@@ -8,30 +8,32 @@ sections: Desktop window chrome, Installation and updates, Desktop Quit, Status.
 
 Tests: 6. Covers: the macOS inset belongs to the merged top row and leaves details compact.
 
-partly: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`,
+replaced: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`,
 `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`,
-`desktop::tests::the_window_options_give_the_band_the_title_bar_only_on_macos` and, run on the test Mac,
+`desktop::tests::the_window_options_give_the_band_the_title_bar_only_on_macos` and, run on the test Mac (2026-11-17,
+with the two bullets below, all passing),
 `desktop::tests::mac::the_real_rows_drag_from_their_background_and_leave_their_controls_and_text_alone`,
 `desktop::tests::mac::with_no_session_open_the_empty_panes_strip_drags`,
 `desktop::tests::mac::the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear`,
 `desktop::tests::mac::with_no_session_open_a_band_strip_covers_the_panes_top` and
 `desktop::tests::mac::in_a_narrow_window_the_app_bar_runs_above_both_panes`; the web-shell case is superseded (there is
 no web shell), and "text stays selectable" is superseded by labels no longer being selectable (decided by the maintainer
-on 2026-11-13; see Deviations); and the real-window check on the test Mac passed (2026-11-14: dragging the wordmark or
+on 2026-11-13; see Deviations); and the real-window checks on the test Mac passed (2026-11-14: dragging the wordmark or
 the session top row's empty background moves the window, a drag that starts on the version text does not, a double-click
-on the band zooms and a second one restores; not covered: a Force Touch trackpad, a second display). The
-`app-title-band` scene, captured by the screenshot batch on the test Mac (2026-11-14, light, narrow), matches the
-reference `macos-window-chrome`: the inset kept clear for the traffic lights, the wordmark and version, and the 48 px
-top row across both panes; the batch captures the app's own drawing, so the lights themselves show only in a screen
-capture of the real window. Not yet ported: a press over a stale session's inert tab, and presses on and beside a real
-tab in the session top row (the same gap as `click-detail.test.js`'s inert-descendant case). Both dated checks predate
-the terminal tab strip and the text-size stepper that the session top row gained on 2026-11-15, so neither pressed a
-tab, the stepper or the strip's empty part, and the `mac` tests' run on the test Mac is not dated here; the real-rows
-test presses the middle of the row's tab slot and expects a drag, a press that could land on a tab once tabs fill the
-slot
+on the band zooms and a second one restores; 2026-11-17, with a shell tab open: a drag starting in the gap between the
+Agent and Terminal 1 tabs moves the window, as does one starting just above the shell tab, a drag starting on the shell
+tab does not, and no press resizes the window). The `app-title-band` scene, captured by the screenshot batch on the test
+Mac (2026-11-14, light, narrow), matches the reference `macos-window-chrome`: the inset kept clear for the traffic
+lights, the wordmark and version, and the 48 px top row across both panes; the batch captures the app's own drawing, so
+the lights themselves show only in a screen capture of the real window. Not covered in a real window: a press on a stale
+session's inert tab (covered in process by the last bullet). Not covered by any test: a press on the text-size stepper.
+Not checked: a Force Touch trackpad, a second display
 
 - `desktop::tests::mac::the_connection_screens_strip_keeps_the_lights_clear_and_drags`: while the window is not
   connected, a 48-point band strip runs across its top and a press on it drags.
+- `desktop::tests::mac::the_top_rows_tabs_keep_their_presses_live_or_inert_and_the_strip_around_them_drags`: with two
+  shell tabs, a press on a tab chooses it and does not drag, a press in the gap between two tabs and one above a tab
+  drag, and once the session is listed stale a press on its inert tab does not drag.
 
 ### `tests/update-readout-css.spec.ts`
 
@@ -99,15 +101,20 @@ since presses reach the band through GPUI's own propagation and no report crosse
 
 Tests: 20. Covers: which presses inside a drag surface count as empty background, and when a repeat may zoom.
 
-partly: the classification and pairing cases by
+replaced: the classification and pairing cases by
 `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs` and
 `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`; the endpoint, header and
 synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" (the old case pressed a
-stale session's inert tab) has no test yet: the terminal tabs are now in the session top row and go inert with the
-terminal under a stale session's card, but no test presses a live tab, an inert one or the strip's empty part; a
-positioned popover over the band is covered by the layer manager's occluding popovers, which a press never passes
-through; "a press inside a surface but outside its box" is GPUI's hit testing, which hands a row only presses inside it;
-"a replaced or disconnected spacer" is covered by pairing presses by row, not by element
+stale session's inert tab) is the bullet below, run on the test Mac on 2026-11-17: the terminal tabs are now in the
+session top row and go inert with the terminal under a stale session's card, and the inert tab is covered in process
+only, while a live tab and the strip's empty part beside and above one were also checked in a real window that day
+(`window-chrome.spec.ts`'s entry); a positioned popover over the band is covered by the layer manager's occluding
+popovers, which a press never passes through; "a press inside a surface but outside its box" is GPUI's hit testing,
+which hands a row only presses inside it; "a replaced or disconnected spacer" is covered by pairing presses by row, not
+by element
+
+- `desktop::tests::mac::the_top_rows_tabs_keep_their_presses_live_or_inert_and_the_strip_around_them_drags`: a press on
+  a live tab and on a stale session's inert tab keeps the tab's, and the strip's empty part around the tabs drags.
 
 ### The old native smoke test's legs
 
@@ -211,7 +218,8 @@ the old one, and keeps the sessions (their terminals alive) and the helm's prefe
 replaced: `scripts/gui-lifecycle.py` step 08 (SIGKILL, the same supervisor running and reused, the seeded session listed
 again as running, waiting or idle) and step 07 (the same after a quit, and a new credential with the old one refused
 with 401). The old leg's live terminal was a terminal host still listening on its socket, not typed input; a session
-whose terminal was lost lists as interrupted, which the steps' live-state check refuses. The remembered selection and
+whose terminal was lost lists as interrupted, which the steps' live-state check refuses, and step 08 also types into the
+kept session in the relaunched window and sees it echoed (`assert_session_takes_typing`). The remembered selection and
 sort are the helm's preferences, which the sidebar area restores, and this entry does not claim them; the web view's
 re-authentication and attachment trace are superseded
 
@@ -247,20 +255,33 @@ than the drawn button, is not yet ported; the pending KDE check covers KWin's
 Tests: 1. Covers: a program file replaced the way an install does it makes the next launch stop the app's own supervisor
 and start one from the new file, with sessions kept and driveable.
 
-partly: the decision by `the_app_replaces_only_its_own_supervisor_and_only_when_it_must`, and a replaced file counting
+replaced: the decision by `the_app_replaces_only_its_own_supervisor_and_only_when_it_must`, and a replaced file counting
 as another program by `managed_supervisor::tests::the_same_path_with_a_replaced_file_is_a_different_program` and
 `a_running_supervisor_matches_after_its_program_is_replaced` (in `farhelm-supervisor`); the end-to-end replacement with
-a session kept and typed into is not yet ported
+a session kept and typed into is the bullet below
+
+- `scripts/gui-lifecycle.py` step 11: with the app quit and its supervisor running, a launch from a copy of the program
+  in the run, and then one after that copy was replaced the way an install does it (a new file renamed over the path),
+  each stop the old supervisor the orderly way and start a new one running the new file, and the seeded session stays
+  live and takes typing.
 
 #### "a replacement that would fail its prerequisites stops nothing"
 
 Tests: 1. Covers: a replacement whose program folder holds `:` refuses with exit 1 while the old supervisor keeps
 serving and its record stays.
 
-partly: a replacement program that does not run refuses before anything is stopped
+replaced: a replacement program that does not run refuses before anything is stopped
 (`a_replacement_refuses_a_program_that_does_not_run`), and the folder rule itself is
 `service::core::tests::a_colon_in_the_session_program_folder_is_refused_at_startup` (in `farhelm-supervisor`); the
-desktop's check runs the same `validate_session_program_path` before stopping anything, with no test of its own
+desktop's own check is the first bullet below, and that the launch refuses before it stops the old supervisor is the
+second
+
+- `tests::a_program_folder_holding_a_colon_fails_the_desktops_prerequisites` (in `crates/farhelm-desktop`): a program in
+  a folder holding `:` refuses, naming the folder and that it cannot be one PATH entry, while a plain folder or a colon
+  only in the file name passes; in the versioned Mac layout the forwarder's folder is the one checked.
+- `scripts/gui-lifecycle.py` step 12: with the app quit and its supervisor running, a launch from a copy of the program
+  in a folder named `replace:refused` exits 1 with the folder's refusal, and the same supervisor is still recorded,
+  running and accepting at its socket.
 
 #### "a launch replaces the app's own supervisor when it never answers"
 
@@ -320,9 +341,10 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   which also pins the chords the three items show to the terminal's key rows, the enabled-state test
   (`desktop::tests::the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field`),
   `components::tests::text_input::the_edit_menus_copy_paste_and_select_all_act_on_every_kind_of_field` and
-  `terminal::attached::tests::the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`. Pending on the test
-  Mac: the three items over a real terminal, and that Cmd+C on a focused button falls through to the disabled Copy
-  without a beep.
+  `terminal::attached::tests::the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`. Checked on the test
+  Mac in a real window (2026-11-17), over a focused terminal: Undo, Redo and Cut are disabled and Copy, Paste and Select
+  All enabled, the menu's Paste reaches the terminal as a bracketed paste, and Select All then Copy copies the
+  terminal's text. Not yet checked: that Cmd+C on a focused button falls through to the disabled Copy without a beep.
 - **The Open-Source Notices window** (new: the old app had no notices surface; the maintainer decided on 2026-11-13 that
   the notices live in it). Tested by `desktop::tests::the_notices_item_opens_one_window_and_brings_it_forward` (one
   window, the text drawn as a virtualized list, a second choice brings it forward, also when made from the notices

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""End-to-end lifecycle check of the Linux desktop app: boot, quit, relaunch, second launch and the saved window frame,
-on headless Mutter, through the run machinery of `scripts/gui-agent.py` (`docs/gui-agent.md`).
+"""End-to-end lifecycle check of the Linux desktop app: boot, quit, relaunch, second launch, the saved window frame and
+a replaced or refused program file, on headless Mutter, through the run machinery of `scripts/gui-agent.py` (`docs/gui-agent.md`).
 
 NOTE: This is a script of its own, not steps in `scripts/gui-e2e-smoke.py`, because a quit or a relaunch ends an app
 run, and the smoke's steps all share one. Here every step leaves the app where the next one begins (running, quit or
@@ -17,7 +17,8 @@ state directory and its start time is the one first seen, so a reused pid can ne
 Which environments count as having no Wayland session is the unit test
 `a_linux_launch_without_wayland_refuses_with_a_clear_line` in `crates/farhelm-desktop`; step 03 here only shows that a
 launch really refuses before it starts anything. The supervisor replace and reuse decisions are unit tests in
-`crates/farhelm-desktop` too (`docs/gpui/parity/desktop-integration-and-linux-packaging.md` lists them).
+`crates/farhelm-desktop` too (`docs/gpui/parity/desktop-integration-and-linux-packaging.md` lists them); steps 11
+and 12 here show a replacement end to end and one refused before it stops anything.
 
 The run directory is made under /tmp, as the smoke's is, deleted when every step passed and the run stopped cleanly,
 and kept for its logs otherwise (each launch's app log is kept as `logs/app-launch-<n>.log`); `--keep` keeps it either
@@ -168,6 +169,25 @@ def assert_session_kept(when: str) -> None:
         return gui_agent.listed_states(RUN).get(SESSION_ID) in LIVE_STATES
 
     eventually(kept, f"{when}: the helm listing the seeded session {SESSION_ID} as {', '.join(LIVE_STATES)}")
+
+
+def assert_session_takes_typing(when: str) -> None:
+    """The seeded session's terminal still reaches its program, through the window, the helm and the supervisor: a
+    session listed live and whose terminal host still listens can still be one nothing can type into. Its terminal is
+    focused (by a click on its row, unless a relaunch reopened the session and its terminal already holds focus: a click
+    on the title then could land on another copy of it) and shows the fake agent's ready line once it has caught up; a
+    line typed there, stamped so an earlier echo cannot pass for it, comes back as the agent's `echo:` of it, as in
+    `gui-e2e-smoke.py`'s step 02."""
+    try:
+        if "no terminal" in agent("terminal-text", check=False):
+            agent("click", f"text:{SEEDED_TITLE}")
+        agent("terminal-text", "--wait", "FAKE-AGENT READY")
+        line = f"typed-{os.urandom(4).hex()}"
+        agent("type", "--keys", line)
+        agent("press", "enter")
+        agent("terminal-text", "--wait", f"echo:{line}")
+    except AssertionError as error:
+        raise AssertionError(f"{when}: typing into the seeded session: {error}") from None
 
 
 def quit_socket() -> Path:
@@ -458,7 +478,8 @@ def step_08_a_relaunch_after_a_kill_reuses_the_supervisor() -> None:
     """A crash or a kill runs no quit handler: the supervisor is not told anything and a stale second-launch socket
     stays behind. Specified: after SIGKILL the supervisor still runs and the socket file is still there, soon refusing
     connections; a relaunch is not taken for a second launch, connects, reuses the same supervisor, lists the seeded
-    session again, and serves a live socket in place of the stale one.
+    session again, and serves a live socket in place of the stale one; and the kept session's terminal, opened in the
+    relaunched window, takes typing (`assert_session_takes_typing`), which a listing alone cannot show.
 
     "Soon", because `gui_agent.running` calls the app gone once its main thread is a zombie, and a SIGKILLed process's
     other threads can still be tearing down then: its open files, the listening socket among them, close only when the
@@ -482,6 +503,7 @@ def step_08_a_relaunch_after_a_kill_reuses_the_supervisor() -> None:
     assert_session_kept("after a relaunch following a kill")
     if not answers(quit_socket()):
         raise AssertionError("the relaunched app left the stale socket in place: nothing answers at it")
+    assert_session_takes_typing("after a relaunch following a kill")
 
 
 def threads_left(pid: int) -> str:
@@ -538,6 +560,91 @@ def step_10_a_maximized_window_reopens_maximized() -> None:
         raise AssertionError(f"after quitting the window reopened maximized, the record is {frame_record()}")
 
 
+# What the relaunched app logs when it stops the supervisor an earlier launch started, and when that supervisor had to
+# be killed (`stop_own_supervisor` in crates/farhelm-desktop/src/lib.rs).
+REPLACING_LOG = "replacing the supervisor an earlier launch started"
+KILLED_LOG = "ignored the orderly stop and was killed"
+
+
+def step_11_a_replaced_program_replaces_the_apps_own_supervisor() -> None:
+    """An update, or a new build copied over the old, puts a new program file where the app starts its supervisor
+    from; a launch that kept talking to the old supervisor would leave the user on the old build until they found and
+    stopped it by hand. The old native smoke test's replaced-program leg. The run's program is the shared build output,
+    which a run must not overwrite, so the step first moves the run onto a copy of it in the run (a launch from another
+    file, itself a replacement) and then replaces that copy the way an install does, a new file renamed over the path.
+    Specified, for each relaunch, with the app quit and its supervisor running from the previous file before it (the
+    premise): the relaunched app logs that it replaced the supervisor an earlier launch started, and not that it had to
+    kill it; that supervisor is gone; the record names a new, running supervisor whose running image is the run's copy
+    as it is now (same inode); and the seeded session is listed live and takes typing."""
+    global SUPERVISOR
+    run = record()
+    copy = RUN / "work" / "farhelm"
+    copy.parent.mkdir(exist_ok=True)
+    shutil.copy2(run["binaries"]["farhelm"], copy)
+    # Every later launch, and `stop`, then use the copy: `run.json` is `gui-agent.py`'s, and `docs/gui-agent.md` records
+    # this use of it beside `relaunch`'s.
+    run["binaries"]["farhelm"] = str(copy)
+    (RUN / "run.json").write_text(json.dumps(run, indent=2))
+    for how in ("a launch from the run's copy", "a launch after the copy was replaced"):
+        if how.endswith("replaced"):
+            quit_app(by_close_button=False)
+            before = os.stat(copy).st_ino
+            shutil.copy2(copy, copy.with_name("farhelm.new"))
+            os.replace(copy.with_name("farhelm.new"), copy)
+            if os.stat(copy).st_ino == before:
+                raise AssertionError("premise: the replaced copy is a new file")
+        old, app = SUPERVISOR, record()["app"]
+        if (app and gui_agent.running(app["pid"], app["start"])) or old is None or not gui_agent.running(*old):
+            raise AssertionError(f"premise of {how}: the app quit and its supervisor {old} running")
+        relaunch()
+        # Before any other check can fail: once the record names another supervisor, `stop` would miss the old one.
+        new = gui_agent.supervisor_to_stop(state())
+        if gui_agent.running(*old) or new is None or new == old:
+            if gui_agent.running(*old) and new != old:
+                gui_agent.stop_process(*old, 20)
+            raise AssertionError(f"{how}: the old supervisor {old} is not replaced by a running new one ({new})")
+        log = app_log()
+        if REPLACING_LOG not in log or KILLED_LOG in log:
+            raise AssertionError(f"{how}: the app's log does not say it stopped its supervisor the orderly way")
+        image, program = os.stat(f"/proc/{new[0]}/exe"), os.stat(copy)
+        if (image.st_dev, image.st_ino) != (program.st_dev, program.st_ino):
+            raise AssertionError(f"{how}: the new supervisor {new} does not run {copy} as it is now")
+        SUPERVISOR = new
+        assert_session_kept(how)
+        assert_session_takes_typing(how)
+
+
+# The refusal of a program folder holding ':' (`validate_session_program_path` in crates/farhelm-supervisor).
+COLON_REFUSAL = "cannot be used as one PATH entry"
+
+
+def step_12_a_replacement_that_fails_its_prerequisites_stops_nothing() -> None:
+    """A replacement checks the new supervisor's prerequisites before it stops the old one; a launch that stopped first
+    and then refused would leave the user with no supervisor at all. The old native smoke test's leg of the same name.
+    The program is a copy of the run's in a folder whose name holds ':', which no session's PATH can hold, so the plan is
+    a replacement (another file) and only the prerequisite check can refuse. Specified: with the app quit by SIGTERM and
+    its supervisor recorded, running and accepting at its socket (the premise), the launch exits 1 with a
+    `farhelm-desktop: ` line naming the folder and the refusal, and the same supervisor is still recorded, running and
+    accepting."""
+    quit_app(by_close_button=False)
+    refused = RUN / "work" / "replace:refused" / "farhelm"
+    refused.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(record()["binaries"]["farhelm"], refused)
+    supervisor_socket = state() / "supervisor.sock"
+    if not answers(supervisor_socket):
+        raise AssertionError(f"premise: the supervisor does not accept at {supervisor_socket}")
+    # Without the bridge's variables, as in step 03: a launch that wrongly went on must not join the run's bridge.
+    drop = ("GPUI_AGENT_HOME", "GPUI_AGENT_SESSION")
+    result = launch_aside(state(), drop=drop, extra={"FARHELM_DESKTOP_FARHELM": str(refused)})
+    line = f"the Farhelm program folder, {refused.parent},"
+    refusal = [entry for entry in result.stderr.splitlines() if entry.startswith("farhelm-desktop: ")]
+    if result.returncode != 1 or not any(line in entry and COLON_REFUSAL in entry for entry in refusal):
+        raise AssertionError(f"expected exit 1 and the folder's refusal, got {result.returncode}:\n{result.stderr}")
+    assert_supervisor_kept("after a refused replacement")
+    if not answers(supervisor_socket):
+        raise AssertionError("after a refused replacement the supervisor no longer accepts at its socket")
+
+
 STEPS = [
     step_01_the_app_boots_and_connects,
     step_02_a_bootstrap_failure_refuses_plainly,
@@ -549,6 +656,8 @@ STEPS = [
     step_08_a_relaunch_after_a_kill_reuses_the_supervisor,
     step_09_a_saved_size_is_restored,
     step_10_a_maximized_window_reopens_maximized,
+    step_11_a_replaced_program_replaces_the_apps_own_supervisor,
+    step_12_a_replacement_that_fails_its_prerequisites_stops_nothing,
 ]
 
 

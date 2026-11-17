@@ -61,11 +61,12 @@ whatever `start` had already taken, the lock included.
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
 committed end-to-end smoke test built on them, and `scripts/gui-lifecycle.py` checks the Linux app's quit, relaunch,
-second launch and saved window frame, which end an app run and so cannot be smoke steps (`.agents/validation.md` has
-both commands). To relaunch the app on one run it calls the bridge's `launch` again and records the new app in that
-run's `run.json` itself, so that `stop` still finds it. That is the lifecycle check's own arrangement, not part of this
-harness's interface: `run.json` belongs to `gui-agent.py`, and its layout may change with it; whoever changes it changes
-`relaunch` in `gui-lifecycle.py` with it.
+second launch, saved window frame and supervisor replacement, which end an app run and so cannot be smoke steps
+(`.agents/validation.md` has both commands). To relaunch the app on one run it calls the bridge's `launch` again and
+records the new app in that run's `run.json` itself, so that `stop` still finds it, and its supervisor replacement step
+points the record's `farhelm` at a copy of the program in the run, which later launches and `stop` then use. That is the
+lifecycle check's own arrangement, not part of this harness's interface: `run.json` belongs to `gui-agent.py`, and its
+layout may change with it; whoever changes it changes `relaunch` in `gui-lifecycle.py` with it.
 
 ## Seeded sessions
 

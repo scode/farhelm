@@ -2894,6 +2894,51 @@ mod tests {
         );
     }
 
+    /// The desktop's own prerequisite check on the program folder: the folder becomes one entry of every session's
+    /// PATH, and a `:` in it would split that entry, so a launch must refuse before it starts a supervisor and, for a
+    /// replacement, before it stops the one serving the user (the old native smoke test's "a replacement that would
+    /// fail its prerequisites stops nothing" leg, which only an end-to-end run covered). Spec: a program in a folder
+    /// named `replace:refused` refuses, naming that folder and saying it cannot be one PATH entry; the same program in
+    /// a plain folder passes, as does one whose own file name holds the colon; and in the versioned Mac layout the
+    /// folder checked is the app forwarder's (`Contents/MacOS`), so a colon in the bundle's path refuses naming it
+    /// while one only in the version's folder passes. The ordering against the stop is `run`'s (this check comes first
+    /// in both plans), not shown here.
+    #[farhelm_testtrace::test]
+    fn a_program_folder_holding_a_colon_fails_the_desktops_prerequisites() {
+        let dir = tempfile::tempdir().expect("dir");
+        let file = dir.path().join("farhelm");
+        std::fs::write(&file, b"").unwrap();
+        let program = ProgramFile::read(&file).expect("program fixture");
+        let state = dir.path().join("state");
+        let check = |absolute: &Path| {
+            SpawnInputs {
+                farhelm: absolute,
+                absolute,
+                program: &program,
+                state_dir: &state,
+            }
+            .check_prerequisites()
+        };
+        let refused = |absolute: &Path, folder: &Path| {
+            let text = format!("{:#}", check(absolute).expect_err("a colon folder refuses"));
+            let named = format!("the Farhelm program folder, {},", folder.display());
+            assert!(text.contains(&named), "{text}");
+            assert!(text.contains("cannot be used as one PATH entry"), "{text}");
+        };
+        let folder = dir.path().join("replace:refused");
+        refused(&folder.join("farhelm"), &folder);
+        check(&dir.path().join("plain").join("farhelm")).expect("a plain folder passes");
+        check(&dir.path().join("plain").join("far:helm")).expect("a colon in the file name passes");
+        let bundle = dir.path().join("Far:helm.app").join("Contents");
+        refused(
+            &bundle.join("Versions").join("1.0").join("farhelm"),
+            &bundle.join("MacOS"),
+        );
+        let bundle = dir.path().join("Farhelm.app").join("Contents");
+        check(&bundle.join("Versions").join("1:0").join("farhelm"))
+            .expect("only the forwarder's folder counts in the versioned layout");
+    }
+
     /// A discovery that fails outright means "not answering" only for the
     /// app's own supervisor, and stays fatal otherwise.
     ///
