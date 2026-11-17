@@ -248,6 +248,139 @@ fn an_agent_create_body_carries_the_draft() {
     assert!(!body.confirm_yolo);
 }
 
+/// Each agent type's create carries exactly the choices the launcher shows for it and nothing that agent cannot take: a
+/// typed or catalog model, its effort and its permission as chosen, a model or effort carried from another agent
+/// cleared on the switch, and an untouched model omitted so the agent's configured one is used; no flags, wrapper or
+/// trust ride along. Why: the old app checked each agent's request body end to end (the `cursor-composer`,
+/// `grok-composer`, `omp-composer` and `opencode` specs at the reference commit matched the whole launch, and
+/// `model-defaults` its harness, model and permission), because a draft that shows one choice but sends another
+/// launches an agent the user did not ask for. The helm turns these selections into argv; this pins only what the
+/// launcher sends.
+#[test]
+fn each_agent_types_create_carries_only_what_it_takes() {
+    use LaunchEffort::{High, Max};
+    use LaunchHarness::{Codex, Cursor, Goose, Grok, Omp, OpenCode, Pi};
+    use LaunchPermission::{Approve, Guarded, Yolo};
+    let hosts = hosts();
+    let catalog = vec![LaunchCatalogModel {
+        id: "x-ai/grok-4.6".into(),
+        harness: Omp,
+        efforts: vec![Max],
+    }];
+    let sent = |case: &str, draft: &LaunchDraft| {
+        draft
+            .create_body(target(&hosts, Some(&catalog)))
+            .and_then(|body| body.launch)
+            .unwrap_or_else(|| panic!("{case}: an agent launch"))
+    };
+    // The whole launch the old specs matched: these four choices and nothing else.
+    let launch = |harness, model: Option<&str>, effort, permissions| LaunchSelection {
+        harness,
+        model: model.map(str::to_owned),
+        effort,
+        permissions,
+        permission_flags: None,
+        workspace_trust: None,
+        wrapper_prefix: None,
+        container: None,
+    };
+
+    // Each case: what it is, its edits from New (given the catalog), and the launch it sends.
+    type Edits = fn(&mut LaunchDraft, &[LaunchCatalogModel]);
+    let cases: [(&str, Edits, LaunchSelection); 4] = [
+        (
+            "Cursor with a typed model and YOLO",
+            |draft, catalog| {
+                draft.choose_harness(Cursor, Some(catalog), None);
+                draft.choose_permissions(Some(Yolo));
+                draft.choose_custom_model("composer-2.5", Some(catalog));
+            },
+            launch(Cursor, Some("composer-2.5"), None, Some(Yolo)),
+        ),
+        (
+            "Grok after Codex's typed model and High",
+            |draft, catalog| {
+                draft.choose_harness(Codex, Some(catalog), None);
+                draft.choose_custom_model("stale-custom-model", Some(catalog));
+                draft.choose_effort(Some(High));
+                draft.choose_harness(Grok, Some(catalog), None);
+                draft.choose_permissions(Some(Guarded));
+            },
+            launch(Grok, None, None, Some(Guarded)),
+        ),
+        (
+            "OMP with a catalog model, Max and Approve",
+            |draft, catalog| {
+                draft.choose_harness(Omp, Some(catalog), None);
+                draft.choose_catalog_model(Omp, "x-ai/grok-4.6", Some(catalog), None);
+                draft.choose_effort(Some(Max));
+                draft.choose_permissions(Some(Approve));
+            },
+            launch(Omp, Some("x-ai/grok-4.6"), Some(Max), Some(Approve)),
+        ),
+        (
+            "OpenCode after Codex's High, with a typed model sent as written",
+            |draft, catalog| {
+                draft.choose_harness(Codex, Some(catalog), None);
+                draft.choose_effort(Some(High));
+                draft.choose_harness(OpenCode, Some(catalog), None);
+                draft.choose_custom_model("custom'42;$literal", Some(catalog));
+            },
+            launch(OpenCode, Some("custom'42;$literal"), None, Some(Yolo)),
+        ),
+    ];
+    for (case, edits, expected) in cases {
+        let mut draft = draft();
+        edits(&mut draft, &catalog);
+        assert_eq!(sent(case, &draft), expected, "{case}");
+    }
+
+    // The `model-defaults` cases: an agent alone, its configured model omitted and its default permission sent.
+    for (harness, permission) in [(OpenCode, Yolo), (Goose, Yolo), (Pi, Yolo), (Omp, Guarded)] {
+        let mut draft = draft();
+        draft.choose_harness(harness, Some(&catalog), None);
+        let case = format!("{harness:?} alone");
+        assert_eq!(
+            sent(&case, &draft),
+            launch(harness, None, None, Some(permission)),
+            "{case}"
+        );
+    }
+}
+
+/// A launch that stored a workspace trust choice does not pass it on: a Clone of it creates without one, for each
+/// agent type the old case tried (SPEC.md, "Creation": "the old remembered trust value is neither read nor written").
+/// Why: the old `goose-pi-composer` spec checked that a trust value from before its removal never reached a create; a
+/// Clone copies a stored launch verbatim, so it is one way such a value could come back.
+#[test]
+fn a_stored_trust_choice_is_never_sent_again() {
+    let hosts = hosts();
+    for (harness, permissions) in [
+        (LaunchHarness::Pi, LaunchPermission::Yolo),
+        (LaunchHarness::Codex, LaunchPermission::Guarded),
+        (LaunchHarness::Claude, LaunchPermission::Guarded),
+        (LaunchHarness::Muse, LaunchPermission::Guarded),
+    ] {
+        let stored = LaunchSelection {
+            harness,
+            permissions: Some(permissions),
+            workspace_trust: Some(true),
+            ..codex()
+        };
+        let source = session(agent_launch(stored), RestartOffer::Resume);
+        let clone = LaunchDraft::clone_of(&source, Some(1));
+        let launch = clone
+            .create_body(target(&hosts, None))
+            .and_then(|body| body.launch)
+            .unwrap_or_else(|| panic!("{harness:?}: a Clone launches"));
+        assert_eq!(
+            (launch.harness, launch.workspace_trust),
+            (harness, None),
+            "{harness:?}"
+        );
+    }
+}
+
 /// The initial prompt goes only where it can be sent: Goose offers no box, so its draft's dormant prompt stays in the
 /// draft and out of the request (SPEC.md: "Goose, Pi and command launches offer no box").
 #[test]

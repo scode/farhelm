@@ -191,34 +191,42 @@ labelled Not launched"; its test would sit in `templates::save_tests`)
 
 Tests: 1. Covers: Cursor launches without claiming session tracking.
 
-partly: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`,
-`launcher::view_tests::a_switch_that_clears_a_choice_says_so` (the note); this agent's create body and the note's
-absence on the Command tab are not yet tested
+replaced: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`,
+`launcher::view_tests::a_switch_that_clears_a_choice_says_so` (the note, and its absence on the Command tab), and
+`launcher::request_tests::each_agent_types_create_carries_only_what_it_takes` (the create body: the typed model, no
+effort, YOLO)
 
 ### `tests/goose-pi-composer.spec.ts`
 
 Tests: 2. Covers: Goose and Pi permission transitions update the rendered draft.
 
-partly: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`; not yet ported: the rendered
-transitions of "Goose and Pi permission transitions update the rendered draft" (the notice when Pi replaces Goose's
-permission with YOLO, a model id both offer staying Pi's when picked as Pi's, and Pi's effort kept across another Pi
-model), and "workspace trust is absent despite old remembered value ${rememberedTrust}", the create body carrying no
-trust, which SPEC.md, "Creation", asks for ("the old remembered trust value is neither read nor written")
+replaced: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`; the transitions of "Goose and Pi
+permission transitions update the rendered draft" (Goose's Smart approve, Chat or Approve becoming Pi's YOLO with the
+notice, by Pi's button or by Pi's model from the full list, a remembered Smart approve replaced silently, a model id
+both offer staying the one picked as Pi's and taking Pi's efforts, and an effort kept across another Pi model) in
+`launcher::draft_tests::an_agent_switch_lands_on_a_permission_the_new_agent_offers`; "workspace trust is absent despite
+old remembered value ${rememberedTrust}" (SPEC.md, "Creation": "the old remembered trust value is neither read nor
+written"): a Clone of a Pi, Codex, Claude or Muse launch that stored trust creating without it in
+`launcher::request_tests::a_stored_trust_choice_is_never_sent_again`, and the retired `trust:` labels offering nothing
+in `launcher::search_tests::unknown_labels_and_command_words_only_name_the_session`; the GUI has no trust control and
+reads no remembered trust
 
 ### `tests/grok-composer.spec.ts`
 
 Tests: 1. Covers: the Grok composer clears and hides unsupported model and effort choices.
 
-partly: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary` (no effort, no model field);
-clearing a carried model and effort on switching to Grok, and the Grok create body, are not yet tested
+replaced: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary` (no effort, no model field), and
+`launcher::request_tests::each_agent_types_create_carries_only_what_it_takes` (Codex's typed model and High cleared on
+the switch to Grok, and Grok's body with no model or effort and Guarded)
 
 ### `tests/omp-composer.spec.ts`
 
 Tests: 2. Covers: the OMP composer offers OMP's own vocabulary and the row shows the effective permission.
 
-partly: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`; the OMP create body is not yet
-tested; the row's effective permission ("an OMP session row shows the OMP glyph and its actual permission") is the
-session list's, where the OMP mark, the Approve row's shield and its description are in
+replaced: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`; the OMP create body (a catalog
+model, Max and Approve) in `launcher::request_tests::each_agent_types_create_carries_only_what_it_takes`; the row's
+effective permission ("an OMP session row shows the OMP glyph and its actual permission") is the session list's, where
+the OMP mark, the Approve row's shield and its description are in
 `session_list::row_marks_tests::{every_agent_type_draws_the_mark_named_for_it, the_shield_follows_the_launch_and_draws_its_mark, an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command}`,
 the second also drawing the YOLO shield for an OMP row with no stored permission
 
@@ -226,10 +234,11 @@ the second also drawing the YOLO shield for an OMP row with no stored permission
 
 Tests: 2. Covers: OpenCode keeps composer controls while offering default and explicit Zen models.
 
-partly: "typing a model never switches the selected harness, and bare OpenCode names stay OpenCode's" is tested; not yet
-ported: Codex's effort dropped on the switch to OpenCode and the OpenCode create body ("OpenCode keeps composer controls
-while offering default and explicit Zen models"; its controls are in
-`launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`)
+replaced: "typing a model never switches the selected harness, and bare OpenCode names stay OpenCode's" in the bullets
+below; "OpenCode keeps composer controls while offering default and explicit Zen models", Codex's effort dropped on the
+switch to OpenCode and a typed model sent as written with YOLO, in
+`launcher::request_tests::each_agent_types_create_carries_only_what_it_takes`, its controls in
+`launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`
 
 - `launcher::model_tests::bare_opencode_names_stay_opencode_models`: under OpenCode a bare name is OpenCode's custom id,
   and OpenCode's qualified id typed under Codex is not applied.
@@ -362,9 +371,10 @@ remembered permissions, the first agent: "first harness escalation warns after G
 button, and "first harness does not escalate passive ${remembered ?? "default"} permission" for a remembered Guarded) in
 `launcher::draft_tests::the_first_agent_escalates_only_a_deliberate_choice` and
 `templates::apply_tests::escalation_is_judged_once_for_the_batch`; the slide and outline, and both under reduced motion,
-in `components::tests::transition`; not yet ported: the passive default variant of "first harness does not escalate
-passive ${remembered ?? "default"} permission", and the Undo of "first harness escalation warns after Guarded chosen by
-${source}" bringing back the deliberate Guarded with no agent, so that choosing the agent again warns again; the model
+in `components::tests::transition`; the passive default variant of "first harness does not escalate passive ${remembered
+?? "default"} permission", and the Undo of "first harness escalation warns after Guarded chosen by ${source}" bringing
+back the deliberate Guarded with no agent, so that choosing the agent again warns again, in
+`launcher::draft_tests::undo_of_the_first_agents_warning_keeps_the_choice_deliberate`; not yet ported: the model
 picker's path (258's second run) drawn, the banner shown after a click on another agent's model in the list; its draft
 half, a cross-agent model pick raising the banner and Undo restoring the draft exactly, is
 `launcher::draft_tests::{a_cross_agent_model_pick_can_raise_the_banner, undo_after_a_cross_agent_model_pick_restores_the_draft_exactly}`;
@@ -381,23 +391,24 @@ the drawn band is layout, shown in the `app-launcher-escalation-banner` scene
 Tests: 3. Covers: the remembered structured-launch permissions mode survives an open, a reset, and a later default
 launch.
 
-partly: New preselecting the remembered mode and Reset choices keeping it in
+replaced: New preselecting the remembered mode and Reset choices keeping it in
 `launcher::entry_tests::new_opens_beside_the_open_session` and
 `launcher::draft_tests::reset_choices_returns_to_the_remembered_permission`; what the helm remembers and clears (a
 harness's default or forced YOLO, Custom, a reply's claims, command launches) in the helm's
 `sessions_tests::{a_successful_structured_launch_remembers_its_permissions_choice, remembered_defaults_follow_the_submitted_launch_not_the_reply}`
 and `store::only_an_explicit_selection_shapes_history_and_remembered_defaults`; every link of the old real-launch runs
-is tested on its own there, and the GUI reads the remembered mode only from the helm's pushed preferences; not yet
-ported: the GUI half of "${label}'s default YOLO does not spill into the next harness" (Pi, OpenCode or Goose showing
-YOLO, then Codex showing Guarded)
+is tested on its own there, and the GUI reads the remembered mode only from the helm's pushed preferences; the GUI half
+of "${label}'s default YOLO does not spill into the next harness" (Pi, OpenCode or Goose showing YOLO, then Codex
+showing Guarded) in `launcher::draft_tests::a_default_yolo_does_not_follow_to_the_next_agent`
 
 ### `tests/model-defaults.spec.ts`
 
 Tests: 1. Covers: ${label} can launch with its configured model.
 
-not yet ported: its case launches each agent with its configured model and checks the create body; the old case
-intercepted the request rather than run a real agent, so `launcher::request_tests` can reach it; the Harness default row
-it starts from is in `launcher::view_tests::the_model_list_filters_and_enter_picks_the_highlighted_row`
+replaced: each agent's create with its configured model (no model sent; YOLO for OpenCode, Goose and Pi, Guarded for
+OMP) in `launcher::request_tests::each_agent_types_create_carries_only_what_it_takes`; the old case intercepted the
+request rather than run a real agent. The Harness default row it starts from is in
+`launcher::view_tests::the_model_list_filters_and_enter_picks_the_highlighted_row`
 
 ### `tests/named-conversations.spec.ts`
 
@@ -873,13 +884,15 @@ chosen harness's catalog and applies with Enter"), the search's highlighted row 
 clearing the highlight ("composer search keeps active results visible and focus contained"; a hovered row's look is
 layout, not separately tested, since no scene hovers a search row and the highlight a hover must not mimic is
 `launcher::search_view_tests::arrows_move_the_highlight_and_enter_or_a_click_takes_a_row`'s), Tab and Shift+Tab wrapping
-to targets kept in view ("composer focus-trap wraps reveal their targets at narrow width"), and the Tab order through
-the launch groups and the footer ("composer menu-closed Tab order follows the displayed launch groups", "composer footer
-names the chosen harness, host, and folder"; the placement segments' stops come with the environments work), the
+to targets kept in view ("composer focus-trap wraps reveal their targets at narrow width"), the Tab order through the
+launch groups and the footer ("composer menu-closed Tab order follows the displayed launch groups", "composer footer
+names the chosen harness, host, and folder"; the placement segments' stops come with the environments work), and the
 launcher opened by a click on New while a row menu is open, or by Enter or Space on New, with focus in search and typing
-landing there (5566; a plain opening is tested, in the bullets below), and a model picked from another agent type's list
-replacing the first agent's default YOLO with the new one's default (9150)
+landing there (5566; a plain opening is tested, in the bullets below)
 
+- "model picks discard another harness's default YOLO" (9150): a Codex model picked from the full list under Pi,
+  OpenCode or Goose's default YOLO ending on Codex's Guarded, in
+  `launcher::draft_tests::a_default_yolo_does_not_follow_to_the_next_agent`.
 - "the launch composer autofocuses search and returns focus to New after Escape" (5527): focus in search on opening in
   `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`, the first Escape closing the results
   and the second the launcher in `launcher::search_view_tests::escape_closes_the_results_and_keeps_the_query` (with a
