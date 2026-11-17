@@ -1,9 +1,10 @@
 //! Tests of the open session's top row: the actions' order, labels and hover help, Restart's offer and its request,
 //! that Stop, Replace and Delete from the header ask the row's questions and send the row's preconditions, a pending
 //! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
-//! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane), and the terminal text
-//! size group at the start of the actions (its steps, readout, range, shortcut,
-//! and the size a terminal opens at). The header of an open session the list does not show is `carried_tests.rs`'s.
+//! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane, and the tab strip's
+//! floor beside the pill), and the terminal text size group at the start of the actions (its steps, readout, range,
+//! shortcut, and the size a terminal opens at). The header of an open session the list does not show is
+//! `carried_tests.rs`'s.
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
 //! lifecycle tests do (whose fixtures these share), and reads what the window sent from the fake and what it drew from
@@ -1809,6 +1810,8 @@ struct RealPane {
     cx: HeadlessAppContext,
     fake: FakeHelm,
     window: gpui::AnyWindowHandle,
+    /// The pane, weakly: a strong handle held as the app context drops would fail GPUI's leak check.
+    pane: gpui::WeakEntity<SessionPane>,
 }
 
 impl RealPane {
@@ -1825,12 +1828,15 @@ impl RealPane {
         cx.run_until_parked();
         fake.connect(snapshot);
         cx.run_until_parked();
+        let built = Rc::new(RefCell::new(None));
+        let kept = built.clone();
         let window = cx
             .open_window(size(px(width), px(300.)), |window, cx| {
                 let view = cx.new(|cx| {
                     let list = cx.new(SessionList::new);
                     let new = list.read(cx).new_focus().clone();
                     let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+                    kept.replace(Some(pane.downgrade()));
                     PaneOnly {
                         pane,
                         _list: list,
@@ -1840,12 +1846,35 @@ impl RealPane {
                 cx.new(|cx| Root::new(view, window, cx))
             })
             .unwrap();
+        let pane = built.borrow_mut().take().expect("the pane was built");
         RealPane {
             _connection: connection,
             cx,
             fake,
             window: window.into(),
+            pane,
         }
+    }
+
+    /// Run the header's `action` as a press on its button would, with a fresh input mark.
+    fn header_action(&mut self, action: Action) {
+        let pane = self.pane.clone();
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                let mark = Mark::take(cx);
+                pane.update(cx, |pane, cx| pane.header_action(action, &mark, window, cx))
+                    .expect("the pane is alive");
+            })
+            .unwrap();
+    }
+
+    /// Press Tab: dispatch the action Tab is bound to from wherever focus is.
+    fn tab(&mut self) {
+        self.cx
+            .update_window(self.window, |_, window, cx| {
+                window.dispatch_action(Box::new(crate::actions::FocusNext), cx)
+            })
+            .unwrap();
     }
 
     /// Draw a few frames, letting what each asked for run, and return the driver record of the last one.
@@ -1877,6 +1906,15 @@ impl RealPane {
     /// Answer what the app sent, in order: the open session's tunnel read lists one tunnel to `host`, and everything
     /// else succeeds with no body. Panics unless the read was sent, the premise of every pill these tests draw.
     fn open_tunnel(&mut self, host: &str) {
+        self.open_tunnels(host, 1);
+    }
+
+    /// [`RealPane::open_tunnel`], with `count` tunnels listed: two or more draw the pill as a count rather than one
+    /// tunnel's mapping.
+    fn open_tunnels(&mut self, host: &str, count: u16) {
+        let tunnels: Vec<Value> = (1..=count)
+            .map(|n| json!({ "id": format!("t{n}"), "local_port": 54320 + n, "remote_port": 5172 + n }))
+            .collect();
         let mut read = false;
         for command in self.fake.commands() {
             if command.method == Method::Get && command.path == "/api/sessions/a/tunnels" {
@@ -1888,7 +1926,7 @@ impl RealPane {
                         "available": true,
                         "host_name": host,
                         "consent": true,
-                        "tunnels": [{ "id": "t1", "local_port": 54321, "remote_port": 5173 }],
+                        "tunnels": tunnels,
                     })),
                 );
             } else {
@@ -1918,6 +1956,11 @@ fn only_node<'a>(nodes: &'a [gpui::DriverNode], id: &str) -> &'a gpui::DriverNod
 /// A snapshot with an idle session `a` on the pinned host list's SSH host 2, so its terminal reads its tunnels as it
 /// opens.
 fn remote_session() -> Vec<CollectionState> {
+    remote_session_skipping(false)
+}
+
+/// [`remote_session`], with **Skip session confirmations** set to `skip`, so the header's Delete can be sent unasked.
+fn remote_session_skipping(skip: bool) -> Vec<CollectionState> {
     let mut remote = entry(&idle("a"), 0);
     remote.value["host"] = json!(2);
     let hosts: Value = serde_json::from_str(include_str!(
@@ -1935,7 +1978,7 @@ fn remote_session() -> Vec<CollectionState> {
         .collect();
     let keys: Vec<String> = host_entries.iter().map(|entry| entry.key.clone()).collect();
     let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-    let mut snapshot = snapshot_of(vec![remote], false);
+    let mut snapshot = snapshot_of(vec![remote], skip);
     snapshot.push(CollectionState {
         collection: Collection::Hosts,
         meta: meta(&keys),
@@ -1947,8 +1990,19 @@ fn remote_session() -> Vec<CollectionState> {
 /// A snapshot with an idle session `a` on a container environment's host (host 2, remote), whose header draws Suspend
 /// left of Stop.
 fn environment_session() -> Vec<CollectionState> {
+    environment_session_with_tabs(&[])
+}
+
+/// [`environment_session`], its session listing the shell tabs `tabs` (by id, in the helm's order).
+fn environment_session_with_tabs(tabs: &[&str]) -> Vec<CollectionState> {
     use crate::session_list::environment_tests::{Provider, connected, environment_host, registry};
-    let mut snapshot = snapshot_of(vec![entry(&idle("a"), 0)], false);
+    let mut row = entry(&idle("a"), 0);
+    row.value["tabs"] = json!(
+        tabs.iter()
+            .map(|id| json!({ "id": id }))
+            .collect::<Vec<_>>()
+    );
+    let mut snapshot = snapshot_of(vec![row], false);
     snapshot.push(registry(&environment_host(
         Provider::Container,
         connected(),
@@ -1965,18 +2019,24 @@ fn long_host() -> String {
 /// and keyboard reachable from a 650px main pane; … Narrower panes may clip the row, which never wraps." Before the
 /// actions could condense, a pill at its floor (154 pixels, which keeps both ports readable) was drawn over the first
 /// 49 pixels of the actions at 650 pixels; the old app condensed its actions instead (`header-layout.js` and
-/// `.actions-compact`), and the terminal area agreed on 2026-11-16 that the pill keeps its floor. Specified: in a
-/// 650-pixel pane, for a remote session and for a container environment's session, once the terminal lists one tunnel
-/// to a very long host name, every action, both carets, the text size group and the environment's control are drawn
-/// once each, whole, inside the pane, on one line, each but the readout tracking a focus handle so Tab reaches it; the
-/// pill is drawn whole, no narrower than its floor and ending left of the actions; Stop is narrower than it was before
-/// the pill showed, by more than its side padding (the condensed look); three more frames draw Stop and the pill in the
-/// same place, so the look does not flip between frames; and the same row widened to 1400 pixels draws Stop as wide as
-/// before the pill showed, and narrowed to 650 again draws it condensed as before, so a condensed look neither sticks
-/// nor fails to come back.
+/// `.actions-compact`), and the terminal area agreed on 2026-11-16 that the pill keeps its floor. The tab strip's old
+/// 112-pixel floor beside a pill competes for the same width, and at 650 pixels neither row has room for all of it:
+/// kept fixed, it draws the pill over the first action, and dropped, it lets the pill take width from the strip that
+/// the pill's own floor does not need, so it gives way only as far as the pill's floor needs (decided with the session
+/// view's owner on 2026-11-16). Specified: in a 650-pixel pane, for a remote session and for a container environment's
+/// session, once the terminal lists one tunnel to a very long host name, every action, both carets, the text size group
+/// and the environment's control are drawn once each, whole, inside the pane, on one line, each but the readout
+/// tracking a focus handle so Tab reaches it; the pill is drawn whole, no narrower than its floor and ending left of
+/// the actions; the tab strip is narrower than 112 pixels and ends the row's 6-pixel gap left of the pill, which is
+/// exactly its 154-pixel floor wide, so the strip has all the room the pill's floor leaves; Stop is narrower than it
+/// was before the pill showed, by more than its side padding (the condensed look); three more frames draw Stop and the
+/// pill in the same place, so the look does not flip between frames; and the same row widened to 1400 pixels draws
+/// Stop as wide as before the pill showed, and narrowed to 650 again draws it condensed as before, so a condensed look
+/// neither sticks nor fails to come back.
 #[test]
 fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
     use super::header::ENVIRONMENT_ID;
+    use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
     use crate::terminal::text_size::SMALLER_ID;
     for (name, snapshot, environment) in [
         ("remote", remote_session(), false),
@@ -2024,6 +2084,20 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
             pill,
             "the pill is drawn whole ({name})"
         );
+        // The strip's floor beside the pill: neither row has room for all 112 pixels of it beside the pill at its
+        // floor and the condensed actions, so it gives way, but only that far: the strip has every pixel the pill's
+        // floor leaves, the pill no more than its floor, with the row's 6-pixel gap between them (the module docs of
+        // `header/fit.rs`).
+        let strip = only_node(&nodes, STRIP_ID).bounds;
+        assert!(
+            strip.size.width < px(STRIP_FLOOR_BESIDE_PILL),
+            "the premise: the strip gives up part of its floor ({name}): {strip:?}"
+        );
+        assert!(
+            pill.size.width == px(154.)
+                && strip.origin.x + strip.size.width + px(6.) == pill.origin.x,
+            "the strip takes all the room the pill's floor leaves ({name}): strip {strip:?}, pill {pill:?}"
+        );
         let stop = only_node(&nodes, Action::Stop.id()).bounds;
         assert!(
             stop.size.width + px(16.) < ordinary_stop.size.width,
@@ -2058,11 +2132,15 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
 }
 
 /// The old app condensed its actions only for measured pressure: "a wide row keeps its ordinary spacing even with
-/// tunnels" (the old stylesheet's comment on `.actions-compact`). Specified: in a 1400-pixel pane, once a remote
-/// session's terminal lists one tunnel to a very long host name, the pill is drawn and Stop, Restart and the gap
-/// between them have the same widths as before the pill showed.
+/// tunnels" (the old stylesheet's comment on `.actions-compact`). The same row is where the tab strip's floor beside a
+/// pill shows on its own: the strip's tabs ask for less than 112 pixels, so only the floor (the old `min-width:
+/// 112px`) makes it wider, and a floor that went missing or gave way with room to spare would show here. Specified: in
+/// a 1400-pixel pane, once a remote session's terminal lists one tunnel to a very long host name, the pill is drawn and
+/// Stop, Restart and the gap between them have the same widths as before the pill showed, and the tab strip is at
+/// least 112 pixels wide and ends left of the pill.
 #[test]
 fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
+    use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
     let mut pane = RealPane::open(1400., remote_session());
     let before = pane.draw();
     let gap = |nodes: &[gpui::DriverNode]| {
@@ -2075,13 +2153,213 @@ fn a_wide_pane_keeps_the_ordinary_actions_beside_a_pill() {
         )
     };
     let ordinary = gap(&before);
+    let bare = only_node(&before, STRIP_ID).bounds;
+    assert!(
+        bare.size.width < px(STRIP_FLOOR_BESIDE_PILL),
+        "the premise: without a pill the strip is narrower than its floor beside one: {bare:?}"
+    );
     pane.open_tunnel(&long_host());
     let nodes = pane.draw();
-    only_node(&nodes, "session-tunnel-pill");
+    let pill = only_node(&nodes, "session-tunnel-pill").bounds;
     assert_eq!(
         gap(&nodes),
         ordinary,
         "the actions keep their ordinary look"
+    );
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    assert!(
+        strip.size.width >= px(STRIP_FLOOR_BESIDE_PILL)
+            && strip.origin.x + strip.size.width <= pill.origin.x,
+        "the strip keeps its floor beside the pill: strip {strip:?}, pill {pill:?}"
+    );
+}
+
+/// SPEC.md keeps the tunnel pill fully visible down to a 650-pixel pane, and a pill counting two or more tunnels has
+/// no floor of its own (unlike one showing a mapping, which shrinks to 154 pixels by cutting the host's name): any
+/// width it gives up cuts its words. So beside such a pill the strip's floor must leave the pill its whole content
+/// width, not its floor of nothing, or the strip's 112 pixels squeeze it (to 58 of its 100 pixels, measured), and the
+/// pill must keep that width as a floor of its own, or it shrinks alongside the strip (to 88). Specified: for a
+/// container environment's session whose terminal lists two tunnels, the pill drawn in a 1400-pixel pane (where
+/// nothing presses on it) has the same width when the pane is narrowed to 650 pixels; there it is drawn whole and ends
+/// left of the first action, and the strip ends the row's 6-pixel gap left of it.
+#[test]
+fn a_count_pill_at_650_pixels_keeps_its_whole_width() {
+    use crate::terminal::set::STRIP_ID;
+    use crate::terminal::text_size::SMALLER_ID;
+    let mut pane = RealPane::open(1400., environment_session());
+    pane.draw();
+    pane.open_tunnels(&long_host(), 2);
+    let wide = only_node(&pane.draw(), "session-tunnel-pill").bounds;
+    pane.resize(650.);
+    let nodes = pane.draw();
+    let pill = only_node(&nodes, "session-tunnel-pill");
+    let first = only_node(&nodes, SMALLER_ID).bounds;
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    assert!(
+        pill.bounds.size.width < px(154.),
+        "the premise: the pill is a count, narrower than a mapping's floor: {:?}",
+        pill.bounds
+    );
+    assert_eq!(
+        pill.bounds.size.width, wide.size.width,
+        "the pill keeps its whole width at 650 pixels: {:?}, at 1400 {wide:?}",
+        pill.bounds
+    );
+    assert!(
+        pill.visible_bounds == pill.bounds && pill.bounds.right() <= first.origin.x,
+        "the pill is drawn whole, left of the first action: {:?}, visible {:?}, first action {first:?}",
+        pill.bounds,
+        pill.visible_bounds
+    );
+    assert_eq!(
+        strip.right() + px(6.),
+        pill.bounds.origin.x,
+        "the strip ends the gap left of the pill: strip {strip:?}"
+    );
+}
+
+/// SPEC.md keeps every control of the top row keyboard reachable from a 650-pixel pane, and the tab strip is the part
+/// of the row that scrolls rather than drops a control. Beside a pill at 650 pixels, an environment session's strip
+/// gives up nearly all of its 112-pixel floor (`header/fit.rs`), leaving it narrower than a single tab, so its controls
+/// stay usable only through that scrolling: one that took focus out of view would be invisible. Specified: in a
+/// 650-pixel pane, for a container environment's session with one shell tab, once the terminal lists one tunnel to a
+/// very long host name, the strip is narrower than its Agent tab alone; the Agent tab, the shell tab, its × and New
+/// terminal are each drawn once and track a focus handle; pressing Tab from where focus starts reaches each of them
+/// within 40 presses; and each of them, once focused, is scrolled into the strip far enough that part of it is visible.
+/// The × is the case that needs its own rule: it sits at the end of an item wider than the strip, whose start is what
+/// scrolling to the item would show (`TerminalSet::reveal_focused`).
+#[test]
+fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
+    use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, STRIP_ID, close_element_id, tab_element_id};
+    let mut pane = RealPane::open(650., environment_session_with_tabs(&["t1"]));
+    pane.draw();
+    pane.open_tunnel(&long_host());
+    let nodes = pane.draw();
+    only_node(&nodes, "session-tunnel-pill");
+    let strip = only_node(&nodes, STRIP_ID).bounds;
+    let agent = only_node(&nodes, AGENT_TAB_ID).bounds;
+    assert!(
+        strip.size.width < agent.size.width,
+        "the premise: the strip is narrower than its Agent tab alone: strip {strip:?}, Agent {agent:?}"
+    );
+    let controls = [
+        AGENT_TAB_ID.to_owned(),
+        tab_element_id("t1"),
+        close_element_id("t1"),
+        ADD_ID.to_owned(),
+    ];
+    for id in &controls {
+        assert!(
+            only_node(&nodes, id).focus.is_some(),
+            "{id} is drawn and tracks a focus handle"
+        );
+    }
+    let mut reached: Vec<String> = Vec::new();
+    for _ in 0..40 {
+        pane.tab();
+        let nodes = pane.draw();
+        let Some(focused) = nodes
+            .iter()
+            .find(|node| node.flags.focused && node.element_id.is_some())
+        else {
+            continue;
+        };
+        let id = focused.element_id.as_deref().unwrap_or_default().to_owned();
+        if controls.contains(&id) {
+            let visible = focused.visible_bounds;
+            assert!(
+                visible.size.width > px(0.) && visible.size.height > px(0.),
+                "{id}, focused, is scrolled into view: visible {visible:?}, bounds {:?}, strip {strip:?}",
+                focused.bounds
+            );
+        }
+        if controls.contains(&id) && !reached.contains(&id) {
+            reached.push(id);
+        }
+        if reached.len() == controls.len() {
+            break;
+        }
+    }
+    assert_eq!(
+        reached.len(),
+        controls.len(),
+        "Tab reaches each of the strip's controls; reached {reached:?}"
+    );
+}
+
+/// The strip's floor beside a pill is the fit's to apply, and the row draws its left region without the fit when it
+/// has no actions to fit: no store, no session row, or a Delete in flight, whose progress then shows in place of the
+/// actions. Those rows were not part of the decision on the floor, so they keep the layout they had before it.
+/// A running Delete is the one a user meets with a pill showing. Specified: in a 1400-pixel pane with **Skip session
+/// confirmations** on, for a remote session, once the terminal lists one tunnel to a very long host name the strip is
+/// at least 112 pixels wide (the floor applies while the actions show); once the header's Delete is sent and left
+/// unanswered, the Delete's progress and the pill are drawn, no action is, and the strip has exactly the bounds it had
+/// before the pill showed (no floor).
+#[test]
+fn a_running_delete_draws_the_strip_beside_a_pill_without_its_floor() {
+    use crate::terminal::set::{STRIP_FLOOR_BESIDE_PILL, STRIP_ID};
+    let mut pane = RealPane::open(1400., remote_session_skipping(true));
+    let bare = only_node(&pane.draw(), STRIP_ID).bounds;
+    pane.open_tunnel(&long_host());
+    let floored = only_node(&pane.draw(), STRIP_ID).bounds;
+    assert!(
+        floored.size.width >= px(STRIP_FLOOR_BESIDE_PILL) && bare.size.width < floored.size.width,
+        "the premise: beside the pill and the actions the strip has its floor: {floored:?}, without the pill {bare:?}"
+    );
+    pane.header_action(Action::Delete);
+    let nodes = pane.draw();
+    assert!(
+        pane.fake
+            .commands()
+            .iter()
+            .any(|command| command.method == Method::Delete
+                && command.path.starts_with("/api/sessions/a")),
+        "the premise: the Delete was sent unasked and is unanswered"
+    );
+    only_node(&nodes, "session-header-delete-progress-a");
+    only_node(&nodes, "session-tunnel-pill");
+    for action in Action::ALL {
+        assert!(
+            !nodes
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some(action.id())),
+            "{action:?} gave way to the progress"
+        );
+    }
+    assert_eq!(
+        only_node(&nodes, STRIP_ID).bounds,
+        bare,
+        "the strip is laid out as it was before the pill showed"
+    );
+}
+
+/// On a row with no actions to fit, neither the strip nor the pill is wrapped in a floor box, so the pill keeps its own
+/// floor and the strip, which scrolls, gives way, as before floors existed. A box with no floor shrank alongside the
+/// strip and let the pill spill out of it over the Delete's progress.
+///
+/// Spec: in a 650-pixel pane with **Skip session confirmations** on, for a remote session listing fifteen shell tabs,
+/// once the terminal lists one tunnel to a very long host name and the header's Delete is sent and left unanswered, the
+/// pill is at least 154 pixels wide and ends left of the Delete's progress.
+#[test]
+fn a_running_delete_in_a_narrow_pane_keeps_the_pill_whole_beside_many_tabs() {
+    let mut snapshot = remote_session_skipping(true);
+    let tabs: Vec<Value> = (1..=15).map(|n| json!({ "id": format!("t{n}") })).collect();
+    let row = snapshot
+        .iter_mut()
+        .flat_map(|collection| collection.entries.iter_mut())
+        .find(|entry| entry.value.get("host").is_some() && entry.value.get("tabs").is_some())
+        .expect("the premise: the snapshot holds session a's row");
+    row.value["tabs"] = json!(tabs);
+    let mut pane = RealPane::open(650., snapshot);
+    pane.open_tunnel(&long_host());
+    pane.draw();
+    pane.header_action(Action::Delete);
+    let nodes = pane.draw();
+    let progress = only_node(&nodes, "session-header-delete-progress-a").bounds;
+    let pill = only_node(&nodes, "session-tunnel-pill").bounds;
+    assert!(
+        pill.size.width >= px(154.) && pill.origin.x + pill.size.width <= progress.origin.x,
+        "the pill keeps its floor and ends left of the progress: pill {pill:?}, progress {progress:?}"
     );
 }
 
