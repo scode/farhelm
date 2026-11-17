@@ -1,5 +1,5 @@
 ---
-kind: breaking
+kind: removed
 ---
 
 `farhelm helm run` is gone: the helm now runs only inside the Farhelm desktop app, which starts its own. Its release
@@ -22,3 +22,6 @@ Linux today, so the service breaks when someone replaces that file by hand. That
 machine gets a newer `farhelm` (the installer refuses Linux and no Linux desktop archive ships), so every Linux setup
 user who moves to this release meets the failure: keep the caveat. This sits next to the
 `farhelm helm setup` entry from `remove-helm-setup.md`, whose "keep running" sentence was edited to point here.)
+
+(Curator: the maintainer ruled on 2026-11-16 that this is not a breaking change, because `farhelm helm run` and
+`farhelm helm setup` were never a user-supported surface; list it as a removal in a normal release.)
