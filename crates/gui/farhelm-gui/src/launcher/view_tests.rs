@@ -1312,6 +1312,141 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
     assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
 }
 
+/// The Agent tab's other launch text is spelled out as the old launcher showed it (`view::shown_text`): a model a draft
+/// carries in the closed model field, Custom flags in an editable escaped spelling, and the initial prompt read-only
+/// behind Clear initial prompt. Why: such text comes from a source session or a template, and shown raw it could hide
+/// or reverse what it says. Specified: a Codex draft with model `gpt<U+202E>x`, Custom flags `--a<U+200B>` and the
+/// prompt `do<U+202E>it` shows those spellings while the draft keeps the raw bytes; the flags field takes typing after
+/// the spelling, which the draft then holds as typed; the prompt says why it is read-only and refuses typing until
+/// Clear initial prompt empties it.
+#[gpui::test]
+fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestAppContext) {
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    let _ = start.choose_harness(LaunchHarness::Codex, None, None);
+    start.agent.model = Some("gpt\u{202e}x".into());
+    start.agent.permissions = Some(LaunchPermission::Custom);
+    start.agent.permission_flags = "--a\u{200b}".into();
+    start.prompt = "do\u{202e}it".into();
+    let (_helm, cx) = launcher_on(cx, start);
+    assert_eq!(model_text(cx), "gpt<U+202E>x");
+    assert_eq!(
+        draft(cx).agent.model.as_deref(),
+        Some("gpt\u{202e}x"),
+        "the draft keeps the raw id"
+    );
+
+    assert_eq!(
+        draft(cx).agent.permission_flags,
+        "--a\u{200b}",
+        "untouched flags keep their raw bytes"
+    );
+    assert_eq!(draft(cx).prompt, "do\u{202e}it", "and so does the prompt");
+    assert!(
+        has_node(
+            cx,
+            "Invisible formatting is shown escaped. Clear the message to replace it."
+        ),
+        "the old line says why the prompt is read-only"
+    );
+    escaped_until_cleared(
+        cx,
+        "launcher-prompt-row",
+        "launcher-clear-prompt",
+        "do<U+202E>it",
+        |launcher| &launcher.prompt,
+    );
+
+    let flags = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| launcher.flags.text(cx).to_string())
+    };
+    assert_eq!(flags(cx), "--a<U+200B>");
+    assert!(
+        !has_node(
+            cx,
+            "Invisible formatting is shown escaped. Clear the message to replace it."
+        ),
+        "the line goes with the read-only prompt"
+    );
+    // After the prompt's Clear, which takes the prompt's help line and button away and so brings the flags row into the
+    // dialog's view.
+    test_support::click(cx, "launcher-flags-row");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .flags
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused the flags field"
+    );
+    keys(cx, "end x");
+    assert_eq!(flags(cx), "--a<U+200B>x", "the spelling is editable");
+    assert_eq!(
+        draft(cx).agent.permission_flags,
+        "--a<U+200B>x",
+        "and an edit takes the field as it reads"
+    );
+}
+
+/// Outside Restart with's stored values, a command line and resume command holding invisible characters are shown in
+/// an editable escaped spelling, as the old launcher showed the ones Clone and Replace with copy, while an untouched
+/// value still holds its raw bytes; text the user types is shown as typed, since it reaches Bash as written and a
+/// spelling's `<` and `>` would be redirections there (SPEC.md, "Command launch"). Specified: a Command tab draft
+/// opening with command `run<U+200B> {farhelm_args}` and resume command `run<U+202E> {conversation}` shows both spelled
+/// out, with no Clear buttons; the draft keeps the raw text; typing at the command's end edits the spelling; a
+/// zero-width space typed after that is shown and kept as typed.
+#[gpui::test]
+fn copied_command_text_holding_invisible_characters_shows_escaped_and_editable(
+    cx: &mut TestAppContext,
+) {
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    start.choose_tab(Tab::Command);
+    start.edit_command("run\u{200b} {farhelm_args}".into());
+    start.choose_command_agent(Some(LaunchHarness::Codex));
+    start.choose_command_resume(true);
+    start.edit_command_resume("run\u{202e} {conversation}".into());
+    let (_helm, cx) = launcher_on(cx, start);
+    let text = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| {
+            (
+                launcher.command.text(cx).to_string(),
+                launcher.resume.text(cx).to_string(),
+            )
+        })
+    };
+    assert_eq!(
+        text(cx),
+        (
+            "run<U+200B> {farhelm_args}".to_owned(),
+            "run<U+202E> {conversation}".to_owned()
+        )
+    );
+    assert!(
+        !has_node(cx, "launcher-clear-command") && !has_node(cx, "launcher-clear-resume"),
+        "editable, so no Clear"
+    );
+    assert_eq!(draft(cx).command.command, "run\u{200b} {farhelm_args}");
+    test_support::click(cx, "launcher-command-row");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .command
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused the command field"
+    );
+    keys(cx, "end x");
+    assert_eq!(draft(cx).command.command, "run<U+200B> {farhelm_args}x");
+    cx.simulate_input("\u{200b}");
+    settle(cx);
+    assert_eq!(
+        draft(cx).command.command,
+        "run<U+200B> {farhelm_args}x\u{200b}"
+    );
+    assert_eq!(
+        text(cx).0,
+        "run<U+200B> {farhelm_args}x\u{200b}",
+        "typed text is shown as typed"
+    );
+}
+
 /// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field only
 /// chooses, open or closed: Restart is a separate press. Why: the old launcher's "choosing a model must not submit the
 /// launcher" (restart-with.spec's "restart with model Enter chooses before a separate restart action"), and a restart
