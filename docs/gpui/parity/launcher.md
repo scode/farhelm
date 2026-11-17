@@ -45,8 +45,8 @@ custom flags refused ("launcher Enter names invalid custom permission flags"; an
 effort the catalog does not offer refusing the press and going away once the user picks another ("launcher effort
 dropdown preserves an unsupported inherited choice until a native edit"; that it stays offered is
 `launcher::view_tests::a_carried_effort_the_model_does_not_offer_stays_offered`), and a held Enter on the closed host
-button and on a closed select ("launcher repeated Enter never launches"; text fields, buttons, segments, tabs and the
-search box are tested)
+button, which keeps its own copy of the Enter rule ("launcher repeated Enter never launches"; text fields, buttons,
+segments, tabs, the search box and a closed select are tested)
 
 - "launcher gap keeps focus and container Enter explains an incomplete draft": a click on the empty space of a dialog
   that keeps focus leaves focus on the control in use, in
@@ -64,7 +64,10 @@ search box are tested)
   shared select (`launcher::view_tests::{many_efforts_are_a_select, five_effort_options_are_still_segments}`), whose
   keys and Enter are in
   `components::tests::select::{the_select_keys_open_move_choose_and_close_as_a_native_pop_up, enter_on_a_closed_select_with_a_main_action_runs_it_with_the_value_shown}`.
-  Its arrows open the list, where the old native select's changed the value in place.
+  Its arrows open the list, where the old native select's changed the value in place. Its composing Enter is superseded
+  by the choice controls' shared Enter rule, which says no input method can compose into them
+  (`components::enter_choice`'s documentation in `crates/gui/farhelm-gui/src/components/mod.rs`; decided by the
+  migration's orchestrator on 2026-11-16).
 - "launcher choice-button Enter applies then launches" (beyond the harness chip) and "launcher choice Enter explains an
   incomplete draft": the effort and permission segments in
   `components::tests::radio_group::a_button_group_makes_each_option_a_tab_stop_chosen_with_enter_or_space`, the
@@ -84,6 +87,10 @@ search box are tested)
   `launcher::yolo_tests::{a_yolo_refusal_asks_the_question_with_cancel_focused, cancel_starts_nothing_and_keeps_the_launcher}`,
   and the inline question's own answers in
   `prompt_tests::an_inline_question_answers_once_and_returns_focus_inside_its_dialog`.
+- "launcher repeated Enter never launches", on a closed select: the select takes Enter through the choice controls'
+  shared rule (`components::tests::select::enter_on_a_closed_select_with_a_main_action_runs_it_with_the_value_shown`),
+  whose held Enter doing nothing is that rule's own test,
+  `components::tests::enter_choice::an_areas_own_tab_takes_the_enter_rule_through_the_helper`.
 - The retry-key cases' non-key halves: taking a search row only edits
   (`launcher::search_view_tests::a_word_and_enter_choose_it_and_empty_the_box`), a model change clears an effort the
   model does not offer (`launcher::draft_tests::model_choices_follow_their_owning_agent`), a blank name is sent as none
@@ -106,14 +113,19 @@ partly: `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`,
 `launcher::draft_tests::each_tab_keeps_its_own_draft_across_switches`; the remembered wrapper prefix on an agent switch,
 shown escaped when it holds an invisible character, in
 `launcher::view_tests::an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`; search moving to the Agent tab in
-`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`; not yet ported: a folder or
-`name:` row taken on the Command tab keeping that tab and its command ("search on the command tab switches to the agent
-tab only for an agent choice"), and an unparsable wrapper left on the Agent tab not blocking Save as template on the
-Command tab ("a dormant invalid wrapper does not block saving a command template"; its test would sit with Save as
-template's in `templates::save_tests`)
+`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`; not yet ported: a `name:` row
+taken on the Command tab keeping that tab and its command, and a folder row keeping the typed command ("search on the
+command tab switches to the agent tab only for an agent choice"; a folder row keeping the tab is in the bullet below),
+and an unparsable wrapper left on the Agent tab not blocking Save as template on the Command tab ("a dormant invalid
+wrapper does not block saving a command template"; its test would sit with Save as template's in
+`templates::save_tests`)
 
 - New opening on the Agent tab with focus in the search box:
   `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`.
+- "search on the command tab switches to the agent tab only for an agent choice", a folder row: a saved folder taken
+  from search on the Command tab sets the folder and keeps the tab, in
+  `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout` (its draft holds no command, so
+  the command's survival is not asserted).
 - "the arrow keys move between the launch-kind tabs": Right and Home in
   `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`, and the strip as one tab stop in
   `components::tests::tab_strip::the_tab_strip_moves_with_the_arrows_and_enter_chooses_then_launches`.
@@ -128,7 +140,7 @@ template's in `templates::save_tests`)
 
 Tests: 1. Covers: launcher summary and actions stay pinned at ${viewport.width}x${viewport.height}.
 
-partly: the pinned footer is the dialog frame's, tested for every dialog; the launcher's summary beside its actions is
+replaced: the pinned footer is the dialog frame's, tested for every dialog; the launcher's summary beside its actions is
 layout, shown in the `app-launcher-scrolled-end` scene and not separately tested (nothing checks that the summary and
 the actions do not overlap); all three old window sizes (1280 by 540, 390 by 844 and 360 by 300) are below the minimum
 window (Deviations)
@@ -142,7 +154,7 @@ window (Deviations)
 
 Tests: 5. Covers: launcher status waits two seconds, counts up and ends on a real refusal.
 
-partly: the two-second threshold, the count, the one announcement and the refusal ending it in
+replaced: the two-second threshold, the count, the one announcement and the refusal ending it in
 `launcher::launch_tests::{a_slow_launch_shows_its_progress_pill_after_two_seconds, a_quick_reply_shows_no_progress_pill, the_progress_pill_counts_in_an_inactive_window}`;
 the deadline case's outcome (an unknown outcome after the helm's bound; the pill during such a wait is the first test's)
 in
@@ -205,7 +217,10 @@ clearing a carried model and effort on switching to Grok, and the Grok create bo
 Tests: 2. Covers: the OMP composer offers OMP's own vocabulary and the row shows the effective permission.
 
 partly: `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`; the OMP create body is not yet
-tested; the row's effective permission is the session list's
+tested; the row's effective permission ("an OMP session row shows the OMP glyph and its actual permission") is the
+session list's, where the OMP mark, the Approve row's shield and its description are in
+`session_list::row_marks_tests::{every_agent_type_draws_the_mark_named_for_it, the_shield_follows_the_launch_and_draws_its_mark, an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command}`,
+the second also drawing the YOLO shield for an OMP row with no stored permission
 
 ### `tests/opencode.spec.ts`
 
@@ -241,10 +256,11 @@ shown at that press" (976) and the ambiguous-retry variants of 1383), since the 
 Deviations), and the undispatched-preview variants of 1383, a command-line configuration change while New stays open, by
 the launch-history deviation; "managed checkout setup notes use ordinary helper styling" (418) is layout, shown in the
 `app-launcher-managed-checkout` scene: the inline setup field stands in for the note while it shows, drawn as a
-deviation below says; not yet ported: the highlighted suggestion kept in view while the arrows wrap (161), an observed
-configuration change keeping the setup field's draft, text and focus while it re-checks, and a name edit reading no
-suggestions (212), the "No repository matches; enter owner/repo" row, Enter on it doing nothing, and focusing the
-repository field closing open search results (462; the lifetime explanation under the field is wording, drawn in the
+deviation below says; not yet ported: the highlighted suggestion kept in view while the arrows wrap (161; the wrap
+itself is the shared field list's, in `launcher::field_list_tests::arrows_wrap_both_ways_and_start_from_no_highlight`),
+an observed configuration change keeping the setup field's draft, text and focus while it re-checks, and a name edit
+reading no suggestions (212), the "No repository matches; enter owner/repo" row, Enter on it doing nothing, and focusing
+the repository field closing open search results (462; the lifetime explanation under the field is wording, drawn in the
 same scene, and the failed scan note's warning ink is layout, not separately tested, since no scene's host fails its
 repository scan and the note's words are asserted in
 `launcher::checkout_tests::suggestions_are_read_after_typing_and_enter_picks_one`), and a host switch dropping the old
@@ -282,9 +298,12 @@ search box's warning line is not separately tested, since no scene types a query
 which lines are warnings; not yet ported: the refusal alert's alert role, the whole keyboard path of "composer word
 search drives a structured launch" in one launcher (an effort row taken through the box, `effort:default` resetting it,
 `guarded` replacing YOLO, and the create carrying them), and, for "New's command tab keeps the agent draft dormant and
-preserves the raw invocation", a Command create carrying no agent launch while the Agent tab holds one, and a folder row
-keeping the Command tab
+preserves the raw invocation", a Command create carrying no agent launch while the Agent tab holds one (a folder row
+keeping the Command tab is in the bullets below)
 
+- "New's command tab keeps the agent draft dormant and preserves the raw invocation", a folder row:
+  `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout` (a saved folder taken on the
+  Command tab sets the folder and keeps the tab).
 - "Tab from the open model list reaches the next launcher control":
   `launcher::view_tests::leaving_the_model_field_closes_its_list` (Tab leaves the field and closes the list; which
   control takes focus is not asserted, and the focus invariant every test step checks keeps it inside the launcher).
@@ -325,7 +344,9 @@ each agent's Guarded explanation, and Cursor's own-setting one, is its segment's
 separately tested: the words are the shared permission words, whose Codex texts
 `session_list::row_marks_tests::an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command` asserts; not
 yet ported: the "About permission modes" button opening the documentation's permission modes page; "guarded and older
-own-setting shields show their actual launch provenance" is the session list's
+own-setting shields show their actual launch provenance" is the session list's, in
+`session_list::row_marks_tests::{the_shield_follows_the_launch_and_draws_its_mark, an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command}`
+(Codex's Guarded and own-setting shields, and their descriptions with the stored command)
 
 ### `tests/permission-switch.spec.ts`
 
@@ -337,10 +358,17 @@ restoring the pre-switch draft after later edits, Dismiss, a later switch taking
 and its eight seconds held by hover and focus in
 `launcher::escalation_tests::{an_escalating_switch_shows_the_banner_and_undo_restores_the_draft, dismiss_keeps_the_switch, a_later_switch_clears_the_banner, the_banner_shows_eight_seconds_unless_hovered_or_focused, a_direct_permission_choice_raises_no_banner}`;
 a template batch in `launcher::search_view_tests::a_tl_row_that_escalates_raises_the_banner`; the rules (passive and
-remembered permissions, the first agent) in `launcher::draft_tests` and
+remembered permissions, the first agent: "first harness escalation warns after Guarded chosen by ${source}" through the
+button, and "first harness does not escalate passive ${remembered ?? "default"} permission" for a remembered Guarded) in
+`launcher::draft_tests::the_first_agent_escalates_only_a_deliberate_choice` and
 `templates::apply_tests::escalation_is_judged_once_for_the_batch`; the slide and outline, and both under reduced motion,
-in `components::tests::transition`; not yet ported: the model picker's path (258's second run); the drawn band is
-layout, shown in the `app-launcher-escalation-banner` scene
+in `components::tests::transition`; not yet ported: the passive default variant of "first harness does not escalate
+passive ${remembered ?? "default"} permission", and the Undo of "first harness escalation warns after Guarded chosen by
+${source}" bringing back the deliberate Guarded with no agent, so that choosing the agent again warns again; the model
+picker's path (258's second run) drawn, the banner shown after a click on another agent's model in the list; its draft
+half, a cross-agent model pick raising the banner and Undo restoring the draft exactly, is
+`launcher::draft_tests::{a_cross_agent_model_pick_can_raise_the_banner, undo_after_a_cross_agent_model_pick_restores_the_draft_exactly}`;
+the drawn band is layout, shown in the `app-launcher-escalation-banner` scene
 
 - "OMP defaults to Guarded and escalation Undo restores the pre-switch draft": OMP's Guarded default in
   `launcher::view_tests::each_agent_type_offers_its_own_permission_vocabulary`, and an explicit Guarded kept on a switch
@@ -517,7 +545,7 @@ environment waits for the environments work
 
 Tests: 8. Covers: New inherits a filtered selected destination with replacement=${replace}.
 
-partly: both cases of "New inherits a filtered selected destination" in
+replaced: both cases of "New inherits a filtered selected destination" in
 `launcher::entry_tests::{new_opens_beside_an_open_session_the_list_hides, new_does_not_follow_a_retargeted_host_row}`;
 "the launcher's folder follows each host's last launch until the user types one" (666) in
 `launcher::folder_default_tests::{new_waits_for_the_hosts_last_folder_and_starts_there, a_failed_history_read_settles_on_home, new_beside_an_open_session_waits_for_nothing}`
@@ -556,21 +584,26 @@ follows the pushed Podman checks it asks for on opening and whose note follows t
 `launcher::environment_view_tests::{opening_the_launcher_checks_the_container_hosts, opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable, new_container_shows_its_rows_with_unusable_hosts_disabled, the_note_follows_the_recipe_place}`;
 not yet ported: "restored container placement displays the recipe and host it submits", "environment recents hold
 focused intent until deliberate promotion" and "environment recents stay independent of a held ordinary folder default",
-which come with the environments work's recent setups. The spec's other cases are other areas': "container template
-quick launch retains its saved place" is the templates and quick launch area's, "a connected container's Delete asks its
-Farhelm and reports the container that stays" is the session view's, and "Containers Settings keeps failed cleanup
-explicit" and the `recipes` surface of the delayed-probe case are in [Settings and hosts](settings-and-hosts.md).
+which come with the environments work's recent setups, and the drawn Runs on segments, defaults and place note of the
+partly ported cases above: covered by the New sandbox PRs (desktop integration), the citation the migration's
+orchestrator decided on 2026-11-16 for every environments case until those PRs land. The spec's other cases are other
+areas': "container template quick launch retains its saved place" is the templates and quick launch area's, "a connected
+container's Delete asks its Farhelm and reports the container that stays" is the session view's, and "Containers
+Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are in
+[Settings and hosts](settings-and-hosts.md).
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
 Tests: 16. Covers: recipe placement explains prerequisites and requires billing consent.
 
-not yet ported: New sandbox is the environments work's next piece. Six of the 16 cases are this area's: "recipe
-placement explains prerequisites and requires billing consent", "an existing-host launch stays nonmodal while its Resume
-is held", "a recipe template quick launch asks before one recipe request" (the question comes with New sandbox; the
-templates area applies the template's target), "template placement keeps Host editable after leaving an environment", "a
-held sandbox Suspend and a launch on another host proceed side by side" and "Hosts refuses a host's Resume and Settings
-while a launch is waking that host". The other ten are the session view's and Hosts'; the session view's are recorded in
+not yet ported: New sandbox is the environments work's next piece, and this area's cases below are covered by the New
+sandbox PRs (desktop integration), the citation the migration's orchestrator decided on 2026-11-16 for every
+environments case until those PRs land. Six of the 16 cases are this area's: "recipe placement explains prerequisites
+and requires billing consent", "an existing-host launch stays nonmodal while its Resume is held", "a recipe template
+quick launch asks before one recipe request" (the question comes with New sandbox; the templates area applies the
+template's target), "template placement keeps Host editable after leaving an environment", "a held sandbox Suspend and a
+launch on another host proceed side by side" and "Hosts refuses a host's Resume and Settings while a launch is waking
+that host". The other ten are the session view's and Hosts'; the session view's are recorded in
 [Sidebar and session view](sidebar-and-session-view.md), under its cases of specs listed in other areas' files.
 
 ### `tests/github-checkouts.spec.ts`
@@ -578,7 +611,7 @@ while a launch is waking that host". The other ten are the session view's and Ho
 Tests: 18. Covers: quick launch waits for a managed preview and
 ${collide ? "reveals its path race" : "starts directly"}${base ? " for a template base name" : ""}.
 
-partly: Clone's `-clone` default and its numbering, an explicit name staying a conflict, Folder restoring the source's
+replaced: Clone's `-clone` default and its numbering, an explicit name staying a conflict, Folder restoring the source's
 folder and title, a template base name numbering (1151, and 248: its pill and "(<base> is taken)" note in
 `templates::checkout_name_tests`, its quick launches in
 `templates::dispatch_tests::{a_taken_base_name_is_numbered_and_launched_out_of_sight, a_numbered_quick_launch_the_user_moved_on_from_starts_quietly, a_base_name_quick_launch_that_loses_its_folder_is_shown}`
@@ -593,10 +626,10 @@ search result leaving checkout mode (895) in
 `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout`; the real-clone cases (830, 868,
 935, 1047) by their launcher halves below, with a real clone in the end-to-end suite and the checkout's references in
 the supervisor's unit tests, since a GUI-driven real clone is not run (the end-to-end smoke test's fake fleet has no
-repository source); not yet tested: two server behaviors the old cases drove through the HTTP API, a stopped borrower
-keeping its reference to the checkout (935) and a Replace onto another folder archiving the checkout it released (1047),
-which no server test drives through Stop or Replace yet; they are the supervisor's, outside the GUI port, so no GUI test
-will replace them
+repository source); dropped from the GUI port as supervisor behavior (decided by the migration's orchestrator on
+2026-11-16): the server halves of 935 and 1047, a stopped borrower keeping its reference to the checkout and a Replace
+onto another folder archiving the checkout it released, which the old cases drove through the HTTP API and no server
+test drives through Stop or Replace yet
 
 - 830, the launcher's half: a name edit re-previewing in
   `launcher::checkout_tests::what_a_preview_answers_for_asks_again_and_late_answers_never_apply`, the create carrying
@@ -674,14 +707,15 @@ question by restarting guarded", "a YOLO command restart-with asks inside the di
 question itself is tested), the old model escaped in its changed marker ("restart with escapes the old model in its
 changed marker"), an omitted permission compared by its effective mode ("restart with compares an older omitted
 permission by its effective mode"), an edited resume command with its resume and YOLO markers ("restart with edits a
-command launch's command, resume command and YOLO answer"), a stored trust being no edit and left out of the body
-("restart with choice Enter applies effort and permissions without old trust"), a held Enter in the model field
-("restart with model Enter refuses an unselected draft and held keys"; the unselected draft is tested), a composing
-Enter on a choice ("restart with unchanged repeated and composing choice Enter sends nothing"), a command template, the
-shortcut batches and the bolt in Restart with ("restart with applies an allowed partial command template", "restart with
-refuses held shortcut batches and bolt templates", "restart with applies matching bolt and shortcut templates without
-restarting"; their tests would sit in `templates::apply_tests` and `templates::launcher_modes_tests`), and the catalog's
-Retry keeping an edit made before it ("restart with retries the catalog without reseeding its draft")
+command launch's command, resume command and YOLO answer"; the command's own marker, shown for an edited command and for
+nothing else, is `launcher::restart_with_tests::restart_with_marks_an_edited_command`), a stored trust being no edit and
+left out of the body ("restart with choice Enter applies effort and permissions without old trust"), a held Enter in the
+model field ("restart with model Enter refuses an unselected draft and held keys"; the unselected draft is tested), a
+command template, the shortcut batches and the bolt in Restart with ("restart with applies an allowed partial command
+template", "restart with refuses held shortcut batches and bolt templates", "restart with applies matching bolt and
+shortcut templates without restarting"; their tests would sit in `templates::apply_tests` and
+`templates::launcher_modes_tests`), and the catalog's Retry keeping an edit made before it ("restart with retries the
+catalog without reseeding its draft")
 
 - "restart with keeps gap focus and container Enter uses its enabled action", the gap half:
   `layers_tests::the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus`.
@@ -703,7 +737,10 @@ Retry keeping an edit made before it ("restart with retries the catalog without 
   in `launcher::request_tests::refusals_name_the_first_thing_to_fix`.
 - "restart with unchanged repeated and composing choice Enter sends nothing", its unchanged and repeated halves:
   `launcher::request_tests::restart_with_needs_an_edit_and_sends_it` and
-  `components::tests::button::enter_or_space_on_a_focused_button_runs_it_once`.
+  `components::tests::button::enter_or_space_on_a_focused_button_runs_it_once`; its composing half is superseded by the
+  choice controls' shared Enter rule, which says no input method can compose into them (`components::enter_choice`'s
+  documentation in `crates/gui/farhelm-gui/src/components/mod.rs`; decided by the migration's orchestrator on
+  2026-11-16).
 - "restart with command Enter validates and keeps the shown YOLO value":
   `launcher::view_tests::a_refused_press_says_why_beside_the_main_action` (Enter in a single-line field),
   `launcher::request_tests::restart_with_names_its_command_and_host_problems` and
@@ -744,8 +781,7 @@ partly: `launcher::view_tests::the_host_list_offers_every_host_with_its_phase_an
 `cancel_and_the_host_button_are_tab_stops`; not yet ported: a press outside closing the list ("host picker opened
 without click focus still owns the keyboard and closes outside"), and browsing the empty list before hosts arrive
 leaving the host unset, then the button naming the host once they do ("host picker retains the empty value until hosts
-arrive"); the one-second prefix reset and repeated-letter cycling, which none of the old cases asserts, are not tested
-either; the picker disabled during a launch's write is superseded: the launcher hides while its create is out
+arrive"); the picker disabled during a launch's write is superseded: the launcher hides while its create is out
 (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`)
 
 - "host picker opened without click focus still owns the keyboard and closes outside", its keyboard half from the search
@@ -774,14 +810,26 @@ view area (decided by the migration's orchestrator on 2026-11-14); the Settings 
 Case: the 35 `composer ...` cases (from "composer search reconciles a custom model like a harness button" to "composer
 busy guard preserves one structured create through queued edits and cancel"), and the two cases among them not titled
 so, "a phone-width recent row shows its folder and hides its host" and "compact recents distinguish guarded defaults and
-own-setting".
+own-setting"; also three launcher cases of the spec that no parity file listed, "the launch composer autofocuses search
+and returns focus to New after Escape" (5527), "opening New focuses search and immediate typing lands there, with or
+without a prior menu" (5566) and "model picks discard another harness's default YOLO" (9150).
 
 partly: `launcher::search_view_tests::only_a_fresh_enter_on_an_empty_box_launches` and
 `launcher::search_view_tests::a_scoped_miss_says_why_and_enter_changes_nothing` cover "composer no-result Enter keeps a
-valid launch draft open without posting", and the model field's cases are in `launcher::view_tests` (its model field
-section) and `launcher::model_tests`; "composer busy guard preserves one structured create through queued edits and
-cancel" by `launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher` (nothing can edit or press the
-launcher while its create is out); the search cases in `launcher::search_tests` (the query's rules) and
+valid launch draft open without posting", and the model field's cases are in its own tests: "composer model combobox
+filters the chosen harness's catalog and applies with Enter" in
+`launcher::view_tests::{the_model_list_filters_and_enter_picks_the_highlighted_row, enter_on_typed_text_applies_a_custom_id_or_says_who_owns_it}`
+and
+`launcher::model_tests::{model_options_filter_and_keep_harness_defaults, model_enter_target_distinguishes_navigation_and_draft_semantics}`,
+"composer model combobox refuses a custom id until a harness is chosen" in
+`launcher::view_tests::{a_custom_id_with_no_agent_says_to_choose_one, enter_on_typed_text_applies_a_custom_id_or_says_who_owns_it}`,
+"composer model combobox can show every harness's models and switching model switches harness" in
+`launcher::view_tests::show_all_lists_every_agents_models_and_picking_one_switches_the_agent`, and "composer Escape in
+the model combobox reverts the field and keeps the dialog open" in
+`launcher::view_tests::{escape_closes_the_model_list_first, the_model_error_lasts_until_a_pick_or_escape}`; "composer
+busy guard preserves one structured create through queued edits and cancel" by
+`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher` (nothing can edit or press the launcher
+while its create is out); the search cases in `launcher::search_tests` (the query's rules) and
 `launcher::search_view_tests` (the box); the folder dropdown's cases ("composer folder dropdown preserves keyboard
 launch and grouped history": the recents, filtering, the refused Enter that closes the list, Escape then typing, Escape
 before the launcher, Tab, and eight recents after Reset to home; and the local-home reset) in
@@ -827,8 +875,19 @@ layout, not separately tested, since no scene hovers a search row and the highli
 `launcher::search_view_tests::arrows_move_the_highlight_and_enter_or_a_click_takes_a_row`'s), Tab and Shift+Tab wrapping
 to targets kept in view ("composer focus-trap wraps reveal their targets at narrow width"), and the Tab order through
 the launch groups and the footer ("composer menu-closed Tab order follows the displayed launch groups", "composer footer
-names the chosen harness, host, and folder"; the placement segments' stops come with the environments work)
+names the chosen harness, host, and folder"; the placement segments' stops come with the environments work), the
+launcher opened by a click on New while a row menu is open, or by Enter or Space on New, with focus in search and typing
+landing there (5566; a plain opening is tested, in the bullets below), and a model picked from another agent type's list
+replacing the first agent's default YOLO with the new one's default (9150)
 
+- "the launch composer autofocuses search and returns focus to New after Escape" (5527): focus in search on opening in
+  `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`, the first Escape closing the results
+  and the second the launcher in `launcher::search_view_tests::escape_closes_the_results_and_keeps_the_query` (with a
+  query that has results, where the old one had none), and focus back on New in
+  `session_list::order::tests::new_opens_the_launcher_and_closing_returns_focus_to_the_button`.
+- "opening New focuses search and immediate typing lands there, with or without a prior menu" (5566), a plain opening:
+  focus in search in `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`, and text typed
+  with no click first reaching the box in `launcher::search_view_tests::a_word_and_enter_choose_it_and_empty_the_box`.
 - "composer search reconciles a custom model like a harness button": the chip and the search's harness row take one
   path, whose reconciliation is
   `launcher::draft_tests::{model_choices_follow_their_owning_agent, a_switch_clears_what_the_new_agent_cannot_use_and_says_so}`,
@@ -858,7 +917,7 @@ names the chosen harness, host, and folder"; the placement segments' stops come 
 
 Case: row Replace YOLO arrival respects ${focus} focus.
 
-ported by the sidebar, which asks the launcher's YOLO question at the row and header: its YOLO cases in
+replaced, by the sidebar, which asks the launcher's YOLO question at the row and header: its YOLO cases in
 `session_list/lifecycle_tests.rs` and `session_pane/header_tests.rs`, and smoke step `test_54`
 
 - The moved-on variant: `session_list::lifecycle_tests::a_yolo_question_after_the_user_moved_on_waits_without_focus`,
@@ -870,7 +929,12 @@ ported by the sidebar, which asks the launcher's YOLO question at the row and he
 
 ### `tests/replace.spec.ts` (sidebar)
 
-Case: the 8 Replace with cases (lines 801, 1024, 1081, 1166, 1281, 1384, 1446, 1503 at the pin).
+Case: the 8 Replace with cases (lines 801, 1024, 1081, 1166, 1281, 1384, 1446, 1503 at the pin), and the launcher
+variants of two cases no parity file listed: "launchers start fresh after repairing a missing folder (${surface})"
+(161), whose new, clone and replace-with variants are the launcher's and whose sidebar and header ones are plain
+Replace's, and the Replace with variants of 539, "Replace with selects its replacement after an earlier complete fleet
+refresh" and "Replace with reconciles an externally removed source after refusal" (the plain Replace variants are the
+sidebar's).
 
 partly: line 1166's prefill and launch in
 `launcher::replace_with_tests::{replace_with_prefills_the_source_and_holds_its_host, replace_with_warns_about_a_running_source_and_sends_its_guard, replace_with_opens_its_replacement_only_where_the_source_was_open}`
@@ -883,10 +947,20 @@ and that row naming the warning as their accessible description (deviations belo
 the helm keeps a source more alive than shown); also
 `launcher::replace_with_tests::{a_refused_replace_with_comes_back_and_stays_on_the_source, replace_with_waits_while_its_source_is_busy}`;
 1024 and 1081 (focus on search) in `launcher::search_view_tests::clone_and_replace_with_start_focus_in_the_search_box`;
-superseded: 801 (retry keys; the GUI sends none)
+superseded: 801 (retry keys; the GUI sends none) and 161's check that the second attempt carries a new key; not yet
+ported: 161's second press, once the folder is repaired, sending a new create or Replace and opening its session (the
+refusal half is below), and 539's refusal variant, the launcher showing the refusal after the source was removed
+elsewhere while the Replace with was out, and the selection then falling back to the session visited before
 
 - 1024 and 1081, the row menu opening Replace with on its row:
   `session_list::menu_tests::the_menus_clone_and_replace_with_open_the_launcher_on_their_row`.
+- 161, the refusal half: the refusal brought back with the draft, for New in
+  `launcher::launch_tests::a_refused_launch_brings_the_launcher_back_with_the_helms_words` (Clone goes through the same
+  submit, as `launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher` says) and for Replace with in
+  `launcher::replace_with_tests::a_refused_replace_with_comes_back_and_stays_on_the_source`.
+- 539's success variant: a listing that drops the source and lists the replacement arrives before the reply, and the
+  replacement still opens, in the first half of
+  `launcher::replace_with_tests::replace_with_opens_its_replacement_only_where_the_source_was_open`.
 - 1166, the Replace body built from the create's:
   `launcher::request_tests::a_replace_with_body_carries_the_create_and_the_shown_guard`.
 
@@ -911,12 +985,81 @@ words and no "Restart error." lead, as New's timed-out create does
 (`launcher::launch_tests::a_timed_out_create_comes_back_without_not_launched`); the old return of the dialog after the
 user switched away is the notice deviation below
 
+### `tests/terminal.spec.ts` (terminal)
+
+Case: its six create-form cases, "the create form prefills the working directory with ~ when no session is selected",
+"multi-session flow: create two, open and type in one, stop and delete the other, then delete the first with
+confirmation" (its launcher half), "create dialog surfaces a precondition failure, preserves the form, and creates no
+session", "create dialog disables the submit control while a create is in flight", "submitting the create form twice
+while one create is in flight produces exactly one session" and "a blank title creates a session titled after the
+working directory's basename, not an empty string". Only the launcher's cases are listed here; the spec's other cases
+are the terminal area's, whose file tracks the spec, and the sidebar and session view's.
+
+partly: every case's launcher half is named below; not yet ported: a second press after a refusal, once the folder is
+fixed, launching and opening the session ("create dialog surfaces a precondition failure, preserves the form, and
+creates no session"), and opening another session while a create is out ("create dialog disables the submit control
+while a create is in flight", with nonblocking-launch's 59)
+
+- "the create form prefills the working directory with ~ when no session is selected": New without an open session
+  starts in `~` in `launcher::folder_default_tests::new_waits_for_the_hosts_last_folder_and_starts_there`, and a history
+  with no launch into a plain folder leaves it there in
+  `launcher::recents_tests::the_remembered_folder_is_the_newest_plain_folder_launch`.
+- "multi-session flow: create two, open and type in one, stop and delete the other, then delete the first with
+  confirmation", the launcher's half, each create opening its session:
+  `launcher::launch_tests::a_launch_the_user_waited_for_opens_its_session`. Typing in the open session is the
+  terminal's, and Stop and Delete with its confirmation are the sidebar and session view's.
+- "create dialog surfaces a precondition failure, preserves the form, and creates no session": the refusal shown after
+  "Not launched." with the draft kept, and an edit taking it away, in
+  `launcher::launch_tests::a_refused_launch_brings_the_launcher_back_with_the_helms_words`; one press sends one create
+  (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`).
+- "create dialog disables the submit control while a create is in flight": the launcher hides while its create is out,
+  so nothing in it can be pressed (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`), and New
+  is unavailable meanwhile (`launcher::entry_tests::new_waits_for_a_pending_launch_and_then_brings_back_its_refusal`).
+- "submitting the create form twice while one create is in flight produces exactly one session":
+  `launcher::launch_tests::{launching_sends_one_create_and_hides_the_launcher, a_repeated_enter_on_launch_still_opens_the_session}`.
+- "a blank title creates a session titled after the working directory's basename, not an empty string": a blank name
+  sent as no title in `launcher::request_tests::an_agent_create_body_carries_the_draft`; the title then derived from the
+  folder is the supervisor's.
+
+### `tests/terminal-multihost.spec.ts` (terminal)
+
+Case: its eight create and Clone cases, each titled after its label: "create-dialog-host-selector", "clone-cross-host",
+"clone-cross-host-explicit-edit", "create-dialog-selector-disappearance", "create-dialog-selector-disabled-in-flight",
+"create-on-unreachable-refused", "create-intent-key-rebinds-on-host-change" and "create-intent-key-rebinds-on-retarget".
+Only the launcher's cases are listed here; the spec's Uninstall, Retry and Adopt host cases are in
+[Settings and hosts](settings-and-hosts.md), and its stale-session cases are the sidebar and session view's, as the
+terminal area's entry for the spec says.
+
+partly: four cases are named below; superseded: the two intent-key cases, since the GUI sends no create keys (SPEC.md,
+"Creation" and "Losing the connection to the helm"), and "clone-cross-host-explicit-edit", whose command was overwritten
+when the old launcher bound a Clone's host after its hosts read: a Clone's host is decided once, as it opens, from the
+hosts the helm has pushed (SPEC_impl.md, "The UI channel"), falling back with a note when the source's host is not among
+them (`launcher::entry_tests::clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so`), and nothing binds it
+later (Deviations, the first bullet); not yet ported: "create-dialog-selector-disappearance", a chosen host leaving the
+registry while New is open (how the launcher answers it is a deviation, in Deviations): the refusal's words are checked
+for an unconnected host in `launcher::request_tests::refusals_name_the_first_thing_to_fix`, but no test removes the
+chosen host
+
+- "create-dialog-host-selector": the pick in
+  `launcher::view_tests::{the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one, the_host_picker_browses_with_arrows_and_enter}`,
+  and the create carrying the draft's host in `launcher::request_tests::an_agent_create_body_carries_the_draft`; the
+  row's remote mark is the session list's.
+- "clone-cross-host": a Clone opening on its source's host with its command, and its create sent there, in
+  `launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, a_clone_launch_sends_the_copied_launch}`.
+- "create-dialog-selector-disabled-in-flight": the launcher, its host picker and folder included, hides while its create
+  is out (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`; Deviations).
+- "create-on-unreachable-refused": a host that is not connected refuses Launch before anything is sent, in
+  `launcher::request_tests::refusals_name_the_first_thing_to_fix` ("Choose a connected host before launching", where the
+  old note said "The selected host is unavailable; choose a connected host before launching") and
+  `launcher::view_tests::a_refused_press_says_why_beside_the_main_action`.
+
 ### `tests/tensorlake-lifecycle.spec.ts` (settings and hosts)
 
 Case: its 13 cases of a launch that resumes its suspended host first (lines 216 to 630 and 1131 to 1835 at the pin); its
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
-not yet ported (environments, milestone M3)
+not yet ported (environments, milestone M3): covered by the New sandbox PRs (desktop integration), the citation the
+migration's orchestrator decided on 2026-11-16 for every environments case until those PRs land
 
 ## Deviations
 
@@ -953,8 +1096,13 @@ not yet ported (environments, milestone M3)
   copy runs YOLO on an ordinary host unless that host asks first; the note and the host picker show where it goes.
 - A launch refused after the user moved on is offered by a notice with Open launcher, as SPEC.md now says; the old app
   brought the launcher back by itself as soon as no other dialog was open.
-- Opening a launched session does not close Hosts. It opens the session the way the quick switcher does (ordinary
-  selection, the session list's), which does not close Hosts yet; the old app closed it.
+- Opening a launched session does not itself close Hosts; the old app's opening did. New returns the sidebar to Sessions
+  as it opens, from its button, its shortcut or the quick switcher (SPEC.md, "All or a host avatar returns to Sessions,
+  as does an accepted quick-switcher pick or New handoff";
+  `session_list::order::tests::the_new_action_leaves_the_hosts_panel_only_when_new_opens`), and opening Hosts while the
+  create is out counts as moving on, after which the session is not opened at all
+  (`session_pane::tests::a_first_launch_the_user_moved_on_from_selects_nothing`), so the difference shows only for a
+  launcher opened some other way while Hosts is shown.
 - A create the host does not answer within the helm's 20-second bound comes back with the helm's reply ("the host did
   not answer within 20 seconds; the request is still being carried out, and the session list will show its result") in
   the refusal's place, without "Not launched.", and keeps its draft; moved on from, it has its own notice. The old app
@@ -1004,6 +1152,25 @@ not yet ported (environments, milestone M3)
 - Neither the host button nor the model field reports its list as expanded or its highlighted row as the active
   descendant to assistive technology; the rows themselves report their selected state. The shared button's expanded
   state also draws its pressed look, which the old host button never had, so the host button reports neither.
+- The effort control, a select once an agent offers more than five efforts, opens its list on the arrow keys; the old
+  native select changed the value in place (`launcher::view_tests::many_efforts_are_a_select`,
+  `components::tests::select::the_select_keys_open_move_choose_and_close_as_a_native_pop_up`).
+- A press of Launch refused for a wrapper prefix that does not parse says "Correct the wrapper prefix before launching"
+  (`launcher::request_tests::refusals_name_the_first_thing_to_fix`); the old press gave the parse error, "Invalid
+  wrapper prefix: …", which the line under the field now gives
+  (`launcher::view_tests::a_wrapper_prefix_that_does_not_parse_is_said_at_once`).
+- The launcher's labels are not selectable text, and a click on one counts as a click on empty space (SPEC.md, "Opening
+  and closing"); in the old launcher a double click on the dialog's gaps had to be kept from selecting text ("launcher
+  gap keeps focus and container Enter explains an incomplete draft"), which has no counterpart.
+- While a launch's create is out, the old launcher stayed on screen with its host picker disabled; this launcher hides
+  for the whole time the create is out instead, so neither the picker nor anything else in it can be pressed
+  (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`).
+- A host removed from the registry while New has it chosen stays chosen, and Launch is refused with "Choose a connected
+  host before launching", the words any unconnected host gets. The old launcher said the host was no longer registered,
+  in a note under its host field, which then stopped showing the removed host.
+- A Clone's copied folder and session name holding a hidden character are shown as they are, not spelled out as the old
+  prefill showed them; the copied model, Custom flags and command text are spelled out. The folder and name are listed
+  as not yet ported in the clone entry; until they are ported, this is how they show.
 - The host button, Browse and Browse's listing entries have the frame's 1-pixel edge; the old ones had 1.5 pixels.
 - The composer search's results are drawn as one flat list under group headings; the old area nested each group in a
   `role="group"` node named by its heading. Flat, every row is the list's own child, so the arrows keep the highlighted
@@ -1025,7 +1192,7 @@ not yet ported (environments, milestone M3)
   environment, as the strip does, until the environments work brings them back.
 - The composer search's recent-setup rows are drawn in the shared option row's padding with the list's 2-pixel gap; the
   old rows were a fixed 44 pixels tall with 4 pixels between them ("composer search recents keep complete 44px two-line
-  rows"). Not yet compared side by side in the running app.
+  rows"). The rows are drawn in the `app-launcher-search-recents` scene.
 - The launch history is read when the launcher opens and whenever its host or that host's connection changes; the old
   app also re-read it on every activity-feed notice and on a fallback timer. The desktop app has no activity feed, and
   an open launcher's history changes only by a launch from another window, which shows at the next opening. The checkout
