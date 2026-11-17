@@ -714,11 +714,11 @@ impl ByFocus {
 
 /// The control `owner`, whose help is `help` and whose focus stop is `focus`, was drawn: the focus half of the
 /// tooltip rule, which [`crate::components::with_hover_help`] wires on every control that can hold focus. Focus
-/// landing on that stop while the user's last input was the keyboard (the old `:focus-visible`, as the focus ring has
-/// it) shows its help as the pointer resting on it would: after [`HOVER_DELAY`], or at once in the warm grace, placed
-/// against the control by the old ordinary rule (centered above it, else below: [`super::beside`]). A click does not,
-/// and nor does a later key press on a control a click focused: only the landing counts, as the old app scheduled
-/// help on `focusin` alone. Focus leaving the stop takes it down ([`ByFocus`]).
+/// landing on that stop while the user's last press was a key and the pointer did not put it there
+/// ([`crate::focus::focus_came_by_keyboard`]) shows its help as the pointer resting on it would: after [`HOVER_DELAY`],
+/// or at once in the warm grace, placed against the control by the old ordinary rule (centered above it, else below:
+/// [`super::beside`]). A click does not, and nor does a later key press on a control a click focused: only the landing
+/// counts, as the old app scheduled help on `focusin` alone. Focus leaving the stop takes it down ([`ByFocus`]).
 ///
 /// Pointer and focus help share the one tooltip, and the latest wins: focus landing on a control replaces the
 /// pointer's help; the pointer coming onto another control replaces focus help; the pointer leaving leaves focus
@@ -741,7 +741,7 @@ pub fn focus_drawn(
     };
     let id = owner.entity_id();
     let focused = focus.is_focused(window);
-    let keyboard = window.last_input_was_keyboard();
+    let keyboard = crate::focus::focus_came_by_keyboard(window, cx);
     stack.update(cx, |stack, cx| {
         if focused == (stack.focused == Some(id)) {
             return;

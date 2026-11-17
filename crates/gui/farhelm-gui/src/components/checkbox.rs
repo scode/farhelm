@@ -207,7 +207,7 @@ impl RenderOnce for Checkbox {
                 cx,
             )
         });
-        let ring = focus::shows_ring(&focus, window);
+        let ring = focus::shows_ring(&focus, window, cx);
         let enabled = !self.disabled;
         let toggle = self
             .on_toggle

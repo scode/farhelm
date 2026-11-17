@@ -231,7 +231,7 @@ impl Launcher {
         for (index, entry) in rows.into_iter().enumerate() {
             let handle = self.recents.handle_for(drawn[index].clone(), cx);
             // The hint, like the ring, shows for keyboard focus only.
-            let focused = focus::shows_ring(&handle, window);
+            let focused = focus::shows_ring(&handle, window, cx);
             let destination = HostText::from_host(destination_label(&entry));
             let summary = selection_summary(&entry.selection);
             // The whole setup, host values escaped: the row's hover help, and its accessible name after "Replace: " in

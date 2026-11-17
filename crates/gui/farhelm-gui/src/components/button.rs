@@ -882,7 +882,7 @@ impl RenderOnce for Button {
                 cx,
             )
         });
-        let ring = focus::shows_ring(&focus, window);
+        let ring = focus::shows_ring(&focus, window, cx);
         // The lifecycle buttons' condensed look: smaller text and line, no side padding, a narrower gap.
         let words = self.compact == Some(Compact::Condensed(Condensed::Words));
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.

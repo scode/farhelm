@@ -366,7 +366,7 @@ impl RenderOnce for Select {
             .map(SelectOption::shown)
             .or_else(|| self.placeholder.clone())
             .unwrap_or_default();
-        let ring = enabled && focus::shows_ring(&focus, window);
+        let ring = enabled && focus::shows_ring(&focus, window, cx);
         let mut control = div()
             .id(ElementId::Name(self.id.clone()))
             .relative()

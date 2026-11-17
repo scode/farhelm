@@ -214,7 +214,7 @@ impl RenderOnce for MenuItem {
         // `.menu-item:focus:not([aria-disabled="true"])`: the highlight. The keyboard ring goes on top of it only after
         // keyboard input, as `:focus-visible` did.
         let lit = enabled && focus.is_focused(window);
-        let ring = lit && focus::shows_ring(&focus, window);
+        let ring = lit && focus::shows_ring(&focus, window, cx);
         let (ink, icon_ink, description_ink) = if lit {
             (palette.on_fill, palette.on_fill, palette.on_accent_dim)
         } else if self.danger {

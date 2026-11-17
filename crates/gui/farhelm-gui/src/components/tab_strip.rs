@@ -213,7 +213,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
         let mut tabs = Vec::with_capacity(self.tabs.len());
         for (index, tab) in self.tabs.iter().enumerate() {
             let selected = index == chosen;
-            let ring = focus::shows_ring(&handles[index], window);
+            let ring = focus::shows_ring(&handles[index], window, cx);
             let element = div()
                 .id(ElementId::Name(ids[index].clone()))
                 // Tests find a control by its id; this records nothing outside test builds.
