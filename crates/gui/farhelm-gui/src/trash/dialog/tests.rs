@@ -6,8 +6,8 @@
 //! driver record of the frame by element id (`trash-entry-delete-<host>-<id>`, `trash-host-totals-<host>`,
 //! `trash-notice-<host>-<n>-message` and so on). The fixtures are the button tests'.
 
-use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView};
 use gpui::{DriverNode, Pixels, TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
@@ -15,14 +15,14 @@ use serde_json::{Value, json};
 use super::SETTLE;
 use crate::focus;
 use crate::local_time;
-use crate::operations::{OpKey, Work};
+use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::test_support::{self, focused_id, frame, meta};
-use crate::trash::BUTTON_ID;
 use crate::trash::tests::{
     answer, answer_reads, checkout, down, epoch, listing, local, open_button, push_hosts,
     push_registry_failure, reads, remote, snapshot, take,
 };
+use crate::trash::{BUTTON_ID, Refused};
 
 /// The node drawn under `id`, if any.
 fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
@@ -928,13 +928,47 @@ fn an_open_question_holds_the_dialog_and_close_or_escape_dismisses_it_first(
     );
 }
 
+/// Start `work` on `key` in the window's operation store and leave it unanswered, as other work of this window holds
+/// the key the trash's guards read; its command is taken from the fake.
+fn hold(helm: &mut FakeHelm, cx: &mut VisualTestContext, key: OpKey, work: Work) {
+    cx.update(|_, cx| {
+        let operations = session::current_operations(cx).unwrap();
+        let path = ApiPath::api(&["work"]).unwrap();
+        let command = Command::new(work, Method::Post, path, None, "POST /api/work");
+        operations.update(cx, |operations, cx| {
+            operations.start(&key, command, cx, |_, _| {}).unwrap();
+        });
+    });
+    test_support::settle(cx);
+    assert_eq!(take(helm).len(), 1, "the premise: the work went out");
+}
+
+/// Press the open question's Delete permanently and check what a refusal at the press must do: no delete is sent, the
+/// dialog stays open, the question is gone (the prompt closes an inline question as its answer runs), and `reason` is
+/// painted and named above the footer's actions.
+fn confirm_refused(helm: &mut FakeHelm, cx: &mut VisualTestContext, reason: Refused) {
+    let reason = reason.words();
+    let reason = reason.as_str();
+    test_support::click(cx, "prompt-confirm");
+    assert!(deletes(&take(helm)).is_empty(), "nothing was sent");
+    assert!(test_support::any_open(cx), "the dialog stays open");
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "trash-confirm-checkouts").is_none(),
+        "the question is gone"
+    );
+    assert_eq!(label(&nodes, "trash-refusal"), reason);
+    assert!(painted(&nodes, reason), "the reason is visible");
+}
+
 /// Why this matters: a confirmation authorizes only what its question showed, on the connection the host had then
 /// (SPEC_impl.md, "Archived-checkout trash": confirmations freeze "observed host incarnations"), and a refusal at the
-/// press must not close the dialog over a delete that never went out. Specified: with build-box's question open, the
-/// helm reports build-box on a new connection; Delete permanently then sends no delete, the dialog stays open, and the
-/// question and its band are gone.
+/// press must neither close the dialog over a delete that never went out nor leave the press silent (SPEC.md, "Errors
+/// and diagnostics"). Specified: with build-box's question open, the helm reports build-box on a new connection; Delete
+/// permanently then sends no delete, the dialog stays open, its question and band are gone, and the old dispatch's
+/// "The host connection changed" reason shows; once build-box is read again, asking again takes the reason away.
 #[gpui::test]
-fn a_confirmation_the_guards_refuse_sends_nothing_and_keeps_the_dialog(cx: &mut TestAppContext) {
+fn a_confirmation_on_a_reconnected_host_sends_nothing_and_says_why(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = opened(cx);
     test_support::click(cx, "trash-host-delete-2");
     assert!(
@@ -945,14 +979,107 @@ fn a_confirmation_the_guards_refuse_sends_nothing_and_keeps_the_dialog(cx: &mut 
     reconnected.incarnation = 2;
     push_hosts(&mut helm, &[local(), reconnected, down()]);
     test_support::settle(cx);
-    let _ = take(&mut helm);
-    test_support::click(cx, "prompt-confirm");
-    assert!(
-        deletes(&take(&mut helm)).is_empty(),
-        "nothing was sent for the old connection"
-    );
-    assert!(test_support::any_open(cx), "the dialog stays open");
+    let reread = take(&mut helm);
+    confirm_refused(&mut helm, cx, Refused::Connection);
     assert!(cx.debug_bounds("trash-host-confirmation-2").is_none());
+
+    answer(
+        &mut helm,
+        &reread,
+        |host| (200, archives(host)),
+        |_| (500, Value::Null),
+    );
+    test_support::advance(cx, SETTLE);
+    test_support::click(cx, "trash-host-delete-2");
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "trash-confirm-checkouts").is_some(),
+        "the premise: asked again"
+    );
+    assert!(
+        node(&nodes, "trash-refusal").is_none(),
+        "the new question took the reason away"
+    );
+}
+
+/// Why this matters: the trash allows one delete of its own at a time (SPEC.md: "the trash control prevents
+/// overlapping deletes of its own"), and a question already open when one starts must not send a second; the old
+/// band's answer was unavailable then, while an answered question here must say why it did nothing. Specified: with
+/// the global question open, a trash delete of this window's starts on the local host's trash key; Delete permanently
+/// sends nothing, keeps the dialog open, and shows the busy reason ("Not deleted: another operation was in progress").
+#[gpui::test]
+fn a_confirmation_while_another_trash_delete_runs_sends_nothing_and_says_why(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-delete-all");
+    hold(&mut helm, cx, OpKey::trash("1"), Work::TrashDelete);
+    assert!(
+        cx.debug_bounds("trash-global-confirmation").is_some(),
+        "the premise: the question outlived the work's start"
+    );
+    confirm_refused(&mut helm, cx, Refused::Busy);
+}
+
+/// Why this matters: SPEC.md puts bulk cleanup under the hosts' operation guards, so a confirmation must not clean a
+/// host whose own key other work holds (its removal, say), and the press must say why. Specified: with build-box's
+/// question open, other work starts on build-box's own key; Delete permanently sends nothing, keeps the dialog open,
+/// and shows the busy reason. An entry's own Delete on another host then goes out and takes the reason away, so the
+/// line never sits beside a delete that did start.
+#[gpui::test]
+fn a_confirmation_while_its_host_is_busy_sends_nothing_and_says_why(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-host-delete-2");
+    hold(&mut helm, cx, OpKey::host("2"), Work::Save);
+    assert!(
+        cx.debug_bounds("trash-host-confirmation-2").is_some(),
+        "the premise: the question outlived the work's start"
+    );
+    confirm_refused(&mut helm, cx, Refused::Busy);
+
+    test_support::advance(cx, SETTLE);
+    assert!(
+        enabled(&frame(cx), "trash-entry-delete-1-a"),
+        "the premise: the local host's entry can be deleted"
+    );
+    assert!(
+        node(&frame(cx), "trash-refusal").is_some(),
+        "the premise: the reason outlived the pause"
+    );
+    test_support::click(cx, "trash-entry-delete-1-a");
+    assert_eq!(
+        deletes(&take(&mut helm)).len(),
+        1,
+        "the entry's delete went out"
+    );
+    assert!(
+        node(&frame(cx), "trash-refusal").is_none(),
+        "a delete that started took the reason away"
+    );
+}
+
+/// Why this matters: cleanup must not act on a registry the helm could not read (the old "single trash delete requires
+/// settled listings and a healthy host refresh"), also from a question asked before the registry failed, and the press
+/// must say why. Specified: with the global question open, the registry fails; Delete permanently sends nothing, keeps
+/// the dialog open, and shows the old dispatch's "The host connection changed" reason.
+#[gpui::test]
+fn a_confirmation_while_the_registry_is_unreadable_sends_nothing_and_says_why(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-delete-all");
+    push_registry_failure(&mut helm, &["1", "2", "3"]);
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "trash-hosts-error").is_some(),
+        "the premise: the registry is unreadable"
+    );
+    assert!(
+        cx.debug_bounds("trash-global-confirmation").is_some(),
+        "the premise: the question outlived the failure"
+    );
+    confirm_refused(&mut helm, cx, Refused::Connection);
 }
 
 /// Why this matters: Delete all can become unavailable while its question is up, and a cancelled question returns

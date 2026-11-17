@@ -73,7 +73,7 @@ use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::HostText;
 use crate::layers::{self, Dialog, LayerId};
-use crate::operations::{self, Command, OpKey, Outcome as Answer, Settled, Work};
+use crate::operations::{self, Command, NotStarted, OpKey, Outcome as Answer, Settled, Work};
 use crate::session::{self, PerSession};
 use crate::theme;
 use crate::ticker;
@@ -89,6 +89,32 @@ pub(crate) const BUTTON_ID: &str = "checkout-trash-button";
 /// The status the helm answers a trash delete with when it stopped waiting on the host (its host-wait bound) while the
 /// cleanup may still go on ([`TrashButton::deleted`]).
 const HOST_TIMEOUT: u16 = 504;
+
+/// Why a confirmed delete sent nothing ([`TrashButton::delete_batches`]), which the dialog shows until its next question.
+/// The old band said nothing in either case, so neither line ports one of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// Another trash delete of this window's runs, or a confirmed host's own key is busy.
+    Busy,
+    /// The registry cannot be read, or a confirmed host left the connection its batch was listed on.
+    Connection,
+}
+
+impl Refused {
+    /// The line the dialog shows. A busy refusal gives the operation store's shared reason after a lead-in naming what
+    /// did not happen (SPEC_impl.md, "Work that finishes later"); that reason is in the past tense because the line
+    /// stays after the work in the way has finished. A stale connection keeps the old dispatch's words for a frozen
+    /// selection that is no longer current (`refuse` in `list/trash.rs` at reference commit `24bc0580`, which showed
+    /// them only to the rail's Retry).
+    pub(crate) fn words(self) -> String {
+        match self {
+            Refused::Busy => format!("Not deleted: {}", NotStarted::BUSY_REASON),
+            Refused::Connection => {
+                "The host connection changed. Wait for Trash to refresh before retrying.".to_owned()
+            }
+        }
+    }
+}
 
 /// The list route, as a refusal without words names it.
 const LIST_SHOWN: &str = "POST /api/checkout-trash/list";
@@ -515,26 +541,35 @@ impl TrashButton {
     /// still on the connection its batch was listed on, with its own key free (SPEC.md puts bulk cleanup under the
     /// host-listing and operation guards, and the old dispatch rechecked them when pressed); otherwise nothing is sent,
     /// as the old dispatch refused a frozen selection whose host had reconnected (the reconnect's read then shows the
-    /// host's trash afresh). Returns whether the batches went out, since only then does the dialog close: the old one
-    /// stayed open on a refused answer.
-    pub(crate) fn delete_batches(&mut self, batches: Vec<Target>, cx: &mut Context<Self>) -> bool {
+    /// host's trash afresh). Only batches that went out close the dialog, as the old one stayed open on a refused
+    /// answer; a refusal is the reason the dialog shows ([`Refused`]).
+    pub(crate) fn delete_batches(
+        &mut self,
+        batches: Vec<Target>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), Refused> {
         let snapshot = self.snapshot(cx);
-        let guarded = batches.iter().all(|target| {
-            snapshot.hosts.iter().any(|host| {
-                host.id == target.host
-                    && host.connected
-                    && host.incarnation == target.incarnation
-                    && !host.busy
-            })
+        let shown = |target: &Target| snapshot.hosts.iter().find(|host| host.id == target.host);
+        // The old dispatch's order: work in the way first, then whether the frozen hosts are still current.
+        if snapshot.delete_in_flight
+            || batches
+                .iter()
+                .any(|target| shown(target).is_some_and(|host| host.busy))
+        {
+            return Err(Refused::Busy);
+        }
+        let current = batches.iter().all(|target| {
+            shown(target)
+                .is_some_and(|host| host.connected && host.incarnation == target.incarnation)
         });
-        if !snapshot.hosts_known || snapshot.delete_in_flight || !guarded {
-            return false;
+        if !snapshot.hosts_known || !current {
+            return Err(Refused::Connection);
         }
         for target in batches {
             self.send(target, cx);
         }
         cx.notify();
-        true
+        Ok(())
     }
 
     /// Start `target`'s delete as work on its host's trash key, and apply its answer when it settles

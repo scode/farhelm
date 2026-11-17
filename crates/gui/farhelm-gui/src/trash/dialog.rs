@@ -34,9 +34,10 @@
 //!   re-read under the question, say), so it can still take focus back. Delete all waits until every reachable host's
 //!   listing is settled and skips unreachable hosts ([`Snapshot::global_batches`]). Confirming closes the dialog at
 //!   once and sends one request per host with its frozen IDs ([`TrashButton::delete_batches`]). A confirmation the
-//!   guards refuse when pressed (another trash delete of this window's running, a host reconnected or busy) sends
-//!   nothing and leaves the dialog open. The settle pause does not hold these buttons: a question stands between them
-//!   and a delete.
+//!   guards refuse when pressed (another trash delete of this window's running, a host reconnected or busy, the
+//!   registry unreadable) sends nothing, leaves the dialog open and says why above the footer's actions
+//!   ([`super::Refused`]), until another question opens or an entry's own Delete goes out (SPEC.md, "Errors and
+//!   diagnostics": a failed operation surfaces its error). The settle pause does not hold these buttons: a question stands between them and a delete.
 //! - **An open question holds the rest of the dialog,** as the old band did: the entries' own Deletes are unavailable,
 //!   and Close, the header's close and Escape dismiss the question first, returning focus to the button that asked it,
 //!   rather than closing the dialog ([`TrashDialog::dismissed`]). The other Delete all buttons stay available, as in
@@ -68,8 +69,8 @@ use gpui::{
     Styled as _, Subscription, WeakEntity, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
-use super::TrashButton;
 use super::listing::{self, Batch, HostSnapshot, Notice, Snapshot, Target};
+use super::{Refused, TrashButton};
 use crate::assets::Icon;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark};
@@ -112,6 +113,11 @@ pub(crate) struct TrashDialog {
     /// The button that asked the latest question (a host's id, or `None` for Delete all), kept after the question
     /// closes: a cancelled question returns focus to it, so it stays able to take focus while unavailable.
     asked_by: Option<Option<i64>>,
+    /// Why the last confirmation sent nothing ([`TrashButton::delete_batches`]), shown in the frame's notices region
+    /// above the footer's actions, which the frame keeps in view whatever the body's scroll. The old band said nothing
+    /// in this case; SPEC.md does not allow a silent refusal. Cleared when the next question opens or an entry's own
+    /// Delete goes out, so it never sits beside a delete that did start; it lives no longer than the dialog.
+    refused: Option<Refused>,
     /// Set right after the layer opens.
     pub(super) layer: Option<LayerId>,
     /// The fingerprint of the layout last drawn ([`layout`]).
@@ -137,6 +143,7 @@ impl TrashDialog {
             host_deletes: HashMap::new(),
             asked: None,
             asked_by: None,
+            refused: None,
             layer: None,
             drawn: None,
             settled: true,
@@ -189,13 +196,22 @@ impl TrashDialog {
             &mark,
             move |targets: Vec<Target>, window, cx| {
                 // SPEC.md: "Confirming a bulk delete closes the dialog immediately and sends one request per host". A
-                // confirmation the guards refuse sends nothing and leaves the dialog open on what changed.
-                let layer = dialog.upgrade().and_then(|dialog| dialog.read(cx).layer);
-                let sent = button
-                    .update(cx, |button, cx| button.delete_batches(targets, cx))
-                    .unwrap_or(false);
-                if let Some(layer) = layer.filter(|_| sent) {
-                    layers::close(layer, window, cx);
+                // confirmation the guards refuse sends nothing and leaves the dialog open on what changed, saying why.
+                match button.update(cx, |button, cx| button.delete_batches(targets, cx)) {
+                    Ok(Ok(())) => {
+                        let layer = dialog.upgrade().and_then(|dialog| dialog.read(cx).layer);
+                        if let Some(layer) = layer {
+                            layers::close(layer, window, cx);
+                        }
+                    }
+                    Ok(Err(reason)) => {
+                        let _ = dialog.update(cx, |dialog, cx| {
+                            dialog.refused = Some(reason);
+                            cx.notify();
+                        });
+                    }
+                    // The button went with its window: nothing is left to send from or to tell.
+                    Err(_) => {}
                 }
             },
             window,
@@ -203,6 +219,7 @@ impl TrashDialog {
         );
         self.asked = Some((host, inline));
         self.asked_by = Some(host);
+        self.refused = None;
         cx.notify();
     }
 
@@ -360,6 +377,11 @@ impl Handles {
             if held {
                 return;
             }
+            let _ = dialog.update(cx, |dialog, cx| {
+                if dialog.refused.take().is_some() {
+                    cx.notify();
+                }
+            });
             let _ = button.update(cx, |button, cx| button.delete(host, &id, cx));
         }
     }
@@ -519,6 +541,13 @@ impl Render for TrashDialog {
                         .child(global),
                 )
                 .notices_stop("Global checkout deletion confirmation");
+        } else if let Some(reason) = self.refused {
+            // In the dialog's error ink, as its other line of the app's own failure words (the bell's) is.
+            frame = frame.notices(
+                div()
+                    .text_color(theme::color(palette.danger_strong))
+                    .child(line("trash-refusal", reason.words())),
+            );
         }
         frame
             .heading(heading)
@@ -956,14 +985,14 @@ fn paragraph(id: String, words: &'static str) -> impl IntoElement {
 }
 
 /// A line of the app's own words that tests and assistive technology find by `id`.
-fn line(id: impl Into<SharedString>, words: &'static str) -> impl IntoElement {
-    let id = id.into();
+fn line(id: impl Into<SharedString>, words: impl Into<SharedString>) -> impl IntoElement {
+    let (id, words) = (id.into(), words.into());
     let selector = id.clone();
     div()
         .id(id)
         .debug_selector(move || selector.to_string())
         .role(Role::Label)
-        .aria_label(words)
+        .aria_label(words.clone())
         .child(words)
 }
 

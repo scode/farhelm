@@ -192,8 +192,11 @@ button's, `trash/listing/tests.rs` the rules'):
   `cancelling_returns_focus_to_delete_all_while_it_is_unavailable`; an open question holding the entries' Deletes and
   Close, the header's close and Escape dismissing it before the dialog, with the settle pause restarting as it closes,
   are `an_open_question_holds_the_dialog_and_close_or_escape_dismisses_it_first`; a confirmation refused at the press
-  (its host reconnected under the question) sending nothing and leaving the dialog open is
-  `a_confirmation_the_guards_refuse_sends_nothing_and_keeps_the_dialog`.
+  sending nothing, leaving the dialog open and saying why is
+  `a_confirmation_on_a_reconnected_host_sends_nothing_and_says_why`,
+  `a_confirmation_while_another_trash_delete_runs_sends_nothing_and_says_why`,
+  `a_confirmation_while_its_host_is_busy_sends_nothing_and_says_why` and
+  `a_confirmation_while_the_registry_is_unreadable_sends_nothing_and_says_why`.
 - "trash batch issues survive reopening after ${http | transport} failure", partly: a bulk delete's lost answer is one
   notice naming every ID it sent until later reports settle them,
   `a_bulk_delete_answer_is_one_notice_that_later_reports_shrink` in `trash/listing/tests.rs`; it is kept and shown on
@@ -485,12 +488,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   machine, build-box? Work in them …"); here each ends where the host names do, and the rest is a line of its own, in
   the same words. A host value is drawn as a block of its own, so the rest started a new line anyway, with the "?" alone
   at its start.
-- **A confirmation the guards refuse takes the question away.** A Delete permanently pressed while another trash delete
-  of this window's runs, while the registry cannot be read, or after a host reconnected or became busy with its own work
-  is taken: the question goes, nothing is sent, the dialog stays open, and nothing says why. The old band's answer was
-  unavailable while a delete ran, and a refused band answer kept the band up, also without a message. For a reconnected
-  host the outcome matches the old app's, which closed the band and read the trash again: the reconnect reads the host
-  again here, and the dialog shows its trash afresh.
+- **A confirmation the guards refuse takes the question away and says why.** A Delete permanently pressed while another
+  trash delete of this window's runs, while the registry cannot be read, or after a host reconnected or became busy with
+  its own work is taken: the question goes, nothing is sent, the dialog stays open, and the reason shows above the
+  footer's actions ("Not deleted: another operation was in progress. Try again." for work in the way, the app's shared
+  busy reason; the old dispatch's "The host connection changed. Wait for Trash to refresh before retrying." otherwise)
+  until another question opens or an entry's own Delete goes out. The old band's answer was unavailable while a delete
+  ran, and a refused band answer kept the band up, saying nothing; the old dispatch showed its refusal words only to the
+  rail's Retry. SPEC.md does not allow a refusal to be silent, and the prompt closes an inline question as its answer
+  runs. For a reconnected host the outcome otherwise matches the old app's, which closed the band and read the trash
+  again: the reconnect reads the host again here, and the dialog shows its trash afresh.
 - **Hosts progress independently in outcome, not in time.** Each host's delete is its own request on its own key, and
   one host's answer never waits on another's to be applied. But the helm answers the window's commands one at a time, so
   a host that does not answer delays the others' answers by up to the helm's 20-second host bound.
