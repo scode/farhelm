@@ -405,26 +405,32 @@ Restart reattaching without the card or a red band, held for the whole recovery 
 answers it before the reattach, by crates/gui/farhelm-gui/src/session_pane/tests.rs
 `a_restart_reattaches_without_a_card_or_a_red_band`, and the card once an attempt fails, or the reattach drops before it
 goes live, by `a_restarts_failed_reattach_shows_the_card` and `a_restarts_reattach_that_drops_mid_replay_shows_the_card`
-(decided by the migration's orchestrator on 2026-11-15). A stuck Restart stays silent for at most about a minute: the
-first attempt's socket must open within the stream's 30 s watchdog, and an opened one that never attaches is ended by
-the same watchdog, after which the second attempt shows the card. The bound does not cover a reattach that attaches and
-then stalls in its replay while its link keeps answering pings: that one stays hidden until it fails, drops or
-completes. Tab terminals are not held, since a Restart detaches no tab, by
-crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_restart_does_not_hold_a_tabs_reconnect_card`; an inert terminal
-draws no card by crates/gui/farhelm-gui/src/terminal/attached/tests.rs `an_inert_terminal_draws_no_reconnect_card`, and
-the card keeps presses from the screen behind it by
-`a_drag_on_the_card_reaches_nothing_behind_it_and_the_scrim_lets_presses_through`. The card's phase and attempt line,
-from what the fake stream reports: the old card's four templates word for word, with the scheduled wait rounded as the
-old card rounded it, by crates/gui/farhelm-gui/src/terminal/attached/tests.rs `the_phase_line_says_the_old_cards_words`
-(the wait is not counted down, as there, because the line is redrawn only on the stream's reports; no test pins that);
-`retry-exhaustion-shows-reprobe-phase`'s probing phase ("Retrying every", the attempt count past six, Reconnect now
-still drawn), reached through every rung of the ladder, by `the_phase_line_follows_the_ladder_into_probing`;
-`manual-reconnect-is-offered-during-the-first-rung`'s "attempt 1 of 6" and its press starting that attempt, which the
-line keeps through the catch-up, by `reconnect_now_in_the_first_wait_shows_attempt_1_under_way`; the line's look by no
-golden either. Waiting: PageUp scrolling the cut-short card from its focused button; retry exhaustion against a real
-helm (failing real handshakes rather than the fake's); and the rest of the spec (wedged sockets, version skew). Its
-takeovers during backoff no longer apply: one UI holds the helm at a time, and a displaced window shows no terminal
-(decided by the migration's orchestrator on 2026-11-15)
+(decided by the migration's orchestrator on 2026-11-15). A stuck Restart stays silent for at most about 35 s: the first
+attempt's socket must open within the stream's 30 s watchdog, and an opened one that sends no grid message for 5 s is
+ended as a failed attempt by the catch-up's idle bound, ported from the old app, after which the second attempt shows
+the card, by crates/farhelm-helm-client/src/terminal/tests/catch_up.rs
+`a_reattach_that_sends_no_grid_message_climbs_the_ladder`. A reattach that attaches and then stalls in its replay while
+its link keeps answering pings ends its catch-up 5 s after its last grid message, by
+`a_replay_that_goes_quiet_partway_ends_its_catch_up_on_what_arrived`, with the caller's own delays not counted by
+`the_bound_waits_while_the_caller_is_behind`; the terminal then shows what arrived, a whole screen or not, and goes
+live, as the old one did, while the supervisor's own end of replay on a partial screen is still a protocol fault, by
+crates/gui/farhelm-gui/src/terminal/attached/tests.rs `a_replay_that_went_quiet_shows_what_arrived_and_goes_live`. Tab
+terminals are not held, since a Restart detaches no tab, by crates/gui/farhelm-gui/src/terminal/set/tests.rs
+`a_restart_does_not_hold_a_tabs_reconnect_card`; an inert terminal draws no card by
+crates/gui/farhelm-gui/src/terminal/attached/tests.rs `an_inert_terminal_draws_no_reconnect_card`, and the card keeps
+presses from the screen behind it by `a_drag_on_the_card_reaches_nothing_behind_it_and_the_scrim_lets_presses_through`.
+The card's phase and attempt line, from what the fake stream reports: the old card's four templates word for word, with
+the scheduled wait rounded as the old card rounded it, by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`the_phase_line_says_the_old_cards_words` (the wait is not counted down, as there, because the line is redrawn only on
+the stream's reports; no test pins that); `retry-exhaustion-shows-reprobe-phase`'s probing phase ("Retrying every", the
+attempt count past six, Reconnect now still drawn), reached through every rung of the ladder, by
+`the_phase_line_follows_the_ladder_into_probing`; `manual-reconnect-is-offered-during-the-first-rung`'s "attempt 1 of 6"
+and its press starting that attempt, which the line keeps through the catch-up, by
+`reconnect_now_in_the_first_wait_shows_attempt_1_under_way`; the line's look by no golden either. Waiting: PageUp
+scrolling the cut-short card from its focused button; retry exhaustion against a real helm (failing real handshakes
+rather than the fake's); and the rest of the spec (wedged sockets, version skew). Its takeovers during backoff no longer
+apply: one UI holds the helm at a time, and a displaced window shows no terminal (decided by the migration's
+orchestrator on 2026-11-15)
 
 ### `tests/terminal-switch-geometry.spec.ts`
 
@@ -585,3 +591,11 @@ stay.
   it, in the ordinary look and in the condensed one beside a tunnel pill, where the old control was shorter than them.
   Its magnifier buttons take the header buttons' compact geometry. Decided by the maintainer on 2026-11-16, who counts
   the old height as a bug; meant to stay. (`terminal/text_size.rs`.)
+- A first attach whose socket opened and then sent no grid message within the catch-up's 5 s idle bound goes onto the
+  reconnect ladder as a failed attempt, where the old app revealed an empty, live terminal. The helm client announces an
+  attachment only with its first output, so there is nothing to reveal and no attachment for typing to reach; a
+  reconnect that sends nothing already went onto the ladder in the old app. What it costs: in the old app, output that
+  came after the 5 s still filled the revealed terminal, while here a first attach whose first grid message takes longer
+  than that is dropped and retried, so a host that slow on every attempt never shows and keeps climbing the ladder. That
+  is unlikely, since the supervisor's own wait for the attach's size is at most 1 s. (`farhelm-helm-client`'s
+  `terminal.rs`, "The catch-up's idle bound".)

@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 };
 use tokio_tungstenite::tungstenite::http::StatusCode;
 
+mod catch_up;
 mod ladder;
 mod parity;
 

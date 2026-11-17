@@ -10,11 +10,12 @@
 //!
 //! NOTE: This compares the GUI's event feed, the size of every accepted attach and the resize sent as its socket
 //! opens, and which input reached the helm. Every attach takes the one terminal route, which the real side checks on
-//! each accepted attach (`attach_of`). It does not compare timing (pings, the watchdog, how long a wait
-//! lasts), which the fake does not model and the real stream's own tests pin, nor the route of an attach that failed
-//! or was refused, which the fake does not report. A wait's end has no step of its own: the real stream ends each wait
-//! by itself within the step, so the fake's run ends every wait as soon as a step starts one. One script cannot reach
-//! every state, so some of the fake's rules are pinned only by its own tests: see the test's docstring for which.
+//! each accepted attach (`attach_of`). It does not compare timing (pings, the watchdog, the catch-up's idle bound, how
+//! long a wait lasts), which the fake does not model and the real stream's own tests pin, nor the route of an attach
+//! that failed or was refused, which the fake does not report. A wait's end has no step of its own: the real stream
+//! ends each wait by itself within the step, so the fake's run ends every wait as soon as a step starts one. One script
+//! cannot reach every state, so some of the fake's rules are pinned only by its own tests: see the test's docstring for
+//! which.
 
 use super::*;
 use crate::fake::terminal::{FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest};

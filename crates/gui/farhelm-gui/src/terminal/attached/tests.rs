@@ -1058,6 +1058,65 @@ fn a_stall_during_the_first_replay_keeps_what_arrived(cx: &mut TestAppContext) {
     assert!(h.cx.debug_bounds("terminal-connecting").is_none());
 }
 
+/// Why: the stream ends a replay that went quiet partway by itself (its catch-up idle bound), and that ending vouches
+/// for nothing, so it may come on less than a whole screen. Holding it to the marker's checks would call a stall a
+/// broken format: the terminal would restart six times and end on a red "Terminal stream error", blaming the peer,
+/// where the old app revealed what had arrived (`armIdleTimer` in terminal.js at the reference commit). Only the idle
+/// ending is lenient: the supervisor's own marker must still find a whole screen, or a broken peer would go unnoticed.
+///
+/// Spec: a first replay of a screen with "$ echo" and then the rows of an update with no frame (so not a whole screen),
+/// ended by the stream's idle end, shows "$ echo" with no red band, no card and no status line; the terminal is live,
+/// so a typed key is sent and a live update ("live", which commits the open one) is drawn. After the link drops, the
+/// reattach's same partial screen ended by the supervisor's marker is a protocol fault: the stream is closed, the card
+/// shows over the kept "live", and the terminal is not live.
+#[gpui::test]
+fn a_replay_that_went_quiet_shows_what_arrived_and_goes_live(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    // A whole first screen and then the rows of an update whose frame never came: the model refuses the marker on an
+    // open update, so this is not a whole screen.
+    let partial = |cols, rows| {
+        let mut replay = screen(cols, rows, "$ echo", serde_json::Value::Null);
+        replay.push(update(2, cols, rows, "never committed")[0].clone());
+        replay
+    };
+    let asked = h.fake().attach();
+    for message in partial(asked.cols, asked.rows) {
+        h.fake().output(message);
+    }
+    h.fake().replay_idle();
+    settle(h.cx);
+    assert_eq!(h.text().as_deref().map(first_line), Some("$ echo"));
+    assert!(!h.banner_drawn(), "no red band");
+    assert!(!h.card_drawn());
+    assert_eq!(h.status(), None);
+    assert!(h.read(|owner, _| owner.is_live()));
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    keys(h.cx, "x");
+    assert_eq!(h.sent(), [(key("x", 88), true)]);
+    for message in update(3, asked.cols, asked.rows, "live") {
+        h.fake().output(message);
+    }
+    settle(h.cx);
+    assert_eq!(h.text().as_deref().map(first_line), Some("live"));
+
+    h.fake().drop_link();
+    let asked = h.fake().attach();
+    for message in partial(asked.cols, asked.rows) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().phase(),
+        FakePhase::Closed,
+        "the marker's partial screen faulted"
+    );
+    assert!(h.card_drawn());
+    assert_eq!(h.text().as_deref().map(first_line), Some("live"));
+    assert!(!h.read(|owner, _| owner.is_live()));
+}
+
 /// A flood is delivered at most `BATCH` events per turn of the main thread, and the delivery then yields, so other
 /// work queued on the main thread (input, a frame) runs between batches instead of after the whole flood. Consecutive
 /// output in a turn is applied as one batch, so the terminal redraws once per turn, never once per message. Twenty

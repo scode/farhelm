@@ -123,6 +123,9 @@ pub struct FakeTerminal {
     size: (u16, u16),
     /// How many attachments have gone live: the live one's stamp, 0 before the first.
     attachments: u64,
+    /// Whether the live attachment's replay has ended, by either end. The real stream ends the catch-up on an idle
+    /// bound only for an attachment still catching up, so [`FakeTerminal::replay_idle`] needs this false.
+    replay_ended: bool,
     received: Vec<FakeTerminalRequest>,
 }
 
@@ -158,6 +161,7 @@ impl FakeTerminal {
             attempt_size: size,
             size,
             attachments: 0,
+            replay_ended: false,
             received: Vec::new(),
         };
         fake.emit(TerminalEvent::State(StreamState::Attaching));
@@ -197,7 +201,24 @@ impl FakeTerminal {
     pub fn replay_complete(&mut self) {
         self.require_socket();
         self.go_live();
+        self.replay_ended = true;
         self.emit(TerminalEvent::ReplayComplete);
+    }
+
+    /// The real stream's own end of a replay that went quiet before its marker (`TerminalEvent::ReplayIdle`, the
+    /// catch-up's idle bound); what follows is live. The fake keeps no clock, so the test says when the bound ran out.
+    /// Panics unless the attachment is live (some output arrived: an attach that sent nothing fails instead, as
+    /// [`FakeTerminal::drop_link`] plays it) and its replay has not ended yet.
+    pub fn replay_idle(&mut self) {
+        self.settle();
+        assert!(
+            self.phase == FakePhase::Attached && !self.replay_ended,
+            "the idle bound ends only a catch-up that has output and no end yet, not one in {:?} (ended: {})",
+            self.phase,
+            self.replay_ended
+        );
+        self.replay_ended = true;
+        self.emit(TerminalEvent::ReplayIdle);
     }
 
     /// The helm detached this viewer. `tab_closed` and `stalled` stop the stream in `Detached` until the GUI takes
@@ -374,6 +395,7 @@ impl FakeTerminal {
         if self.phase == FakePhase::Open {
             self.phase = FakePhase::Attached;
             self.attachments += 1;
+            self.replay_ended = false;
             self.emit(TerminalEvent::State(StreamState::Attached(Attachment(
                 self.attachments,
             ))));
