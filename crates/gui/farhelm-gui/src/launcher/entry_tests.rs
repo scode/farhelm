@@ -1,22 +1,26 @@
 //! Tests of the launcher's New and Clone entry points in the real main view over the helm client's fake: New's prefill
 //! from the open session, New named's name, Cmd+N's action, Clone's prefill from its source and its host fallback, and
-//! both refused while a launch is pending (New also while a host change is in flight; Clone shares its check).
+//! both refused while a launch is pending (New also while a host change is in flight; Clone shares its check). The last
+//! section has Clone and New carrying a sandbox session's environment into a fresh one, and Replace with keeping it.
 //!
 //! The fleet: host1 (the helm's own host, kind `local`), host9 (a connected ssh host recorded as install `identity9`)
-//! and host11 (a sandbox a session owns), with session `a` on host9's install, `b` on host9's row but listed under an
-//! install the row no longer names, `c` on host11, and `e`, a titled command session on host9's install that the list
-//! hides (as a filter would) while the helm still carries it.
+//! and host11 (a sandbox a session owns, naming no environment except in [`environment_window`]; the real helm builds a
+//! host's sandbox binding and its environment view together, so host11 without one is a state the helm does not
+//! serve, kept for the fallback it guards), with session `a` on
+//! host9's install, `b` on host9's row but listed under an install the row no longer names, `c` on host11, and `e`, a
+//! titled command session on host9's install that the list hides (as a filter would) while the helm still carries it.
 
-use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::LaunchPermission;
+use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{CollectionState, Preferences};
+use farhelm_proto::{EnvironmentHostView, LaunchPermission, LaunchTarget, Place};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
 use super::draft::Mode;
 use super::draft::{LaunchDraft, Tab};
-use super::entry::{ENVIRONMENT_NOT_CARRIED, HOST_NOT_CARRIED};
-use super::entry::{new_available, open_clone, open_new, open_new_named};
+use super::entry::HOST_NOT_CARRIED;
+use super::entry::{new_available, open_clone, open_new, open_new_named, open_replace_with};
+use super::environment_launch_tests::{answer_except, catalog};
 use super::launch_tests::{HostChange, created, creates, start_host_change};
 use super::view_tests::{draft, fixture_hosts, name_of, shown_refusal};
 use crate::actions::NewSession;
@@ -67,12 +71,22 @@ fn fleet() -> CollectionState {
     state
 }
 
-/// The main view over the fake helm with hosts 1, 9 and 11 and `yolo` as the remembered permission: with [`fleet`] and
-/// `selected` selected, or, for `None`, with no sessions at all, since the selection rules open a listed session by
+/// The main view over the fake helm with hosts 1, 5, 9 and 11 and `yolo` as the remembered permission: with [`fleet`]
+/// and `selected` selected, or, for `None`, with no sessions at all, since the selection rules open a listed session by
 /// themselves and "no open session" needs nothing to open.
 pub(super) fn window_with<'a>(
     cx: &'a mut TestAppContext,
     selected: Option<&str>,
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    window_on(cx, selected, fixture_hosts(&[0, 4, 8, 10]), Vec::new())
+}
+
+/// [`window_with`] over the hosts collection `hosts`, with `more` collections in the helm's first snapshot.
+fn window_on<'a>(
+    cx: &'a mut TestAppContext,
+    selected: Option<&str>,
+    hosts: CollectionState,
+    more: Vec<CollectionState>,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
     let (mut helm, _connection) = started(cx);
     let sessions = if selected.is_some() {
@@ -80,16 +94,18 @@ pub(super) fn window_with<'a>(
     } else {
         listing(&[], &[])
     };
-    helm.connect(vec![
+    let mut snapshot = vec![
         sessions,
-        fixture_hosts(&[0, 4, 8, 10]),
+        hosts,
         preferences_state(Preferences {
             remembered_permissions: Some("yolo".into()),
             // A helm that has shown the Welcome card, which would otherwise open over the main view (`crate::welcome`).
             welcome_seen: Some(true),
             ..Preferences::default()
         }),
-    ]);
+    ];
+    snapshot.extend(more);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, MainView::new);
     if let Some(key) = selected {
@@ -187,14 +203,16 @@ fn new_does_not_follow_a_retargeted_host_row(cx: &mut TestAppContext) {
 }
 
 /// A sandbox a session owns is no place for an unrelated session, and the host picker leaves such hosts out, so New
-/// from an open sandbox session falls back to the helm's own host until the environments work brings SPEC.md's recipe
-/// preselection. Specified: with c open on host11, New opens on host1 in `~`.
+/// from an open sandbox session never lands there; with no environment named on the host to preselect
+/// ([`new_beside_an_open_environment_session_preselects_its_recipe_and_place`] has one), it is New on the helm's own
+/// host. Specified: with c open on host11, which names no environment, New opens on host1 in `~` with no target.
 #[gpui::test]
 fn new_from_a_sandbox_session_starts_on_the_helms_own_host(cx: &mut TestAppContext) {
     let (_helm, cx) = window_with(cx, Some("c"));
     assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
     assert!(new(cx));
     assert_eq!(destination(cx), (Some(1), "~".to_owned()));
+    assert_eq!(draft(cx).target, None);
 }
 
 /// SPEC.md, the quick switcher's "New session named X": "Picking it opens New with that name and the default launch
@@ -414,17 +432,21 @@ fn clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so(cx: &mut T
     assert_eq!(host_note(cx), None, "the picked host is the user's");
 }
 
-/// A host a sandbox or container owns is no place for another session, and the fresh environment SPEC.md's Clone
-/// targets instead comes with the environments work; until then a Clone of such a session falls back to New's host as
-/// above, with its own note, rather than landing silently elsewhere. Specified: with c (on the sandbox host11) open,
-/// Clone of c opens on host1 with c's folder and the environment note; Clone of e, whose host is confirmed, shows none.
+/// A host a sandbox or container owns is no place for another session, so a Clone of a session there that cannot say
+/// which environment to make afresh (its host names none) falls back to New's host with the old note, as for a host it
+/// cannot confirm, rather than landing silently elsewhere (decided by the launcher area on 2026-11-16). Specified: with
+/// c (on the sandbox host11, which names no environment) open, Clone of c opens on host1 with c's folder, no target and
+/// the note; Clone of e, whose host is confirmed, shows none.
 #[gpui::test]
-fn clone_of_a_sandbox_session_falls_back_and_says_so(cx: &mut TestAppContext) {
+fn clone_of_a_sandbox_session_with_nothing_to_carry_falls_back_and_says_so(
+    cx: &mut TestAppContext,
+) {
     let (_helm, cx) = window_with(cx, Some("c"));
     assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
     assert!(clone(cx, "c"));
     assert_eq!(destination(cx), (Some(1), "/home/user/src/c".to_owned()));
-    assert_eq!(host_note(cx).as_deref(), Some(ENVIRONMENT_NOT_CARRIED));
+    assert_eq!(draft(cx).target, None);
+    assert_eq!(host_note(cx).as_deref(), Some(HOST_NOT_CARRIED));
     test_support::keys(cx, "escape");
     assert!(!any_open(cx), "the premise: Escape closed the Clone");
     assert!(clone(cx, "e"));
@@ -588,4 +610,146 @@ fn clone_falls_back_to_the_open_sessions_host(cx: &mut TestAppContext) {
     assert!(clone(cx, "b"));
     assert_eq!(destination(cx), (Some(9), "/home/user/src/b".to_owned()));
     assert_eq!(host_note(cx).as_deref(), Some(HOST_NOT_CARRIED));
+}
+
+// ---- Carrying an environment ----------------------------------------------------------------------------------------
+
+/// A new sandbox of `recipe` on the Tensorlake account.
+fn sandbox(recipe: &str) -> LaunchTarget {
+    LaunchTarget::Environment {
+        recipe: recipe.into(),
+        place: Place::TensorlakeAccount,
+    }
+}
+
+/// [`window_with`] with `selected` open, where host11's sandbox is described as the helm describes an environment's
+/// host (`HostView::environment`), made from `recipe` on the Tensorlake account, and the pushed recipe catalog holds
+/// `web` alone. host1's Podman is usable, so New container is offered too.
+fn environment_window<'a>(
+    cx: &'a mut TestAppContext,
+    selected: &str,
+    recipe: &str,
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let mut hosts = fixture_hosts(&[0, 4, 8, 10]);
+    let environment = EnvironmentHostView {
+        name: format!("{recipe} sandbox"),
+        place_name: None,
+        target: sandbox(recipe),
+        tunnels: None,
+        credential_warning: None,
+    };
+    let host11 = hosts
+        .entries
+        .iter_mut()
+        .find(|entry| entry.key == "11")
+        .expect("the fixture lists host11");
+    host11.value["environment"] = serde_json::to_value(environment).unwrap();
+    window_on(cx, Some(selected), hosts, vec![catalog()])
+}
+
+/// SPEC.md, "Sandbox sessions": "Clone targets the recipe for a fresh sandbox with the source's launch and repository
+/// intent, never a copy of its disk"; "Container sessions" has Clone create "a new container from the recipe at its
+/// selected place". The old launcher took the source host's environment target, by the host's id, with Folder `~`.
+/// Specified: with c open on host11, a `web` sandbox, Clone of c opens in Clone mode on a new `web` sandbox in `~`,
+/// with New's host (host1) held behind Existing host; choosing Existing host gives host1 back with no note under Host,
+/// since nothing fell back.
+#[gpui::test]
+fn clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe(cx: &mut TestAppContext) {
+    let (_helm, cx) = environment_window(cx, "c", "web");
+    assert!(clone(cx, "c"), "Clone opened");
+    let opened = draft(cx);
+    assert_eq!(opened.mode, Mode::Clone);
+    assert_eq!(opened.target, Some(sandbox("web")));
+    assert_eq!(destination(cx), (Some(1), "~".to_owned()));
+    test_support::click(cx, "launcher-runs-on-Existing host");
+    assert_eq!(draft(cx).target, None, "the premise: Existing host chosen");
+    assert_eq!(destination(cx).0, Some(1));
+    assert_eq!(host_note(cx), None, "the environment was carried");
+}
+
+/// SPEC.md, "Creation": "Missing recipes or removed place hosts make that placement inapplicable", and "Sandbox
+/// sessions": "A missing recipe stays unavailable rather than silently choosing another host". Quietly swapping in
+/// another recipe would start something the user did not copy. Specified: with c's sandbox made from `gone`, a recipe
+/// the catalog no longer lists, Clone of c keeps `gone` chosen, drawn as "Unavailable recipe (retained)", and a press
+/// says why and sends nothing.
+#[gpui::test]
+fn a_clone_whose_recipe_is_gone_keeps_it_unavailable(cx: &mut TestAppContext) {
+    let (mut helm, cx) = environment_window(cx, "c", "gone");
+    assert!(clone(cx, "c"));
+    assert_eq!(draft(cx).target, Some(sandbox("gone")));
+    assert!(
+        crate::session_list::tests::painted(&test_support::frame(cx))
+            .iter()
+            .any(|line| line.contains("Unavailable recipe (retained)")),
+        "the Recipe select keeps it as unavailable"
+    );
+    let is_create =
+        |command: &FakeCommand| command.path.ends_with("sessions") && command.body.is_some();
+    answer_except(&mut helm, cx, is_create);
+    test_support::click(cx, "launcher-launch");
+    assert!(
+        shown_refusal(cx).is_some_and(|refusal| refusal.contains("Recipe \"gone\" is unavailable")),
+        "{:?}",
+        shown_refusal(cx)
+    );
+    assert_eq!(
+        answer_except(&mut helm, cx, is_create),
+        Vec::new(),
+        "nothing was sent"
+    );
+}
+
+/// SPEC.md, "Sandbox sessions": "When a sandbox session is open, New and quick-switcher creation preselect its recipe
+/// for a new sandbox and use the new sandbox's home Folder default, never the disposable host or its old folder". A
+/// quick launch keeps its template's choices and New's defaults instead, or a template naming no placement would
+/// launch into a fresh environment (decided by the launcher area on 2026-11-16). Specified: with c open on a `web`
+/// sandbox, New and New named "fix-login" each open on a new `web` sandbox in `~` with New's host1 behind it, the
+/// latter named; New's prefill, which quick launches start from, holds no target.
+#[gpui::test]
+fn new_beside_an_open_environment_session_preselects_its_recipe_and_place(cx: &mut TestAppContext) {
+    let (_helm, cx) = environment_window(cx, "c", "web");
+    assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
+    assert!(new(cx), "New opened");
+    assert_eq!(draft(cx).target, Some(sandbox("web")));
+    assert_eq!(destination(cx), (Some(1), "~".to_owned()));
+    test_support::keys(cx, "escape");
+    assert!(cx.update(|window, cx| open_new_named("fix-login", window, cx)));
+    settle(cx);
+    let named = draft(cx);
+    assert_eq!(
+        (named.target, named.name.value().as_str()),
+        (Some(sandbox("web")), "fix-login")
+    );
+    test_support::keys(cx, "escape");
+    let prefill = cx.update(|_, cx| super::entry::new_prefill(cx));
+    assert_eq!(
+        prefill.map(|draft| draft.target),
+        Some(None),
+        "a quick launch's prefill keeps New's defaults"
+    );
+}
+
+/// SPEC.md, "Sandbox sessions": "Restart, Restart with, Replace and Replace with stay in the existing sandbox". The
+/// draft refuses a target in Replace with (`environment_tests`); this shows the launcher offers none either, where New
+/// beside the same session does. Specified: with c open on a `web` sandbox and New container usable, New shows the Runs
+/// on switch; Replace with of c holds host11 with no target and draws no switch.
+#[gpui::test]
+fn replace_with_of_an_environment_session_keeps_its_environment(cx: &mut TestAppContext) {
+    let (_helm, cx) = environment_window(cx, "c", "web");
+    assert!(new(cx));
+    assert!(
+        name_of(cx, "launcher-runs-on-Existing host").is_some(),
+        "the premise: New beside c shows the switch"
+    );
+    test_support::keys(cx, "escape");
+    assert!(cx.update(|window, cx| open_replace_with("c", window, cx)));
+    settle(cx);
+    let draft = draft(cx);
+    assert!(matches!(draft.mode, Mode::ReplaceWith { .. }));
+    assert_eq!((draft.target, draft.host), (None, Some(11)));
+    assert_eq!(
+        name_of(cx, "launcher-runs-on-Existing host"),
+        None,
+        "no switch"
+    );
 }

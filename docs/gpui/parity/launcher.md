@@ -553,7 +553,7 @@ showed them, in
 (the first test's read-only prompt half is the old templates spec's "initial prompt launcher template stacking and save
 selection", in the templates area's file); a copied folder and session name holding one are not yet spelled out, as the
 old prefill did; the prefill, host fallback and its note, and refusals in
-`launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so, clone_of_a_sandbox_session_falls_back_and_says_so, clone_opens_nothing_over_a_dialog_or_for_an_unknown_session, clone_brings_back_a_refused_launch_waiting_behind_its_notice}`;
+`launcher::entry_tests::{clone_prefills_the_sources_host_folder_title_and_launch, clone_of_a_session_on_a_retargeted_host_row_falls_back_and_says_so, clone_of_a_sandbox_session_with_nothing_to_carry_falls_back_and_says_so, clone_opens_nothing_over_a_dialog_or_for_an_unknown_session, clone_brings_back_a_refused_launch_waiting_behind_its_notice}`;
 "each clone restores every field after an intervening draft edit" and "closing a clone without submitting, or submitting
 it, both leave the next New Session with fresh defaults" in
 `launcher::entry_tests::{each_clone_starts_from_its_source_and_new_starts_fresh_after_closing, a_clone_launch_sends_the_copied_launch}`;
@@ -566,8 +566,11 @@ superseded: the toggle-return, held-focus-work and held-terminal-reveal cases (f
 coordinator, and a reply such as the catalog's never moves it, so a late catalog keeps focus on the name field too); the
 two cases that focus search on opening in
 `launcher::search_view_tests::clone_and_replace_with_start_focus_in_the_search_box`; a managed-checkout Clone's fresh
-checkout and `-clone` name are in the `github-checkouts.spec.ts` row, and a sandbox or container Clone's fresh
-environment waits for the environments work
+checkout and `-clone` name are in the `github-checkouts.spec.ts` row; a sandbox or container Clone's fresh environment
+from the source's recipe and place, folder `~`, found by the source's host id as the old launcher found it, a recipe
+gone since kept as unavailable, and a host naming no environment falling back with the old note, in
+`launcher::entry_tests::{clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe, a_clone_whose_recipe_is_gone_keeps_it_unavailable, clone_of_a_sandbox_session_with_nothing_to_carry_falls_back_and_says_so}`
+and `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_and_chooses_nothing`
 
 - "a structured GUI clone pre-fills without launching, then starts its ready successor": the agent launch seeded as
   deliberate choices in `launcher::draft_tests::clone_seeds_an_agent_launch_verbatim`, one create per press in
@@ -626,7 +629,15 @@ orchestrator decided on 2026-11-16 for every environments case until those PRs l
 areas': "container template quick launch retains its saved place" is the templates and quick launch area's, "a connected
 container's Delete asks its Farhelm and reports the container that stays" is the session view's, and "Containers
 Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are in
-[Settings and hosts](settings-and-hosts.md).
+[Settings and hosts](settings-and-hosts.md). Beyond this spec's cases, SPEC.md's carried placements (Container sessions
+follow Sandbox sessions' Clone, and New beside an open environment session preselects its recipe and place, never in a
+quick launch): one seed for both providers in
+`launcher::environment_tests::a_seeded_environment_has_the_segments_effects_and_chooses_nothing`, driven with a sandbox
+in
+`launcher::entry_tests::{clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe, new_beside_an_open_environment_session_preselects_its_recipe_and_place}`,
+and Replace with keeping the existing environment in
+`launcher::entry_tests::replace_with_of_an_environment_session_keeps_its_environment` and
+`launcher::environment_tests::restart_with_and_replace_with_keep_the_existing_environment`.
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
@@ -1180,10 +1191,6 @@ migration's orchestrator decided on 2026-11-16 for every environments case until
 - Replace with's Launch does not name the source warning as its accessible description, as the old button did with
   `aria-describedby`; the warning beside it is its own announced status instead. The button's description comes from its
   hover help, and putting the long warning into a tooltip would change what sighted users see.
-- A Clone of a sandbox or container session opens on New's host, with the source's folder and launch and a note under
-  Host saying its host was not carried over, until the environments work brings back the old launcher's Clone onto a
-  fresh environment from the source's recipe. The launch is still copied verbatim, a YOLO permission included, so such a
-  copy runs YOLO on an ordinary host unless that host asks first; the note and the host picker show where it goes.
 - A launch refused after the user moved on is offered by a notice with Open launcher, as SPEC.md now says; the old app
   brought the launcher back by itself as soon as no other dialog was open.
 - Opening a launched session does not itself close Hosts; the old app's opening did. New returns the sidebar to Sessions
