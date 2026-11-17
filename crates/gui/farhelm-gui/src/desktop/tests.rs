@@ -1177,6 +1177,64 @@ mod mac {
         assert_eq!(press_at(cx, at), None, "the sidebar's resize edge");
     }
 
+    /// SPEC.md, "Desktop window chrome": a tab is one of the band's controls, so a press on it keeps the tab's own
+    /// interaction, while the strip's empty part around the tabs is background. A stale session's tabs are inert
+    /// beneath the unavailable card, and an inert tab must not turn into background because it no longer answers: the
+    /// old `click-detail.test.js`'s "press over an inert descendant" (at reference commit `24bc0580`), which pressed
+    /// exactly that. Specified: with session a open listing two shell tabs, a press on Terminal 2 decides no drag and
+    /// chooses that tab; a press in the gap between the Agent tab and Terminal 1, and one above Terminal 1 inside the
+    /// row, drag; once a is listed stale (the card drawn, the tab no longer a focus stop: the premise), a press on
+    /// Terminal 2 still decides no drag.
+    #[gpui::test]
+    fn the_top_rows_tabs_keep_their_presses_live_or_inert_and_the_strip_around_them_drags(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::session_list::menu_tests::{push, snapshot};
+        use crate::terminal::set::{AGENT_TAB_ID, tab_element_id};
+        let mut main = test_support::open_main(cx, snapshot(&[(session("a"), 2)], false));
+        test_support::settle(main.cx);
+        let (first, second) = (tab_element_id("tab-0"), tab_element_id("tab-1"));
+        let node = |cx: &mut VisualTestContext, id: &str| {
+            frame(cx)
+                .into_iter()
+                .find(|node| node.element_id.as_deref() == Some(id))
+                .unwrap_or_else(|| panic!("{id} was not drawn"))
+        };
+        let (none, drag) = (
+            Some((Row::SessionTop, PressAction::None)),
+            Some((Row::SessionTop, PressAction::Drag)),
+        );
+        let chosen = Some(gpui::Toggled::True);
+        let live = node(main.cx, &second);
+        assert!(
+            live.flags.focusable && live.toggled != chosen,
+            "the premise: a live tab, not chosen"
+        );
+        let at = drawn(main.cx, &second).center();
+        assert_eq!(press_at(main.cx, at), none, "a live tab");
+        assert_eq!(node(main.cx, &second).toggled, chosen, "the press chose it");
+        let (agent, tab) = (drawn(main.cx, AGENT_TAB_ID), drawn(main.cx, &first));
+        let gap = px((f32::from(agent.right()) + f32::from(tab.left())) / 2.);
+        let beside = gpui::point(gap, tab.center().y);
+        assert_eq!(press_at(main.cx, beside), drag, "between two tabs");
+        let row = test_support::bounds(main.cx, "session-header");
+        assert!(row.top() + px(4.) < tab.top(), "the premise: room above");
+        let above = gpui::point(tab.center().x, tab.top() - px(2.));
+        assert_eq!(press_at(main.cx, above), drag, "above a tab");
+
+        push(
+            &mut main.helm,
+            &["a"],
+            &[(session("a").stale(), 2)],
+            main.cx,
+        );
+        let inert = node(main.cx, &second);
+        assert!(!inert.flags.focusable, "the premise: an inert tab");
+        drawn(main.cx, crate::session_pane::unavailable::CARD_ID);
+        let at = drawn(main.cx, &second).center();
+        assert_eq!(press_at(main.cx, at), none, "a stale session's inert tab");
+    }
+
     /// See the test above: with no session open, the strip over the empty pane is the band's other half.
     #[gpui::test]
     fn with_no_session_open_the_empty_panes_strip_drags(cx: &mut TestAppContext) {

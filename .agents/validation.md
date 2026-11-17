@@ -909,14 +909,18 @@ systemd or SSH substrate ran.
   removes the second-launch socket and leaves the supervisor running; a relaunch reuses that supervisor (same pid and
   start time), lists the session again as live and has a new helm credential, the old one refused; after SIGKILL the
   supervisor survives and the stale socket refuses connections, and a relaunch reuses the supervisor, lists the session
-  as live and answers at a live socket; SIGTERM quits the way Close does, and a 900 by 650 frame saved then reopens the
-  window at that size; and the title bar's Maximize makes the app save the maximized state with that ordinary frame
-  kept, after a quit by Close the relaunched window opens maximized, and quit again by SIGTERM it still saves maximized
-  with that ordinary frame. The ordinary size is written between launches because the bridge cannot resize a window on
-  headless Mutter. Linux only; needs what `gui-agent.py start` needs there; it builds the app first unless given
-  `--no-build`. CI does not run it. Run it when the desktop app's startup, quit, second-launch forwarding, Wayland
-  refusal, supervisor decisions, window frame saving or restoring, the Linux title bar's Close or Maximize, or
-  `scripts/gui-agent.py` change.
+  as live, answers at a live socket and echoes a line typed into the session's terminal; SIGTERM quits the way Close
+  does, and a 900 by 650 frame saved then reopens the window at that size; the title bar's Maximize makes the app save
+  the maximized state with that ordinary frame kept, after a quit by Close the relaunched window opens maximized, and
+  quit again by SIGTERM it still saves maximized with that ordinary frame; and with the app quit, a launch from a copy
+  of the program in the run, and one after that copy is replaced by a new file renamed over it, each stop the app's own
+  supervisor the orderly way and start one running the new file, the session kept live and taking typing; and a launch
+  from a copy in a folder whose name holds `:` exits 1 with the folder's refusal while the same supervisor stays
+  recorded, running and accepting at its socket. The ordinary size is written between launches because the bridge cannot
+  resize a window on headless Mutter. Linux only; needs what `gui-agent.py start` needs there; it builds the app first
+  unless given `--no-build`. CI does not run it. Run it when the desktop app's startup, quit, second-launch forwarding,
+  Wayland refusal, supervisor decisions or replacement, window frame saving or restoring, the Linux title bar's Close or
+  Maximize, or `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
