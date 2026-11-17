@@ -153,7 +153,8 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
   name and Escape keeps the launcher")
 - `templates::save_tests::escape_or_cancel_puts_focus_back_in_the_search_box` ("save as template handles body Escape
   before the launcher", with focus in the panel: Escape and Cancel each put focus back in the search box, which is not
-  checked to be in view)
+  checked to be in view here; `escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view`, below,
+  checks that)
 - `templates::save_tests::opening_the_panel_brings_its_name_field_into_view` (the same case, its reopening step)
 - `templates::save_tests::replace_with_offers_no_save_as_template` ("Replace with accepts its own template host and
   refuses another host atomically")
@@ -169,25 +170,29 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
   key opens New with a temporary composition explanation"; its held catalog read showing "Loading session setup…" is the
   deviations "A switcher template pick shows no loading state" and "Every quick-launch banner expires", which count the
   banner's seconds from when the templates applied)
+- `templates::dispatch_tests::a_click_on_the_banner_keeps_it_and_a_tab_choice_takes_it_away` (the same case: a click on
+  the banner is not an edit, and a button choice, the Command tab, takes the banner away)
+- `templates::dialog_tests::a_key_pushed_while_open_is_drawn_and_kept_by_the_next_key_write` ("number keys move, follow
+  rename, and stay freed after undo": a change to the bindings pushed while the dialog is open is kept by the next key
+  write; the old key button did not draw that change, showing the keys as the dialog's own reads and writes had left
+  them, which is the deviation "The key buttons follow pushed bindings")
+- `templates::save_tests::escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view` ("save as
+  template handles body Escape before the launcher", with focus outside the panel: Shift+Tab moves it to a launcher
+  control above the panel, the counterpart of the old page body, since focus cannot leave the launcher: the layer
+  manager keeps it inside the dialog, and an empty-space click keeps the control in use. Escape closes the panel and not
+  New; the search box, which the body would leave out of view without the panel too, is back in view after Escape and
+  after Cancel)
+- `templates::editor_tests::reopening_the_open_row_keeps_any_edit_also_after_a_save` ("reselecting the current template
+  preserves edits and renames", its second half: an edit to a field other than the name kept across reopening, and
+  reopening the row after a save keeping a typed rename)
+- `templates::editor_tests::the_busy_editor_scrolls_back_to_its_name_by_keyboard` ("templates busy root stays
+  keyboard-scrollable", what is left of its scrolling: with a save out, Shift+Tab back to the name field scrolls the
+  body until the field shows; its Home back to the top is the deviation "Home and the page keys do not scroll the
+  Templates editor")
 
-Not yet ported:
-
-- the approval-card half of "save as template refusal respects ${focusOwner} focus" (a refusal leaving focus on an
-  approval card the user moved to while the save was out); its other halves are above, and its lost-focus half is
-  superseded
-- of "number keys move, follow rename, and stay freed after undo", a change to the bindings pushed while the dialog is
-  open, drawn on its key button and kept by the next key write
-  (`templates::dialog_tests::the_key_menu_offers_every_key_and_moves_the_chosen_one` builds its write from bindings
-  pushed before the dialog opened)
-- of "save as template handles body Escape before the launcher", Escape with focus outside the panel (in the launcher,
-  for example after a click in its search box, the counterpart of the old page body) closing the panel and not New, and
-  the search box back in view after Escape and after Cancel
-- of "reselecting the current template preserves edits and renames", reopening the row after a save, and an edit to a
-  field other than the name kept across reopening
-- of "templates busy root stays keyboard-scrollable", scrolling the busy editor by keyboard (Home back to the top); the
-  deviation "While a save is in flight" covers its Tab stop, not its scrolling
-- of "model-only number key opens New with a temporary composition explanation", a click on the banner not counting as
-  an edit, and a button choice (the Command tab) taking the banner away
+Not yet ported: the approval-card half of "save as template refusal respects ${focusOwner} focus" (a refusal leaving
+focus on an approval card the user moved to while the save was out); its other halves are above, and its lost-focus half
+is superseded.
 
 Superseded: "save as template leaves composing Enter with the name editor" and "save as template keeps the draft on
 composing Escape", by the terminal file's `tests/ime-composition.spec.ts` entry, which supersedes that spec whole: these
@@ -205,9 +210,9 @@ wait and the phone draft's retry were settled on 2026-11-16 by the GPUI migratio
 
 Tests: 32. Covers: quick launch submits the wrapper prefix saved in its agent template.
 
-partly, with parts of three cases not yet ported (after the bullets): the ⚡ chord's direct launch through New's
-prefill, the catalog and the launcher's submit path, unseen, the mark kept to success and cleared by a reveal, a slow
-one showing the launcher's progress pill until its reply
+partly, with part of one case not yet ported (after the bullets): the ⚡ chord's direct launch through New's prefill,
+the catalog and the launcher's submit path, unseen, the mark kept to success and cleared by a reveal, a slow one showing
+the launcher's progress pill until its reply
 (`templates::dispatch_tests::the_chord_launches_the_marked_template_unseen`,
 `a_revealed_quick_launch_is_no_longer_unseen`, `actions_tests::the_launch_chords_run_once_per_press_from_a_terminal`),
 an incomplete mark opening New with its choices and the needs-more-choices banner, which an edit takes away
@@ -302,9 +307,10 @@ naming (`templates::naming_tests::escape_and_cancel_on_a_changed_name_send_no_re
 - `templates::dialog_tests::the_bolt_marks_and_clears_through_the_preferences` (the same case, and "the template mark
   moves, survives rename, and stays cleared after undo")
 - `templates::dialog_tests::a_write_in_flight_leaves_focus_and_the_dialog_alone` ("quick launch honors a held local mark
-  against the shared read": Escape and Space do not close the dialog while the mark's write is held, though the test
-  never presses the header Close, the old case's control; the bolt not lit until the helm stores the mark is the
-  deviation "⚡ is lit once the helm stores it")
+  against the shared read": Escape and Space do not close the dialog while the mark's write is held; the bolt not lit
+  until the helm stores the mark is the deviation "⚡ is lit once the helm stores it")
+- `templates::dialog_tests::the_header_close_waits_for_a_write_in_flight` (the same case's control: the header Close
+  does not close the dialog while the mark's write is held, and closes it once the write is answered)
 - `templates::dispatch_tests::the_chord_launches_the_marked_template_unseen` (the same case: the chord afterwards
   launches the mark the helm stored)
 - `templates::editor_tests::a_rename_saves_moves_the_mark_and_key_then_deletes_the_old_name` ("the template mark moves,
@@ -320,17 +326,13 @@ naming (`templates::naming_tests::escape_and_cancel_on_a_changed_name_send_no_re
   the launcher's test of that refusal replaces it, decided on 2026-11-16 by the GPUI migration's coordinator)
 - `templates::dispatch_tests::unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page` ("a quick preparation
   error survives New's first host binding", its error half: unreadable bindings open New with "Not launched. Couldn't
-  prepare quick launch:" and the helm's words)
+  prepare quick launch:" and the helm's words, on the helm's own host; and its host-binding half: the error survives
+  New's folder default and installation settling from the host's launch history after it is shown, the counterpart of
+  the old first binding; New's host itself is bound as it opens)
 
-Not yet ported:
-
-- the Replace with half of "hidden preparation isolates keys and a queued Replace with requires Launch" (Replace with
-  opened while a quick launch is being prepared out of sight, leaving Launch to the user); its key half is
-  `templates::dispatch_tests::presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule`, above
-- the host-binding half of "a quick preparation error survives New's first host binding" (New binding its first host
-  after the preparation error without clearing it)
-- of "quick launch honors a held local mark against the shared read", the header Close not closing the dialog while the
-  mark's write is held
+Not yet ported: the Replace with half of "hidden preparation isolates keys and a queued Replace with requires Launch"
+(Replace with opened while a quick launch is being prepared out of sight, leaving Launch to the user); its key half is
+`templates::dispatch_tests::presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule`, above.
 
 ### `tests/launcher-template-shortcuts.spec.ts`
 
@@ -545,12 +547,13 @@ Its file: launcher.
 Template cases: "template placement keeps Host editable after leaving an environment" and "a recipe template quick
 launch asks before one recipe request". The spec's other cases are the launcher's.
 
-ported: "template placement keeps Host editable after leaving an environment" is ported whole (a legacy recipe template
-opening on New sandbox, Existing host leaving an empty Host to choose, the chosen segment changing nothing, the save
-storing the host alone, and a Host added to another template starting empty), with the editor's other placement rules
-beside it. "A recipe template quick launch asks before one recipe request" is ported too: a number key on a sandbox
-template brings the launcher back with "Create a sandbox for this session?" rather than creating, and its "Create and
-launch" sends one confirmed create through the environment route alone, whose refusal comes back in the launcher.
+replaced: "template placement keeps Host editable after leaving an environment" is ported whole (a legacy recipe
+template opening on New sandbox, Existing host leaving an empty Host to choose, the chosen segment changing nothing, the
+save storing the host alone, and a Host added to another template starting empty), with the editor's other placement
+rules beside it. "A recipe template quick launch asks before one recipe request" is ported too: a number key on a
+sandbox template brings the launcher back with "Create a sandbox for this session?" rather than creating, and its
+"Create and launch" sends one confirmed create through the environment route alone, whose refusal comes back in the
+launcher.
 
 - `templates::editor_tests::leaving_an_environment_keeps_the_host_editable`
 - `templates::editor_tests::entering_an_environment_chooses_its_first_recipe_and_place` (the old authoring mode's
@@ -605,13 +608,11 @@ Template cases: the shortcut-digit half of "template summaries split command fon
 widths" (the number keys' digits drawn at equal widths). Its summary-fonts half is in the foundations entry
 (`templates::summary_tests::template_values_are_host_text`).
 
-partly
+replaced
 
 - `templates::dialog_tests::the_number_keys_digits_are_drawn_at_equal_widths` (with the real text system, the key
-  buttons' chords for keys 1 and 8 are each drawn in the monospace face, so they are equally wide; it measures the
-  painted chords, not the buttons' own widths)
-
-Not yet ported: the key buttons' own widths for keys 1 and 8 being equal, which the old case also compared.
+  buttons' chords for keys 1 and 8 are each drawn in the monospace face, so they are equally wide, and so are the key
+  buttons themselves, which the old case also compared)
 
 ### `tests/nonblocking-launch.spec.ts`
 
@@ -693,6 +694,14 @@ orchestrator.
   Tab stop. Here the text fields turn read-only, the buttons (Save, the rows, "+ New template", ✕, "+ Add field") turn
   busy, keeping focus and ignoring presses, and the choices ignore presses without changing their look, so focus never
   falls out of the control the user was on.
+- **Home and the page keys do not scroll the Templates editor.** The old busy editor made the dialog itself a stop, and
+  Home there scrolled it back to the top ("templates busy root stays keyboard-scrollable"). Here focus stays on a
+  control while a save is in flight (the deviation above), and Home, End, Page Up and Page Down scroll nothing from a
+  control in the Templates dialog's body, at any time: the dialog frame lets a dialog opt in to those keys only for its
+  notices region (`DialogFrame::notices_stop`, which the Trash dialog uses), not for its body, so the Templates code
+  alone cannot opt in. Focus moving onto a field scrolls it into view, so Tab and Shift+Tab still reach and show every
+  control of the editor while a save is out. Tested by
+  `templates::editor_tests::the_busy_editor_scrolls_back_to_its_name_by_keyboard`.
 - **The editor's small controls.** The model suggestions are neutral buttons with the neutral fill where the old ones
   had none, and the add menu's entries have the template rows' padding (10 by 12 pixels) where the old ones had 8.
   "Replace name" has hover help ("Clear the name so a new one can be typed"), which the old button lacked and every
@@ -884,6 +893,11 @@ orchestrator.
   in the GPUI list is optimistic: a bolt shows what the store holds, so it lights when the helm pushes the stored mark,
   which on the embedded helm is when its reply arrives. Tested by
   `templates::dialog_tests::the_bolt_marks_and_clears_through_the_preferences`.
+- **The key buttons follow pushed bindings.** The old dialog's key buttons showed the keys as its own reads and writes
+  had left them, so a change from an agent, the command line or another window stayed undrawn until the dialog was
+  reopened. A key button here draws what the store holds, as every setting follows the helm's pushes, so a key bound
+  elsewhere while the dialog is open shows on its button at once. Tested by
+  `templates::dialog_tests::a_key_pushed_while_open_is_drawn_and_kept_by_the_next_key_write`.
 - **Unreadable bindings refuse in the pushed state's words.** The old app read the preferences again for each ⚡ or
   number-key write and each quick launch, and refused when that read failed, with the read's message alone in the list
   and "Couldn't prepare quick launch:" or, in the launcher, "Couldn't load templates:" before it. Here the store is that
