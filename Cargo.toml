@@ -81,7 +81,7 @@ default-members = [
 # 0.14.0-rc.2 from a bump that rode along with an unrelated fix (#879), while
 # releases moved past it; this fixed value replaces that stale number.
 [workspace.package]
-version = "0.0.0-unreleased"
+version = "0.40.0-rc.1"
 edition = "2024"
 # cargo-dist reads `repository` to know where to cut releases and expects a
 # homepage in the package metadata. The project has no separate site, so both
