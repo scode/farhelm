@@ -225,12 +225,10 @@ pub(crate) async fn provision_host(
 /// [`probe_host`] does and can wait as long. A plan found after the timeout
 /// reply is retained but never confirmed, and the user asks for Update again.
 /// The confirmation consumes the plan, claims the host and starts the run on
-/// its own task. Before starting it waits for the host's provisioning lock,
-/// which on an SSH host is held only briefly (a destination or alias change;
-/// a running setup or update makes the claim refuse as busy first), so it is
-/// not bounded. A Tensorlake host's Suspend, Resume or removal can hold that
-/// lock for longer; bounding the confirmation against those belongs with
-/// porting them to the GPUI app.
+/// its own task. It needs no bound, because it does not wait for the host's
+/// provisioning lock: it refuses at once with a 409 while another operation
+/// holds it (`ProvisioningService::start_update`; SPEC_impl.md, "The UI
+/// channel").
 pub(crate) async fn update_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,

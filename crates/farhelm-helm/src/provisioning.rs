@@ -3300,50 +3300,34 @@ mod tests {
         );
     }
 
-    /// An update whose confirming request is dropped while it waits for the
+    /// An uninstall whose confirming request is dropped while it waits for the
     /// host's provisioning lock still runs, and does not leave the host busy.
     ///
     /// Why it matters: starting a run marks the host busy and then waits for
     /// the lock before spawning the run that clears the mark, all on the
     /// request's task. A page reload in that window left the host refusing
     /// every later setup or update as busy until the helm restarted
-    /// (SPEC_impl.md "Who owns an accepted action"). Specified: with the
-    /// provisioning lock held, a confirmation is issued and its waiter
+    /// (SPEC_impl.md "Who owns an accepted action"). An Update's confirmation
+    /// no longer waits for the lock
+    /// (`a_manual_update_confirmation_refuses_at_once_while_the_host_lock_is_held`),
+    /// so an uninstall's, which still does, carries this case. Update keeps the
+    /// same owned task, unexercised here: its claim is still followed by awaits
+    /// before the run is spawned (the host row's read), and a request dropped
+    /// there would leave the host busy; a test of that window would need a
+    /// gate inside it, which nothing offers today. Specified: with
+    /// the provisioning lock held, a confirmation is issued and its waiter
     /// dropped once the host shows busy; after the lock is released the run
-    /// completes.
+    /// completes and forgets the host.
     #[farhelm_testtrace::test]
-    async fn a_dropped_update_confirmation_still_runs_and_clears_busy() {
-        let (builder, host) = FleetBuilder::new()
-            .await
-            .ssh(
-                "dropped.example",
-                HostScript {
-                    identity: Some("recorded-identity".to_string()),
-                    ..HostScript::default()
-                },
-            )
-            .await;
-        let harness = builder.start().await;
-        harness
-            .await_refreshed_as(host, "recorded-identity", 0)
-            .await;
-        let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::skewed(root.path().to_path_buf());
-        let service = service(&harness, backend.clone(), root.path());
-        let preview = service.plan_update(host).await.unwrap();
-        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
-            database_schema: None,
-            peer_build: "0.1.1-old".to_string(),
-            dial_farhelm: root.path().join("farhelm"),
-            dial_state_dir: Some(root.path().join("state")),
-        }));
-
+    async fn a_dropped_uninstall_confirmation_still_runs_and_clears_busy() {
+        let (harness, host, _root, _backend, service) = uninstall_fixture(Vec::new(), false).await;
+        let preview = service.plan_uninstall(host).await.unwrap();
         let held = harness.manager.host_provision_lock(host).await;
         let waiter = tokio::spawn({
             let service = Arc::clone(&service);
             async move {
                 service
-                    .start_update(
+                    .start_uninstall(
                         host,
                         ProvisionRequest {
                             probe_id: preview.probe_id,
@@ -3365,12 +3349,108 @@ mod tests {
         let _ = waiter.await;
         drop(held);
 
+        wait_forgotten(&harness, host).await;
+        assert!(!service.memory.lock().await.busy.contains(&host));
+    }
+
+    /// A manual Update's confirmation refuses at once as busy while another
+    /// operation holds the host's provisioning lock, and leaves nothing behind.
+    ///
+    /// Why it matters: a Tensorlake host's Suspend, Resume or removal can hold
+    /// that lock for minutes, and a confirmation that waited for it kept the
+    /// GUI's request open that long; the refusal tells the user to choose
+    /// Update again, as a busy sandbox's setup rerun does. The automatic
+    /// update still waits for the lock
+    /// (`accepted_automatic_run_outlives_listener_cancellation`). Specified:
+    /// with a failed earlier Update retained and the lock held, the
+    /// confirmation answers without waiting with a refusal saying the host is
+    /// busy and to choose Update again; the host is not left busy and the
+    /// earlier failed run is still its run (so its Re-run stays offered);
+    /// once the lock is free, a new plan's confirmation runs to completion.
+    /// The automatic update's retry record needs no check of its own: every
+    /// path that changes it also replaces or removes the host's run.
+    #[farhelm_testtrace::test]
+    async fn a_manual_update_confirmation_refuses_at_once_while_the_host_lock_is_held() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "held.example",
+                HostScript {
+                    identity: Some("recorded-identity".to_string()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness
+            .await_refreshed_as(host, "recorded-identity", 0)
+            .await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let preview = service.plan_update(host).await.unwrap();
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
+            peer_build: "0.1.1-old".to_string(),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        }));
+
+        // A failed earlier Update, as the GUI shows it with its Re-run.
+        let earlier = ProvisioningView {
+            host_id: host,
+            run_id: Some("earlier-update".into()),
+            operation: Some(ProvisioningOperation::Update),
+            status: RunStatus::Failed,
+            steps: Vec::new(),
+            message: Some("disk full".into()),
+            outcome_unknown: false,
+        };
+        service.insert_run_for_test(earlier.clone()).await;
+        let held = harness.manager.host_provision_lock(host).await;
+        let refused = tokio::time::timeout(
+            Duration::from_secs(5),
+            service.start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: preview.probe_id,
+                },
+            ),
+        )
+        .await
+        .expect("the confirmation answers without waiting for the lock")
+        .expect_err("the confirmation is refused while the lock is held");
+        let text = refusal_text(refused);
+        assert!(text.contains("busy with another operation"), "{text}");
+        assert!(text.contains("choose Update again"), "{text}");
+        {
+            let memory = service.memory.lock().await;
+            assert!(
+                !memory.busy.contains(&host),
+                "the refusal left the host busy"
+            );
+            assert_eq!(
+                memory.runs.get(&host),
+                Some(&earlier),
+                "the earlier failed run is still the host's"
+            );
+        }
+        drop(held);
+
+        let retry = service.plan_update(host).await.unwrap();
+        service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: retry.probe_id,
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(
             wait_finished(&service, host).await.status,
-            RunStatus::Completed,
-            "the run must start and finish although its request was dropped"
+            RunStatus::Completed
         );
-        assert!(!service.memory.lock().await.busy.contains(&host));
     }
 
     /// UPDATE against a skewed supervisor — the host left behind by a
