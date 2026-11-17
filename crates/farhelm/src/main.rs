@@ -1373,6 +1373,23 @@ enum InternalCmd {
         #[arg(long, value_parser = clap::builder::PathBufValueParser::new().try_map(absolute_state_dir))]
         state_dir: PathBuf,
     },
+    /// Print this build's version and whether it carries the release mark
+    /// (`farhelm_helm::RELEASE_BUILD`), for the release workflow's check of
+    /// the published binary.
+    ///
+    /// The output is a contract: with exit status 0, stdout is exactly these
+    /// two lines, in this order, each `key=value` with no spaces, and nothing
+    /// else:
+    ///
+    /// ```text
+    /// version=<the version `farhelm --version` names>
+    /// release-build=yes   (or release-build=no)
+    /// ```
+    ///
+    /// `.github/workflows/sign-sums.yml` compares those bytes exactly, so
+    /// adding a line or changing a spelling must update that check in the
+    /// same change.
+    BuildInfo,
     /// The launch shim: exec a LaunchSpec's argv, recording exec failure
     /// to the spec's status file. See farhelm_supervisor::launch for why
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
@@ -1677,6 +1694,15 @@ fn licenses_text() -> String {
     )
 }
 
+/// What `farhelm internal build-info` prints, in the form its doc comment
+/// promises. Takes the version and the mark as arguments so the tests can
+/// render a marked build's answer: a test build is never marked, and the
+/// mark is fixed at compile time.
+fn build_info_text(version: &str, release_build: bool) -> String {
+    let mark = if release_build { "yes" } else { "no" };
+    format!("version={version}\nrelease-build={mark}\n")
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     hold_own_version(&cli.command)?;
@@ -1883,6 +1909,15 @@ fn main() -> anyhow::Result<()> {
                 launched,
             } => farhelm_supervisor::session_hold::run_keeper(watch, &launched, ready_fd),
             InternalCmd::Install(args) => run_install(args),
+            InternalCmd::BuildInfo => {
+                // CARGO_PKG_VERSION is the version clap's `--version` prints
+                // too, so the two answers cannot disagree.
+                print!(
+                    "{}",
+                    build_info_text(env!("CARGO_PKG_VERSION"), farhelm_helm::RELEASE_BUILD)
+                );
+                Ok(())
+            }
             InternalCmd::TerminalHost { socket } => {
                 // First thing after argument parsing, with no thread or
                 // runtime started: the host forks.
@@ -2863,6 +2898,21 @@ mod tests {
         .err()
         .expect("the retired container tab option is absent");
         assert_eq!(tab.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    /// The release workflow accepts a published binary only if `farhelm
+    /// internal build-info` prints a marked build's answer byte for byte, and
+    /// no test build is marked, so this is the one test of that spelling
+    /// before a release meets it.
+    ///
+    /// Spec: a marked build of version `v` prints exactly
+    /// `version=<v>\nrelease-build=yes\n` (the `BuildInfo` contract).
+    #[test]
+    fn build_info_renders_a_marked_build_exactly() {
+        assert_eq!(
+            super::build_info_text("1.2.3", true),
+            "version=1.2.3\nrelease-build=yes\n"
+        );
     }
 
     /// `farhelm licenses` is the only place the xterm.js port's MIT notice
