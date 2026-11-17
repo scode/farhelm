@@ -440,6 +440,11 @@ const PRICING_URL: &str = "https://www.tensorlake.ai/pricing";
 /// `.tensorlake-billing`'s line height: 1.6 at its 13 pixels.
 const BILLING_LINE: f32 = 20.8;
 
+/// The billing callout's last sentence, the old one's words: what Tensorlake does to an idle sandbox on Usage Credits,
+/// and that Farhelm never undoes it by itself.
+pub(crate) const USAGE_CREDITS_NOTE: &str = "On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a \
+                                             connection. Farhelm never resumes it on its own.";
+
 /// The Tensorlake sandbox's creation confirmation's body: the helm's plan with Copy plan, then the billing callout
 /// (`.tensorlake-billing`), the old `SetupPlanConfirmation`'s Tensorlake branch. Built once from the frozen plan.
 struct SandboxPlanBody {
@@ -449,22 +454,18 @@ struct SandboxPlanBody {
 impl Render for SandboxPlanBody {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        // The old callout: an amber-washed block with a three-pixel amber edge, its link inline in the paragraph; here
-        // the link wraps to a line of its own where it does not fit, as Add host's SSH help link does.
-        let billing = div()
-            .debug_selector(|| "sandbox-billing".to_owned())
+        // The old callout (`.tensorlake-billing`) was one paragraph: an amber-washed block with a three-pixel amber
+        // edge, its pricing link inline after the first sentence and the Usage Credits sentence flowing on after it.
+        // GPUI has no inline flow for a control inside a paragraph, so the first sentence and the link share a row
+        // that wraps the link to a line of its own where it does not fit, as Add host's SSH help link does, and the
+        // Usage Credits sentence is a paragraph of its own under them, as wide as the callout so it wraps inside it.
+        // It must not be a third item of that row: a text item in a wrapping row is never narrower than its whole
+        // text, so a sentence longer than the callout ran off its right edge, led by the space that had separated it
+        // from the link.
+        let lead = div()
             .flex()
             .flex_row()
             .flex_wrap()
-            .py(px(12.))
-            .px(px(14.))
-            .bg(theme::color(palette.warn_bg_dim))
-            .border_l(px(3.))
-            .border_color(theme::color(palette.warn))
-            .rounded(metrics::RADIUS_SM)
-            .text_size(metrics::TEXT_MD)
-            .line_height(px(BILLING_LINE))
-            .text_color(theme::color(palette.fg_0))
             .child("This sandbox bills while running. ")
             .child(
                 Button::new(
@@ -475,11 +476,23 @@ impl Render for SandboxPlanBody {
                 )
                 .tier(Tier::Link)
                 .on_click(|_, _, cx| cx.open_url(PRICING_URL)),
-            )
-            .child(
-                " On Usage Credits, Tensorlake suspends a sandbox after 24 hours without a connection. Farhelm never \
-                 resumes it on its own.",
             );
+        let usage_credits = div().w_full().min_w_0().child(USAGE_CREDITS_NOTE);
+        let billing = div()
+            .debug_selector(|| "sandbox-billing".to_owned())
+            .flex()
+            .flex_col()
+            .py(px(12.))
+            .px(px(14.))
+            .bg(theme::color(palette.warn_bg_dim))
+            .border_l(px(3.))
+            .border_color(theme::color(palette.warn))
+            .rounded(metrics::RADIUS_SM)
+            .text_size(metrics::TEXT_MD)
+            .line_height(px(BILLING_LINE))
+            .text_color(theme::color(palette.fg_0))
+            .child(lead)
+            .child(usage_credits);
         div()
             .flex()
             .flex_col()

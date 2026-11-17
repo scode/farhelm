@@ -31,9 +31,11 @@
 //!   Resume send) as the operation store's `Work::Suspend` or `Work::Resume` on the host's key, as the old panel held
 //!   its own per-host request, and the row shows "Suspending…" or "Resuming…" meanwhile (`super::progress`). A
 //!   session's Suspend and Resume run on that session's key, as the old session controls held theirs, so neither
-//!   surface waits for the other's request: the pushed changing phase holds both once the helm pushes it, and the
-//!   helm's lifecycle lock answers a press on one while the other's is out as busy. It is routine work, not live work
-//!   (`super::status::live`), so the attention list and the rail show nothing for it, as the old ones did not.
+//!   surface waits for the other's request, and the helm's lifecycle lock answers a press on one while the other's is
+//!   out as busy. Nothing pushes the host's changing phase while this window's own request is out: the UI channel
+//!   pushes nothing to a client while one of its commands is in flight, so the phase arrives with the answer. It is
+//!   routine work, not live work (`super::status::live`), so the attention list and the rail show nothing for it, as
+//!   the old ones did not.
 //! - **The bound is routine.** The helm answers within its host reply bound, and a Tensorlake Resume routinely takes
 //!   longer: its 504 that the change carries on is no failure, so its record is dropped and the row goes on showing the
 //!   pushed phase, "Suspending…" or "Resuming…", until it settles.

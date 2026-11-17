@@ -485,6 +485,30 @@ fn new_recipe_opens_the_editor_with_focus_in_name_and_pins_its_answers(cx: &mut 
     assert_eq!(focused_id(cx).as_deref(), Some("recipe-save"), "then Save");
 }
 
+/// Why this matters: the inline editor replaces Add host's fields and the user reads it from its top, its title naming
+/// what is being made; an editor that opened scrolled would also hide whether the pinned answers stand where they do on
+/// their own or only because the body scrolled (the old suite's "Add host pins inline recipe answers and focuses Name",
+/// whose premise was that the body had not scrolled).
+///
+/// Specified: right after "New recipe…", with the editor taller than the body, its title and its Name field lie wholly
+/// inside the body's view.
+#[gpui::test]
+fn the_inline_editor_opens_at_its_top(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_new_recipe(cx, &[recipe("rust-dev", "team/devbox")]);
+    let body = crate::test_support::bounds(cx, "add-host-body");
+    assert!(
+        crate::test_support::bounds(cx, "recipe-add-tunnel").top() > body.bottom(),
+        "the premise: the editor runs on below the body's view"
+    );
+    for id in ["recipe-editor-title", "recipe-name"] {
+        let shown = crate::test_support::bounds(cx, id);
+        assert!(
+            body.top() <= shown.top() && shown.bottom() <= body.bottom(),
+            "{id} shows whole at the body's top: {shown:?} in {body:?}"
+        );
+    }
+}
+
 /// Why this matters: the point of making a recipe from Add host is to create the sandbox from it, so a done Save must
 /// come back to the form with that recipe chosen, and with focus where the user goes on from.
 ///
@@ -781,6 +805,48 @@ fn the_billing_callout_has_the_warning_wash_and_edge(cx: &mut TestAppContext) {
             quad.border_widths.bottom
         ] == [none; 3],
         "only the left edge"
+    );
+}
+
+/// Why this matters: the callout's last sentence is the one that says Tensorlake suspends an idle sandbox and Farhelm
+/// never resumes it, and the old callout wrapped it inside its box. The `host-add-tensorlake-creation` golden caught
+/// this port drawing it as one unbreakable item of the row that holds the pricing link, so it ran off the dialog's
+/// right edge mid-word, led by a stray space.
+///
+/// Specified: in the creation question, the Usage Credits sentence is painted as one text whose box lies wholly inside
+/// the callout's bounds and is taller than one 20.8-pixel line (it wrapped), and the text is exactly the sentence, with
+/// no leading space. GPUI's driver record keeps one entry per painted paragraph, its box the wrapped text's whole size,
+/// so the box's width and height are what tell a wrapped sentence from one running out of the callout.
+#[gpui::test]
+fn the_usage_credits_sentence_wraps_inside_the_billing_callout(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, Vec::new());
+    confirm_plan(cx, &mut helm, "probe-1");
+    let billing = crate::test_support::bounds(cx, "sandbox-billing");
+    let note = crate::hosts::setup::USAGE_CREDITS_NOTE;
+    let painted: Vec<gpui::DriverText> = frame(cx)
+        .into_iter()
+        .flat_map(|node| node.texts)
+        .filter(|text| text.text.contains("Usage Credits"))
+        .collect();
+    let [sentence] = painted.as_slice() else {
+        panic!("the sentence is painted once: {painted:?}");
+    };
+    assert_eq!(
+        sentence.text.as_ref(),
+        note,
+        "the sentence alone, with no leading space"
+    );
+    let shown = sentence.bounds;
+    assert!(
+        billing.left() <= shown.left()
+            && shown.right() <= billing.right()
+            && billing.top() <= shown.top()
+            && shown.bottom() <= billing.bottom(),
+        "the sentence lies inside the callout: {shown:?} in {billing:?}"
+    );
+    assert!(
+        shown.size.height > gpui::px(21.),
+        "the sentence wraps onto more than one line: {shown:?}"
     );
 }
 

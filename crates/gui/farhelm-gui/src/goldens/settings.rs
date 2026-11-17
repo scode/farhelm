@@ -1,5 +1,6 @@
-//! Golden scenes for the Settings dialog, one scene per section and a few states of its Recipes section. The scene list
-//! itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
+//! Golden scenes for the Settings dialog, one scene per section, a few states of its Recipes section, and Tensorlake
+//! with a key saved and its list of sandboxes not on this helm. The scene list itself, `SCENES` with each scene's name
+//! and size, stays in `mod.rs`.
 
 use crate::focus::Mark;
 use crate::{session, test_support};
@@ -52,6 +53,9 @@ struct SettingsFixture {
     /// Open a new recipe's editor as the dialog opens (`settings::open_new_recipe_for_opened`), as New recipe does; the
     /// section must be Recipes.
     recipe_editor: bool,
+    /// Answer the Tensorlake account read with a key saved whatever the section, as Recipes always does; Tensorlake
+    /// then reads its list of sandboxes not on this helm, which [`settings_tensorlake_sandboxes`] answers.
+    tensorlake_key: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -89,6 +93,7 @@ fn settings_scene_with(
         hosts,
         tunnels,
         recipe_editor,
+        tensorlake_key,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -151,9 +156,10 @@ fn settings_scene_with(
                     "/api/credentials" => serde_json::json!([]),
                     "/api/container-orphans" => serde_json::json!([]),
                     // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
-                    // pictures rows that can build, which takes a saved key.
+                    // pictures rows that can build, which takes a saved key, and so does Tensorlake's list of
+                    // sandboxes not on this helm.
                     "/api/tensorlake" => serde_json::json!({
-                        "api_key_set": section == crate::settings::Section::Recipes,
+                        "api_key_set": section == crate::settings::Section::Recipes || tensorlake_key,
                         "create_without_asking": false,
                         "helm_tag": "fixture",
                         "ssh_key": { "state": "not_created" },
@@ -353,6 +359,118 @@ pub(super) fn settings_recipes_places_setup(state: &SceneState, window: &mut Win
 /// waits for the account read.
 pub(super) fn settings_tensorlake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Tensorlake, window, cx);
+}
+
+/// Whether [`settings_tensorlake_sandboxes`] has answered the list's read yet: kept across the scene's frames, since
+/// the read goes out only once the account read's answer says a key is saved, after the opening's own answers.
+struct SandboxListAnswered(std::cell::Cell<bool>);
+
+/// The list's read, which [`settings_tensorlake_sandboxes`] finds by its path.
+const SANDBOX_LIST_PATH: &str = "/api/tensorlake/orphans";
+
+/// Settings at Tensorlake with a key saved, against the reference `settings-tensorlake`, whose stack had none: once the
+/// list of sandboxes not on this helm has read, its rows as [`leftover_sandboxes`] lists them, with the body scrolled
+/// just far enough to bring the list's heading to its top, so the heading, Refresh and the rows show. The read is
+/// answered over the fake helm, so no Tensorlake account is reached; the rows' creation time reads in UTC, the zone a
+/// golden's app has. The window records its frames for the scroll to measure the heading by.
+pub(super) fn settings_tensorlake_sandboxes_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::Tensorlake,
+        SettingsFixture {
+            tensorlake_key: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+    window.set_driver_enabled(true);
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(SandboxListAnswered(std::cell::Cell::new(false))));
+    keep.push(Box::new(super::Pending(std::cell::Cell::new(true))));
+}
+
+/// The list's answer: four leftovers in the states a row draws differently. One of this helm's, running, with its
+/// creation time; one from another helm; one whose snapshot cleanup failed, with its reason and Retry cleanup; and one
+/// whose cleanup is running, with Cleaning up….
+fn leftover_sandboxes() -> serde_json::Value {
+    let row = |id: &str, name: &str| {
+        serde_json::json!({
+            "id": id, "name": name, "created_at": null, "state": "running", "from_another_helm": false,
+        })
+    };
+    let mut own = row("sb-1", "farhelm-host-fixture-old-gpubox");
+    own["created_at"] = serde_json::json!(1_794_647_100_000_i64);
+    let mut other = row("sb-2", "farhelm-host-zzzz-other-devbox");
+    other["from_another_helm"] = serde_json::json!(true);
+    let mut failed = row("sb-3", "farhelm-build-fixture-rust-dev");
+    failed["cleanup"] =
+        serde_json::json!({ "phase": "failed", "reason": "snapshot cleanup blocked" });
+    let mut cleaning = row("sb-4", "farhelm-sess-fixture-run-k7q2");
+    cleaning["cleanup"] = serde_json::json!({ "phase": "running" });
+    cleaning["state"] = serde_json::json!("Cleanup in progress");
+    serde_json::json!([own, other, failed, cleaning])
+}
+
+/// Draws nothing; on each frame, it moves [`settings_tensorlake_sandboxes_setup`]'s scene one step on. Until the list's
+/// read has been answered, it answers every command that has reached the fake helm, in the order sent, as the fake
+/// requires: the list's read, found by its path, with [`leftover_sandboxes`], and anything else as done with no body.
+/// Once a frame has drawn after that, it scrolls the body, once, by how far that frame drew the list's heading below
+/// the body's top (less a margin). A step a frame, since the read goes out only after the account read's answer
+/// arrives, and the rows only after the list's.
+pub(super) fn settings_tensorlake_sandboxes(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::AnyElement {
+    use gpui::{IntoElement as _, point, px};
+    let keep = state.keep.borrow();
+    let helm = keep
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Rc<RefCell<FakeHelm>>>());
+    let answered = keep
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<SandboxListAnswered>());
+    if let (Some(helm), Some(answered)) = (helm, answered) {
+        if !answered.0.get() {
+            let mut helm = helm.borrow_mut();
+            for command in helm.commands() {
+                let body = (command.path == SANDBOX_LIST_PATH).then(leftover_sandboxes);
+                answered.0.set(answered.0.get() || body.is_some());
+                helm.reply(command.id, 200, body);
+            }
+        } else if super::take_pending(state) {
+            // After this frame is drawn, so the record holds where it put the heading.
+            window.defer(cx, |window, cx| {
+                let top = |id: &str| {
+                    window
+                        .driver_nodes()
+                        .iter()
+                        .find(|node| node.element_id.as_deref() == Some(id))
+                        .map(|node| node.bounds.top())
+                };
+                let (Some(heading), Some(body)) =
+                    (top("tensorlake-sandboxes-heading"), top("settings-body"))
+                else {
+                    return;
+                };
+                window.dispatch_event(
+                    gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                        // Inside the section's pane, right of the section list, whatever the header's height.
+                        position: point(px(500.), px(415.)),
+                        delta: gpui::ScrollDelta::Pixels(point(px(0.), body + px(8.) - heading)),
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            });
+        }
+    }
+    gpui::div().into_any_element()
 }
 
 /// Settings at Credentials, as in the reference: nothing saved in any list and no Tensorlake key saved. Focus starts

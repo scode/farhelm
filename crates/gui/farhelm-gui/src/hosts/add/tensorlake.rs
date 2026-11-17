@@ -274,7 +274,7 @@ impl TensorlakeForm {
     }
 
     /// "New recipe…": open the recipe editor in place of the fields, with focus in its Name (the module docs).
-    fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mark = Mark::take(cx);
         let form = cx.weak_entity();
         let departed: RecipeDeparted = Rc::new(move |id, departure, saved, mark, window, cx| {
