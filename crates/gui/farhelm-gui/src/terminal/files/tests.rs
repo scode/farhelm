@@ -1311,3 +1311,289 @@ fn a_save_outlives_the_hover_but_not_the_terminal(cx: &mut TestAppContext) {
     redraw(cx);
     assert!(pending(&downloads), "closing the terminal abandons it");
 }
+
+// ---- What the host names ---------------------------------------------------------------------------------------------
+
+/// Why: the resolved path comes from the host, and it is the evidence the user reads before a click transfers a file.
+/// A right-to-left override in a file name would reorder what they read (`invoice`, U+202E, `txt.exe` is drawn as
+/// "invoiceexe.txt", an executable posing as text), so the display must show such characters rather than obey them.
+/// Spec (old `grid-attach.spec.ts`, "a host's file name with format characters is shown with them visible"; SPEC.md:
+/// "File disclosures ... make presentation-unsafe characters visible"): hovering a printed path the host resolves to
+/// `/tmp/invoice` U+202E `txt.exe`, the name line is named "invoice<U+202E>txt.exe" and painted that way inside its own
+/// direction isolate, and no painted line carries the raw override.
+#[gpui::test]
+fn a_hosts_file_name_with_format_characters_is_shown_with_them_visible(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "/tmp/a.txt", false)], None);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    let answer = h.check("/tmp/a.txt");
+    h.answer(answer, ready("/tmp/invoice\u{202E}txt.exe", 10));
+    let shown = "invoice<U+202E>txt.exe";
+    assert_eq!(h.line("terminal-file-name").as_deref(), Some(shown));
+    // The texts as painted, isolates and all: the session list's `painted` drops a sentence's isolates, which this
+    // test needs to see.
+    let painted: Vec<String> = test_support::frame(h.cx)
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    assert!(
+        painted
+            .iter()
+            .any(|line| crate::host_text::tests::paints_isolated(line, shown)),
+        "the name is painted escaped: {painted:?}"
+    );
+    assert!(
+        painted.iter().all(|line| !line.contains('\u{202E}')),
+        "the override itself is never painted: {painted:?}"
+    );
+}
+
+// ---- Late answers and unrelated output -------------------------------------------------------------------------------
+
+impl Files<'_> {
+    /// Attach and replay a complete screen with `rows` (see [`row`]) and history lines `history` above it, numbered
+    /// from 0, so the screen's first line is `history.len()`. The cap keeps them all.
+    fn show_with_history(&mut self, history: &[&str], rows: Vec<serde_json::Value>) {
+        let asked = self.fake().attach();
+        assert_eq!(
+            (asked.cols, asked.rows),
+            FITTED,
+            "the premise: the terminal attached at the fitted size"
+        );
+        let (cols, height) = FITTED;
+        let replay = [
+            serde_json::json!({"t":"hello","cols":cols,"rows":height,"history_cap":100}),
+            serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+                "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+            serde_json::json!({"t":"rows","rows":rows,"links":[]}),
+            frame(1, cols, height),
+            history_message(history),
+        ];
+        for message in replay {
+            self.fake().output(serde_json::from_value(message).unwrap());
+        }
+        self.fake().replay_complete();
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The link the current hover checks (or checked), as the grid model found it when the hover started.
+    fn hovered_file_link(&mut self) -> Option<TerminalLink> {
+        let owner = self.owner.clone();
+        self.cx.update(|_, cx| {
+            let files = owner.read(cx).files().read(cx);
+            files.hover.as_ref().map(|hover| hover.link.clone())
+        })
+    }
+}
+
+/// A `history` message appending `lines` from line 0, as the first one after a `hello` or a `history_reset` may.
+fn history_message(lines: &[&str]) -> serde_json::Value {
+    let rows: Vec<_> = lines
+        .iter()
+        .map(|text| serde_json::json!({"w":false,"r":[[0,text.len(),text,[0,-1,-1]]]}))
+        .collect();
+    serde_json::json!({"t":"history","first":0,"rows":rows,"cols":FITTED.0})
+}
+
+/// Why: a check waits on the host, and a program writing meanwhile (an agent at work, a prompt's clock) must not void
+/// it, or no file link would ever show while the terminal is busy; but an answer must never stand for a line whose
+/// path changed while it was asked. Spec (old `grid-terminal.spec.ts`, "a late link answer still hovers after output
+/// that did not touch its line"): resting on a printed path, with its check unanswered, a frame that only moves the
+/// cursor and then a rewrite of another row start no check and keep the pending one; its answer then shows and a
+/// click is admitted. The control: with a fresh check pending, a rewrite of the path's own row with another path drops
+/// that check and starts one for the new path, which the display shows as checking. (The old control rewrote the line
+/// with its old text, which the old grid treated as a new line; SPEC.md's file-path bullet makes the same text at the
+/// same position the same hover, which the rewrite tests above pin, so the control here changes the path.)
+#[gpui::test]
+fn a_pending_check_survives_output_that_does_not_touch_its_line(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(
+        vec![row(0, "notes.txt", false), row(2, "idle", false)],
+        None,
+    );
+    let (on, away) = (h.at_cell(2, 0), h.at_cell(40, 5));
+    h.rest_on(on);
+    let pending = h.check("notes.txt");
+
+    let cursor_only = serde_json::json!({"t":"frame","rev":2,"cols":FITTED.0,"rows":FITTED.1,
+        "cursor":{"x":3,"y":2,"visible":true,"shape":"block","blink":false}});
+    h.fake()
+        .output(serde_json::from_value(cursor_only).unwrap());
+    settle(h.cx);
+    redraw(h.cx);
+    h.rewrite(vec![row(2, "busy...", false)], None, 3);
+    assert!(h.checks().is_empty(), "output elsewhere starts no check");
+    assert!(!pending.abandoned(), "and keeps the one in flight");
+    h.answer(pending, ready("/work/notes.txt", 10));
+    assert_eq!(h.line("terminal-file-status").as_deref(), Some("10 B"));
+    h.click(on);
+    assert_eq!(h.admitted(), ["/work/notes.txt"]);
+
+    h.rest_on(away);
+    h.rest_on(on);
+    let pending = h.check("notes.txt");
+    h.rewrite(vec![row(0, "plans.txt", false)], None, 4);
+    assert!(pending.abandoned(), "a changed path drops its check");
+    let _fresh = h.check("plans.txt");
+    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
+    assert_eq!(h.line("terminal-file-path").as_deref(), Some("plans.txt"));
+}
+
+/// Why: a check vouches for the line it was asked about, and scrolling while it is pending puts another line under the
+/// still pointer; using the answer then would show one file's details beside the text of another, which is exactly
+/// what the display exists to rule out. Spec (old `grid-terminal.spec.ts`, "a late link answer is not used for a line
+/// the view scrolled away from the pointer"): over a screen with history above it, resting on the printed path
+/// `/work/asked.txt` on the second row and scrolling one line back while its check is pending drops that check and
+/// checks `/work/above.txt`, now under the pointer; the dropped check's late answer changes nothing, and the display
+/// shows only the new path's check and then its answer.
+#[gpui::test]
+fn a_pending_check_is_not_used_for_a_line_scrolled_away(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show_with_history(
+        &["h0", "h1", "h2"],
+        vec![
+            row(0, "/work/above.txt", false),
+            row(1, "/work/asked.txt", false),
+        ],
+    );
+    let on = h.at_cell(3, 1);
+    h.rest_on(on);
+    let asked = h.check("/work/asked.txt");
+
+    h.scroll_view(-1);
+    assert!(!h.following(), "the premise: the view scrolled back");
+    assert!(
+        asked.abandoned(),
+        "the scrolled-away line's check was dropped"
+    );
+    let above = h.check("/work/above.txt");
+    asked.answer(Ok(ready("/work/asked.txt", 99)));
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
+    assert_eq!(
+        h.line("terminal-file-path").as_deref(),
+        Some("/work/above.txt")
+    );
+    h.answer(above, ready("/work/above.txt", 5));
+    assert_eq!(h.line("terminal-file-status").as_deref(), Some("5 B"));
+}
+
+/// Why: a history reset can rebuild the history with the same text at the same line numbers (a reflow that changed
+/// nothing on those lines), so neither text nor numbers tell the old line from its replacement; a check asked about
+/// the old line must still not stand for the new one, while a fresh hover over the replacement must work. Spec (old
+/// `grid-terminal.spec.ts`, "a late history link answer is refused after a same-number same-text reset"): scrolled to
+/// the top, resting on the printed path in history line 0, with its check pending, a `history_reset` and the same
+/// three lines from line 0 return the view to the live screen and drop the check; scrolling back to the top finds a
+/// link equal in text, cells and file to the first and checks it afresh; the dropped check's late answer changes
+/// nothing, and the fresh one's shows.
+///
+/// NOTE: This departs from the old case, where the view stayed at the top through the reset with the check still
+/// pending, and the old grid refused the late answer by comparing the stored line itself. Here a file hover is the
+/// same hover whenever its link is equal (`FileLinks::follow` compares `hover.link == link`), and the replacement's
+/// link is equal, so the only thing that drops the old check is the view letting go of its place in history on the
+/// reset. SPEC.md does not ask for that; it is this app's viewport rule (line numbers no longer name the lines they
+/// named). A change that keeps the view's place through a reset must give the hover a line identity that a reset
+/// changes, not delete the `following` assertion below.
+#[gpui::test]
+fn a_pending_history_check_is_not_used_after_a_same_number_same_text_reset(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    let history = ["/work/history.txt", "second line", "third line"];
+    h.show_with_history(&history, vec![row(0, "screen 0", false)]);
+    h.scroll_view(-100);
+    assert!(!h.following(), "the premise: the view shows history");
+    let on = h.at_cell(3, 0);
+    h.rest_on(on);
+    let old = h.check("/work/history.txt");
+    let asked = h.hovered_file_link();
+
+    let reset = serde_json::json!({"t":"history_reset"});
+    h.fake().output(serde_json::from_value(reset).unwrap());
+    h.fake()
+        .output(serde_json::from_value(history_message(&history)).unwrap());
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.following(),
+        "the reset returned the view to the screen, which is what drops the old check: the replacement's link is \
+         equal to the asked one, so a view that kept its place would keep the check (see the NOTE above)"
+    );
+    assert!(old.abandoned(), "and dropped the check of the old line");
+
+    h.scroll_view(-100);
+    let fresh = h.check("/work/history.txt");
+    assert_eq!(
+        h.hovered_file_link(),
+        asked,
+        "the premise: the replacement is the same link by text, cells and file"
+    );
+    old.answer(Ok(ready("/work/history.txt", 99)));
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
+    h.answer(fresh, ready("/work/history.txt", 7));
+    assert_eq!(h.line("terminal-file-status").as_deref(), Some("7 B"));
+}
+
+/// Why: a printed path's link reads the rows around it (two above and two below, to rule out a chain of program cuts),
+/// so output there is neighbor evidence, but output past a blank row cannot change the path or its cells, and treating
+/// it as a change would restart the host check (and withdraw the click) every time a status line below redraws. Spec
+/// (old `grid-attach.spec.ts`, "a container file hover survives unrelated neighboring output", both its variants):
+/// with a printed path (on row 0, or `cut` across rows 0 and 1 as a program broke it), a blank row after it and
+/// "status" on the next row, which lies in the link's evidence, a checked hover on the path's first row stays checked
+/// when that status row is rewritten as "update": no check starts, the display keeps its answer, the pointing hand
+/// stays, and a click saves the whole path's file.
+fn hover_survives_output_past_a_blank_row(cx: &mut TestAppContext, cut: bool) {
+    let mut h = harness(cx);
+    let (rows, on, path, status_row) = if cut {
+        // The head ends four columns short of the edge of the fitted width, as in the cut-path test above.
+        let head = format!("{}/work/broken-", " ".repeat(usize::from(FITTED.0) - 17));
+        let rows = vec![
+            row(0, &head, false),
+            row(1, "  file.txt", false),
+            row(3, "status", false),
+        ];
+        (rows, (66, 0), "/work/broken-file.txt", 3)
+    } else {
+        let rows = vec![row(0, "/work/real.txt", false), row(2, "status", false)];
+        (rows, (3, 0), "/work/real.txt", 2)
+    };
+    h.show(rows, None);
+    let on = h.at_cell(on.0, on.1);
+    h.checked(on, path, 29);
+    let link = h.hovered_file_link().expect("the premise: a hover");
+    let first = link.ranges[0].start.line;
+    assert!(
+        link.evidence.contains(&(first + status_row)),
+        "the premise: the status row is part of the link's evidence: {:?}",
+        link.evidence
+    );
+
+    h.rewrite(vec![row(status_row, "update", false)], None, 2);
+    assert!(
+        h.checks().is_empty(),
+        "the rewrite past the blank row starts no check"
+    );
+    assert_eq!(h.line("terminal-file-status").as_deref(), Some("29 B"));
+    assert!(h.pointer(), "the hand stays");
+    h.click(on);
+    assert_eq!(h.last_save(), (path.to_owned(), false));
+}
+
+/// [`hover_survives_output_past_a_blank_row`] for a path on one row (old `grid-attach.spec.ts`, "a container file hover
+/// survives unrelated neighboring output (single row)").
+#[gpui::test]
+fn a_single_row_paths_hover_survives_output_past_a_blank_row(cx: &mut TestAppContext) {
+    hover_survives_output_past_a_blank_row(cx, false);
+}
+
+/// [`hover_survives_output_past_a_blank_row`] for a path a program cut across two rows (old `grid-attach.spec.ts`, "a
+/// container file hover survives unrelated neighboring output (cut)").
+#[gpui::test]
+fn a_cut_paths_hover_survives_output_past_a_blank_row(cx: &mut TestAppContext) {
+    hover_survives_output_past_a_blank_row(cx, true);
+}
