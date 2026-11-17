@@ -695,7 +695,9 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "help-menu",
-        // The app's minimum window height, so the whole menu shows, Open-Source Notices last.
+        // The app's minimum window height. On Linux the menu, with Open-Source Notices last, is a few pixels taller
+        // than that window allows, so this shows it at its cap (the window's height less 16 pixels), scrolled to its
+        // top; the macOS menu fits.
         size: (420., 560.),
         draw: session_lists_then,
         setup: help_menu_setup,

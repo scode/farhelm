@@ -363,10 +363,11 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **A resize no longer closes the Help menu.** The old menu closed when the window's size changed, because its measured
   position went stale. The layer manager anchors the menu to the button, so it follows it instead. A press outside the
   menu still closes it; the layer manager's own tests cover that for every popover.
-- **The menu can be taller than the smallest window.** With Keyboard shortcuts and Welcome in it, the Help menu fills a
-  window at the 720 by 560 minimum exactly on Linux, and an installed Linux app that offers both Announcements and Check
-  for updates as well would draw it about 20 pixels taller than the window. Menus have no maximum height and do not
-  scroll, so the overflow is cut off at the window's edge. That is a follow-up for the shared menu, not for this one.
+- **The menu's height cap follows its placement.** Both menus scroll, header and all, once they reach their cap. The old
+  one hung from the button and was capped at the room from its bottom edge, 4 pixels below the button's, up to 8 pixels
+  below the window's top (`footer_menu_placement`). This one sits on the bottom edge of the window's content area, so it
+  is capped at that area's height less 16 pixels, the old flyouts' own `calc(100vh - 16px)` that the session bell's list
+  and the rail's notices panel keep too, and shows more of a long menu before it scrolls.
 
 ### Send feedback
 
@@ -540,6 +541,9 @@ Where the port does not match the old app, and why. Each stays until the work na
   frame (only what its close needs is kept), so an entry stops being New if the mark moves while the list is open: the
   read mark is kept by the helm and shared by every client (SPEC.md, "Status"), so another client closing its own list
   moves it, and so can a late answer to this window's own previous close.
+- **Clear all's hover help names no other window.** The old help read "Clear: remove these notifications for every
+  window"; with one desktop app per helm (the maintainer's decision of 2026-11-15) there is no other window to clear
+  them in, so it reads "Clear: remove these notifications".
 - **The session bell sits centred on the age's line.** The old bell sat on the age's text baseline; here it is centred
   on the same line, which can put it about a pixel lower, so the row's height stays the age's.
 - **An entry's text wraps by parts when it holds a docs link.** Each run of host text and the link are elements of their
