@@ -996,10 +996,11 @@ def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[st
 # old staging rewrote in the helm's replies, reach the app in a file (`session_pins_body`). What a scenario says that is
 # not staged yet (the viewport's scale) is in docs/gui-agent.md, "Scenario runs".
 
-# The program names a scenario session may be launched as, and the permission-bypass flag each takes: the flags the
-# helm composes a YOLO launch of that harness with (`compile` in crates/farhelm-helm/src/launches.rs). The flag is only
-# what the row's command reads; the helm believes the command launch's `yolo` assertion, not the flag.
-SCENARIO_YOLO_FLAGS = {"claude": "--dangerously-skip-permissions", "codex": "--yolo"}
+# The wrappers a scenario session may name, each with the launch harness (`LaunchHarness`'s wire name in
+# crates/farhelm-proto/src/launch.rs) its agent launch asks for. The helm runs each harness's program by its bare name
+# (`program` in crates/farhelm-helm/src/launches.rs), which is the wrapper's name, so the run's wrapper of that name
+# (STAGED_AGENTS) answers the launch.
+SCENARIO_HARNESSES = {"claude": "claude", "codex": "codex"}
 
 # The session list's preferences the old staging set before the page loaded: the activity order the scenario's row order
 # is written for, and full rows. One sparse write, which touches no other preference.
@@ -1101,8 +1102,8 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
         titles.add(session["title"])
         if session.get("host") not in keys:
             fail(f"{name}: unknown host {session.get('host')!r}")
-        if session.get("wrapper") not in SCENARIO_YOLO_FLAGS:
-            fail(f"{name}: wrapper must be one of {', '.join(SCENARIO_YOLO_FLAGS)}")
+        if session.get("wrapper") not in SCENARIO_HARNESSES:
+            fail(f"{name}: wrapper must be one of {', '.join(SCENARIO_HARNESSES)}")
         # The folder and age the app pins on the session's row (`session_pins_body`).
         if not isinstance(session.get("cwd"), str) or not session["cwd"]:
             fail(f"{name}: cwd is required")
@@ -1209,21 +1210,31 @@ def staged_agent_script(session: dict, fixtures: str) -> str:
 
 
 def scenario_session_body(session: dict, host_id: int, cwd: Path) -> dict:
-    """The `POST /api/sessions` body that creates a scenario session on the host `host_id`, in `cwd`: a command launch
-    of its wrapper's bare name (with the wrapper's YOLO flag for a `yolo` one) declaring that agent type, so its row
-    shows that agent's mark, its status is read the way that agent's is, and its shield is the launch's own assertion,
-    with nothing in the listing rewritten. A declared agent type requires `{farhelm_args}`.
+    """The `POST /api/sessions` body that creates a scenario session on the host `host_id`, in `cwd`: an agent launch
+    of its wrapper's harness, shaped as the launcher's Agent tab sends one (`create_body` in
+    crates/gui/farhelm-gui/src/launcher/request.rs), YOLO for a `yolo` session and Guarded, the launcher's default for
+    both harnesses, for every other. No model or effort, so the helm adds no flags for them.
+
+    An agent launch rather than a command launch (the migration's decision of 2026-11-16), so that the helm records an
+    agent session the way a user's launch makes one: it composes the command itself (`compile` in
+    crates/farhelm-helm/src/launches.rs), the row's mark, status reading and shield come from that launch with nothing
+    in the listing rewritten, and the details bar shows the composed command. A command launch of the same agent type
+    would have to carry `{farhelm_args}`, and its stored command, placeholder and all, is what the details bar showed.
+    The composed command runs the harness's program by its bare name, which the run's wrapper answers.
 
     A YOLO one also carries `confirm_yolo`: every host starts out asking before a YOLO launch, and confirming this one
     launch is what a user answering that question does, which, unlike turning the question off for the host, leaves
     no setting behind that the picture could show."""
-    wrapper = session["wrapper"]
-    words = [wrapper, *([SCENARIO_YOLO_FLAGS[wrapper]] if session["yolo"] else []), "{farhelm_args}"]
     return {
         "host": host_id,
         "cwd": str(cwd),
         "title": session["title"],
-        "command": {"command": " ".join(words), "yolo": session["yolo"], "agent": wrapper, "resume": None},
+        "launch": {
+            "harness": SCENARIO_HARNESSES[session["wrapper"]],
+            "model": None,
+            "effort": None,
+            "permissions": "yolo" if session["yolo"] else "guarded",
+        },
         "confirm_yolo": session["yolo"],
     }
 
@@ -1276,9 +1287,10 @@ def shield_problems(plan: dict, ids: dict[int, str], entries: list[dict]) -> tup
 
     The old staging's last check before the capture, followed here: each row has exactly one shield, slashed for a
     `yolo` session and plain for every other. The shield is read from the first paragraph of the agent track's
-    accessible name (`Description::of` in crates/gui/farhelm-gui/src/session_list/row_marks.rs), which states a command
-    launch's assertion; a status-line observation of YOLO, which draws the slashed shield whatever the launch asserted,
-    comes first in its place, so it fails the check for a session that is not `yolo`."""
+    accessible name (`Description::of` in crates/gui/farhelm-gui/src/session_list/row_marks.rs), which for an agent
+    launch is `<agent> — ` and the heading of its stored permission's help (`permission_help` in
+    crates/gui/farhelm-gui/src/permission/words.rs): `YOLO: ...` or `Guarded · ...`. A status-line observation of
+    YOLO, which draws the slashed shield whatever the launch chose, comes first in its place, so it fails the check."""
     missing, wrong = [], []
     for index, key in ids.items():
         session = plan["sessions"][index]
@@ -1290,8 +1302,8 @@ def shield_problems(plan: dict, ids: dict[int, str], entries: list[dict]) -> tup
         if len(names) != 1:
             missing.append(f"{session['title']} ({len(names)} shields)")
             continue
-        # "— YOLO, as asserted" is not part of "— Not YOLO, as asserted", so each tells the two apart.
-        want = "— YOLO, as asserted" if session["yolo"] else "— Not YOLO, as asserted"
+        # Neither heading holds the other, and the observation's "line: <mode>" holds neither.
+        want = "— YOLO:" if session["yolo"] else "— Guarded"
         first = names[0].split("\n\n")[0]
         if want not in first:
             wrong.append(f"{session['title']}: {first!r} does not say {want!r}")
