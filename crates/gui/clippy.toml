@@ -35,6 +35,9 @@ disallowed-methods = [
   # `tab_index` and a stateful element's `focusable` also make GPUI create a focus handle and focus it on a press.
   { path = "gpui::InteractiveElement::tab_index", reason = "make an element a tab stop through focus::track, which applies the coordinator's press rule" },
   { path = "gpui::StatefulInteractiveElement::focusable", reason = "make an element focusable through focus::track, which applies the coordinator's press rule" },
+  # Whether focus shows as the keyboard's (its ring and its hover help) is the coordinator's own flag. GPUI's flag turns
+  # to "mouse" on any pointer move, which took the ring from a keyboard user who nudged the mouse.
+  { path = "gpui::Window::last_input_was_keyboard", reason = "read focus::last_input_was_keyboard; GPUI's flag clears on any pointer move" },
 
   # Overlays: only the layer manager draws on top of the window, so it alone knows the stacking and what covers a
   # terminal link's disclosure.

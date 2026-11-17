@@ -50,6 +50,7 @@ FUNCTION = re.compile(r"^\s*fn\s+(\w+)")
 EXCEPTION_OWNERS = {
     ("farhelm-gui/src/actions.rs", "install_interceptor"),
     ("farhelm-gui/src/cache.rs", "element"),
+    ("farhelm-gui/src/components/tests/list_row.rs", "gpui_keyboard_flag"),
     ("farhelm-gui/src/components/transition.rs", "one_shot"),
     ("farhelm-gui/src/focus.rs", "apply"),
     ("farhelm-gui/src/focus.rs", "track_raw"),
