@@ -65,6 +65,9 @@ pub struct ChannelConfig {
     pub reconnect_max: Duration,
     /// A terminal stream's reconnect schedule. The UI channel ignores it.
     pub terminal_ladder: TerminalLadder,
+    /// How long a terminal attachment's catch-up may go without a grid message before the stream stops waiting for its
+    /// replay to end (`crate::terminal`, "The catch-up's idle bound"). The UI channel ignores it.
+    pub replay_idle: Duration,
 }
 
 impl Default for ChannelConfig {
@@ -75,6 +78,8 @@ impl Default for ChannelConfig {
             reconnect_initial: Duration::from_secs(1),
             reconnect_max: Duration::from_secs(8),
             terminal_ladder: TerminalLadder::default(),
+            // The old browser app's `REPLAY_IDLE_TIMEOUT_MS`.
+            replay_idle: Duration::from_secs(5),
         }
     }
 }

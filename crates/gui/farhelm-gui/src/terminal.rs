@@ -397,6 +397,13 @@ impl TerminalView {
         result
     }
 
+    /// Release the catch-up placeholder on what has arrived, whole screen or not: the stream's own end of a replay that
+    /// went quiet (`TerminalEvent::ReplayIdle`), which no marker's checks apply to.
+    pub fn reveal(&mut self, cx: &mut Context<Self>) {
+        self.model.reveal();
+        self.sync(cx);
+    }
+
     /// Change focus or the blink phase; repaints the cursor without reshaping anything.
     pub fn set_cursor_phase(&mut self, phase: CursorPhase, cx: &mut Context<Self>) {
         if self.phase != phase {

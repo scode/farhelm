@@ -8,12 +8,13 @@
 //!   "Reconnect now" and take-control alike. It takes the terminal from whatever holds it. There is no non-displacing
 //!   attach: the app is single-UI (SPEC_impl.md, "The seat: one UI per helm"), so there is no other viewer to leave
 //!   alone.
-//! - A dropped socket, an unanswered ping, a failed attempt or a 5xx answer to the upgrade reconnects, climbing the
-//!   terminal's own [`TerminalLadder`] (0.5 to 15 s over six retries, then a probe every 30 s forever). It reconnects
-//!   at once only if the attachment had answered a ping, which shows the link worked; otherwise it waits its rung, so
-//!   a path that attaches, replays and drops again cannot loop on full replays. A successful attachment starts the
-//!   ladder over, so a terminal that recovered retries promptly the next time. Each wait and each attempt is a
-//!   [`StreamState::Reconnecting`] carrying the card's facts ([`ReconnectStatus`]).
+//! - A dropped socket, an unanswered ping, a failed attempt (an attach that sends nothing included; see "The catch-up's
+//!   idle bound" below) or a 5xx answer to the upgrade reconnects, climbing the terminal's own [`TerminalLadder`] (0.5
+//!   to 15 s over six retries, then a probe every 30 s forever). It reconnects at once only if the attachment had
+//!   answered a ping, which shows the link worked; otherwise it waits its rung, so a path that attaches, replays and
+//!   drops again cannot loop on full replays. A successful attachment starts the ladder over, so a terminal that
+//!   recovered retries promptly the next time. Each wait and each attempt is a [`StreamState::Reconnecting`] carrying
+//!   the card's facts ([`ReconnectStatus`]).
 //! - A 5xx answer is retried because a helm restarting usually gives one for a moment (the migration's orchestrator
 //!   decided this on 2026-11-15). Any other status the helm answers the upgrade with (401 credential, 404 session or
 //!   tab gone, 400, 403, 409, a 3xx) cannot fix itself and stops the stream in [`StreamState::Refused`].
@@ -34,9 +35,9 @@
 //!   behind and attaching again would walk back into the same wedge. [`TerminalHandle::take_control`] attaches again.
 //! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing.
 //!
-//! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`].
-//! A [`StreamState::Attached`] event precedes each attachment's first output, and the caller must reset its grid
-//! model there: the replay rebuilds it from nothing.
+//! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`]
+//! or, when it goes quiet, [`TerminalEvent::ReplayIdle`]. A [`StreamState::Attached`] event precedes each attachment's
+//! first output, and the caller must reset its grid model there: the replay rebuilds it from nothing.
 //!
 //! Input is stamped with the [`Attachment`] that event named, and a group of inputs travels as one request
 //! ([`TerminalHandle::input`]). The stream writes a group only to the attachment it was stamped for and drops it whole
@@ -49,6 +50,36 @@
 //! output without limit. While the stream waits on the caller its own watchdog is paused, because the delay is ours,
 //! not the link's. The stream task ends when it is closed, when every [`TerminalHandle`] is gone, or when its
 //! [`TerminalEvents`] is dropped: a stream nobody reads is a reconnect worker nobody owns.
+//!
+//! ## The catch-up's idle bound
+//!
+//! An attach can open its socket and then send nothing, or stop partway through its replay, while the link stays
+//! healthy: once the supervisor has answered the attach, the helm answers pings, so the watchdog never fires. Without a
+//! bound the caller would keep its reconnect card up, or its screen hidden, until the connection happened to drop. The
+//! old browser app bounded this with a catch-up idle watchdog (`REPLAY_IDLE_TIMEOUT_MS` and `armIdleTimer` in
+//! terminal.js at the reference commit), and the stream keeps its rule and its 5 s ([`ChannelConfig::replay_idle`]):
+//!
+//! - **What it measures.** Silence, not elapsed time: it starts when the socket opens and starts again as the caller
+//!   takes each grid message, so a slow replay that keeps arriving is never cut off. Nothing else counts. A pong, a
+//!   control message this client does not know or a WebSocket ping is no evidence of a replay, and letting one count
+//!   would hand a broken or hostile peer a way to keep a terminal hidden for free (the old app excluded empty frames
+//!   for the same reason; here an empty binary message does not decode, which ends the socket outright). The bound is
+//!   paused while the stream waits on its caller, as the watchdog is, because that delay is ours.
+//! - **No grid message at all.** The attach failed: the socket ends as a failed attempt that never attached, so the
+//!   ladder climbs a rung instead of starting over. This is the old app's rule for a reconnect that produced nothing.
+//!   A first attach goes the same way, which differs from the old app where its socket had opened: that one revealed
+//!   an empty, live terminal. There is nothing to reveal here, since an attachment is announced only with its first
+//!   output, and a terminal no attachment stands behind could take no input.
+//! - **Some grid messages, then silence.** The stream ends the catch-up itself with [`TerminalEvent::ReplayIdle`], as
+//!   the old app ended its catch-up as "idle" and revealed what had arrived, live. It is a separate event because it
+//!   vouches for nothing: what arrived may be less than a whole screen, and a caller that checked it as it checks the
+//!   supervisor's marker would blame the peer's format for a stall. The supervisor's own marker, if it comes later, is
+//!   dropped, so each attachment still reports one end of replay.
+//!
+//! The bound lives here rather than in the GUI because only the stream sees a socket open: an attachment is announced
+//! with its first output, so the GUI cannot tell an attach that sent nothing from one still connecting, and it has no
+//! way to end a socket as a failed attempt short of closing the whole stream. Unlike the old app's, the bound does not
+//! cover the connect: the handshake has its own, the watchdog ([`ChannelConfig::watchdog`], 30 s by default).
 
 use std::collections::VecDeque;
 
@@ -141,8 +172,14 @@ pub enum StreamState {
 pub enum TerminalEvent {
     State(StreamState),
     Output(GridOutput),
-    /// The attachment's replay is done; what follows is live.
+    /// The attachment's replay is done; what follows is live. At most once per attachment, and never after
+    /// [`TerminalEvent::ReplayIdle`].
     ReplayComplete,
+    /// The attachment's replay went quiet before its end, past the catch-up's idle bound (see the module docs): the
+    /// catch-up is over on what arrived, which may be less than a whole screen, and what follows is live. Not the
+    /// supervisor's word that the replay is complete, so a caller must not hold it to that marker's checks. At most
+    /// once per attachment, and never after [`TerminalEvent::ReplayComplete`].
+    ReplayIdle,
 }
 
 pub(crate) enum Request {
@@ -318,10 +355,11 @@ pub(crate) fn attach_path(attach: &TerminalAttach) -> Result<ApiPath, crate::Pat
 /// How one socket ended.
 enum Ended {
     /// The socket dropped, its watchdog fired, or the helm detached it for a reason that keeps recovering
-    /// (`replaced`, `taken_over`, `other`); also an attempt that failed before its socket opened. Two separate facts
-    /// decide what happens next: `attached` (the socket got as far as an attachment, so the ladder starts over) and
-    /// `skip_wait` (the attachment answered a ping and then lost its socket, so the link was working and an immediate
-    /// reconnect is earned). A detach notice never skips the wait.
+    /// (`replaced`, `taken_over`, `other`); also an attempt that failed before its socket opened, or that sent no grid
+    /// message within the catch-up's idle bound. Two separate facts decide what happens next: `attached` (the socket
+    /// got as far as an attachment, so the ladder starts over) and `skip_wait` (the attachment answered a ping and then
+    /// lost its socket, so the link was working and an immediate reconnect is earned). A detach notice never skips the
+    /// wait.
     Dropped {
         attached: bool,
         skip_wait: bool,
@@ -533,11 +571,21 @@ impl Stream {
         // Events read from the socket and not yet accepted by the caller's bounded queue. While this is non-empty the
         // socket is not read, so a slow caller slows the stream instead of growing this.
         let mut pending: VecDeque<TerminalEvent> = VecDeque::new();
+        // When the catch-up's idle bound runs out ("The catch-up's idle bound" in the module docs); `None` once this
+        // attachment's replay has ended, by the supervisor's marker or by the bound itself.
+        let replay_idle = self.config.replay_idle;
+        let mut catch_up: Option<Instant> = Some(Instant::now() + replay_idle);
         let ended = loop {
             let waiting_on_caller = !pending.is_empty();
             let watchdog = async {
                 match ping_sent {
                     Some(sent) if !waiting_on_caller => sleep_until(sent + watchdog_period).await,
+                    _ => std::future::pending().await,
+                }
+            };
+            let catch_up_idle = async {
+                match catch_up {
+                    Some(at) if !waiting_on_caller => sleep_until(at).await,
                     _ => std::future::pending().await,
                 }
             };
@@ -554,6 +602,15 @@ impl Stream {
                             // The watchdog was paused while the caller was behind; restart its clock now rather than
                             // charging the link for the caller's delay.
                             ping_sent = Some(Instant::now());
+                        }
+                        // The catch-up's bound starts again here. Until the replay ends, only grid messages (and the
+                        // `Attached` before the first) pass through `pending`, so this measures the silence between
+                        // them.
+                        // It counts from the caller taking the message rather than from its read, because while the
+                        // caller is behind this stream reads nothing, and what the peer held back meanwhile may still
+                        // be on its way.
+                        if pending.is_empty() && let Some(at) = &mut catch_up {
+                            *at = Instant::now() + replay_idle;
                         }
                     }
                     Err(_) => break Ended::Closed,
@@ -576,10 +633,11 @@ impl Stream {
                             answered |= attached && ping_sent.is_some();
                             ping_sent = None;
                         }
-                        Ok(TerminalServerMessage::ReplayComplete) => {
+                        // After the bound has ended the catch-up, the supervisor's marker is late and says nothing new.
+                        Ok(TerminalServerMessage::ReplayComplete) => if catch_up.take().is_some() {
                             Self::mark_attached(&mut attached, &mut pending, &mut self.attachments);
                             pending.push_back(TerminalEvent::ReplayComplete);
-                        }
+                        },
                         Ok(TerminalServerMessage::Detached { reason, code }) if detach_stops(code) => {
                             break Ended::Detached { code, reason };
                         }
@@ -630,6 +688,17 @@ impl Stream {
                 _ = watchdog => {
                     tracing::info!("a terminal stream's watchdog fired");
                     break Ended::Dropped { attached, skip_wait: answered };
+                }
+                _ = catch_up_idle => {
+                    catch_up = None;
+                    // Nothing arrived: a failed attempt, which climbs the ladder (`attached` is false, so it does not
+                    // start over) and earns no immediate retry. Otherwise the catch-up ends on what did arrive.
+                    if !attached {
+                        tracing::info!("a terminal attach sent no grid message within its catch-up bound");
+                        break Ended::Dropped { attached, skip_wait: false };
+                    }
+                    tracing::info!("a terminal replay went quiet before its end; ending its catch-up");
+                    pending.push_back(TerminalEvent::ReplayIdle);
                 }
                 _ = sleep_until(next_ping), if !waiting_on_caller => {
                     next_ping = Instant::now() + self.config.ping_interval;
