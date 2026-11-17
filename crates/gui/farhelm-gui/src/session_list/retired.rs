@@ -23,7 +23,8 @@
 //!   down, Clone, Replace with, Replace and Stop are not drawn, as the old menu drew none of them. The Rename shortcut
 //!   opens nothing for such a session either (`super::rename`), as the old list's metadata fence refused it.
 //! - **No seen stamp.** Opening the session never marks it seen (`super::selection::seen_due`): the old app kept a
-//!   retired session's stored metadata unchanged, even on selection.
+//!   retired session's stored metadata unchanged, even on selection, and the helm's seen route refuses it. It is the
+//!   one session the automatic mark skips; stale and ended sessions are marked (SPEC.md, "Status").
 //! - **The open session's view** mounts no terminal and no tab strip and opens no stream, its header draws Delete
 //!   alone, and a card in the terminal's place says why (`crate::session_pane::retired`).
 //! - **No pin drag.** A retired pin's row draws no grip and no drag of it starts (`super::pin_drag`), as the old app

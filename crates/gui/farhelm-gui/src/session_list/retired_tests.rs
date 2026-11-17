@@ -243,9 +243,10 @@ fn a_retired_row_draws_no_bell_and_no_seen_toggle(cx: &mut TestAppContext) {
 }
 
 /// The old app kept a retired session's stored metadata unchanged even on selection, and its list fenced the Rename
-/// shortcut with the menu's Rename. Specified: with retired a open at startup and its output unseen, no seen mark is
-/// sent for it and the Rename shortcut opens no editor; opening b, whose output is unseen too, sends b's mark, so the
-/// automatic mark is not off altogether.
+/// shortcut with the menu's Rename. The helm refuses a retired session's seen write too, which is why it stays the one
+/// session the automatic mark skips now that stale and ended ones are marked. Specified: with retired a open at startup
+/// and its output unseen, no seen mark is sent for it and the Rename shortcut opens no editor; opening b, whose output
+/// is unseen too, sends b's mark, so the automatic mark is not off altogether.
 #[gpui::test]
 fn opening_a_retired_session_stamps_nothing_and_rename_opens_nothing(cx: &mut TestAppContext) {
     let unseen = |fixture: Fixture| fixture.activity(200).seen(Some(100));
