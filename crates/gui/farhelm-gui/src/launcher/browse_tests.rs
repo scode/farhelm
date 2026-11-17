@@ -15,14 +15,13 @@ use super::draft::{DestinationKind, LaunchDraft};
 use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of};
 use crate::test_support::{self, keys, settle};
 
-/// Scroll the launcher's body to its end with the wheel, where the listing sits: its entries are 38 pixels high, so the
-/// later ones can lie past the body's visible end, where a click would land on whatever covers that point instead.
-fn scroll_body_to_end(cx: &mut VisualTestContext) {
+/// Wheel inside the launcher body so tests can reach clipped rows or change the scroll position without changing focus.
+pub(super) fn scroll_body(cx: &mut VisualTestContext, delta_y: f32) {
     let at = test_support::center(cx, "launcher-body");
     cx.simulate_mouse_move(at, None, Modifiers::none());
     cx.simulate_event(ScrollEvent {
         position: at,
-        delta: ScrollDelta::Pixels(point(px(0.), px(-4000.))),
+        delta: ScrollDelta::Pixels(point(px(0.), px(delta_y))),
         ..Default::default()
     });
     settle(cx);
@@ -119,7 +118,7 @@ fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext
         Some("/tmp/b<U+202E>"),
         "a host value is shown escaped"
     );
-    scroll_body_to_end(cx);
+    scroll_body(cx, -4000.);
     test_support::click(cx, "launcher-browse-1");
     let taken = draft(cx);
     assert_eq!(

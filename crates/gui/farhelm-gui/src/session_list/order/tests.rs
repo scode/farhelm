@@ -769,8 +769,8 @@ fn probe_in_flight(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
 /// remains the sidebar's one filled control"). Its words are the old button's, which a screen reader user hears in
 /// place of the plus. Specified: the button is named "New session", sits right of Templates, takes clicks and focus,
 /// and its hover help is New's help word for word ("New session: start an agent or a command on any host", with " (⌘N)"
-/// on a Mac); under the Linux click rule a click on it opens the launcher, and Escape closes the launcher with focus
-/// back on the button.
+/// on a Mac). A click opens the launcher and Escape restores focus to New. Enter and Space on the focused button
+/// reopen it with focus in search, so immediate typing lands there.
 #[gpui::test]
 fn new_opens_the_launcher_and_closing_returns_focus_to_the_button(cx: &mut TestAppContext) {
     let (_fake, _main, cx) = open(cx);
@@ -795,6 +795,20 @@ fn new_opens_the_launcher_and_closing_returns_focus_to_the_button(cx: &mut TestA
     keys(cx, "escape");
     assert!(!cx.update(|window, cx| layers::any_open(window, cx)));
     assert_eq!(focused_id(cx).as_deref(), Some(NEW_ID));
+
+    for activation in ["enter", "space"] {
+        assert_eq!(focused_id(cx).as_deref(), Some(NEW_ID));
+        keys(cx, activation);
+        assert!(launcher_drawn(cx), "New opened via {activation}");
+        assert!(
+            crate::launcher::view_tests::search_focused(cx),
+            "{activation} focused search"
+        );
+        keys(cx, "a b");
+        assert_eq!(crate::launcher::view_tests::search_text(cx), "ab");
+        keys(cx, "escape escape");
+        assert!(!launcher_drawn(cx), "Escape closed the launcher");
+    }
 }
 
 /// New is unavailable while a launch is pending or a host change is in flight (SPEC.md, "Creation": "Launches and

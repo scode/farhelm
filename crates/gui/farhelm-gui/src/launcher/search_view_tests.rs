@@ -191,6 +191,119 @@ fn a_scoped_miss_says_why_and_enter_changes_nothing(cx: &mut TestAppContext) {
     assert_eq!(search_text(cx), "host:nowhere", "and the query stays");
 }
 
+/// Arrow navigation scrolls the chosen result into view. Going through an unmatched scoped query and back
+/// restores the first result as the selection, so Enter cannot use the previous position.
+#[gpui::test]
+fn navigation_reveals_the_highlight_and_a_miss_clears_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher(cx);
+    let models: Vec<_> = (0..24)
+        .map(|n| {
+            serde_json::json!({
+                "id": format!("scroll-model-{n:02}"), "harness": "codex", "efforts": []
+            })
+        })
+        .collect();
+    answer_catalog(&mut helm, cx, Some(serde_json::Value::Array(models)));
+    assert!(search_focused(cx), "the search has focus");
+    type_in(cx, "scroll-model");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.search_results(cx).rows.len()),
+        24
+    );
+    let target = |cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("launcher-search-option-20"))
+            .expect("the catalog contributed the distant row")
+    };
+    let before = target(cx);
+    assert_ne!(
+        before.visible_bounds, before.bounds,
+        "the row begins below the clip"
+    );
+    for _ in 0..20 {
+        keys(cx, "down");
+    }
+    let after = target(cx);
+    assert_eq!(after.selected, Some(true));
+    assert_eq!(
+        after.visible_bounds, after.bounds,
+        "the whole highlighted row is shown"
+    );
+
+    keys(cx, super::view_tests::SELECT_ALL);
+    type_in(cx, "host:no-such-composer-result");
+    assert_eq!(
+        name_of(cx, "launcher-search-message").as_deref(),
+        Some("No host matches")
+    );
+    assert!(test_support::frame(cx).iter().all(|node| {
+        !node
+            .element_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("launcher-search-option-"))
+    }));
+    assert!(search_focused(cx));
+    keys(cx, super::view_tests::SELECT_ALL);
+    type_in(cx, "scroll-model");
+    assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(true));
+    assert_eq!(
+        target(cx).selected,
+        Some(false),
+        "the old position is no longer selected"
+    );
+}
+
+/// A defaults-only setup replaces all explicit model, effort and permission choices. Accepting its search result
+/// fills the draft and leaves Launch to a separate press.
+#[gpui::test]
+fn a_defaults_only_setup_clears_explicit_choices_without_launching(cx: &mut TestAppContext) {
+    let saved = history(vec![launched(
+        "/saved-defaults",
+        &chosen(LaunchHarness::Codex, None, None, None),
+    )]);
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "/tmp".into(), None));
+    let catalog =
+        serde_json::json!([{ "id": "custom-model", "harness": "codex", "efforts": ["high"] }]);
+    assert!(
+        super::launch_tests::creates_answering_with(&mut helm, cx, &catalog, &saved)
+            .0
+            .is_empty()
+    );
+    for query in [
+        "harness:codex",
+        "model:custom-model",
+        "effort:high",
+        "perms:yolo",
+    ] {
+        assert!(search_focused(cx));
+        type_in(cx, query);
+        keys(cx, "enter");
+    }
+    let before = draft(cx);
+    assert_eq!(before.agent.model.as_deref(), Some("custom-model"));
+    assert_eq!(before.agent.effort, Some(LaunchEffort::High));
+    assert_eq!(before.agent.permissions, Some(LaunchPermission::Yolo));
+
+    type_in(cx, "recent:saved-defaults");
+    assert!(
+        name_of(cx, "launcher-search-option-0")
+            .is_some_and(|label| label.contains("/saved-defaults"))
+    );
+    keys(cx, "enter");
+    let after = draft(cx);
+    assert_eq!(after.folder.value(), "/saved-defaults");
+    assert_eq!(after.agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!((after.agent.model, after.agent.effort), (None, None));
+    // Codex's request permission defaults to Guarded after it drops the earlier explicit YOLO.
+    assert_eq!(after.agent.permissions, Some(LaunchPermission::Guarded));
+    assert_eq!(
+        name_of(cx, "launcher-summary-choices").as_deref(),
+        Some("Model: Default · Effort: Default · Permissions: Guarded")
+    );
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
 /// `host:` rows choose the host as the host picker does. Taking a typed path in search edits only the folder,
 /// so the user can choose a destination without losing the Command tab or the command being written.
 #[gpui::test]

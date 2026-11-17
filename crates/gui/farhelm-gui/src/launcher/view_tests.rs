@@ -394,6 +394,119 @@ fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
     }
 }
 
+/// At the minimum window size the body can scroll while the pinned footer and header stay in view. Tab and
+/// Shift+Tab wrap between Launch and Close, and the footer's other actions keep their reading order.
+#[gpui::test]
+fn the_footer_actions_follow_reading_order_and_wrap_to_close(cx: &mut TestAppContext) {
+    let mut launch = LaunchDraft::new(Some(1), "~".into(), None);
+    let _ = launch.choose_harness(LaunchHarness::Codex, None, None);
+    let (_helm, cx) = launcher_on(cx, launch);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-launch").as_deref(),
+        Some("Launch Codex · host1 · ~"),
+    );
+    assert!(
+        search_focused(cx),
+        "search holds the keyboard with no results open"
+    );
+    let at_endpoint = |cx: &mut VisualTestContext, id| {
+        let node = test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .expect("the endpoint is drawn");
+        assert!(node.flags.focused, "{id} has focus");
+        assert_eq!(node.visible_bounds, node.bounds, "{id} is visible");
+    };
+    let start = test_support::bounds(cx, "launcher-search-box").top();
+    keys(cx, "shift-tab shift-tab");
+    at_endpoint(cx, "launcher-launch");
+    super::browse_tests::scroll_body(cx, -4000.);
+    assert!(
+        test_support::bounds(cx, "launcher-search-box").top() < start,
+        "the body scrolls independently of the footer"
+    );
+    at_endpoint(cx, "launcher-launch");
+    keys(cx, "tab");
+    at_endpoint(cx, "launcher-close");
+    keys(cx, "tab");
+    assert!(search_focused(cx));
+    super::browse_tests::scroll_body(cx, 4000.);
+    assert_eq!(test_support::bounds(cx, "launcher-search-box").top(), start);
+    keys(cx, "shift-tab");
+    at_endpoint(cx, "launcher-close");
+    keys(cx, "shift-tab");
+    at_endpoint(cx, "launcher-launch");
+    for id in [
+        "launcher-save-template",
+        "launcher-reset",
+        "launcher-cancel",
+    ] {
+        keys(cx, "shift-tab");
+        assert_eq!(focused_id(cx).as_deref(), Some(id));
+    }
+}
+
+/// With every placement offered, Tab follows the visible launch groups: search and recents, destination and
+/// placement, host and path, then the active launch tab and its agent choices.
+#[gpui::test]
+fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAppContext) {
+    use super::recents_view_tests::{chosen, history, launched};
+
+    let mut start = LaunchDraft::new(Some(1), "/tmp".into(), None);
+    let _ = start.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = super::environment_launch_tests::window_with(
+        cx,
+        start,
+        fixture_hosts(&[0]),
+        super::environment_launch_tests::plain_preferences(),
+    );
+    let recent = history(vec![launched(
+        "/tmp",
+        &chosen(LaunchHarness::Codex, None, None, None),
+    )]);
+    let account = super::environment_tests::account(
+        true,
+        farhelm_proto::tensorlake::SshKeyStatus::NotCreated,
+    );
+    for command in helm.commands() {
+        let body = if command.path == "/api/tensorlake" {
+            Some(serde_json::to_value(&account).unwrap())
+        } else if command.path.starts_with("/api/launch-history?") {
+            Some(recent.clone())
+        } else {
+            None
+        };
+        helm.reply(command.id, 200, body);
+    }
+    settle(cx);
+    assert!(search_focused(cx));
+    for id in [
+        "launcher-recent-0",
+        "launcher-destination-Folder",
+        "launcher-destination-Managed checkout",
+        "launcher-runs-on-Existing host",
+        "launcher-runs-on-New container",
+        "launcher-runs-on-New sandbox",
+        "launcher-host",
+        "launcher-browse",
+        "launcher-folder",
+        "launcher-name",
+        "launcher-tabs-Agent",
+        "launcher-harness-Codex",
+    ] {
+        keys(cx, "tab");
+        let nodes = test_support::frame(cx);
+        assert!(
+            crate::session_list::host_rail::tests::within(&nodes, id)
+                .iter()
+                .any(|node| node.flags.focused),
+            "Tab reached {id}"
+        );
+    }
+}
+
 /// A host the store does not list, and no host at all, are "Unavailable host" in the footer, the old footer's words, so
 /// the target never silently loses its host part.
 #[gpui::test]
@@ -1252,7 +1365,7 @@ pub(super) fn model_text(cx: &mut VisualTestContext) -> String {
 /// user picks what the agent runs on, and Enter must apply only the row the user moved to.
 #[gpui::test]
 fn the_model_list_filters_and_enter_picks_the_highlighted_row(cx: &mut TestAppContext) {
-    let (_helm, cx) = model_field_open(cx, Some(1));
+    let (mut helm, cx) = model_field_open(cx, Some(1));
     assert_eq!(model_text(cx), "", "the field empties for typing");
     for id in [
         "launcher-model-default",
@@ -1277,6 +1390,18 @@ fn the_model_list_filters_and_enter_picks_the_highlighted_row(cx: &mut TestAppCo
         "picking closes the list"
     );
     assert_eq!(model_text(cx), "gpt-5-mini");
+    assert!(
+        focused(cx, Field::Model),
+        "the closed field still has focus"
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-5-mini"));
+    assert_eq!(
+        model_text(cx),
+        "gpt-5-mini",
+        "Enter cannot apply the old filter"
+    );
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
 }
 
 /// Enter on typed text with no row moved to applies what the text means: a custom id under the chosen agent type is
@@ -1709,6 +1834,28 @@ fn show_all_lists_every_agents_models_and_picking_one_switches_the_agent(cx: &mu
     test_support::click(cx, "launcher-model-option-Claude-sonnet");
     assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
     assert_eq!(draft(cx).agent.model.as_deref(), Some("sonnet"));
+}
+
+/// A model picked before an agent chooses its owner, so model-first composition remains reviewable and needs no
+/// separate agent press (sidebar.spec's arbitrary model-first case).
+#[gpui::test]
+fn a_catalog_model_picked_first_chooses_its_agent(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(&mut helm, cx, Some(model_catalog()));
+    assert_eq!(
+        draft(cx).agent.harness,
+        None,
+        "the premise: no agent chosen"
+    );
+    test_support::click(cx, "launcher-model-row");
+    assert!(
+        !has_node(cx, "launcher-model-show-all"),
+        "all owners are already offered"
+    );
+    test_support::click(cx, "launcher-model-option-Codex-gpt-5");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-5"));
+    assert_eq!(model_text(cx), "gpt-5");
 }
 
 /// Prompt and named-start controls follow the selected agent's capabilities, including the capture warning needed to

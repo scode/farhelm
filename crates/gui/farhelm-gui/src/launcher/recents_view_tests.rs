@@ -268,7 +268,8 @@ fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppConte
 }
 
 /// A setup carrying a retired container choice is refused with the shared reason under the agent choices, and the
-/// draft is unchanged. Why: such a setup supports Delete only (SPEC.md, "Retired containerized sessions").
+/// draft is unchanged. Such a setup supports Delete only (SPEC.md, "Retired containerized sessions"). Taking a usable
+/// setup afterward retires the refusal, which described the previous choice.
 #[gpui::test]
 fn a_retired_container_setup_is_refused(cx: &mut TestAppContext) {
     let mut retired = chosen(LaunchHarness::Codex, None, None, None);
@@ -276,7 +277,13 @@ fn a_retired_container_setup_is_refused(cx: &mut TestAppContext) {
         serde_json::from_value(json!({ "engine": "podman", "image": "old", "api_proxy_port": 1 }))
             .unwrap(),
     );
-    let (_helm, cx) = new_in_tmp(cx, &history(vec![launched("/tmp", &retired)]));
+    let (_helm, cx) = new_in_tmp(
+        cx,
+        &history(vec![
+            launched("/tmp", &retired),
+            launched("/tmp", &chosen(LaunchHarness::Claude, None, None, None)),
+        ]),
+    );
     let before = draft(cx);
     test_support::click(cx, "launcher-recent-0");
     assert_eq!(draft(cx), before, "nothing changed");
@@ -284,6 +291,10 @@ fn a_retired_container_setup_is_refused(cx: &mut TestAppContext) {
         name_of(cx, "launcher-choice-notice").is_some_and(|notice| notice.contains("Delete only")),
         "the shared reason is said under the agent choices"
     );
+    assert!(name_of(cx, "launcher-recent-1").is_some_and(|label| label.contains("Claude")));
+    test_support::click(cx, "launcher-recent-1");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(name_of(cx, "launcher-choice-notice"), None);
 }
 
 /// A row's cells name the agent type first and only the choices the setup set: an explicit model, effort and YOLO
@@ -407,12 +418,26 @@ fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
 /// help say (SPEC.md: host text is escaped "including in accessible names").
 #[gpui::test]
 fn a_row_names_a_custom_model_escaped(cx: &mut TestAppContext) {
+    let raw = "m\u{202e}x";
     let answer = history(vec![launched(
         "/tmp",
-        &chosen(LaunchHarness::Codex, Some("m\u{202e}x"), None, None),
+        &chosen(LaunchHarness::Codex, Some(raw), None, None),
     )]);
-    let (_helm, cx) = new_in_tmp(cx, &answer);
+    let (mut helm, cx) = new_in_tmp(cx, &answer);
     let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
     assert!(name.contains("Model: m<U+202E>x"), "{name}");
     assert!(!name.contains('\u{202e}'), "{name}");
+
+    test_support::click(cx, "launcher-recent-0");
+    assert_eq!(super::view_tests::model_text(cx), "m<U+202E>x");
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "the click fills the draft"
+    );
+    test_support::click(cx, "launcher-launch");
+    let sent = creates(&mut helm, cx);
+    let [create] = sent.as_slice() else {
+        panic!("expected one create with the saved model: {sent:?}");
+    };
+    assert_eq!(create.body.as_ref().unwrap()["launch"]["model"], raw);
 }
