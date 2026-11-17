@@ -386,17 +386,29 @@ impl GridModel {
                 "replay_complete before a complete grid screen".into(),
             ));
         }
+        self.reveal();
+        Ok(())
+    }
+
+    /// Release the placeholder on whatever has arrived, a whole screen or
+    /// not, without the marker's checks.
+    ///
+    /// For an attachment owner's own ending of a replay, such as the helm
+    /// client's catch-up idle bound: a replay that went quiet is a stall, not
+    /// a broken format, so refusing it would blame the peer for nothing. It
+    /// says nothing about the screen, so it never fails.
+    pub fn reveal(&mut self) {
         if !self.replay_complete {
             self.damage.visibility = true;
         }
         self.replay_complete = true;
-        Ok(())
     }
 
-    /// Whether a valid `replay_complete` marker has reached this model.
+    /// Whether the placeholder was released: a valid `replay_complete` marker
+    /// reached this model, or its owner revealed it ([`Self::reveal`]).
     ///
-    /// This tracks only that marker; the attachment owner decides any other
-    /// placeholder-release policy, such as size, timeout, or failure endings.
+    /// The attachment owner decides any other placeholder-release policy,
+    /// such as size, timeout, or failure endings.
     pub fn is_visible(&self) -> bool {
         self.replay_complete
     }

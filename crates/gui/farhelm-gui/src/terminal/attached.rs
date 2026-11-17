@@ -21,9 +21,11 @@
 //! - Staged replay. Each attachment replays the whole screen and history from nothing, so its output goes into a fresh
 //!   view kept off screen until the helm says the replay is complete; only then does it replace what is shown. A
 //!   reconnect, a detach or a refusal therefore never replaces a shown screen with half a replay, and the last
-//!   complete screen stays up while the stream is not live. The one exception is a detach (a stall, say) during the
-//!   first replay, with no earlier screen to keep: what arrived of it is shown, once it holds a whole screen, as the
-//!   detached viewer's snapshot.
+//!   complete screen stays up while the stream is not live. The stream's own end of a replay that went quiet partway
+//!   (its idle bound, the old app's rule; the helm client's "The catch-up's idle bound") is the one ending that shows
+//!   what arrived as it is, a whole screen or not, and goes live: it is a stall, not a broken format. The other
+//!   exception is a detach (a stall, say) during the first replay, with no earlier screen to keep: what arrived of it
+//!   is shown, once it holds a whole screen, as the detached viewer's snapshot.
 //! - Bounded delivery. Each GUI turn takes at most [`BATCH`] events from the stream, applies consecutive output as one
 //!   batch (so a flood redraws once per turn, not once per message), and then yields to the executor, so a flood cannot
 //!   hold the main thread and frames keep their turn.
@@ -1104,7 +1106,8 @@ impl AttachedTerminal {
                     }
                     self.output(run, cx);
                 }
-                TerminalEvent::ReplayComplete => self.replay_complete(cx),
+                TerminalEvent::ReplayComplete => self.replay_complete(true, cx),
+                TerminalEvent::ReplayIdle => self.replay_complete(false, cx),
                 TerminalEvent::State(state) => self.stream_changed(state, cx),
             }
         }
@@ -1162,13 +1165,24 @@ impl AttachedTerminal {
         }
     }
 
-    /// The helm says the current attachment's replay is complete: show it.
-    fn replay_complete(&mut self, cx: &mut Context<Self>) {
-        // One marker per attachment; a second one has nothing staged and changes nothing.
+    /// The current attachment's catch-up is over: show it and go live. `marker` says the helm said the replay is
+    /// complete, which the model checks; without it the stream's idle bound ended a replay that went quiet, and what
+    /// arrived is shown as it is, a whole screen or not, as the old app revealed it (the helm client's "The catch-up's
+    /// idle bound"). A stall is not a broken format, so only the marker can fault.
+    fn replay_complete(&mut self, marker: bool, cx: &mut Context<Self>) {
+        // One end per attachment; a second one has nothing staged and changes nothing.
         let Some(staging) = self.staging.take() else {
             return;
         };
-        match staging.update(cx, |view, cx| view.mark_replay_complete(cx)) {
+        let shown = staging.update(cx, |view, cx| {
+            if marker {
+                view.mark_replay_complete(cx)
+            } else {
+                view.reveal(cx);
+                Ok(())
+            }
+        });
+        match shown {
             Ok(()) => {
                 self.committed = Some(staging);
                 // A drag on the replaced view ends with it: its anchor names that view's lines.
