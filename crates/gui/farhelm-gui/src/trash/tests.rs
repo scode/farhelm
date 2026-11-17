@@ -143,6 +143,17 @@ pub(crate) struct Harness {
     root: root::Attachment,
 }
 
+impl Harness {
+    /// A new Trash button in a root view attached to `window`, as every root view is: what [`open_button`] opens, and
+    /// what a test opening a window of its own (one laid out with the real text system, say) builds itself.
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Harness {
+            button: cx.new(TrashButton::new),
+            root: root::attach(window, cx),
+        }
+    }
+}
+
 impl Render for Harness {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = div().size_full().p(px(20.)).child(self.button.clone());
@@ -159,10 +170,7 @@ pub(crate) fn open_button(
     let (mut helm, _connection) = started(cx);
     helm.connect(snapshot);
     cx.run_until_parked();
-    let (harness, window) = test_support::open_view(cx, |window, cx| Harness {
-        button: cx.new(TrashButton::new),
-        root: root::attach(window, cx),
-    });
+    let (harness, window) = test_support::open_view(cx, Harness::new);
     let button = window.update(|_, cx| harness.read(cx).button.clone());
     (helm, button, window)
 }
