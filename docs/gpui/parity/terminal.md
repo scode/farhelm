@@ -522,7 +522,9 @@ stay.
   the program.
 - A refused click on a program's hyperlink explains itself on the terminal's top line at once, where the old line faded
   in over 200 ms (not ported yet, like the scrollbar's fade). The destination display sits flush inside the window's
-  edge when clamped, where the old one kept 4 pixels from it: the layer manager's shared clamp.
+  content area when clamped (inside the frame and title bar around it, on Linux when the window draws its own frame),
+  where the old one kept 4 pixels from the page's edge: the layer manager's shared clamp. A click counts the display as
+  fully visible only inside that area.
 - The tunnel warning has no busy state: Allow closes it, then the consent save and the tunnel's opening run, and a
   refused save shows in the tunnel notice, where the old warning stayed up, disabled, reading "Saving…", until the save
   answered. The prompt closes every question before its answer runs, unless the answer is an inline one's extra answer.

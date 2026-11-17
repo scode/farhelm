@@ -13,9 +13,9 @@
 //! tunnel ([`super::tunnels`]). A hyperlink's panel keeps its warning and adds the hint after it.
 //!
 //! The panel is the click's safeguard: a click opens the hyperlink only while the panel is fully visible. It records
-//! where it was drawn and the window's size every frame ([`Drawn`]); its owner reads that at the click. It takes no
-//! focus and holds nothing that does: it is a non-focusing popover the layer manager draws on top, anchored to a
-//! zero-width element the terminal draws by the pointer.
+//! where it was drawn and the window's content area every frame ([`Drawn`]); its owner reads that at the click. It
+//! takes no focus and holds nothing that does: it is a non-focusing popover the layer manager draws on top, anchored to
+//! a zero-width element the terminal draws by the pointer.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -23,7 +23,7 @@ use std::rc::Rc;
 use farhelm_grid_model::LinkDisclosure;
 use gpui::{
     App, Bounds, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Render, Size, Stateful, StatefulInteractiveElement, Styled, Window, canvas, div,
+    Render, Stateful, StatefulInteractiveElement, Styled, Window, canvas, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -33,25 +33,28 @@ use crate::theme::{self, metrics};
 /// The warning's first line (the old app's words).
 const MISMATCH_WARNING: &str = "Link text does not match where it goes";
 
-/// Where the panel was last drawn and how large the window was then: what a click checks the panel against. `None`
-/// until its first frame.
-pub(crate) type Drawn = Rc<Cell<Option<(Bounds<Pixels>, Size<Pixels>)>>>;
+/// Where the panel was last drawn and the window's content area then
+/// ([`crate::desktop::linux_title_bar::content_area`]): what a click checks the panel against. `None` until its first
+/// frame.
+pub(crate) type Drawn = Rc<Cell<Option<(Bounds<Pixels>, Bounds<Pixels>)>>>;
 
-/// Whether a panel drawn at `drawn` was fully visible: inside the window it was drawn in (the old app's
-/// `disclosureFits`). Its other half, refusing when another surface is drawn over the panel, is not built: a dialog or
-/// menu opened above the panel is not checked for. When it is built, as a hit test, a popover that lets the pointer
-/// through (`layers::Popover::passes_pointer`) registers no hit area and is invisible to it, so that popover's owner
-/// must keep it off the panel: the terminal's drag-copy notice does not open while the panel is open.
+/// Whether a panel drawn at `drawn` was fully visible: inside the window's content area when it was drawn (the old
+/// app's `disclosureFits`). SPEC.md wants the panel inside the page, and the content area is the old app's page: on
+/// Linux, when the window draws its own frame, it leaves out GPUI Kit's frame and the window's title bar, and otherwise
+/// it is the whole window. Its other half, refusing when another surface is drawn over the panel, is not built: a
+/// dialog or menu opened above the panel is not checked for. When it is built, as a hit test, a popover that lets the
+/// pointer through (`layers::Popover::passes_pointer`) registers no hit area and is invisible to it, so that popover's
+/// owner must keep it off the panel: the terminal's drag-copy notice does not open while the panel is open.
 pub(crate) fn fully_visible(drawn: &Drawn) -> bool {
-    let Some((bounds, window)) = drawn.get() else {
+    let Some((bounds, area)) = drawn.get() else {
         return false;
     };
     bounds.size.width > px(0.)
         && bounds.size.height > px(0.)
-        && bounds.origin.x >= px(0.)
-        && bounds.origin.y >= px(0.)
-        && bounds.origin.x + bounds.size.width <= window.width
-        && bounds.origin.y + bounds.size.height <= window.height
+        && bounds.left() >= area.left()
+        && bounds.top() >= area.top()
+        && bounds.right() <= area.right()
+        && bounds.bottom() <= area.bottom()
 }
 
 /// The floating surface every destination display is drawn on, under element id `id` (the old app's
@@ -81,12 +84,17 @@ pub(super) fn surface(id: &'static str, window: &Window, cx: &App) -> Stateful<D
         .text_size(metrics::TEXT_SM)
 }
 
-/// Records, as the display holding it paints, the display's bounds and the window's size into `drawn`: what a click
-/// checks the display against ([`fully_visible`]). It fills the display and draws nothing.
+/// Records, as the display holding it paints, the display's bounds and the window's content area into `drawn`: what
+/// a click checks the display against ([`fully_visible`]). It fills the display and draws nothing.
 pub(super) fn recorder(drawn: Drawn) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |bounds, (), window, _| drawn.set(Some((bounds, window.viewport_size()))),
+        move |bounds, (), window, _| {
+            drawn.set(Some((
+                bounds,
+                crate::desktop::linux_title_bar::content_area(window),
+            )))
+        },
     )
     .absolute()
     .top_0()
@@ -206,3 +214,6 @@ impl Render for DisclosureView {
             .child(recorder(self.drawn.clone()))
     }
 }
+
+#[cfg(test)]
+mod tests;
