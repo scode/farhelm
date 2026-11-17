@@ -8,25 +8,24 @@ sections: Creation (the Templates dialog, quick launch, number keys, launcher se
 
 Tests: 48. Covers: template bolts use a fixed outline or filled drawing for their mark.
 
-ported, except the approval-card focus case (untested: no fixture puts an approval card beside the open launcher) and
-what needs a person (below): the list, summaries, ⚡ and number keys (`templates::dialog_tests`,
-`templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields, Save, rename and Duplicate
-(`templates::editor_tests`, `templates::fields_tests`); leaving and deleting (`templates::leave_tests`); Save as
-template from New and Clone, its checklist's defaults, Enter, Escape, the name refusals, a refused save and the saved
-template opening in the editor (`templates::save_tests`), focus back in the search box after Escape or Cancel and left
-where the user put it by a refusal (`escape_or_cancel_puts_focus_back_in_the_search_box`,
-`a_refused_save_leaves_focus_where_the_user_put_it`), its GitHub repository row
-(`a_chosen_repository_is_offered_checked_and_the_folder_is_not`), and a template's repository destination choosing that
-repository (`templates::apply_tests::a_repository_destination_chooses_that_repository`); `tl:` in the launcher's search:
-rows only under `tl:`, by a case-insensitive part of the name, the exact name preselected, between Harnesses and Models
-(`launcher::search_tests::templates_are_offered_only_under_tl`,
+partly, with some cases or parts of them not yet ported and some superseded (both after the bullets): the list,
+summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the
+editor, its fields, Save, rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving and
+deleting (`templates::leave_tests`); Save as template from New and Clone, its checklist's defaults, Enter, Escape, the
+name refusals, a refused save and the saved template opening in the editor (`templates::save_tests`), focus back in the
+search box after Escape or Cancel and left where the user put it by a refusal
+(`escape_or_cancel_puts_focus_back_in_the_search_box`, `a_refused_save_leaves_focus_where_the_user_put_it`), its GitHub
+repository row (`a_chosen_repository_is_offered_checked_and_the_folder_is_not`), and a template's repository destination
+choosing that repository (`templates::apply_tests::a_repository_destination_chooses_that_repository`); `tl:` in the
+launcher's search: rows only under `tl:`, by a case-insensitive part of the name, the exact name preselected, between
+Harnesses and Models (`launcher::search_tests::templates_are_offered_only_under_tl`,
 `the_exact_template_name_is_preselected_by_unicode_lowercase`,
 `template_rows_sit_between_harnesses_and_models_in_the_old_words`), a taken row applying its template and keeping the
 launch kind (`launcher::search_view_tests::a_tl_row_applies_its_template_and_keeps_the_launch_kind`), a refused one
 changing nothing and saying why above the box (`a_refused_tl_row_changes_nothing_and_says_why_above_the_box`), and a
-failed read as the reason in the results (`unavailable_templates_are_the_reason_under_tl`,
-`unavailable_templates_are_the_reason_in_the_results`); a ⚡ or number-key write refused while the bindings cannot be
-read, the helm's preferences unavailable or not arrived
+failed read as the reason in the results (`launcher::search_tests::unavailable_templates_are_the_reason_under_tl`,
+`launcher::search_view_tests::unavailable_templates_are_the_reason_in_the_results`); a ⚡ or number-key write refused
+while the bindings cannot be read, the helm's preferences unavailable or not arrived
 (`templates::dialog_tests::unreadable_bindings_refuse_a_key_or_mark_write`,
 `bindings_that_never_arrived_refuse_a_key_write`); stacking several templates from `tl:` is the sequence's; read-only
 resume commands and session names still refusing an unrelated save
@@ -47,30 +46,180 @@ template's trust ignored and a retired container refused
 `a_retired_container_template_is_refused_and_changes_nothing`); a recent setup keeping the typed prompt
 (`launcher::draft_tests::a_recent_setup_keeps_the_typed_prompt`; a prompt cannot leak into the next Clone or Replace
 with, since each opening builds a new draft from a session, which holds none); Launch held during Save as template's
-save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_the_save_is_out_and_keeps_its_focus`);
-"initial prompt launcher template stacking and save selection"'s invisible-character half, a prompt holding U+202E and a
-line break shown escaped and read-only until cleared
-(`launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped`), beside its stacking half above.
-Needs a person with a real input method: Save as template's composing Enter and Escape in its name field, which no test
-harness can drive.
+save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_the_save_is_out_and_keeps_its_focus`).
+
+- `templates::dialog_tests::the_bolt_marks_and_clears_through_the_preferences` ("template bolts use a fixed outline or
+  filled drawing for their mark", in its marking half; the drawing itself is checked only by the `templates-dialog`
+  golden, which an ordinary test run skips)
+- `templates::dialog_tests::a_refused_write_is_reported_and_nothing_changes` ("a refused quick-launch mark restores the
+  stored mark", with the deviation "A refused ⚡ or number-key write says it was not saved")
+- `templates::dialog_tests::an_ineligible_bolt_is_unavailable_unless_it_is_lit` ("model-only number key opens New with a
+  temporary composition explanation", the list's half)
+- `templates::dialog_tests::the_key_menu_offers_every_key_and_moves_the_chosen_one` ("number keys move, follow rename,
+  and stay freed after undo")
+- `templates::dialog_tests::escape_from_the_key_menu_returns_focus_to_its_button` (the same case)
+- `templates::dialog_tests::closing_returns_focus_to_the_templates_button` ("unsaved departures support keep editing,
+  discard and save before leaving", its closing)
+- `templates::shortcuts_tests::a_rename_moves_only_the_old_names_key` ("number keys move, follow rename")
+- `templates::shortcuts_tests::a_bolt_click_writes_what_the_drawn_bolt_meant` (the same case)
+- `templates::shortcuts_tests::writes_patch_only_their_own_field` (the same case)
+- `templates::shortcuts_tests::hover_help_names_the_behavior_and_the_choice` ("model-only number key opens New", the key
+  button's hover help)
+- `templates::editor_tests::save_writes_the_whole_template_once_and_keeps_focus` ("template Save follows unsaved changes
+  and retains focus after saving"; also "the Templates dialog creates, edits, renames, deletes and undoes")
+- `templates::editor_tests::an_escaped_name_saves_raw_until_replaced` ("template name escapes formatting until
+  explicitly replaced")
+- `templates::editor_tests::replace_name_clears_the_name_and_focuses_it` (the same case)
+- `templates::editor_tests::an_escaped_field_keeps_its_raw_value_until_replaced` ("unsafe template model and folder stay
+  raw until explicitly replaced")
+- `templates::editor_tests::the_initial_prompt_keeps_its_line_breaks` ("initial prompt template field preserves
+  multiline text and agent compatibility")
+- `templates::editor_tests::a_field_that_no_longer_fits_stays_and_refuses_saving` (the same case)
+- `templates::editor_tests::add_field_offers_unset_fields_and_escape_closes_only_its_menu` (the same case, and "model
+  suggestions and phone departure controls remain reachable")
+- `templates::editor_tests::new_template_opens_an_empty_draft` ("the Templates dialog creates, edits, renames, deletes
+  and undoes")
+- `templates::editor_tests::a_rename_with_nothing_bound_goes_straight_to_the_deletion` (the same case)
+- `templates::editor_tests::save_refusals_come_in_the_old_order_and_send_nothing` ("long summaries stay reachable and
+  taken names refuse save and undo")
+- `templates::editor_tests::duplicate_opens_an_unsaved_copy_of_the_saved_template` ("session name kind survives
+  duplicate and undo and base saves stay clean")
+- `templates::editor_tests::saving_a_base_name_leaves_no_unsaved_changes` (the same case)
+- `templates::editor_tests::a_kindless_template_opens_with_its_inferred_switch_unsaved` ("legacy switches and agent
+  choices remain explicit at phone width")
+- `templates::editor_tests::a_row_opens_its_template_pressed_with_focus_on_its_name` ("reselecting the current template
+  preserves edits and renames", its first half: reopening the row keeps a typed name)
+- `templates::editor_tests::a_new_name_is_refused_while_the_templates_are_unavailable` ("a phone draft can retry a
+  failed template list without discarding", what is left of it)
+- `templates::editor_tests::an_edit_while_saving_changes_nothing` ("templates busy root stays keyboard-scrollable", with
+  the deviation "While a save is in flight")
+- `templates::editor_tests::a_refused_save_is_reported_kept_and_never_retried` (the same case)
+- `templates::fields_tests::new_and_renamed_names_must_be_free_and_unspaced` ("template name whitespace is refused only
+  for a new name")
+- `templates::fields_tests::the_open_name_always_saves_and_a_rename_must_be_free` (the same case)
+- `templates::fields_tests::spaced_historical_names_keep_their_undo` (the same case)
+- `templates::fields_tests::duplicate_names_are_free_unspaced_and_fit_the_limit` (the same case)
+- `templates::fields_tests::duplicate_replaces_unicode_whitespace` (the same case)
+- `templates::fields_tests::unsafe_text_makes_a_field_read_only` ("older template ${field} stays read-only without
+  bypassing save refusal")
+- `templates::fields_tests::a_retired_container_field_refuses_until_removed` ("retired container templates load, refuse
+  application and allow explicit removal")
+- `templates::fields_tests::removing_a_retired_container_field_makes_the_draft_saveable` (the same case)
+- `templates::fields_tests::opening_infers_the_switch_and_drops_trust_in_the_draft` ("old template trust ${trust} is
+  ignored on launch and dropped on ${write}")
+- `templates::fields_tests::incompatible_fields_refuse_saving_but_any_model_text_fits` ("initial prompt template field
+  preserves multiline text and agent compatibility")
+- `templates::fields_tests::explicit_permissions_stay_saveable_and_partial_templates_offer_all` ("an approvals-only
+  template saves every offered approval choice" and "templates save explicit guarded and default-YOLO permissions")
+- `templates::fields_tests::a_session_name_owns_its_kind` ("session name kind survives duplicate and undo")
+- `templates::fields_tests::opening_infers_the_switch_from_each_field_kind` ("legacy switches and agent choices remain
+  explicit")
+- `templates::fields_tests::changing_the_agent_flags_approvals_it_does_not_offer` (the same case)
+- `templates::leave_tests::every_departure_from_an_unsaved_draft_asks_first` ("unsaved departures support keep editing,
+  discard and save before leaving")
+- `templates::leave_tests::discard_goes_where_the_user_was_heading` (the same case)
+- `templates::leave_tests::save_leaves_only_once_the_save_succeeds` (the same case)
+- `templates::leave_tests::keep_editing_by_pointer_returns_to_the_name_field_on_a_mac` (the same case; it runs on every
+  platform)
+- `templates::leave_tests::delete_takes_effect_at_once_and_undo_restores_the_loaded_copy` ("number keys ... stay freed
+  after undo" and "the Templates dialog creates, edits, renames, deletes and undoes")
+- `templates::leave_tests::a_template_failing_save_rules_is_deleted_permanently` ("older template ${field} deletion
+  warns before permanently deleting")
+- `templates::leave_tests::a_refused_delete_is_reported_and_keeps_the_editor` ("a refused template Delete keeps the helm
+  error and stored template")
+- `templates::leave_tests::undo_refuses_a_taken_name_and_keeps_a_spaced_one` ("taken names refuse save and undo")
+- `templates::leave_tests::undo_lasts_ten_seconds_a_later_delete_replaces_it_and_closing_ends_it` ("undo expires
+  independently of earlier deletions and ends on close")
+- `templates::leave_tests::the_question_is_scrolled_into_view` ("model suggestions and phone departure controls remain
+  reachable", the departure question's half)
+- `templates::save_tests::a_spaced_or_taken_name_is_refused_without_a_write` ("save as template requires a name without
+  whitespace" and "launcher template save refuses a taken name")
+- `templates::save_tests::new_checks_its_choices_and_offers_passive_values_unchecked` ("save as template captures the
+  ${kind} setup without launching"; the checkboxes' geometry is the deviation "Save as template's checklist values")
+- `templates::save_tests::hand_edits_check_permissions_wrapper_host_folder_and_name` (the same case)
+- `templates::save_tests::the_command_tab_offers_only_its_own_fields` (the same case)
+- `templates::save_tests::enter_saves_the_checked_fields_and_opens_the_new_template` (the same case)
+- `templates::save_tests::unchecking_a_field_and_choosing_fixed_change_what_is_saved` (the same case, and "initial
+  prompt launcher template stacking and save selection")
+- `templates::save_tests::the_initial_prompt_is_checked_by_its_first_line_where_it_can_be_sent` ("initial prompt
+  launcher template stacking and save selection")
+- `launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped` ("initial prompt launcher
+  template stacking and save selection", its invisible-character half: a prompt holding U+202E and a line break shown
+  escaped and read-only until cleared)
+- `templates::save_tests::escape_closes_the_panel_and_keeps_the_launcher` ("Escape keeps the launcher", and "save as
+  template handles body Escape before the launcher", with focus in the panel: Escape closes the panel, not New, and the
+  next Escape closes New)
+- `templates::save_tests::a_refused_save_is_reported_and_keeps_the_launcher` ("launcher template save refuses a taken
+  name and Escape keeps the launcher")
+- `templates::save_tests::escape_or_cancel_puts_focus_back_in_the_search_box` ("save as template handles body Escape
+  before the launcher", with focus in the panel: Escape and Cancel each put focus back in the search box, which is not
+  checked to be in view)
+- `templates::save_tests::opening_the_panel_brings_its_name_field_into_view` (the same case, its reopening step)
+- `templates::save_tests::replace_with_offers_no_save_as_template` ("Replace with accepts its own template host and
+  refuses another host atomically")
+- `templates::apply_tests::replace_with_drops_an_equal_host_and_refuses_another` (the same case)
+- `templates::launcher_modes_tests::replace_with_refuses_a_host_change_whole_and_takes_a_later_press` (the same case)
+- `templates::apply_tests::the_prompt_follows_the_shared_fold` ("initial prompt launcher template stacking")
+- `templates::apply_tests::templates_stack_with_the_later_winning_where_they_overlap` ("tl: applies templates, stacks
+  them, and refuses one that does not apply")
+- `templates::apply_tests::a_refusal_anywhere_in_the_batch_leaves_the_draft_unchanged` (the same case)
+- `templates::apply_tests::the_launch_kind_applies_before_the_agent_type` ("a template fills the command tab and the
+  folder")
+- `templates::dispatch_tests::a_partial_number_key_opens_new_with_the_prefix_banner_for_six_seconds` ("model-only number
+  key opens New with a temporary composition explanation"; its held catalog read showing "Loading session setup…" is the
+  deviations "A switcher template pick shows no loading state" and "Every quick-launch banner expires", which count the
+  banner's seconds from when the templates applied)
+
+Not yet ported:
+
+- the approval-card half of "save as template refusal respects ${focusOwner} focus" (a refusal leaving focus on an
+  approval card the user moved to while the save was out); its other halves are above, and its lost-focus half is
+  superseded
+- of "number keys move, follow rename, and stay freed after undo", a change to the bindings pushed while the dialog is
+  open, drawn on its key button and kept by the next key write
+  (`templates::dialog_tests::the_key_menu_offers_every_key_and_moves_the_chosen_one` builds its write from bindings
+  pushed before the dialog opened)
+- of "save as template handles body Escape before the launcher", Escape with focus outside the panel (in the launcher,
+  for example after a click in its search box, the counterpart of the old page body) closing the panel and not New, and
+  the search box back in view after Escape and after Cancel
+- of "reselecting the current template preserves edits and renames", reopening the row after a save, and an edit to a
+  field other than the name kept across reopening
+- of "templates busy root stays keyboard-scrollable", scrolling the busy editor by keyboard (Home back to the top); the
+  deviation "While a save is in flight" covers its Tab stop, not its scrolling
+- of "model-only number key opens New with a temporary composition explanation", a click on the banner not counting as
+  an edit, and a button choice (the Command tab) taking the banner away
+
+Superseded: "save as template leaves composing Enter with the name editor" and "save as template keeps the draft on
+composing Escape", by the terminal file's `tests/ime-composition.spec.ts` entry, which supersedes that spec whole: these
+cases replay a browser engine's composition event order into a field, a DOM guard the GPUI app does not build, and
+input-method support stays at what GPUI gives (the maintainer's decision of 2026-11-12). "delete waits for the saved
+template list before offering undo", by the deviation "No list reload after a save": there is no reload to wait for. "a
+phone draft can retry a failed template list without discarding", by the Superseded entries "The phone-width one-pane
+layout" and "Retry beside a failed template list". The 390-pixel widths of "templates busy root stays
+keyboard-scrollable" and "save as template handles body Escape before the launcher" and the phone halves of "session
+name kind survives duplicate and undo", "legacy switches and agent choices remain explicit at phone width" and "model
+suggestions and phone departure controls remain reachable", by the phone layout's entry. The composing cases, the Delete
+wait and the phone draft's retry were settled on 2026-11-16 by the GPUI migration's coordinator.
 
 ### `tests/quick-launch.spec.ts`
 
 Tests: 32. Covers: quick launch submits the wrapper prefix saved in its agent template.
 
-ported: the ⚡ chord's direct launch through New's prefill, the catalog and the launcher's submit path, unseen, the mark
-kept to success and cleared by a reveal, a slow one showing the launcher's progress pill until its reply
+partly, with parts of three cases not yet ported (after the bullets): the ⚡ chord's direct launch through New's
+prefill, the catalog and the launcher's submit path, unseen, the mark kept to success and cleared by a reveal, a slow
+one showing the launcher's progress pill until its reply
 (`templates::dispatch_tests::the_chord_launches_the_marked_template_unseen`,
 `a_revealed_quick_launch_is_no_longer_unseen`, `actions_tests::the_launch_chords_run_once_per_press_from_a_terminal`),
 an incomplete mark opening New with its choices and the needs-more-choices banner, which an edit takes away
-(`an_incomplete_mark_opens_new_with_its_choices_and_banner`), a model-only template picking its agent type and a model
-the agent type does not offer refused (`a_model_only_template_picks_its_agent_type_from_the_catalog`,
-`a_model_the_agent_type_does_not_offer_is_refused`), a refused mark opening New with the refusal
-(`a_refused_mark_opens_new_unchanged_with_the_refusal`), a draft the launcher refuses shown with its reason, the
-offline-host case (`a_draft_the_launcher_refuses_is_shown_with_its_reason`), a missing or unusable mark opening
-Templates (`a_missing_or_unusable_mark_opens_templates_with_its_hint`), a failed template read refused
-(`unavailable_templates_refuse_a_press_on_the_page`), unreadable bindings refused for the ⚡ chord, the number keys and
-a sequence's keys, but not its words (`unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page`,
+(`templates::dispatch_tests::an_incomplete_mark_opens_new_with_its_choices_and_banner`), a model-only template picking
+its agent type and a model the agent type does not offer refused
+(`a_model_only_template_picks_its_agent_type_from_the_catalog`, `a_model_the_agent_type_does_not_offer_is_refused`), a
+refused mark opening New with the refusal (`a_refused_mark_opens_new_unchanged_with_the_refusal`), a draft the launcher
+refuses shown with its reason, the offline-host case (`a_draft_the_launcher_refuses_is_shown_with_its_reason`), a
+missing or unusable mark opening Templates (`a_missing_or_unusable_mark_opens_templates_with_its_hint`), a failed
+template read refused (`unavailable_templates_refuse_a_press_on_the_page`), unreadable bindings refused for the ⚡
+chord, the number keys and a sequence's keys, but not its words
+(`unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page`,
 `bindings_that_never_arrived_refuse_the_chord_on_the_page`, `unreadable_bindings_refuse_a_press_in_the_launcher`,
 `a_sequence_on_unreadable_bindings_refuses_its_keys_but_not_its_words`), a press consumed while a refused launch waits
 behind its notice (`a_press_waits_while_a_refused_launch_waits_behind_its_notice`), presses during a quick launch's
@@ -81,8 +230,8 @@ notice (`presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_
 keys (`the_chord_and_number_keys_do_nothing_under_another_dialog`), a number key launching its template unseen
 (`a_number_key_launches_its_template_unseen`), a held number key acting once
 (`actions_tests::a_held_number_key_acts_once_and_a_held_text_size_chord_repeats`), an unbound or unusable number key
-opening Templates with its hint (`an_unbound_number_key_opens_templates_with_its_hint`), a partial template's number key
-opening New with the prefix banner, which goes six seconds after the templates applied
+opening Templates with its hint (`templates::dispatch_tests::an_unbound_number_key_opens_templates_with_its_hint`), a
+partial template's number key opening New with the prefix banner, which goes six seconds after the templates applied
 (`a_partial_number_key_opens_new_with_the_prefix_banner_for_six_seconds`), and a sequence's Enter launching or opening
 New with its banner or refusal (`a_sequences_enter_launches_unseen`, `a_sequence_that_cannot_launch_opens_new`); the
 sequence's prefix, key capture, cancels and pill (`templates::armed_tests`,
@@ -112,17 +261,82 @@ last folder, and showing New when the host's recent setups cannot be read: the l
 `a_quick_launch_without_the_hosts_history_shows_new`), and through a template's ⚡, waiting only when the template
 leaves the folder alone (`templates::dispatch_tests::a_quick_launch_without_a_folder_starts_in_the_hosts_last_folder`,
 `a_quick_launch_of_a_template_with_a_folder_reads_no_history`). Superseded (see below): the old dispatcher's fences and
-the lost reply's retry. A deviation (see above): a quick launch while the host list is unavailable. Also: a template's
+the lost reply's retry. A deviation (see below): a quick launch while the host list is unavailable. Also: a template's
 wrapper prefix through the ⚡ chord (`templates::dispatch_tests::the_chord_launches_a_templates_wrapper_prefix`), a
 sequence of a partial number key and ⚡ launching the stacked setup
 (`a_sequence_of_a_partial_key_and_the_mark_launches_the_stacked_setup`), and Escape and Cancel on a changed name in
-naming (`templates::naming_tests::escape_and_cancel_on_a_changed_name_send_no_rename`)
+naming (`templates::naming_tests::escape_and_cancel_on_a_changed_name_send_no_rename`).
+
+- `templates::armed_tests::the_prefix_from_a_terminal_arms_a_sequence_that_takes_every_key` ("typed launch proceeds
+  before the prefix catalog returns and owns terminal input"; the template read the old case held at the prefix has no
+  counterpart, since the helm pushes the templates and nothing reads them then)
+- `templates::armed_tests::bindings_are_copied_when_the_prefix_starts` ("a sequence honors a ${binding} changed after
+  this window loaded")
+- `templates::armed_tests::a_non_sequence_key_cancels_and_reaches_the_program` ("launch sequence cancellation leaves
+  ordinary terminal input and modals in control")
+- `templates::armed_tests::escape_cancels_and_never_reaches_the_program` (the same case)
+- `templates::armed_tests::a_dialog_keeps_the_keyboard_from_the_prefix_and_an_armed_sequence` (the same case)
+- `templates::armed_tests::the_prefix_with_no_session_open_centers_the_pill_on_the_main_area` (the same case's pill
+  place; the Mac's lower pill is the deviation "The sequence pill's place follows the selected session", checked by
+  reading the code, not by a test)
+- `templates::armed_tests::the_launcher_pill_stays_above_an_open_sessions_details_bar` (the same case)
+- `templates::armed_tests::a_text_field_keeps_the_prefix` ("launch prefix keeps text fields and resolves an unbound
+  digit only at Enter")
+- `templates::armed_tests::enter_with_an_unbound_key_opens_templates_with_its_hint` (the same case)
+- `templates::armed_tests::the_pill_shows_chips_the_word_and_its_candidates` ("typed candidates stay bounded and
+  pointer-transparent without moving the pill"; its 390-pixel width has no counterpart, since the window cannot be
+  narrower than 720 pixels)
+- `templates::sequence_tests::the_candidate_cap_never_limits_ambiguity` (the same case)
+- `templates::sequence_tests::a_missing_captured_name_refuses_the_whole_sequence` ("typed page refusals are atomic and
+  empty Enter leaves later bindings paired", and "a sequence naming a deleted template reveals New with the missing
+  name")
+- `templates::sequence_tests::a_word_refusal_wins_over_any_key_refusal` ("typed page refusals are atomic"; its pairing
+  of later bindings after an empty Enter is superseded by "The old quick-launch dispatcher's fences")
+- `templates::sequence_tests::enter_queues_the_word_and_an_empty_sequence_is_nothing` (the same case)
+- `templates::sequence_tests::a_completed_name_is_matched_again_at_enter` ("a sequence naming a deleted template")
+- `templates::sequence_tests::key_refusals_choose_a_hint_and_a_launcher_sentence` ("a bound Bolt and unbound number show
+  only the number binding hint", with the deviation "One binding hint for a sequence's unbound keys")
+- `templates::sequence_tests::an_unbound_reference_refuses_naming_the_first` (the same case)
+- `templates::dialog_tests::a_refused_write_is_reported_and_nothing_changes` ("quick launch discards a failed local mark
+  against the shared read", with the deviation "⚡ is lit once the helm stores it")
+- `templates::dialog_tests::the_bolt_marks_and_clears_through_the_preferences` (the same case, and "the template mark
+  moves, survives rename, and stays cleared after undo")
+- `templates::dialog_tests::a_write_in_flight_leaves_focus_and_the_dialog_alone` ("quick launch honors a held local mark
+  against the shared read": Escape and Space do not close the dialog while the mark's write is held, though the test
+  never presses the header Close, the old case's control; the bolt not lit until the helm stores the mark is the
+  deviation "⚡ is lit once the helm stores it")
+- `templates::dispatch_tests::the_chord_launches_the_marked_template_unseen` (the same case: the chord afterwards
+  launches the mark the helm stored)
+- `templates::editor_tests::a_rename_saves_moves_the_mark_and_key_then_deletes_the_old_name` ("the template mark moves,
+  survives rename")
+- `templates::leave_tests::delete_takes_effect_at_once_and_undo_restores_the_loaded_copy` (the same case's "stays
+  cleared after undo")
+- `templates::dialog_tests::an_ineligible_bolt_is_unavailable_unless_it_is_lit` ("a marked template that became
+  ineligible can still be unmarked")
+- `templates::naming_tests::the_created_name_stays_selected_through_pushes_of_its_row` ("repeated naming selects the
+  title and returns focus after immediate Enter and Save")
+- `launcher::launch_tests::a_refusal_after_the_host_moved_installation_is_generic` ("a refusal after target change
+  reveals the spent quick-launch draft": a quick launch's refusal comes back through the launcher's own submit path, so
+  the launcher's test of that refusal replaces it, decided on 2026-11-16 by the GPUI migration's coordinator)
+- `templates::dispatch_tests::unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page` ("a quick preparation
+  error survives New's first host binding", its error half: unreadable bindings open New with "Not launched. Couldn't
+  prepare quick launch:" and the helm's words)
+
+Not yet ported:
+
+- the Replace with half of "hidden preparation isolates keys and a queued Replace with requires Launch" (Replace with
+  opened while a quick launch is being prepared out of sight, leaving Launch to the user); its key half is
+  `templates::dispatch_tests::presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule`, above
+- the host-binding half of "a quick preparation error survives New's first host binding" (New binding its first host
+  after the preparation error without clearing it)
+- of "quick launch honors a held local mark against the shared read", the header Close not closing the dialog while the
+  mark's write is held
 
 ### `tests/launcher-template-shortcuts.spec.ts`
 
 Tests: 8. Covers: back-to-back bolt and number chords stack on New without submitting.
 
-ported: back-to-back ⚡ presses applying in order to the open launcher's draft, each its own refusal unit, with Launch
+replaced: back-to-back ⚡ presses applying in order to the open launcher's draft, each its own refusal unit, with Launch
 left to the user (`templates::dispatch_tests::presses_apply_to_the_open_launcher_in_order`), a press waiting for the
 launcher's catalog read (`a_press_waits_for_the_open_launchers_catalog`), a Launch press dropping presses still waiting
 for it (`launch_drops_the_batches_waiting_for_the_catalog`), a missing mark or failed read refused there without opening
@@ -144,21 +358,34 @@ quick launch's YOLO question keeping focus and the selection in the Name field
 while a dialog sits over the launcher, the old Replace with case's "yields to another modal" half
 (`templates::launcher_modes_tests::a_number_key_does_nothing_while_a_dialog_is_open_over_the_launcher`), and a list that
 never takes focus, as the Host list, not stopping a key, as the old shortcuts gave way only to a modal dialog
-(`templates::launcher_modes_tests::a_number_key_applies_while_the_host_list_is_open`)
+(`templates::launcher_modes_tests::a_number_key_applies_while_the_host_list_is_open`).
+
+- `templates::sequence_tests::words_match_exact_then_lowercase_exact_then_prefix` ("typed launcher matching prefers
+  exact names and refuses whole ambiguous batches")
+- `templates::sequence_tests::matching_names_are_ordered_by_tier_then_catalog` (the same case)
+- `templates::sequence_tests::a_word_refusal_wins_over_any_key_refusal` (the same case's whole-batch refusal)
+- `templates::sequence_tests::keys_queue_entries_in_typing_order` ("typed launcher words mix with digits and chords in
+  input order")
+- `templates::sequence_tests::enter_applies_in_order_through_the_captured_bindings` (the same case)
+- `templates::sequence_tests::backspace_edits_only_the_unfinished_word_by_scalar` (the same case)
+- `templates::sequence_tests::tab_needs_known_names_and_a_word` ("typed launcher Tab completion is immediate and
+  preserves spaced names", the spaced names)
+- `templates::sequence_tests::tab_completes_only_a_unique_match` (the same case)
 
 ### `tests/template-list-shortcut.spec.ts`
 
 Tests: 4. Covers: Cmd-J exact name launches through the fresh quick-launch path.
 
-ported, as a templates-only mode of the sidebar's quick switcher: the exact name over an earlier match, the arrows
+replaced, as a templates-only mode of the sidebar's quick switcher: the exact name over an earlier match, the arrows
 taking that away, the chips, Enter's unseen launch, and the chord ending an armed sequence
 (`session_list::quick_switcher::template_list_tests::an_exact_name_is_started_over_an_earlier_match_until_the_arrows_move`,
 `the_chord_opens_the_template_list_from_a_terminal`); no match, Escape and a press outside
 (`with_no_match_enter_does_nothing_and_escape_or_a_press_outside_closes`); a partial template opening New
 (`a_partial_template_opens_new_with_its_choices_applied`); New and hidden quick-launch preparation keeping the chord
-(`a_partial_template_opens_new_with_its_choices_applied`, `the_chord_does_nothing_during_a_hidden_preparation`; other
-dialogs and preferences not yet arrived are the switcher's shared gate, pinned in
-`session_list::quick_switcher::tests`); a click, which also leaves the Hosts panel
+(`a_partial_template_opens_new_with_its_choices_applied`, `the_chord_does_nothing_during_a_hidden_preparation`; a menu
+over the page and preferences not yet arrived are the switcher's shared gate, pinned by
+`session_list::quick_switcher::tests::the_chord_does_nothing_over_a_menu` and
+`the_chord_does_nothing_before_the_preferences_arrive`); a click, which also leaves the Hosts panel
 (`a_click_starts_the_clicked_template_and_leaves_the_hosts_panel`); a pick resolving the name afresh and keeping its
 choice by name across pushes (`a_pick_uses_the_template_as_the_store_holds_it_now`, with a deviation below); the
 switcher's `tl:` rows drawing no chips (`the_switchers_tl_rows_draw_no_key_chips`); the held chord once per press
@@ -180,7 +407,7 @@ Template cases: the `tl:` section ("a template pick waits for launcher inputs be
 template reports the launcher's catalog read failure", and the plain query of "the pinned name action opens ordinary New
 with remembered defaults", which lists no template rows); the Quick launch row is `tests/quick-launch.spec.ts`'s.
 
-ported: the `tl:` label, the rows' matching, order, summaries and shortcuts, an unavailable collection
+replaced: the `tl:` label, the rows' matching, order, summaries and shortcuts, an unavailable collection
 (`templates::rows_tests::a_leading_tl_label_makes_a_template_query`,
 `rows_match_a_lowercased_substring_in_order_with_summaries_and_shortcuts`,
 `unavailable_templates_give_the_reason_instead_of_rows`), a pick opening New with the template and never launching, the
@@ -198,7 +425,7 @@ Its file: launcher.
 Template cases: quick launch into a managed checkout, template base-name numbering, the path race, the template name
 pill, and Save as template from a checkout template.
 
-ported: a hidden quick launch waiting for its checkout preview, one whose preview fails shown
+replaced: a hidden quick launch waiting for its checkout preview, one whose preview fails shown
 (`launcher::checkout_tests::a_quick_launch_into_a_checkout_waits_for_its_preview_out_of_sight`,
 `a_quick_launch_whose_preview_fails_is_shown`), a repository template's taken base name numbered and launched out of
 sight, with naming afterwards (`templates::dispatch_tests::a_taken_base_name_is_numbered_and_launched_out_of_sight`),
@@ -224,7 +451,7 @@ Its file: launcher.
 Template cases: custom template words ("custom template words round trip into the launcher and clear on a stacked
 permission").
 
-ported: the words applied from a template and cleared by a later template's permission
+replaced: the words applied from a template and cleared by a later template's permission
 (`templates::apply_tests::custom_words_are_cleared_by_a_later_templates_permission`), the editor showing and saving them
 (`templates::editor_tests::custom_approvals_carry_their_words`), and words without Custom refused
 (`templates::fields_tests::custom_words_must_match_their_choice`; the helm's own refusal is the backend's). A bad quote
@@ -238,8 +465,8 @@ Its file: launcher.
 Template cases: a null-permission template applied through `tl:` ("a null-permission ${harness} template retains consent
 and one session after a lost reply").
 
-ported: the lost reply's retry with one intent key is superseded (the launcher's row: the GUI sends no create keys). A
-`permissions: null` template picked under `tl:` resetting New to the harness's default, Guarded for Codex and YOLO for
+replaced, with the lost reply's retry with one intent key superseded (the launcher's row: the GUI sends no create keys):
+a `permissions: null` template picked under `tl:` resetting New to the harness's default, Guarded for Codex and YOLO for
 Goose (`launcher::search_view_tests::a_tl_reset_of_codexs_permission_launches_guarded`,
 `a_tl_reset_of_gooses_permission_launches_yolo`); Goose's YOLO question then is the launcher's ordinary one
 
@@ -276,8 +503,8 @@ Its file: launcher.
 Template cases: "container template quick launch retains its saved place". The spec's other cases are the launcher's and
 Settings and hosts' (the launcher's entry lists them).
 
-ported: a number key on a container template launching out of sight through the environment route alone, with the stored
-recipe and place, and the helm's refusal bringing the launcher back on the stored place, shown in its Recipe and
+replaced: a number key on a container template launching out of sight through the environment route alone, with the
+stored recipe and place, and the helm's refusal bringing the launcher back on the stored place, shown in its Recipe and
 Container host rows (`templates::dispatch_tests::a_container_template_on_a_number_key_launches_at_its_place`); the
 placement applying as the launcher's own Runs on edits, refused when its recipe or place host is gone, and left by a
 later template's host (`templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`,
@@ -300,10 +527,10 @@ Its file: launcher.
 Case: "quick launch shows a named pending pill" and its twin "template shortcut shows a named pending pill" (one case
 run for ⚡ and for number key 1).
 
-ported, except the reveal after the switcher, which is superseded: one create titled with the template-supplied name, no
-pill at 1.9 seconds, then a status naming the session and its host and counting "2 s", the switcher opening and closing
-over the hidden launch with the pill still up (after the pill shows, where the old test ran it before 1.9 seconds), and
-the refusal taking the pill down
+replaced, with the reveal after the switcher superseded: one create titled with the template-supplied name, no pill at
+1.9 seconds, then a status naming the session and its host and counting "2 s", the switcher opening and closing over the
+hidden launch with the pill still up (after the pill shows, where the old test ran it before 1.9 seconds), and the
+refusal taking the pill down
 (`templates::dispatch_tests::the_chords_held_launch_names_its_session_and_host_in_the_pill`,
 `a_number_keys_held_launch_names_its_session_and_host_in_the_pill`). The old test then saw the refusal reveal the
 launcher as a modal again; under today's SPEC.md ("Keyboard focus", "Who may move focus") the switcher's key presses
@@ -329,6 +556,80 @@ refused until New sandbox is ported", below).
   starting recipe and place, an unusable host and an unbuilt recipe choosable, the target saved without a host)
 - `templates::editor_tests::retained_choices_and_an_unusable_only_host_stay_in_reach` (a recipe and host no longer
   listed kept as retained, and New container offered when its only host is unusable)
+
+### `tests/restart-with.spec.ts`
+
+Its file: launcher.
+
+Template cases: "restart with applies an allowed partial agent template", "restart with applies an allowed partial
+command template", "restart with applies a template's matching held ${field}" (the launch kind, agent type, host,
+destination and name), "restart with refuses a template's held ${field} atomically" (the same fields and the initial
+prompt), "restart with refuses held shortcut batches and bolt templates" and "restart with applies matching bolt and
+shortcut templates without restarting". The launcher's entry lists the spec's other cases, and also lists the partial
+command template and the two shortcut cases as not yet ported there.
+
+partly: the two held-field cases are replaced by the template rules' unit tests, with no port through the open dialog
+(decided 2026-11-16 by the GPUI migration's coordinator), as far as those tests reach: the matching case whole, and of
+the refused case the agent type, the initial prompt and the host through a container placement. Restart with's refusal
+is one check in the template application (`restart_refusal` in `templates/apply.rs`) that names the first held field a
+template would change, and these tests run it without a window.
+
+- `templates::apply_tests::restart_with_applies_equal_held_values_as_nothing` ("applies a template's matching held
+  ${field}": a template repeating the launch kind, agent type, host, folder, with a trailing slash, and name applies as
+  nothing for those fields and its other edits land, and the repeated name brings no name kind)
+- `templates::apply_tests::restart_with_refuses_a_change_to_a_held_field` ("refuses a template's held ${field}
+  atomically", through a changed agent type and an initial prompt, each refused naming the field with nothing applied)
+- `templates::apply_tests::restart_with_refuses_a_placement` (the same rule for a container template, refused as a held
+  host)
+- `templates::apply_tests::restart_with_refuses_clearing_a_commands_resume` (the same rule for a command restart's
+  resume choice, which no old case named)
+- `templates::apply_tests::restart_with_resets_permissions_to_todays_default` (the permission reset the partial agent
+  template carries, as a rule; the case itself is not yet ported)
+
+Not yet ported:
+
+- of "restart with refuses a template's held ${field} atomically", the launch kind, a plain host (one naming another
+  installation, not a placement), the destination and the session name: `restart_refusal` checks each, but no test makes
+  a Restart with template change them
+- the two partial-template cases and the two shortcut cases: no test applies `tl:`, ⚡, a number key or a sequence to an
+  open Restart with, or checks what its main action then sends
+
+### `tests/interface-fonts.spec.ts`
+
+Its file: foundations.
+
+Template cases: the shortcut-digit half of "template summaries split command fonts and shortcut digits keep equal
+widths" (the number keys' digits drawn at equal widths). Its summary-fonts half is in the foundations entry
+(`templates::summary_tests::template_values_are_host_text`).
+
+partly
+
+- `templates::dialog_tests::the_number_keys_digits_are_drawn_at_equal_widths` (with the real text system, the key
+  buttons' chords for keys 1 and 8 are each drawn in the monospace face, so they are equally wide; it measures the
+  painted chords, not the buttons' own widths)
+
+Not yet ported: the key buttons' own widths for keys 1 and 8 being equal, which the old case also compared.
+
+### `tests/nonblocking-launch.spec.ts`
+
+Its file: launcher.
+
+Template cases: "quick-launch naming is skipped after a switcher opened during its create" and "quick-launch naming
+waits for an asynchronous host result and rechecks input after it closes", which the launcher's entry hands to this
+area.
+
+superseded: the second case's premise cannot arise in the GPUI app. Its host refusal opens by itself after the ⚡ press,
+and naming waits behind it. Here a dialog opens only through the mark of the user's own action and is refused once they
+have pressed anything since (`layers`, "Things the user did not start never open a layer"; decided on 2026-11-17 by the
+GPUI migration's coordinator). The ⚡ chord is such a press, so that refusal opens nothing and stays under its host's
+row, and no dialog can be up for a naming editor to wait behind. The only layers opened without a user action are the
+window-start dialogs, and the chord does nothing while one is up.
+
+- `templates::naming_tests::a_quick_launch_the_user_moved_on_from_is_not_named` (the first case: a key pressed while the
+  create is out, standing in for the switcher's chord, sends the success down the moved-on path with no naming, so none
+  is left to uncover when the switcher closes)
+- `hosts::update::tests::a_refused_plan_after_the_user_moved_on_opens_nothing` (the second case's host refusal, arriving
+  after a later press: no dialog opens, and the refusal shows under the host's row)
 
 ## Deviations
 
@@ -576,12 +877,6 @@ orchestrator.
   Cut begins a sequence, as Cmd+X does there; the old app's menu Cut never did. Both are GPUI Kit's one Cut action, and
   the field cannot tell which sent it (`TextInput::on_unselected_prefix`). Tested by
   `components::tests::text_input::by_the_mac_rule_cut_with_nothing_selected_runs_the_handler_and_with_a_selection_cuts`.
-
-- **Naming does not wait behind another dialog.** SPEC.md has "A naming dialog waiting behind another dialog checks
-  again before opening". The GPUI app opens the naming editor at the success that opened the session, which happens only
-  when the user has pressed nothing since the press, so no dialog of theirs can be up. A dialog that opened by itself
-  meanwhile is not waited behind: the naming editor opens on top of it and takes the keyboard. This is the old app's
-  behavior too, whose naming dialog took focus whatever held it (`FocusAdmission::Always`), rather than SPEC.md's.
 
 - **A refused ⚡ or number-key write says it was not saved.** The old list showed the change before the helm stored it,
   and on a failed write said "The quick-launch mark may not have been saved; showing the mark read from Farhelm" (or the
