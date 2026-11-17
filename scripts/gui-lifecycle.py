@@ -456,20 +456,41 @@ def step_07_a_relaunch_reuses_the_supervisor() -> None:
 
 def step_08_a_relaunch_after_a_kill_reuses_the_supervisor() -> None:
     """A crash or a kill runs no quit handler: the supervisor is not told anything and a stale second-launch socket
-    stays behind. Specified: after SIGKILL the supervisor still runs and the socket file is still there, refusing
+    stays behind. Specified: after SIGKILL the supervisor still runs and the socket file is still there, soon refusing
     connections; a relaunch is not taken for a second launch, connects, reuses the same supervisor, lists the seeded
-    session again, and serves a live socket in place of the stale one."""
+    session again, and serves a live socket in place of the stale one.
+
+    "Soon", because `gui_agent.running` calls the app gone once its main thread is a zombie, and a SIGKILLed process's
+    other threads can still be tearing down then: its open files, the listening socket among them, close only when the
+    last thread exits. Under heavy load that took long enough for a single check to find the socket still accepting
+    (FLAKES.md, the 2026-11-16 entry for this step), so the premise waits for the refusal instead. A wait that runs out
+    says whether the killed process was still exiting then (`threads_left`), which is the premise not settling, or was
+    gone, which means something else keeps the listener open: a real fault, not this race."""
     app = record()["app"]
     os.kill(app["pid"], signal.SIGKILL)
     wait_for_exit(app, "SIGKILL")
     assert_supervisor_kept("after the app was killed")
-    if not quit_socket().exists() or answers(quit_socket()):
+    try:
+        eventually(lambda: not answers(quit_socket()), "premise: the killed app's socket refusing connections")
+    except AssertionError as error:
+        raise AssertionError(f"{error}; the killed app (pid {app['pid']}) {threads_left(app['pid'])}") from None
+    # `answers` reads a missing file as refusing, so the refusal means a stale socket only if the file is there.
+    if not quit_socket().exists():
         raise AssertionError("premise: after the kill, the socket file is not there refusing connections")
     relaunch()
     assert_supervisor_kept("after a relaunch following a kill")
     assert_session_kept("after a relaunch following a kill")
     if not answers(quit_socket()):
         raise AssertionError("the relaunched app left the stale socket in place: nothing answers at it")
+
+
+def threads_left(pid: int) -> str:
+    """What remains of the process `pid` as /proc shows it, for a failure message: its live thread count, or that it is
+    gone. Two or more threads mean it was still exiting; one, or none, that something else holds what it left behind."""
+    try:
+        return f"has {len(os.listdir(f'/proc/{pid}/task'))} thread(s) left"
+    except OSError:
+        return "is gone"
 
 
 def step_09_a_saved_size_is_restored() -> None:
