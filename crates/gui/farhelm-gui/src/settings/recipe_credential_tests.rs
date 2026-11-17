@@ -248,3 +248,31 @@ fn the_catalog_is_read_as_the_editor_opens_and_retry_reads_it_again(cx: &mut Tes
     assert!(!drawn(cx, "recipe-credentials-error"));
     assert_eq!(available(cx, "recipe-github"), Some(true));
 }
+
+/// Why this matters: the pickers list only credentials already saved, so the editor must say where to add or replace
+/// one, or a user whose token is not listed has no way on from the form; and it must say that the recipe keeps names,
+/// not values, since the secret itself never comes back to the GUI. The old spec `tensorlake-recipes.spec.ts`, "a
+/// managed recipe is created, edited and deleted without exposing its token", checked the endpoint tokens' line beside
+/// the picker. Specified: with a recipe whose Claude endpoint names a token open in the editor, the painted text holds
+/// the GitHub block's "Add or replace tokens in Settings → Credentials." and the Agents block's "Add or replace
+/// endpoint tokens in Settings → Credentials. This recipe saves their names, not their values."
+#[gpui::test]
+fn the_editor_says_where_credentials_are_added_and_that_it_keeps_names(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show(cx, vec![with_credentials("rust-dev")]);
+    open_editor_with(&mut helm, cx, "recipe-edit-rust-dev", catalog());
+    assert!(
+        drawn(cx, "recipe-claude-endpoint"),
+        "the premise: Claude's endpoint shows"
+    );
+    let text = super::tests::painted(cx);
+    assert!(
+        text.contains("Add or replace tokens in Settings → Credentials."),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "Add or replace endpoint tokens in Settings → Credentials. This recipe saves their names, not their values."
+        ),
+        "{text}"
+    );
+}

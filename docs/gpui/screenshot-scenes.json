@@ -2526,6 +2526,11 @@
       "reference": "settings-tensorlake"
     },
     {
+      "golden": "settings-tensorlake-sandboxes",
+      "title": "Settings at Tensorlake with a key saved, scrolled to bring Sandboxes not on this helm to the body's top, as read over the fake helm: its heading and Refresh, then a running one with its creation time, one from another helm, a failed cleanup with its reason and Retry cleanup, and a running cleanup's Cleaning up…",
+      "reference": "settings-tensorlake"
+    },
+    {
       "golden": "settings-containers",
       "title": "Settings at Containers, three container hosts ready and no containers left behind",
       "reference": "settings-containers"
@@ -2576,6 +2581,11 @@
       "reference": "hosts-panel-host-unreachable"
     },
     {
+      "golden": "hosts-panel-credentials-not-delivered",
+      "title": "The Hosts panel with Details on and a connected Tensorlake sandbox whose credentials were not delivered: its row amber, and its details naming the sandbox, recipe and size, then Credentials not delivered and the helm's reason",
+      "reference": "hosts-panel-details"
+    },
+    {
       "golden": "host-menu",
       "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, then Retry, highlighted, Update, Settings, and Uninstall and Remove behind a separator",
       "reference": "host-menu"
@@ -2594,6 +2604,21 @@
       "golden": "host-add-dialog",
       "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, the second-factor question with its SSH help link, Cancel and Add",
       "reference": "host-add-dialog"
+    },
+    {
+      "golden": "host-add-tensorlake-form",
+      "title": "The Add host dialog on the Tensorlake sandbox kind with a key saved: Name holding a sandbox name and focus, Recipe with a recipe chosen and its summary, Cancel and Continue",
+      "reference": "host-add-dialog"
+    },
+    {
+      "golden": "host-add-tensorlake-recipe-editor",
+      "title": "The recipe editor inside Add host, as its Recipe choice's New recipe… opens it: the editor in place of the sandbox's fields, focus in its Name, and its Cancel and Save in Add host's footer",
+      "reference": "host-add-dialog"
+    },
+    {
+      "golden": "host-add-tensorlake-creation",
+      "title": "A Tensorlake sandbox's creation question: its title and size, the helm's plan with Copy plan, the billing callout with its pricing link, and Cancel, Back and Create sandbox",
+      "reference": "host-add-setup-plan"
     },
     {
       "golden": "host-add-dialog-agent",

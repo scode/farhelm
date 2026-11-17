@@ -269,6 +269,229 @@ pub(super) fn hosts_panel_host_unreachable_setup(state: &SceneState, _: &mut Win
     hosts_panel_scene(state, &listed, true, cx);
 }
 
+/// Details on with a Tensorlake sandbox, `gpu-sandbox`, whose credentials the helm could not deliver, below the
+/// reference hosts (against reference `hosts-panel-details`, whose stack had no sandbox): the sandbox's row in the
+/// advisory amber though it is connected, and its details naming the sandbox, its recipe and size, then "Credentials
+/// not delivered:" and the helm's reason. Drawn in the tall column, since four rows' details overflow the short one.
+pub(super) fn hosts_panel_credentials_not_delivered_setup(
+    state: &SceneState,
+    _: &mut Window,
+    cx: &mut App,
+) {
+    use crate::hosts::tests::{aliased, connected, host, reference_hosts};
+    let mut sandbox = aliased(
+        host(4, "tensorlake", connected()),
+        "gpu-sandbox",
+        "farhelm-host-fixture-gpubox",
+    );
+    sandbox.tensorlake = Some(farhelm_proto::ui_channel::TensorlakeHostView {
+        sandbox: "farhelm-host-fixture-gpubox".into(),
+        recipe: "rust-dev".into(),
+        size: Some(farhelm_proto::recipes::RecipeSize {
+            cpus: 2,
+            memory_gb: 4,
+            disk_gb: 20,
+        }),
+        tunnels: None,
+        credential_warning: Some(
+            "the sandbox refused the Codex login file: permission denied".into(),
+        ),
+    });
+    let mut listed = reference_hosts();
+    listed.push(sandbox);
+    hosts_panel_scene(state, &listed, true, cx);
+}
+
+/// The Tensorlake account as a sandbox's Add host form has read it with a key saved, for the sandbox scenes below: no
+/// SSH key made and creation asking first, as the helm's defaults have it.
+fn saved_key_account() -> farhelm_proto::tensorlake::Settings {
+    farhelm_proto::tensorlake::Settings {
+        api_key_set: true,
+        create_without_asking: false,
+        helm_tag: "fixture".into(),
+        ssh_key: farhelm_proto::tensorlake::SshKeyStatus::NotCreated,
+    }
+}
+
+/// The pushed recipe catalog with the one recipe the sandbox scenes choose, `rust-dev`: 2 CPUs, 4 GB memory and 20 GB
+/// disk on an image, with two packages and no snapshot built yet.
+fn rust_dev_catalog() -> farhelm_proto::ui_channel::CollectionState {
+    use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+    let recipe = serde_json::json!({
+        "name": "rust-dev",
+        "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
+        "base": { "kind": "image", "image": "team/devbox-base" },
+        "packages": ["jq", "ripgrep"],
+        "claude": null, "codex": null,
+        "claude_login_credential": null, "codex_login_credential": null, "github_token_credential": null,
+        "tunnels": [],
+    });
+    CollectionState {
+        collection: Collection::Recipes,
+        meta: crate::test_support::meta(&["rust-dev"]),
+        entries: vec![KeyedEntry {
+            key: "rust-dev".to_owned(),
+            value: recipe,
+        }],
+    }
+}
+
+/// Run `open` once the fake helm, connected with the reference hosts and [`rust_dev_catalog`], has made its UI session,
+/// as the Add host scenes open their dialog; the fake, the connection and the watch are kept for the scene's life.
+/// Right after `open`, the recipe editor's credential catalog read is answered with no credentials, as Settings' recipe
+/// editor scene answers it; the scenes that open no editor send no such read, and nothing else they send is answered.
+fn with_sandbox_catalog(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+    open: impl Fn(&gpui::FocusHandle, &mut Window, &mut App) + 'static,
+) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        crate::hosts::tests::hosts(&crate::hosts::tests::reference_hosts()),
+        rust_dev_catalog(),
+    ]);
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = Cell::new(false);
+    let helm = Rc::new(RefCell::new(helm));
+    let answering = helm.clone();
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| open(&opener, window, cx));
+        let mut helm = answering.borrow_mut();
+        for read in helm.commands() {
+            if read.path == "/api/credentials" {
+                helm.reply(read.id, 200, Some(serde_json::json!([])));
+            }
+        }
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// The Add host dialog on the Tensorlake sandbox kind with a key saved (against reference `host-add-dialog`, whose
+/// stack had no Tensorlake account): the kind choice, Name holding `gpubox` and focus, Recipe with `rust-dev` chosen
+/// and its summary, and Cancel and Continue. It opens as a sandbox's creation question's Back reopens it
+/// (`hosts::add::reopen_sandbox`), from the account as read, so no read is answered and no Tensorlake account reached.
+pub(super) fn host_add_tensorlake_form_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    with_sandbox_catalog(state, window, cx, reopen_gpubox);
+}
+
+/// Reopen Add host on the sandbox kind as [`host_add_tensorlake_form_setup`] pictures it: `gpubox` and `rust-dev`
+/// from [`saved_key_account`], with the scene's ring handle as the opener.
+fn reopen_gpubox(opener: &gpui::FocusHandle, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    let seed = crate::hosts::add::SandboxSeed {
+        name: "gpubox".to_owned(),
+        recipe: "rust-dev".to_owned(),
+        account: saved_key_account(),
+        problem: None,
+    };
+    let _ = crate::hosts::add::reopen_sandbox(opener, &mark, seed, window, cx);
+}
+
+/// The recipe editor inside Add host (against reference `host-add-dialog`, whose stack had no Tensorlake account), as
+/// "New recipe…" in [`host_add_tensorlake_form_setup`]'s form opens it: the editor in place of the fields, focus in its
+/// Name, and its Cancel and Save in Add host's footer, with no credentials in the catalog. The editor opens through
+/// `hosts::add::open_new_recipe_for_opened` rather than by pressing Recipe and "New recipe…"; the form's own tests pin
+/// that click path.
+pub(super) fn host_add_tensorlake_recipe_editor_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    with_sandbox_catalog(state, window, cx, |opener, window, cx| {
+        reopen_gpubox(opener, window, cx);
+        crate::hosts::add::open_new_recipe_for_opened(window, cx);
+    });
+}
+
+/// The creation question Continue opens for `gpubox` (against reference `host-add-setup-plan`, the SSH setup's
+/// confirmation, since the reference stack had no Tensorlake account): its title and size, the helm's plan for a
+/// sandbox from `rust-dev` in the helm's words with Copy plan, the billing callout with its pricing link, and Cancel,
+/// Back and Create sandbox, focus on Create sandbox. The plan is the scene's own, so no Tensorlake account is reached.
+pub(super) fn host_add_tensorlake_creation_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use farhelm_proto::provisioning::{PlanStep, PlanSteps};
+    with_sandbox_catalog(state, window, cx, |opener, window, cx| {
+        let step = |id: &str, name: &str| PlanStep {
+            id: id.into(),
+            name: name.into(),
+            paths: Vec::new(),
+            explanation: None,
+        };
+        let steps = PlanSteps {
+            lead: "Create a Tensorlake sandbox and set it up as a host".into(),
+            kept: None,
+            steps: vec![
+                step(
+                    "build-snapshot",
+                    "Build the snapshot for recipe rust-dev (packages, Claude Code and Codex; takes a few minutes)",
+                ),
+                step(
+                    "create-sandbox",
+                    "Create sandbox farhelm-host-fixture-gpubox with 2 CPUs, 4 GB memory and 20 GB disk",
+                ),
+                step(
+                    "prepare-sandbox",
+                    "Start the sandbox's login manager and keep the user manager running",
+                ),
+                step(
+                    "configure-agents",
+                    "Configure host credentials and agent endpoints, preserving other settings",
+                ),
+                step(
+                    "set-up-farhelm",
+                    "Install Farhelm's supervisor, as on any host",
+                ),
+            ],
+        };
+        let confirmation = std::iter::once(steps.lead.clone())
+            .chain(
+                steps
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .map(|(n, step)| format!("{}. {}", n + 1, step.name)),
+            )
+            .map(|line| line + "\n")
+            .collect();
+        let offer = crate::hosts::setup::Offer {
+            key: crate::operations::OpKey::new_host_add(),
+            probe_id: "golden-sandbox-plan".to_owned(),
+            confirmation,
+            steps,
+            target: crate::hosts::setup::Target::Sandbox(crate::hosts::setup::Sandbox {
+                opener: opener.clone(),
+                name: "gpubox".to_owned(),
+                recipe: "rust-dev".to_owned(),
+                account: saved_key_account(),
+                resources: farhelm_proto::recipes::RecipeSize {
+                    cpus: 2,
+                    memory_gb: 4,
+                    disk_gb: 20,
+                },
+            }),
+            mark: Mark::take(cx),
+        };
+        crate::hosts::setup::confirm(offer, window, cx);
+    });
+}
+
 /// The reference screens' setup of `dev@new-box` (`host-setup-running-hosts-panel` and `host-setup-failed-hosts-panel`)
 /// with Details on: the three reference hosts and `dev@new-box` failing to connect at `attempt`, its setup's nine steps
 /// in `statuses`, the run in `status`, and `reason` as the failed step's and the run's message. Motion is reduced, so

@@ -393,6 +393,37 @@ fn results_after_the_user_moved_on_open_nothing_and_show_under_the_row(cx: &mut 
     assert_eq!(label(cx, "host-error-2").as_deref(), Some(MOVED_ON));
 }
 
+/// Why this matters: the old page kept a plain-text renderer for planning replies from older helms that sent the plan's
+/// text without its steps (`provisioning.spec.ts`, "unstructured ${operation} plan keeps a named keyboard entry"), and
+/// gave that body its own named keyboard stop. This app's helm is the one built with it and always sends the steps, so
+/// the confirmation never shows a plan without them; such a reply must open no confirmation built from nothing, and
+/// must still say what went wrong where the host's refusals show. Specified: a 200 plan reply with its probe id, plan
+/// and text but no steps opens nothing, and `build-box`'s row says the helm's answer to the uninstall request could not
+/// be read.
+#[gpui::test]
+fn a_plan_without_its_steps_opens_nothing_and_says_it_could_not_be_read(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx);
+    let plan = choose_uninstall(&mut helm, cx);
+    helm.reply(
+        plan,
+        200,
+        Some(json!({
+            "probe_id": "un-1",
+            "plan": { "operation": "uninstall", "state_dir": KEPT },
+            "confirmation": "Farhelm will uninstall from dev@build-box (ubuntu, x86_64):\n",
+        })),
+    );
+    settle(cx);
+    assert!(!any_open(cx), "no confirmation");
+    let line = label(cx, "host-error-2").unwrap_or_default();
+    assert!(
+        line.starts_with(
+            "the helm's answer to POST /api/hosts/[host]/uninstall could not be read: "
+        ),
+        "{line}"
+    );
+}
+
 /// The confirmation freezes the host as the registry lists it when the plan arrives, not as it was at the press, since
 /// up to the helm's host-wait bound can pass between them; and a plan for a host that left the list meanwhile has
 /// nowhere to show. Specified: with `build-box` renamed `builder` while its plan request is out, the confirmation is
