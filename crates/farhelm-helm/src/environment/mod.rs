@@ -47,9 +47,10 @@
 //! task: pending row, progress, private artifact, durable admission, credentials,
 //! attachment and ordinary session creation. ProviderHandle's exhaustive
 //! registration/admission methods preserve each provider's durable facts.
-//! Public wording and marks remain the UI's exhaustive provider home. The
-//! helm's own refusal of work on a suspended host words it per provider in
-//! [`suspended_refusal`], beside the binding's provisioning refusals.
+//! Public wording and marks remain the UI's exhaustive provider home. Text the
+//! helm writes itself is decided here instead, per provider: refusals over the
+//! handle, the refusal of work on a suspended host ([`suspended_refusal`]), and
+//! the launch's progress step names over the place ([`LaunchStepNames`]).
 
 pub(crate) mod lifecycle;
 pub(crate) mod podman;
@@ -264,6 +265,50 @@ pub(crate) fn suspended_refusal(
     match resume_failed {
         None => format!("{what}; it runs again once it is resumed"),
         Some(details) => format!("{what} and its last resume failed: {details}"),
+    }
+}
+
+/// What a new environment's launch progress calls its provider-shaped steps,
+/// in SPEC.md's words ("Sandbox sessions" and "Container sessions"). The run's
+/// step ids are the same for every provider; only these names differ.
+///
+/// The steps SPEC does not name (selecting the recipe source, configuring
+/// credentials, launching the session) keep the shared launch's own wording.
+/// Every step keeps a distinct name: the launcher's pill shows the running
+/// step's name and restarts its seconds when that name changes, so two steps
+/// sharing a name would read as one.
+pub(crate) struct LaunchStepNames {
+    /// `prepare-snapshot`, shown only when preparation turns out to be needed.
+    pub(crate) preparing: String,
+    /// `create-sandbox`, whatever the provider creates.
+    pub(crate) creating: String,
+    /// `attach-supervisor`.
+    pub(crate) starting: String,
+}
+
+#[warn(clippy::wildcard_enum_match_arm)]
+impl LaunchStepNames {
+    /// The names for a launch of `recipe` at `place`. `place_name` is the
+    /// helm's display name for a host-backed place, as Hosts shows it, and
+    /// account places ignore it. The shared launch always supplies the name;
+    /// without one a place host reads "host <id>", as the launcher's label for
+    /// such a container does.
+    pub(crate) fn at(place: Place, recipe: &str, place_name: Option<&str>) -> Self {
+        match place {
+            Place::TensorlakeAccount => Self {
+                preparing: format!("Preparing {recipe} for sessions…"),
+                creating: format!("Creating a {recipe} sandbox…"),
+                starting: "Starting Farhelm in the sandbox…".into(),
+            },
+            Place::PodmanHost(host) => {
+                let host = place_name.map_or_else(|| format!("host {host}"), str::to_owned);
+                Self {
+                    preparing: format!("Preparing {recipe} on {host}…"),
+                    creating: format!("Creating a {recipe} container on {host}…"),
+                    starting: "Starting Farhelm in the container…".into(),
+                }
+            }
+        }
     }
 }
 
