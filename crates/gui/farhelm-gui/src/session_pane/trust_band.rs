@@ -1,26 +1,30 @@
-//! Claude's trust hint band: a note above the open session's agent terminal while Claude asks whether to trust a new
-//! managed checkout. It says that Farhelm can answer that question, offers Settings at the switch that does, and
-//! answers nothing itself.
+//! The trust hint band: a note above the open session's agent terminal while its agent (Claude, Codex or Muse) asks
+//! whether to trust a new managed checkout. It says that Farhelm can answer that question, offers Settings at the
+//! agent's switch that does, and answers nothing itself.
 //!
-//! SPEC.md, "Managed checkouts" (the paragraph that starts "While Claude's trust question is visible"). Ported from the
-//! old app's `ClaudeTrustBand` (`claude_trust.rs` at reference commit `24bc0580`), with its words, buttons, hover help
-//! and failure line, and its look from `.claude-trust-band` in `app.css`. The orchestrator assigned the band to the
-//! session view on 2026-11-14. Here's the TLDR of its rules:
+//! SPEC.md, "Managed checkouts" (the paragraphs that start "While Claude's trust question is visible" and "Codex and
+//! Muse show the same nonmodal discovery hint"). Ported from the old app's `ClaudeTrustBand` (`claude_trust.rs`) and
+//! `AgentTrustBand` (`workspace_trust.rs`) at reference commit `24bc0580`, with their words, buttons, hover help and
+//! failure line, and their shared look from `.claude-trust-band` in `app.css`. The orchestrator assigned the band to the
+//! session view on 2026-11-14, and decided on 2026-11-16 that Codex's and Muse's are built as this one. Here's the TLDR
+//! of its rules:
 //!
-//! - **When it shows** ([`Facts::shows`]): Claude's question is on the open session's agent terminal in a managed
-//!   checkout, Claude's trust is known off, the hint is not dismissed, and × has not hidden this occurrence.
-//! - **Why no harness check.** The supervisor sets `claude_trust_prompt` only from Claude's own screen reader, so the
-//!   flag already belongs to Claude (`agent_kind/screen_reader.rs`). The band names [`TrustAgent::Claude`] for its read,
-//!   its Settings entry point and its words because it is Claude's band; it does not branch on the session's harness.
-//! - **What it reads, and when.** The question and the dismissal are pushed and read while drawing. Claude's trust is
-//!   not pushed, so the band reads its route ([`TrustAgent::read`]) when the open session reaches the question, when any
-//!   Settings dialog closes ([`settings::Closings`]), when Don't show again is pressed (the old corrective read), and on
-//!   the ticker's 30-second clock while the band shows ([`TrustBand::tick_while`]), so a change made elsewhere reaches
-//!   the band within one tick, as the old band's refresh brought it (the orchestrator's decision of 2026-11-16; the old
-//!   refresh followed the session feed and named no interval, so the tick is the ticker's age clock). A tick sends
-//!   nothing while a read is still out ([`Known::out`]), so a slow helm gets no pile of reads. The helm answers in the
-//!   order it was asked, so the last answer is the newest; an answer that arrives while a newer read is still out is
-//!   dropped, so a stale off does not show in that gap ([`TrustBand::reads`]).
+//! - **When it shows** ([`Facts::shows`]): an agent's question is on the open session's agent terminal in a managed
+//!   checkout, that agent's trust is known off, its hint is not dismissed, and × has not hidden this occurrence.
+//! - **Which agent asks** ([`TrustAgent::asking`]): Claude by its own flag, Codex and Muse by the harness-neutral flag
+//!   and the session's structured launch. The band shows one agent's note at a time and takes its read, its Settings
+//!   entry point, its dismissal and its words ([`TrustAgent::band_words`]) from that agent; it never branches on the
+//!   agent itself.
+//! - **What it reads, and when.** The question and the dismissal are pushed and read while drawing. The agent's trust
+//!   is not pushed, so the band reads its route ([`TrustAgent::read`]) when the open session reaches the question (or
+//!   another agent asks there), when any Settings dialog closes ([`settings::Closings`]), when Don't show again is
+//!   pressed (the old corrective read), and on the ticker's 30-second clock while the band shows
+//!   ([`TrustBand::tick_while`]), so a change made elsewhere reaches the band within one tick, as the old band's refresh
+//!   brought it (the orchestrator's decision of 2026-11-16; the old refresh followed the session feed and named no
+//!   interval, so the tick is the ticker's age clock). A tick sends nothing while a read is still out ([`Known::out`]),
+//!   so a slow helm gets no pile of reads. The helm answers in the order it was asked, so the last answer is the newest;
+//!   an answer that arrives while a newer read is still out is dropped, so a stale off does not show in that gap
+//!   ([`TrustBand::reads`]).
 //! - **× and Don't show again**: [`TrustBand::hidden`] and [`TrustBand::hide_everywhere`].
 //!
 //! NOTE: Three deviations, recorded in the parity file
@@ -43,12 +47,13 @@ use crate::focus::Mark;
 use crate::local_state::{self, LocalState};
 use crate::operations::{NotStarted, OpKey, Outcome};
 use crate::session::{self, ObservingCurrent, PerSession};
-use crate::settings::{self, TrustAgent};
+use crate::settings::{self, BandWords, TrustAgent};
 use crate::theme::{self, metrics};
 use crate::ticker;
 
-// The element ids tests and the test bridge find the band and its parts by: the explanation, Settings and caveats,
-// Don't show again, ×, and the failure line of a refused Don't show again.
+// The element ids tests and the test bridge find the band and its parts by, whichever agent asks (named for Claude's
+// band, which came first): the explanation, Settings, Don't show again, ×, and the failure line of a refused Don't show
+// again.
 pub(crate) const BAND_ID: &str = "claude-trust-band";
 pub(crate) const COPY_ID: &str = "claude-trust-band-copy";
 pub(crate) const SETTINGS_ID: &str = "claude-trust-band-settings";
@@ -56,10 +61,6 @@ pub(crate) const DISMISS_ID: &str = "claude-trust-band-dismiss";
 pub(crate) const HIDE_ID: &str = "claude-trust-band-hide";
 pub(crate) const ERROR_ID: &str = "claude-trust-band-error";
 
-/// The explanation's bold lead, in the info ink (`.claude-trust-band-copy strong`), and the rest of it.
-const LEAD: &str = "Claude asks this for every new checkout. ";
-const COPY: &str = "Farhelm can answer it for you, but it's off by default: there's no supported way to do it, so \
-                    Farhelm would have to edit Claude's own settings file, which comes with caveats.";
 /// The failure line's words after the helm refused Don't show again (a press refused because another preference save
 /// was out says [`busy`] instead).
 pub(crate) const ERROR: &str = "Could not save hiding this trust hint. Try again.";
@@ -74,8 +75,8 @@ const RULE: f32 = 3.;
 // ---- When the band shows --------------------------------------------------------------------------------------------
 
 /// What decides the band for the open session, each read where it lives: the pushed row, the drawn terminal, the read
-/// of Claude's trust (`None` until one answers, or when it failed), the pushed dismissal (or the band's own save of
-/// it in flight), and the occurrence's ×.
+/// of the asking agent's trust (`None` until one answers, or when it failed), the pushed dismissal of that agent's hint
+/// (or the band's own save of it in flight), and the occurrence's ×.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Facts {
     pub(crate) question: bool,
@@ -110,10 +111,10 @@ impl Facts {
     }
 }
 
-/// Whether `row` puts the band's read in play: the question is up, in a managed checkout, on a host the helm reaches (a
-/// stale row's question is its last-known screen, under the unavailable card).
-fn at_question(row: &SessionRow) -> bool {
-    row.info.claude_trust_prompt && row.info.working_copy.is_some() && !row.stale
+/// The agent whose question puts the band's read in play for `row`, if any: the question is up, in a managed checkout,
+/// on a host the helm reaches (a stale row's question is its last-known screen, under the unavailable card).
+fn at_question(row: &SessionRow) -> Option<TrustAgent> {
+    TrustAgent::asking(&row.info).filter(|_| row.info.working_copy.is_some() && !row.stale)
 }
 
 // ---- State ----------------------------------------------------------------------------------------------------------
@@ -121,12 +122,14 @@ fn at_question(row: &SessionRow) -> bool {
 /// What the band knows for one UI session. A reset starts it over: its reads and its save die with the session.
 #[derive(Default)]
 struct Known {
-    /// The open session the trust read is for, while it is at the question ([`at_question`]).
-    read_for: Option<String>,
+    /// The open session the trust read is for, while it is at a question ([`at_question`]), and the agent asking there,
+    /// whose trust is read.
+    read_for: Option<(String, TrustAgent)>,
     /// The last answer for `read_for`: `Some` when the helm said, `None` before any answer or after a failed one.
     trust: Option<bool>,
-    /// Whether the band's Don't show again is in flight.
-    hiding: bool,
+    /// The agent whose hint the band's Don't show again is storing, while the save is in flight. The preference row's
+    /// key admits one save at a time, so there is never more than one.
+    hiding: Option<TrustAgent>,
     /// The session whose Don't show again was refused while it was open, with the line's words: [`ERROR`] for the
     /// helm's refusal, [`busy`] for a press the operation store refused because another preference save was out.
     /// Dropped when another session opens.
@@ -146,15 +149,16 @@ pub(crate) fn busy() -> SharedString {
 /// The band's state, held by the session pane for the window's life.
 pub(crate) struct TrustBand {
     known: PerSession<Known>,
-    /// The sessions whose current occurrence the user hid with × (SPEC.md: "× hides only the current occurrence, until
-    /// the question leaves the screen"). Kept for the window's life, as the old page kept it, across switches between
-    /// sessions, and cleared only by a pushed row showing the question gone: a row the store does not hold (a cut or
+    /// The sessions whose current occurrence the user hid with ×, each with the agent that asked (SPEC.md: "× hides
+    /// only the current occurrence, until the question leaves the screen"). Kept for the window's life, as the old page
+    /// kept it, across switches between sessions, and cleared only by a pushed row showing that agent's question gone,
+    /// another agent asking there included (the old `OccurrenceDismissals`): a row the store does not hold (a cut or
     /// filtered list) is not that evidence.
-    hidden: HashSet<String>,
-    /// Counts the reads sent and the changes of the session read for, so an answer applies only if neither happened
-    /// since its read was sent. Outside [`Known`] so it never starts over.
+    hidden: HashSet<(String, TrustAgent)>,
+    /// Counts the reads sent and the changes of the session (or agent) read for, so an answer applies only if neither
+    /// happened since its read was sent. Outside [`Known`] so it never starts over.
     reads: u64,
-    /// Settings and caveats' focus handle: where focus returns when the Settings it opened closes.
+    /// The Settings button's focus handle: where focus returns when the Settings it opened closes.
     settings: FocusHandle,
     /// Holds the ticker's clock while the band shows ([`TrustBand::tick_while`]); the band observes it.
     tick: Entity<Tick>,
@@ -174,9 +178,9 @@ impl TrustBand {
             _store: session::observe_current(cx, |band: &mut Self, cx| band.follow(cx)),
             _observing: vec![
                 cx.observe_global::<LocalState>(|band, cx| band.follow(cx)),
-                // Settings closed, and the user may have changed Claude's trust there.
+                // Settings closed, and the user may have changed the agent's trust there.
                 cx.observe_global::<settings::Closings>(|band, cx| band.read(cx)),
-                // A tick while the band shows: someone may have changed Claude's trust elsewhere.
+                // A tick while the band shows: someone may have changed the agent's trust elsewhere.
                 cx.observe(&tick, |band, _, cx| {
                     if band.known.current(cx).out == 0 {
                         band.read(cx);
@@ -199,27 +203,29 @@ impl TrustBand {
     }
 
     /// Bring the band up to the store and the selection: end the occurrences whose question a pushed row shows gone,
-    /// drop a failure line that belongs to a session no longer open, and read trust when the open session reaches the
+    /// drop a failure line that belongs to a session no longer open, and read trust when the open session reaches a
     /// question.
     fn follow(&mut self, cx: &mut Context<Self>) {
         let store = session::current_store(cx);
-        // Whether the store's row for `key` shows the question, and whether it is at the question in the band's sense.
+        // The agent the store's row for `key` shows asking, and the one at the question in the band's sense.
         let question = |key: &str, cx: &App| {
             let row = store
                 .as_ref()?
                 .read(cx)
                 .collections()
                 .get::<SessionRow>(key)?;
-            Some((row.info.claude_trust_prompt, at_question(row)))
+            Some((TrustAgent::asking(&row.info), at_question(row)))
         };
         let before = self.hidden.len();
-        self.hidden
-            .retain(|key| question(key, cx).is_none_or(|(prompt, _)| prompt));
+        self.hidden.retain(|(key, agent)| {
+            question(key, cx).is_none_or(|(asking, _)| asking == Some(*agent))
+        });
         let mut changed = self.hidden.len() != before;
         let open = local_state::selected(cx);
-        let wanted = open
-            .clone()
-            .filter(|key| question(key, cx).is_some_and(|(_, at)| at));
+        let wanted = open.clone().and_then(|key| {
+            let agent = question(&key, cx)?.1?;
+            Some((key, agent))
+        });
         let known = self.known.current(cx);
         if known
             .failed
@@ -243,17 +249,17 @@ impl TrustBand {
         }
     }
 
-    /// Send a read of Claude's trust for the session the band reads for, nothing while it reads for none. The answer
-    /// applies only if [`TrustBand::reads`] has not moved since.
+    /// Send a read of the asking agent's trust for the session the band reads for, nothing while it reads for none.
+    /// The answer applies only if [`TrustBand::reads`] has not moved since.
     fn read(&mut self, cx: &mut Context<Self>) {
-        if self.known.current(cx).read_for.is_none() {
+        let Some((_, agent)) = self.known.current(cx).read_for.clone() else {
             return;
-        }
+        };
         self.reads += 1;
         self.known.current(cx).out += 1;
         let sent = self.reads;
         let band = cx.weak_entity();
-        TrustAgent::Claude.read(cx, move |answer, cx| {
+        agent.read(cx, move |answer, cx| {
             let _ = band.update(cx, |band, cx| {
                 let applies = band.reads == sent;
                 let known = band.known.current(cx);
@@ -266,24 +272,26 @@ impl TrustBand {
         });
     }
 
-    /// Don't show again for the open session: store the shared dismissal through the operation store under the
-    /// preference row's key, as the Settings switch does, and read trust again. The band hides while the save is out
-    /// and then follows the stored value. A refusal, or a press refused because another preference save holds the key,
-    /// shows its line while the session pressed for stays open ([`Known::failed`]); while trust is not known off (the
-    /// corrective read failed), only that line shows ([`Facts::shows_failure`]).
-    fn hide_everywhere(&mut self, cx: &mut Context<Self>) {
+    /// Don't show again for the open session, whose `agent` asks: store that agent's shared dismissal through the
+    /// operation store under the preference row's key, as its Settings switch does, and read trust again. The band
+    /// hides while the save is out and then follows the stored value. A refusal, or a press refused because another
+    /// preference save holds the key, shows its line while the session pressed for stays open ([`Known::failed`]);
+    /// while trust is not known off (the corrective read failed), only that line shows ([`Facts::shows_failure`]).
+    fn hide_everywhere(&mut self, agent: TrustAgent, cx: &mut Context<Self>) {
         let Some(pressed) = local_state::selected(cx) else {
             return;
         };
         let Some(operations) = session::current_operations(cx) else {
             return;
         };
-        let command = match settings::hide_claude_trust_hint_command() {
-            Ok(command) => command,
-            Err(error) => {
+        let command = match settings::hide_trust_hint_command(agent) {
+            Some(Ok(command)) => command,
+            Some(Err(error)) => {
                 tracing::debug!(?error, "the trust hint's dismissal not built");
                 return;
             }
+            // An agent without a hint has no band, so no button to press.
+            None => return,
         };
         self.known.current(cx).failed = None;
         let band = cx.weak_entity();
@@ -296,7 +304,7 @@ impl TrustBand {
         });
         match started {
             Ok(()) => {
-                self.known.current(cx).hiding = true;
+                self.known.current(cx).hiding = Some(agent);
                 self.read(cx);
             }
             Err(NotStarted::Busy(_)) => {
@@ -313,7 +321,7 @@ impl TrustBand {
     fn hide_settled(&mut self, pressed: &str, refused: bool, cx: &mut Context<Self>) {
         let open = local_state::selected(cx);
         let known = self.known.current(cx);
-        known.hiding = false;
+        known.hiding = None;
         if refused && open.as_deref() == Some(pressed) {
             known.failed = Some((pressed.to_owned(), ERROR.into()));
         }
@@ -338,16 +346,19 @@ pub(crate) fn draw(
     agent_shown: bool,
     cx: &App,
 ) -> Option<AnyElement> {
+    // Every fact below is about the asking agent's question; while no agent with a hint asks, no question is up.
+    let agent = TrustAgent::asking(&row.info)?;
+    let words = agent.band_words()?;
     let state = band.read(cx);
     let known = state.known.read(cx);
     let facts = Facts {
-        question: row.info.claude_trust_prompt,
+        question: true,
         managed: row.info.working_copy.is_some(),
         agent_shown,
         trust: known.and_then(|known| known.trust),
-        dismissed: !settings::claude_trust_hint_shown(cx)
-            || known.is_some_and(|known| known.hiding),
-        hidden: state.hidden.contains(key),
+        dismissed: !settings::trust_hint_shown(agent, cx)
+            || known.is_some_and(|known| known.hiding == Some(agent)),
+        hidden: state.hidden.contains(&(key.to_owned(), agent)),
     };
     let failed = known
         .and_then(|known| known.failed.as_ref())
@@ -387,7 +398,8 @@ pub(crate) fn draw(
                     .bg(theme::color(palette.info)),
             )
             .when(shows, |band| {
-                band.child(copy(palette)).child(actions(&weak, key, state))
+                band.child(copy(&words, palette))
+                    .child(actions(&weak, key, agent, &words, state))
             })
             .children(failed.filter(|_| failure).map(|words| {
                 div()
@@ -403,51 +415,54 @@ pub(crate) fn draw(
     )
 }
 
-/// The explanation, its lead in bold info ink.
-fn copy(palette: &theme::Palette) -> impl IntoElement {
+/// The explanation, its lead in bold info ink (`.claude-trust-band-copy strong`).
+fn copy(words: &BandWords, palette: &theme::Palette) -> impl IntoElement {
     let lead = HighlightStyle {
         color: Some(theme::color(palette.info)),
         font_weight: Some(FontWeight::BOLD),
         ..HighlightStyle::default()
     };
-    let words = format!("{LEAD}{COPY}");
+    let text = format!("{}{}", words.lead, words.rest);
     div()
         .id(COPY_ID)
         .debug_selector(|| COPY_ID.into())
         .role(Role::Label)
-        .aria_label(SharedString::from(words.clone()))
-        .child(StyledText::new(words).with_highlights([(0..LEAD.len(), lead)]))
+        .aria_label(SharedString::from(text.clone()))
+        .child(StyledText::new(text).with_highlights([(0..words.lead.len(), lead)]))
 }
 
-/// Settings and caveats, Don't show again and ×, each acting through `band` for the session filed under `key`.
-fn actions(band: &WeakEntity<TrustBand>, key: &str, state: &TrustBand) -> impl IntoElement {
+/// Settings, Don't show again and ×, each acting through `band` for `agent`'s question in the session filed under
+/// `key`.
+fn actions(
+    band: &WeakEntity<TrustBand>,
+    key: &str,
+    agent: TrustAgent,
+    words: &BandWords,
+    state: &TrustBand,
+) -> impl IntoElement {
     let opener = state.settings.clone();
     let settings = Button::new(
         SETTINGS_ID,
-        "Settings and caveats",
-        HoverHelp::tooltip(
-            "Open Settings at the option to answer this question for new checkouts, with its caveats",
-        ),
+        words.settings,
+        HoverHelp::tooltip(words.settings_help),
         Role::Button,
     )
     .tier(Tier::Primary)
     .focus(&state.settings)
     .on_click(move |_, window, cx| {
         let mark = Mark::take(cx);
-        settings::open_at_agent_trust(TrustAgent::Claude, &opener, &mark, window, cx);
+        settings::open_at_agent_trust(agent, &opener, &mark, window, cx);
     });
     let dismissing = band.clone();
     let dismiss = Button::new(
         DISMISS_ID,
         "Don't show again",
-        HoverHelp::tooltip(
-            "Stop showing this note for every session; Settings can turn it back on",
-        ),
+        HoverHelp::tooltip(words.dismiss_help),
         Role::Button,
     )
     .tier(Tier::Neutral)
     .on_click(move |_, _, cx| {
-        let _ = dismissing.update(cx, |band, cx| band.hide_everywhere(cx));
+        let _ = dismissing.update(cx, |band, cx| band.hide_everywhere(agent, cx));
     });
     let (hiding, occurrence) = (band.clone(), key.to_owned());
     let hide = Button::new(
@@ -460,7 +475,7 @@ fn actions(band: &WeakEntity<TrustBand>, key: &str, state: &TrustBand) -> impl I
     .tier(Tier::Neutral)
     .on_click(move |_, _, cx| {
         let _ = hiding.update(cx, |band, cx| {
-            band.hidden.insert(occurrence.clone());
+            band.hidden.insert((occurrence.clone(), agent));
             cx.notify();
         });
     });

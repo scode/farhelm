@@ -232,10 +232,10 @@ every machine, so it shows the switch.
 
 The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
 opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
-file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). Claude's trust hint band, the
-session view's, opens it through the Agent trust entry point (`settings::open_at_agent_trust`) and reads Claude's trust
-again whenever a Settings dialog closes (`settings::Closings`); its cases are in the sidebar's parity file, under
-`tests/claude-trust.spec.ts`.
+file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). The trust hint band (Claude's,
+Codex's and Muse's), the session view's, opens it through the Agent trust entry point (`settings::open_at_agent_trust`)
+and reads its agent's trust again whenever a Settings dialog closes (`settings::Closings`); its cases are in the
+sidebar's parity file, under `tests/claude-trust.spec.ts` and `tests/workspace-trust.spec.ts`.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named otherwise:
 
@@ -1130,9 +1130,9 @@ hint switch that reverses its Don't show again. Replacing tests, in `crates/gui/
 Not ported here: the two hint-band cases ("... trust hint stays scoped to its managed agent terminal and own dismissal",
 "Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to
 [Sidebar and session view](sidebar-and-session-view.md), since the session view draws the hint bands (decided by the
-migration's orchestrator on 2026-11-14, as `launcher.md`'s `tests/claude-trust.spec.ts` entry records). Claude's band is
-built, with its cases in the sidebar's parity file under `tests/claude-trust.spec.ts`; the Codex and Muse band, which
-these two cases are about, is not built yet.
+migration's orchestrator on 2026-11-14, as `launcher.md`'s `tests/claude-trust.spec.ts` entry records). The band is
+built for Claude, Codex and Muse, with its cases in the sidebar's parity file under `tests/claude-trust.spec.ts` and
+`tests/workspace-trust.spec.ts`.
 
 ## `tests/podman-environments.spec.ts`, this area's cases
 

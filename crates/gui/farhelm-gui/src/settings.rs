@@ -142,6 +142,8 @@ use choices::{Choice, Switch};
 use configured::Configured;
 use tensorlake_key::{Place, TensorlakeAccount, TensorlakeKey};
 
+/// What the session view's trust hint band says for an agent, kept with the rest of that agent's trust vocabulary.
+pub(crate) use agent_trust::BandWords;
 pub use agent_trust::TrustAgent;
 pub use checkout_field::{CheckoutField, FolderScope, Saved};
 /// The one way the GUI asks the helm for Podman checks, for the launcher too ([`containers::check_container_hosts`]).
@@ -282,15 +284,15 @@ fn open_dialog(
 }
 
 /// Set each time a Settings dialog is released, however it closed (Escape, a close control, a reset's `close_all`), so
-/// observing it is how a view learns that Settings closed: the trust hint band reads Claude's trust again then, since
-/// the helm does not push trust and the user may have changed it in Settings, whichever entry point opened it
+/// observing it is how a view learns that Settings closed: the trust hint band reads its agent's trust again then,
+/// since the helm does not push trust and the user may have changed it in Settings, whichever entry point opened it
 /// (`crate::session_pane::trust_band`). A dialog whose opening was refused is released too, which costs the band one
 /// more read.
 pub(crate) struct Closings;
 
 impl gpui::Global for Closings {}
 
-/// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint's "Settings and caveats" (SPEC.md: "Trust
+/// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint band's Settings button (SPEC.md: "Trust
 /// hints instead open agent trust at the relevant switch and scroll its block into view"). `opener` and `mark` are as
 /// [`open`]'s: the hint's button and the mark taken in its click handler.
 ///
@@ -330,20 +332,25 @@ pub fn open_at_agent_trust(
     Some(layer)
 }
 
-/// `PUT /api/preferences` turning "Show the hint when Claude asks about a managed checkout" off, exactly as its switch
-/// here saves it: for the trust hint band's Don't show again, which stores the same shared dismissal.
-pub(crate) fn hide_claude_trust_hint_command()
--> Result<crate::operations::Command, farhelm_helm_client::PathError> {
-    Choice::ShowClaudeTrustHint.command(false)
+/// `PUT /api/preferences` turning `agent`'s "Show the hint when ... asks about a managed checkout" off, exactly as its
+/// switch here saves it: for the trust hint band's Don't show again, which stores the same shared dismissal. `None` for
+/// an agent without a hint (Pi).
+pub(crate) fn hide_trust_hint_command(
+    agent: TrustAgent,
+) -> Option<Result<crate::operations::Command, farhelm_helm_client::PathError>> {
+    agent.hint().map(|choice| choice.command(false))
 }
 
-/// Whether the pushed preference row lets Claude's trust hint show, by the rule its switch here reads (shown unless the
-/// dismissal is stored `true`): for the trust hint band, so the two never disagree on an unset field.
-pub(crate) fn claude_trust_hint_shown(cx: &App) -> bool {
+/// Whether the pushed preference row lets `agent`'s trust hint show, by the rule its switch here reads (shown unless
+/// the dismissal is stored `true`): for the trust hint band, so the two never disagree on an unset field. Never for an
+/// agent without a hint (Pi).
+pub(crate) fn trust_hint_shown(agent: TrustAgent, cx: &App) -> bool {
     let store = session::current_store(cx);
     let collections = store.as_ref().map(|store| store.read(cx).collections());
     let preferences = collections.and_then(|all| all.get::<Preferences>(PREFERENCES_KEY));
-    Choice::ShowClaudeTrustHint.stored(preferences)
+    agent
+        .hint()
+        .is_some_and(|choice| choice.stored(preferences))
 }
 
 /// `PUT /api/preferences` turning "Set up new hosts without asking" on, exactly as its switch here saves it: for the

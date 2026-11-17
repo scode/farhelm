@@ -42,7 +42,7 @@ pub(crate) const TEST_NOW: i64 = 1_751_414_398;
 /// One session as the helm would push it: the helm's pinned list fixture with the fields these tests are about
 /// replaced. Defaults: titled by its key, running, created and last active at 100, seen at 100 (so nothing is new), in
 /// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`, launched as the
-/// fixture's Codex agent launch in YOLO with no status-line evidence, not at Claude's trust question, with no
+/// fixture's Codex agent launch in YOLO with no status-line evidence, not at any trust question, with no
 /// notifications (the helm fixture's row carries a resolved one, which would give every row a bell; a test that wants
 /// one names it), and unpinned (the helm fixture's row is pinned, which would group every row first and draw a pin on
 /// each; a test that wants one names its position). The screenshot goldens build their fleet from it too.
@@ -68,6 +68,9 @@ pub(crate) struct Fixture {
     /// Whether the supervisor sees Claude's "trust this folder?" question on the agent's screen now
     /// (`claude_trust_prompt`).
     claude_trust_prompt: bool,
+    /// Whether the supervisor sees the harness-neutral workspace-trust question (Codex's, Muse's) on the agent's screen
+    /// now (`workspace_trust_prompt`).
+    workspace_trust_prompt: bool,
     /// The session's notifications in the helm's wire form and its read mark, when the test names them; else none, and
     /// a read mark of 0.
     notifications: Option<(Value, u64)>,
@@ -103,6 +106,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         launch: None,
         screen_yolo: false,
         claude_trust_prompt: false,
+        workspace_trust_prompt: false,
         notifications: None,
         tabs: 0,
         invocation: None,
@@ -178,6 +182,12 @@ impl Fixture {
         self.claude_trust_prompt = true;
         self
     }
+    /// The session at its agent's workspace-trust question, as the supervisor reports it for any harness whose question
+    /// it recognizes; which agent asks is the launch's to say.
+    pub(crate) fn at_workspace_trust_question(mut self) -> Self {
+        self.workspace_trust_prompt = true;
+        self
+    }
     /// The session with `notifications` (an array of `SessionNotification`s in the helm's wire form) and the helm's read
     /// mark `read_through`, as the helm lists a session whose row shows a bell.
     pub(crate) fn notifications(mut self, notifications: Value, read_through: u64) -> Self {
@@ -236,6 +246,7 @@ impl Fixture {
         }
         value["screen_yolo"] = json!(self.screen_yolo);
         value["claude_trust_prompt"] = json!(self.claude_trust_prompt);
+        value["workspace_trust_prompt"] = json!(self.workspace_trust_prompt);
         let (notifications, read_through) =
             self.notifications.clone().unwrap_or_else(|| (json!([]), 0));
         value["notifications"] = notifications;

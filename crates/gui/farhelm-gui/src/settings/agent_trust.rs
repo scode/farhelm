@@ -25,8 +25,11 @@
 //! - **The hint switches are preferences.** Whether a hint was dismissed is a field of the pushed preference row, which
 //!   the hint band reads too, so those switches are ordinary Settings switches ([`super::choices::Choice`]) drawn here.
 //!   The trust routes also answer with the dismissal; the section ignores it and reads the store, which stays current.
+//! - **The session view's trust hint band reads its per-agent facts here too**: which agent a session's trust question
+//!   belongs to ([`TrustAgent::asking`]) and the band's words ([`TrustAgent::band_words`]).
 
 use farhelm_helm_client::{ApiPath, PathError};
+use farhelm_proto::{LaunchHarness, SessionInfo};
 use gpui::{
     AnyElement, App, Div, FocusHandle, FontWeight, IntoElement, ParentElement as _, Role,
     Styled as _, Window, div, prelude::FluentBuilder as _, px,
@@ -49,12 +52,13 @@ const CAUTION_PAD: f32 = 12.;
 const CAUTION_LINE_HEIGHT: f32 = 18.;
 const CAUTION_GAP: f32 = 8.;
 
-/// An agent with a managed-checkout trust switch: the GUI's per-agent trust vocabulary. Everything the section does
-/// differently per agent is an exhaustive method here, so a new trust agent needs a decision at each one (AGENTS.md,
-/// "Code rules"; the per-harness map in `crates/farhelm-supervisor/src/agent_kind/mod.rs` names this enum).
+/// An agent with a managed-checkout trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
+/// session view's trust hint band do differently per agent, which agent a session's trust question belongs to
+/// included, is an exhaustive method here, so a new trust agent needs a decision at each one (AGENTS.md, "Code rules";
+/// the per-harness map in `crates/farhelm-supervisor/src/agent_kind/mod.rs` names this enum).
 ///
 /// The discriminants are each agent's place in [`TrustAgent::ALL`], where the dialog keeps its state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TrustAgent {
     Claude = 0,
     Codex = 1,
@@ -198,11 +202,85 @@ impl TrustAgent {
 
     /// The switch that shows or hides the agent's discovery hint; Pi has no hint (SPEC.md: "Pi has a switch but no
     /// hint band").
-    fn hint(self) -> Option<Choice> {
+    pub(super) fn hint(self) -> Option<Choice> {
         match self {
             TrustAgent::Claude => Some(Choice::ShowClaudeTrustHint),
             TrustAgent::Codex => Some(Choice::ShowCodexTrustHint),
             TrustAgent::Muse => Some(Choice::ShowMuseTrustHint),
+            TrustAgent::Pi => None,
+        }
+    }
+
+    /// The agent whose own trust question is on the session's agent screen now, by the session's pushed `info`, for the
+    /// trust hint band (`crate::session_pane::trust_band`); `None` while no agent with a hint asks.
+    ///
+    /// Claude is named by its own flag, `claude_trust_prompt`, whatever the launch, as the band has read it since it
+    /// was built: the supervisor sets that flag only from Claude's screen reader. Codex and Muse share the
+    /// harness-neutral `workspace_trust_prompt`, which says that a question is up but not whose, so the session's
+    /// structured launch names the agent (`TrustAgent::for_harness`). A command or legacy launch names no harness and
+    /// borrows no agent's switch or dismissal, as in the old app (`TrustAgent::for_session` in `workspace_trust.rs` at
+    /// `24bc0580`). An agent without a hint (Pi) is never named.
+    pub(crate) fn asking(info: &SessionInfo) -> Option<TrustAgent> {
+        if info.claude_trust_prompt {
+            return Some(TrustAgent::Claude);
+        }
+        if !info.workspace_trust_prompt {
+            return None;
+        }
+        TrustAgent::for_harness(info.launch.agent_selection()?.harness)
+            .filter(|agent| agent.hint().is_some())
+    }
+
+    /// The agent whose managed-checkout trust switch a structured launch of `harness` reads, for the harness-neutral
+    /// question. Claude is not one here: its question has its own flag ([`TrustAgent::asking`]), so the neutral flag
+    /// on a Claude launch adds no second band. The other harnesses have no trust switch.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    fn for_harness(harness: LaunchHarness) -> Option<TrustAgent> {
+        match harness {
+            LaunchHarness::Codex => Some(TrustAgent::Codex),
+            LaunchHarness::Muse => Some(TrustAgent::Muse),
+            LaunchHarness::Pi => Some(TrustAgent::Pi),
+            LaunchHarness::Claude
+            | LaunchHarness::Cursor
+            | LaunchHarness::Goose
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => None,
+        }
+    }
+
+    /// The trust hint band's words for the agent, `None` for an agent without a hint (Pi). Claude's are the old
+    /// `ClaudeTrustBand`'s (`claude_trust.rs`), which point at the caveats of editing Claude's own file; Codex's and
+    /// Muse's are the old `AgentTrustBand`'s (`workspace_trust.rs`), whose mechanism is a command-line flag, both at
+    /// reference commit `24bc0580`.
+    pub(crate) fn band_words(self) -> Option<BandWords> {
+        // The flag-based agents' explanation after their lead.
+        const FLAG: &str = "Farhelm can answer it for managed checkouts through a command-line flag. It's off by \
+                            default because repository hooks, settings and commands are then trusted.";
+        match self {
+            TrustAgent::Claude => Some(BandWords {
+                lead: "Claude asks this for every new checkout. ",
+                rest: "Farhelm can answer it for you, but it's off by default: there's no supported way to do it, \
+                       so Farhelm would have to edit Claude's own settings file, which comes with caveats.",
+                settings: "Settings and caveats",
+                settings_help: "Open Settings at the option to answer this question for new checkouts, with its \
+                                caveats",
+                dismiss_help: "Stop showing this note for every session; Settings can turn it back on",
+            }),
+            TrustAgent::Codex => Some(BandWords {
+                lead: "Codex asks about trust for this checkout. ",
+                rest: FLAG,
+                settings: "Settings",
+                settings_help: "Open Settings at the Codex managed-checkout trust switch",
+                dismiss_help: "Stop showing this Codex note for every session; Settings can turn it back on",
+            }),
+            TrustAgent::Muse => Some(BandWords {
+                lead: "Muse asks about trust for this checkout. ",
+                rest: FLAG,
+                settings: "Settings",
+                settings_help: "Open Settings at the Muse managed-checkout trust switch",
+                dismiss_help: "Stop showing this Muse note for every session; Settings can turn it back on",
+            }),
             TrustAgent::Pi => None,
         }
     }
@@ -223,6 +301,17 @@ impl TrustAgent {
     ) {
         configured::read_enabled(self.path(), cx, on_read);
     }
+}
+
+/// What the trust hint band says for one agent ([`TrustAgent::band_words`]): the explanation's bold lead and the rest
+/// of it, the Settings button's label and hover help, and Don't show again's hover help. The ×, its help and the
+/// failure line say the same for every agent, so they stay with the band.
+pub(crate) struct BandWords {
+    pub(crate) lead: &'static str,
+    pub(crate) rest: &'static str,
+    pub(crate) settings: &'static str,
+    pub(crate) settings_help: &'static str,
+    pub(crate) dismiss_help: &'static str,
 }
 
 /// One agent's trust switch in the open dialog.

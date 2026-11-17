@@ -837,10 +837,14 @@ Lint exceptions: none.
 
 ### Settings dialog
 
-Extension points: reported, the whole file: owned by the settings-and-hosts area, which built it. Another area uses one
-of its items: the host rail's gear opens Settings (`open`, sidebar-and-session-view). The table holds only whole paths,
-so the row covers the whole dialog and the owner's own changes to it are reported too; the review gate passes those that
-leave the shared item alone. Another area's change follows the pattern already there, and the review gate judges it.
+Extension points: reported, the whole file: owned by the settings-and-hosts area, which built it. Other areas use some
+of its items: the host rail's gear opens Settings (`open`, sidebar-and-session-view), and the session view's trust hint
+band opens it at an agent's switch (`open_at_agent_trust`), reads trust again when it closes (`Closings`), and reads and
+stores an agent's hint dismissal (`trust_hint_shown`, `hide_trust_hint_command`), naming the agent and its words with
+`TrustAgent` and `BandWords` from `settings/agent_trust.rs` (sidebar-and-session-view). The table holds only whole
+paths, so the row covers the whole dialog and the owner's own changes to it are reported too; the review gate passes
+those that leave the shared item alone. Another area's change follows the pattern already there, and the review gate
+judges it.
 
 Lint exceptions: none.
 
