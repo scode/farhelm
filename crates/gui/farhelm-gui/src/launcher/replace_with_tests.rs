@@ -11,6 +11,7 @@ use serde_json::json;
 use super::draft::Mode;
 use super::entry::open_replace_with;
 use super::entry_tests::{destination, window_with};
+use super::folder_default_tests::edit_draft;
 use super::view_tests::{draft, name_of, shown_refusal};
 use crate::local_state;
 use crate::session_list::tests::{change, listing_meta, session};
@@ -315,4 +316,88 @@ fn cancelling_replace_with_sends_nothing(cx: &mut TestAppContext) {
     assert!(!any_open(cx), "the premise: Escape closed it");
     assert!(replaces(&mut helm, cx).is_empty());
     assert_eq!(selected(cx).as_deref(), Some("a"));
+}
+
+// ---- A timeout, and a refusal before sending ---------------------------------------------------------------------------
+
+/// A Replace with whose reply is the host's timeout may still replace its source: its row says so once the reply
+/// comes, even with the launcher out of sight, and the launcher, brought back from its notice, shows the helm's words
+/// without "Not launched." (nonblocking-launch.spec's "Replace with settles its unknown before its launcher can return").
+/// Specified: a key press after Launch, then a 504 with the bounded route's words: no launcher opens, and the store's
+/// line for a is a Replace with those words; Open launcher brings the launcher back showing them alone.
+#[gpui::test]
+fn a_timed_out_replace_with_settles_its_row_before_the_launcher_returns(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(replace_with(cx, "a"));
+    let replace = pressed(&mut helm, cx);
+    super::launch_tests::times_out_after_moving_on(
+        &mut helm,
+        cx,
+        replace.id,
+        "a",
+        crate::operations::Work::Replace,
+    );
+}
+
+/// Whether a's row reports the refused Stop of the next test.
+fn reports_the_stop(cx: &mut VisualTestContext) -> bool {
+    cx.update(|_, cx| crate::session_list::outcome::current_line("a", cx))
+        .is_some_and(|line| {
+            line.work == crate::operations::Work::Stop && line.message.raw() == "stop refused here"
+        })
+}
+
+/// A Replace with refused before anything is sent leaves the source's row as it was, an earlier Stop's report included
+/// (nonblocking-launch.spec's "a locally refused Replace with preserves the source's earlier Stop report"). Why: a press
+/// that sent nothing has no outcome of its own to put on the row. Specified: a's Stop, from its row menu, is refused
+/// with "stop refused here"; then Replace with of a, given a wrapper prefix that does not parse, is pressed: nothing is
+/// sent, the launcher says why, and a's line is still that Stop refusal.
+#[gpui::test]
+fn a_locally_refused_replace_with_keeps_the_sources_stop_report(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    replaces(&mut helm, cx);
+    test_support::click(cx, "session-menu-a");
+    test_support::click(cx, "session-menu-stop");
+    // a's agent is working, so its Stop asks first; the answer is not what is under test.
+    test_support::click(cx, "prompt-confirm");
+    cx.run_until_parked();
+    let mut stopped = false;
+    for command in helm.commands() {
+        if command.path == "/api/sessions/a/stop" {
+            helm.reply(command.id, 409, Some(json!("stop refused here")));
+            stopped = true;
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    settle(cx);
+    assert!(stopped, "the premise: a's Stop was sent");
+    assert!(
+        reports_the_stop(cx),
+        "the premise: a's row reports its Stop"
+    );
+
+    assert!(replace_with(cx, "a"));
+    edit_draft(cx, |draft| draft.edit_wrapper("'unclosed".into()));
+    test_support::click(cx, "launcher-launch");
+    cx.run_until_parked();
+    let launches: Vec<String> = helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.method == farhelm_helm_client::Method::Post)
+        .map(|command| command.path)
+        .filter(|path| {
+            path == "/api/sessions"
+                || path.ends_with("/replace")
+                || path.ends_with("/resume")
+                || path.contains("/environment")
+        })
+        .collect();
+    assert_eq!(launches, Vec::<String>::new(), "nothing was sent");
+    assert!(
+        shown_refusal(cx).is_some_and(|refusal| refusal.contains("wrapper prefix")),
+        "the launcher says why: {:?}",
+        shown_refusal(cx)
+    );
+    assert!(reports_the_stop(cx), "a's row still reports its Stop");
 }

@@ -83,6 +83,8 @@ pub(crate) mod launch_tests;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]
+mod pending_tests;
+#[cfg(test)]
 mod recents_tests;
 #[cfg(test)]
 mod recents_view_tests;

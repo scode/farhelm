@@ -734,6 +734,28 @@ fn the_catalog_retry_keeps_an_edit(cx: &mut TestAppContext) {
     );
 }
 
+// ---- A timed-out restart ----------------------------------------------------------------------------------------
+
+/// A Restart with whose reply is the host's timeout may still restart the session: its row says so once the reply
+/// comes, even with the launcher out of sight, and the launcher, brought back from its notice, shows the helm's words
+/// rather than a refusal's, with its edit (nonblocking-launch.spec's "Restart with settles its unknown before its
+/// launcher can return"). Specified: a key press after Restart, then a 504 with the bounded route's words: no launcher
+/// opens, and the store's line for a is a Restart with those words; Open launcher brings it back showing them alone,
+/// with the Medium effort.
+#[gpui::test]
+fn a_timed_out_restart_with_settles_its_row_before_the_launcher_returns(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    edit_effort(cx);
+    let restart = pressed(&mut helm, cx);
+    super::launch_tests::times_out_after_moving_on(&mut helm, cx, restart.id, "a", Work::Restart);
+    assert_eq!(
+        draft(cx).agent.effort,
+        Some(LaunchEffort::Medium),
+        "with its edit"
+    );
+}
+
 // ---- Held keys ---------------------------------------------------------------------------------------------------
 
 /// A held Enter in the model field applies nothing, as the old field's ignored an auto-repeat, so a key still down from
