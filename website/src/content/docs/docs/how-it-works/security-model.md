@@ -14,8 +14,9 @@ This page is planned but not written yet. The text below says what it will cover
 
 :::
 
-What Farhelm exposes and trusts: SSH for reaching hosts, a web UI that listens only on loopback and that a link on a
-page from another local port cannot open, and no Farhelm relay or account. Adding an ordinary SSH host needs no root;
+What Farhelm exposes and trusts: SSH for reaching hosts; the app's window, which reaches the helm built into it over
+loopback only, with a credential made fresh at each launch; a helm that refuses any request a page in your browser
+sends; and no Farhelm relay or account. Adding an ordinary SSH host needs no root;
 [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) use passwordless sudo to prepare user services and need a
 Tensorlake account. Also how much the helm is trusted with on each host, since it can run commands there, and what an
 agent on one host can do to sessions on others through Farhelm, with your approval or a host's **Run farhelm commands
@@ -32,12 +33,12 @@ new releases and downloads them, checking each one's signature, by itself unless
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
 the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's
-terminal: the helm can read any file the session's account can read on that host. In the desktop app, Cmd-click
-(Ctrl-click on Linux) also opens the saved copy in its default app for Markdown, text and JSON files and common image
-types by default. The [desktop setting](/docs/using/session-list/#terminal-links) can allow any file type you add,
-including one that may run code in its default app. The dialog warns beside each type Farhelm does not recognize as
-safe. An opened HTML-like page can run browser scripts and send requests to services on your computer, including
-localhost on other ports. Plain clicks and browser clicks only download; check the disclosed host and path first
+terminal: the helm can read any file the session's account can read on that host. Cmd-click (Ctrl-click on Linux) also
+opens the saved copy in its default app for Markdown, text and JSON files and common image types by default.
+[**File types to open with Cmd-click**](/docs/using/session-list/#terminal-links) (Ctrl-click on Linux) in Settings →
+Terminal can allow any file type you add, including one that may run code in its default app, and warns beside each type
+Farhelm does not recognize as safe. An opened HTML-like page can run browser scripts and send requests to services on
+your computer, including localhost on other ports. Plain clicks only download; check the disclosed host and path first
 ([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)). And opening links: with your approval, or a
 host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
 lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also
