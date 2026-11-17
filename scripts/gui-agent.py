@@ -37,8 +37,9 @@ own `FARHELM_*` variables never reach the app. `--remote-host DEST` (repeatable)
 one more supervisor per destination, each in the run's own `r<N>` state directory, and has the app's helm register
 each as an SSH host reached at DEST, which must be this machine under a spelling of its own. `--scenario FILE` stages
 the fleet a docs-media `scenario.json5` describes, a staged run whose remote hosts are the scenario's: its hosts with
-their aliases, its sessions with their titles, agent types, YOLO launches, statuses and seen state, the window at its
-viewport and the open session opened (see "Scenario runs" below). `--user-session` (Linux)
+their aliases, its sessions with their titles, agent types, YOLO launches, statuses and seen state and with the ages
+and folders the app pins on their rows, the window at its viewport and the open session opened (see "Scenario runs"
+below). `--user-session` (Linux)
 gives the app the caller's own runtime directory and session bus, so that its helm's Podman check reaches the user's
 systemd manager and New container shows; such a run shares that manager, and `stop` removes what the run's helm and
 supervisor left there by recorded name (USER_SESSION_ENV, `remove_user_session_objects`). Any other verb goes to the
@@ -670,12 +671,14 @@ def app_env_args(
     start_dialogs: bool = False,
     payload_dir: Path | None = None,
     ensure_hosts: Path | None = None,
+    session_pins: Path | None = None,
     staged: bool = False,
 ) -> list[str]:
     """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
-    first window's size, a forced appearance, the scripted provisioning backend's directory, the payload directory and
-    a staged run's ensure-hosts file when the run asks for them (unset otherwise, so the app starts at its own default
-    size in the system's appearance, sets up hosts for real, has no payloads to push and registers no hosts).
+    first window's size, a forced appearance, the scripted provisioning backend's directory, the payload directory, a
+    staged run's ensure-hosts file and a scenario run's pinned session values when the run asks for them (unset
+    otherwise, so the app starts at its own default size in the system's appearance, sets up hosts for real, has no
+    payloads to push, registers no hosts and shows every session as the helm pushes it).
     `staged` forces the scripted backend on whatever `scripted_hosts` says: a staged remote host is this machine, so a
     real setup, Update or uninstall of it would act on its own Farhelm installation. The start dialogs are off unless
     `start_dialogs` asks for them, because every run's helm is fresh and would otherwise open the Welcome card over the
@@ -705,6 +708,8 @@ def app_env_args(
         pairs[PAYLOAD_DIR_ENV] = str(payload_dir)
     if ensure_hosts is not None:
         pairs[ENSURE_HOSTS_ENV] = str(ensure_hosts)
+    if session_pins is not None:
+        pairs[SESSION_PINS_ENV] = str(session_pins)
     args: list[str] = []
     for key, value in pairs.items():
         args += ["--env", f"{key}={value}"]
@@ -803,9 +808,10 @@ def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[st
 # destination dialed, so a typo fails as a usage error instead of as a picture that looks plausible and is wrong. Its
 # remote hosts become `--remote-host` destinations, so the run is staged (`staged_start`). Once the app is up,
 # `stage_scenario` names the hosts, creates the sessions on them, waits for every status, sets the seen state, and
-# checks each row's permission shield in the window. Ported from the browser suite's `e2e/readme-hero/scenario.ts`
-# and `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). What a scenario says that is not
-# staged yet (ages, folders, the viewport's scale) is in docs/gui-agent.md, "Scenario runs".
+# checks each row's permission shield in the window. Ported from the browser suite's `e2e/readme-hero/scenario.ts` and
+# `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). Each session's age and folder, which the
+# old staging rewrote in the helm's replies, reach the app in a file (`session_pins_body`). What a scenario says that is
+# not staged yet (the viewport's scale) is in docs/gui-agent.md, "Scenario runs".
 
 # The program names a scenario session may be launched as, and the permission-bypass flag each takes: the flags the
 # helm composes a YOLO launch of that harness with (`compile` in crates/farhelm-helm/src/launches.rs). The flag is only
@@ -815,6 +821,11 @@ SCENARIO_YOLO_FLAGS = {"claude": "--dangerously-skip-permissions", "codex": "--y
 # The session list's preferences the old staging set before the page loaded: the activity order the scenario's row order
 # is written for, and full rows. One sparse write, which touches no other preference.
 SCENARIO_PREFERENCES = {"list_sort": "activity", "compact": False}
+
+# The variable naming the pins file to an agent build of the app (`SESSION_PINS_ENV` in
+# crates/gui/farhelm-gui/src/agent_startup.rs, which reads it), and the file's name in the run directory.
+SESSION_PINS_ENV = "FARHELM_DESKTOP_AGENT_SESSION_PINS"
+SESSION_PINS_FILE = "session-pins.json"
 
 
 def _sibling(name: str):
@@ -845,7 +856,8 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
     """The scenario `document`, checked and completed in place for staging, with `source` added: each remote host's
     `ssh` with `$USER` expanded, and each session with `yolo` and `open` (false), `then` (the replay shape its `status`
     implies) and `exit_code` (0) filled in where the file leaves them out, and its `transcript` resolved against
-    `directory` into an absolute path (or None). `source` names the file in errors.
+    `directory` into an absolute path (or None). A session's `cwd` and `age` are checked and kept as written, for the
+    pins file (`session_pins_body`). `source` names the file in errors.
 
     The checks are the old browser loader's (`e2e/readme-hero/scenario.ts`) for the fields staged here, strict on
     purpose: the scenario is edited by hand, and a typo that silently dropped a session or misread a status would make
@@ -895,6 +907,7 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
     if not isinstance(sessions, list) or not sessions:
         fail("at least one session is required")
     titles = set()
+    previous_age = 0
     for session in sessions:
         if not isinstance(session, dict) or not isinstance(session.get("title"), str) or not session["title"]:
             fail("every session needs a title")
@@ -907,6 +920,16 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
             fail(f"{name}: unknown host {session.get('host')!r}")
         if session.get("wrapper") not in SCENARIO_YOLO_FLAGS:
             fail(f"{name}: wrapper must be one of {', '.join(SCENARIO_YOLO_FLAGS)}")
+        # The folder and age the app pins on the session's row (`session_pins_body`).
+        if not isinstance(session.get("cwd"), str) or not session["cwd"]:
+            fail(f"{name}: cwd is required")
+        if type(session.get("age")) is not int or session["age"] < 0:
+            fail(f"{name}: age must be a non-negative integer")
+        # The file lists rows in the order they should appear, with ages that agree (its comment on `sessions`), so a
+        # younger session below an older one is a mistake in the file.
+        if session["age"] < previous_age:
+            fail(f"{name}: ages must not decrease down the list")
+        previous_age = session["age"]
         for flag in ("yolo", "open"):
             if not isinstance(session.setdefault(flag, False), bool):
                 fail(f"{name}: {flag} must be true or false")
@@ -931,6 +954,25 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
         fail("exactly one session must carry open: true")
     document["source"] = source
     return document
+
+
+def session_pins_body(plan: dict) -> dict:
+    """The pins file a scenario run hands the app (SESSION_PINS_ENV): each session's title, `age` and `cwd`, which an
+    agent build shows in place of the session's real activity and scratch folder (why and how: the "Staged session
+    values" section of crates/gui/farhelm-gui/src/agent_startup.rs)."""
+    return {
+        "sessions": [
+            {"title": session["title"], "age": session["age"], "cwd": session["cwd"]} for session in plan["sessions"]
+        ]
+    }
+
+
+def write_session_pins(run: Path, plan: dict) -> Path:
+    """Write the scenario `plan`'s pins file (`session_pins_body`) into the run directory and return its path, the
+    value SESSION_PINS_ENV hands the app."""
+    path = run / SESSION_PINS_FILE
+    path.write_text(json.dumps(session_pins_body(plan), indent=2) + "\n")
+    return path
 
 
 def scenario_remote_hosts(plan: dict) -> list[str]:
@@ -1028,9 +1070,10 @@ def seen_body(session: dict, row: dict) -> dict | None:
     scenario leaves to the window: only an idle session's seen state shows (its dot is blue while unseen, grey once
     seen; SPEC.md, "Status"), as in the old staging.
 
-    A seen one is stamped with its row's own activity (`effective_activity`, the stamp the window compares), which is
-    what reads as seen against the real stamps; the old staging stamped `now - age`, to agree with the ages it rewrote
-    in transit."""
+    A seen one is stamped with its row's own activity as the helm lists it (`effective_activity`): the window compares
+    the pinned stamp (`session_pins_body`), which is older than any real activity of the session, since the app counted
+    it back from its own start, so the real one reads as seen there too. The old staging stamped `now - age`, which
+    agreed with the ages it rewrote in transit."""
     if session["status"] != "idle":
         return None
     if not session["seen"]:
@@ -1838,6 +1881,7 @@ def start(run: Path, args: list[str]) -> int:
         ensure_hosts.write_text(json.dumps(ensure_hosts_body(run, remote_hosts, binaries["farhelm"]), indent=2) + "\n")
     if options.scripted_hosts or staged:
         prepare_scripted_hosts(run)
+    session_pins = write_session_pins(run, scenario) if scenario else None
     launched = cli(
         run,
         record,
@@ -1854,6 +1898,7 @@ def start(run: Path, args: list[str]) -> int:
                 start_dialogs=options.start_dialogs,
                 payload_dir=options.payload_dir,
                 ensure_hosts=ensure_hosts,
+                session_pins=session_pins,
             ),
             "--",
             binaries["desktop"],
