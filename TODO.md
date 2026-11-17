@@ -261,6 +261,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - `packaging/farhelm-desktop/dist.toml`'s comment still says Linux users open a browser and that a Linux build would
     need WebKitGTK.
 
+- **Settings search.** support search in settings dialog.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
