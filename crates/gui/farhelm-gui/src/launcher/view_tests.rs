@@ -2207,3 +2207,160 @@ fn the_prefix_in_a_launcher_field_begins_a_sequence_only_with_nothing_selected(
         "and the field kept its chord"
     );
 }
+
+// ---- Font roles, with the real text system ---------------------------------------------------------------------------
+
+/// Run `test` on a test app whose text system is the real one, knowing only the bundled fonts, with the checks and the
+/// teardown `#[gpui::test]` and `gpui::run_test` give the app they make: the entity leak check once the tasks are
+/// drained, and the scheduler's end-of-test check. GPUI's test text system gives every face the same widths, so only a
+/// real one can tell the interface face from the monospace one; a test app built over one, rather than the headless
+/// app the sidebar's font tests draw in, keeps the shared harness's simulated typing and per-step checks.
+fn with_real_text_system(test: impl FnOnce(&mut TestAppContext)) {
+    let dispatcher = gpui::TestDispatcher::new(0);
+    let scheduler = dispatcher.scheduler().clone();
+    let text_system = std::sync::Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        crate::assets::UI_FONT,
+    ));
+    let mut cx = TestAppContext::build_with_text_system(dispatcher.clone(), None, text_system);
+    // Held until the tasks are drained, as the macro holds it: dropping it runs the leak detector.
+    let entity_refcounts = cx.app.borrow().ref_counts_drop_handle();
+    test(&mut cx);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        cx.background_executor().forbid_parking();
+        cx.quit();
+    });
+    cx.run_until_parked();
+    drop(cx);
+    dispatcher.drain_tasks();
+    drop(dispatcher);
+    drop(entity_refcounts);
+    scheduler.end_test();
+}
+
+/// `text`'s width at the launcher's 13-pixel text size, shaped by the window's text system in the monospace face when
+/// `mono` is set and in the interface face otherwise.
+fn face_width(cx: &mut VisualTestContext, text: &str, mono: bool) -> f32 {
+    let family = if mono {
+        crate::assets::TERMINAL_FONT
+    } else {
+        crate::assets::UI_FONT
+    };
+    let run = gpui::TextStyle {
+        font_family: family.into(),
+        ..gpui::TextStyle::default()
+    }
+    .to_run(text.len());
+    cx.update(|window, _| {
+        let line = window.text_system().shape_line(
+            text.to_owned().into(),
+            crate::theme::metrics::TEXT_MD,
+            &[run],
+            None,
+        );
+        f32::from(line.width)
+    })
+}
+
+/// The old `interface-fonts.spec.ts` case "interface and technical values load their own bundled font roles", its
+/// launcher half: the old launcher drew the Folder and Agent command fields in the monospace face, as technical
+/// values, the search box in the interface face, and its "Use this path" and "Browse this path" rows with their words
+/// in the interface face and the path in the monospace face. Only the real text system can tell the faces apart. The
+/// draft is on the Command tab, which shows the Folder field and the search box as the Agent tab does, so one launcher
+/// shows every field. Specified, with the real text system, on New's Command tab with the folder `/iiiiiiii` and the
+/// agent command `iiiiiiii`, and `/iiiiiiii` typed into the search box, where focus starts: the Folder field, the Agent
+/// command field, the search box and the two rows each paint one line holding their text (a row's sentence isolates
+/// aside), as wide as its parts drawn in their faces at 13 pixels, within half a pixel: the fields' values in the
+/// monospace face, the query in the interface face, and each row's words in the interface face followed by the path in
+/// the monospace face. The premise, per case: every other choice of face for the line's parts draws it at least a pixel
+/// wider or narrower.
+#[test]
+fn the_launchers_paths_and_command_are_monospace_beside_words_in_the_interface_face() {
+    const PATH: &str = "/iiiiiiii";
+    const COMMAND: &str = "iiiiiiii";
+    with_real_text_system(|cx| {
+        let mut start = LaunchDraft::new(Some(1), PATH.into(), None);
+        start.choose_tab(Tab::Command);
+        start.edit_command(COMMAND.into());
+        let (_helm, cx) = launcher_on(cx, start);
+        assert!(
+            search_focused(cx),
+            "the premise: focus starts in the search box"
+        );
+        cx.simulate_input(PATH);
+        settle(cx);
+        let nodes = test_support::frame(cx);
+        // A search row is found by its accessible name, its words and the path, since its id is its place in the list.
+        let row = |words: &str| -> String {
+            let label = format!("{words}{PATH}");
+            nodes
+                .iter()
+                .find(|node| node.label.as_deref() == Some(label.as_str()))
+                .and_then(|node| node.element_id.as_deref())
+                .unwrap_or_else(|| panic!("a search row named {label:?} was drawn"))
+                .to_owned()
+        };
+        // Each case: what is measured, the id it is drawn under, and its parts, each with whether it is monospace.
+        type Case = (&'static str, String, &'static [(&'static str, bool)]);
+        let cases: [Case; 5] = [
+            (
+                "the Folder field",
+                "launcher-folder".into(),
+                &[(PATH, true)],
+            ),
+            (
+                "the Agent command field",
+                "launcher-command".into(),
+                &[(COMMAND, true)],
+            ),
+            ("the search box", "launcher-search".into(), &[(PATH, false)]),
+            (
+                "the Use this path row",
+                row("Use this path: "),
+                &[("Use this path: ", false), (PATH, true)],
+            ),
+            (
+                "the Browse this path row",
+                row("Browse this path: "),
+                &[("Browse this path: ", false), (PATH, true)],
+            ),
+        ];
+        // A line's text as the user sees it: a sentence draws a host value inside Unicode isolates (`host_text`),
+        // which draw as nothing.
+        let shown = |line: &gpui::DriverText| -> String {
+            line.text
+                .chars()
+                .filter(|c| !('\u{2066}'..='\u{2069}').contains(c))
+                .collect()
+        };
+        for (case, id, parts) in cases {
+            let text: String = parts.iter().map(|(part, _)| *part).collect();
+            let lines = crate::session_list::host_rail::tests::texts_within(&nodes, &id);
+            let matching: Vec<_> = lines.iter().filter(|&line| shown(line) == text).collect();
+            let [line] = &matching[..] else {
+                let painted: Vec<_> = lines.iter().map(|line| &line.text).collect();
+                panic!("{case} paints {text:?} on one line; it painted {painted:?}");
+            };
+            // The line's width for every choice of face for its parts, the specified choice first: bit `n` of `flips`
+            // puts part `n` in the other face.
+            let mut choices = Vec::new();
+            for flips in 0..1u32 << parts.len() {
+                let mut total = 0.;
+                for (n, (part, mono)) in parts.iter().enumerate() {
+                    total += face_width(cx, part, *mono != ((flips >> n) & 1 == 1));
+                }
+                choices.push(total);
+            }
+            let (specified, others) = (choices[0], &choices[1..]);
+            assert!(
+                others.iter().all(|other| (other - specified).abs() >= 1.),
+                "premise: other faces draw {case} apart from {specified}: {others:?}"
+            );
+            let drawn = f32::from(line.bounds.size.width);
+            assert!(
+                (drawn - specified).abs() < 0.5,
+                "{case} is {drawn} wide; its specified faces draw it {specified}, the others {others:?}"
+            );
+        }
+    });
+}
