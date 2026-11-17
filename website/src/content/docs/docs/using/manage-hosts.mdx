@@ -5,13 +5,11 @@ sidebar:
   order: 6
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
 The navigation rail, the column of icons down the left edge of the sidebar, shows your ordinary session hosts. It shows
 your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name, and a
 dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
 name in view, select **»** (Expand navigation rail) at the very bottom of the rail: the rail widens beside the session
-list, and **«** **Collapse** narrows it again. Each device remembers which you chose. Choosing a host
+list, and **«** **Collapse** narrows it again. Farhelm remembers which you chose. Choosing a host
 there shows only its sessions, and **All** shows every host's again ([Read the session list](/docs/using/session-list/)).
 The **Hosts** button at the foot of the rail swaps the session list for the host list, where your Mac is listed as
 **Local (this machine)** and everything on this page happens; choose a host or **All** on the rail to go back. Adding a
@@ -30,33 +28,30 @@ host. The list disappears when nothing needs attention and while the full host l
 
 ## The host menu
 
-<Screenshot
-  name="manage-hosts/host-menu"
-  alt="A remote host's menu, opened from its three dots, with settings, uninstall, and remove explained."
-/>
+Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. On a remote SSH
+host it offers **Retry**, which tries the connection again now, **Update**, **Settings**, **Uninstall** and **Remove**.
+**Update** installs your Mac's version of Farhelm on the
+host; [Update a host](#update-a-host) has more. Other items appear only when a host needs attention, such as setting
+Farhelm up on a host that does not have it yet. Your Mac's own row has no **Uninstall** or **Remove**. In the Farhelm
+app installed on your Mac, its **Update** checks for a new release of Farhelm and installs it, as
+[Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In the Linux app, or in a copy of Farhelm
+that is not installed in `~/Applications`, it is greyed out instead. If **Retry** or **Adopt** fails, a dialog shows
+why.
 
-Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. **Update** installs
-your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items
-appear only when a host needs attention, such as setting Farhelm up on a host that does not have it yet. Your Mac's own
-row has no **Uninstall** or **Remove**. In the Farhelm app installed on your Mac, its **Update** checks for a new
-release of Farhelm and installs it, as [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In a
-browser, or in a copy of Farhelm that is not installed in `~/Applications`, it is greyed out instead.
-If **Retry** or **Adopt** fails, a dialog shows why.
-
-A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) also offers **Suspend**, or **Resume** when suspended. It has
-**Delete sandbox** in place of **Remove**, and no **Uninstall**: Farhelm owns that machine, so deleting it loses its
-files and sessions. [Suspend or delete a Tensorlake sandbox](#suspend-or-delete-a-tensorlake-sandbox) covers those
-actions. A [container session](/docs/agents/containerized-sessions/#stopping-and-deleting) has **Suspend** and
-**Resume** too, and **Delete container** removes its whole environment and files. A container session's container, like
+A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) has **Delete sandbox** in place of **Remove**, and no
+**Uninstall**: Farhelm owns that machine, so deleting it loses its files and sessions.
+[Delete a Tensorlake sandbox](#delete-a-tensorlake-sandbox) covers it. The host menu has no **Suspend** or **Resume**.
+A [container session](/docs/agents/containerized-sessions/#stopping-and-deleting)'s host has **Delete container**,
+which removes its whole environment and files; the session's own menu has **Suspend** and **Resume**. A container
+session's container, like
 a [sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox)'s sandbox, appears in Hosts and
 update notices without a permanent rail icon.
 
 ## Host settings
 
-<Screenshot
-  name="manage-hosts/host-settings"
-  alt="A host's settings dialog, with the destination and alias edit buttons, the icon choice, and its five permission switches explained."
-/>
+Choose **Settings** in a host's menu to open its settings. **Connection** shows the destination and the alias, each with
+**Edit**; **Appearance**, **Checkouts** and **Permissions** follow. The destination and alias save with their field's
+**Save**, and the checkout folder with its own; everything else saves as you change it.
 
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
@@ -79,14 +74,14 @@ separate YOLO permission. A plain restart, including of a YOLO session, needs no
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
 host's sessions' links in your browser. Both start off, and the second includes your machine and private network. [Open
-links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) explains the cards,
-the web UI's one-click opening, and why allowing local-network links needs a separate choice. Adopting a reinstalled or
+links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) explains the cards
+and why allowing local-network links needs a separate choice. Adopting a reinstalled or
 replaced host turns all five permissions off again.
 
 For any host, choose an icon and a color under **Appearance** to tell its sessions apart at a glance. The mark
 appears on the navigation rail, beside its sessions, in the host list and quick switcher, and in the session launcher's
 host picker. Each choice saves
-as you make it and appears in your other open Farhelm windows. Your Mac starts with a red laptop mark, which you can change.
+as you make it. Your Mac starts with a red laptop mark, which you can change.
 
 Under **Checkouts**, **Checkout folder** chooses where this host's new managed checkouts go. Leave it empty to use the
 default shown in grey from **Settings → Checkouts**. Save an empty field, or choose **Use default**, to follow that
@@ -96,8 +91,7 @@ covers launching one.
 
 In Settings, **Color terminal frames by host** under **Sessions** adds a thin frame around every terminal in its host's
 color. It starts off. The terminal background and text colors stay the same. The switch is kept by the
-[helm](/docs/how-it-works/the-pieces/), so it applies in every Farhelm window; other open windows pick up a change when
-they reload.
+[helm](/docs/how-it-works/the-pieces/) and takes effect at once.
 
 ## Update a host
 
@@ -106,8 +100,8 @@ up-arrow. Above your sessions, each update row offers **Update**. If several lis
 updates those hosts. While automatic updates are off, **Always update** there also updates the listed hosts and turns on
 **Update remote hosts automatically**, so later updates install without asking. If that choice cannot be saved, a
 message says later updates will still wait, with **Try again**. You can dismiss optional update reminders; required updates stay visible because that host's
-sessions cannot be reached until it is updated. The reminders return when another host gains an update, Farhelm changes
-version, or you reload the interface.
+sessions cannot be reached until it is updated. The reminders return when another host gains an update, or when you quit
+and open Farhelm again.
 
 When a remote host runs an older version of Farhelm than your Mac, an **↑ Update** button appears beside its name: amber
 when updating is optional, red when the host cannot connect until it is updated. Hover over it to see both versions.
@@ -124,12 +118,11 @@ warning until you open the host list, where its row shows what happened.
 To have Farhelm update remote hosts as soon as updates are available, turn on **Update remote hosts automatically** in
 Settings, under **Hosts**. It starts off; **Always update** above your sessions turns it on too. Once on, it works whenever Farhelm is running, which on your Mac means while
 the app is open. It never updates your Mac. If an automatic update of a host fails, Farhelm does not try that host again
-until it reconnects or Farhelm restarts; the host keeps its up-arrow, so you can update it yourself. The choice applies to every remote host; other open Farhelm windows pick it
-up when they reload.
+until it reconnects or Farhelm restarts; the host keeps its up-arrow, so you can update it yourself. The choice applies to every remote host.
 
 ## Uninstall Farhelm from a remote host
 
-This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#suspend-or-delete-a-tensorlake-sandbox) instead.
+This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#delete-a-tensorlake-sandbox) instead.
 
 **Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. On a remote Mac this removes its background job and the job's
@@ -146,9 +139,9 @@ session on the host while the uninstall runs: one started then can end along wit
 to be connected to the host so it can check. If its row shows **Unreachable, retrying**, **Needs update**, **Too new**,
 **Identity mismatch**, **Identity unverified** or **Duplicate**, fix that first: the refusal says how, and so do the
 host's [details](#see-more-about-each-host). **Remove** still works. A few less common setups are
-refused too, with the reason shown in a dialog: a remote Mac with the Farhelm desktop app installed, a Linux host where
-Farhelm was set up by running `farhelm helm setup` on the host itself (its own `farhelm uninstall` removes it), one whose
-Farhelm runs from somewhere unexpected, and one whose
+refused too, with the reason shown in a dialog: a remote Mac with the Farhelm desktop app installed, one whose Farhelm
+runs from somewhere unexpected (such as a Linux host set up with an earlier release's `farhelm helm setup`), and
+one whose
 `~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. On a Mac the mount check is
 best effort: a mount whose name contains " (" or " on " can go unnoticed. **Remove** still works for all of them.
 
@@ -160,10 +153,8 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 
 ## Remove a host
 
-<Screenshot
-  name="manage-hosts/remove-dialog"
-  alt="The remove host dialog, with the remove, don't ask again button explained."
-/>
+**Remove** in an SSH host's menu asks first. **Remove, don't ask again** removes it and turns on **Remove hosts without
+asking**, which skips the question from then on.
 
 For an SSH host, removing it only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
@@ -173,16 +164,13 @@ there first. A refusal names what needs cleanup.
 [Container sessions](/docs/agents/containerized-sessions/#stopping-and-deleting) explains their confirmed deletion.
 
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
-a refusal opens a short dialog instead.
+a refusal shows under the host's row in the host list instead.
 
-## Suspend or delete a Tensorlake sandbox
+## Delete a Tensorlake sandbox
 
-**Suspend** pauses a Tensorlake host with its processes and sessions intact. It asks first if an agent is working or
-Farhelm cannot check activity reliably. The host shows **Suspending…** until Tensorlake confirms it, then a grey
-**Suspended** state and a **Resume** button on its row; the menu offers **Resume** too. Resuming shows **Resuming…**,
-then **Connecting…** while Farhelm reconnects. An open session offers **Resume host**. Tensorlake can also suspend the
-sandbox after its plan's idle limit; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains the
-24-hour limit on Usage Credits and launching after resume.
+Tensorlake can suspend a sandbox host itself, for example on the Usage Credits plan after 24 hours without a connection
+from Farhelm; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains more. A suspended host shows a grey **Suspended** state, and while it resumes, **Resuming…** and then **Connecting**.
+An open session on it offers **Resume host**.
 
 **Delete sandbox** permanently deletes the sandbox, its files, sessions and snapshots taken from it. It always asks,
 regardless of **Remove hosts without asking**. Keep work you need elsewhere first. While Farhelm deletes it, the host
@@ -192,27 +180,21 @@ the recipe's prepared snapshot remain available for new hosts.
 
 ## Turn the questions back on
 
-<Screenshot
-  name="manage-hosts/app-settings"
-  alt="The Settings dialog with hosts selected, showing the section list and the switches for asking before setting up or removing hosts."
-/>
-
 The gear at the foot of the navigation rail, below **Hosts**, opens Settings at **Sessions**. Choose **Hosts** in its
 section list for these two questions. Turning on **Set up new hosts without asking** or **Remove hosts without asking**
 skips that question for actions you start in the UI; turn it off to be asked again.
 [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
-SSH hosts, and other open Farhelm windows pick up a change when they reload. Tensorlake creation has its own
+SSH hosts, and a change takes effect at once. Tensorlake creation has its own
 **Create Tensorlake sandboxes without asking** switch under **Tensorlake**; deleting a sandbox always asks.
 
 Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
-discards those drafts, except that an edited recipe asks whether to save, discard or keep editing. At phone width,
-**‹ Settings** returns to the section list.
+discards those drafts, except that an edited recipe asks whether to save, discard or keep editing.
 
 **Sessions** holds **Color terminal frames by host**, **Name sessions on quick launch** (covered in
 [Launch templates](/docs/using/launch-templates/#quick-launch)), and **Skip session confirmations**, which covers
 [session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
 choices or YOLO and trash questions. **Terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
-and, in the desktop app, file types to open with a modifier-click and
+and file types to open with a modifier-click, and in the Mac app,
 [tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Default checkout folder**, **Post-clone command** and
 [**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout). **Credentials** holds the GitHub tokens,
@@ -222,18 +204,16 @@ host. **Tensorlake** keeps its cloud account settings and sandbox leftovers. **C
 [Podman readiness and container leftovers](/docs/agents/containerized-sessions/).
 
 **Appearance** chooses **System**, **Dark** or **Light**; **System** follows your device's own setting, and the terminal
-stays dark either way. Unlike the other settings, this choice is kept by the browser or app on this device rather than
-by your helm. **Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
+stays dark either way. Your helm keeps this choice. **Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **App** holds **Install
 updates automatically**, which is about updating Farhelm itself; see
 [Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
 
 ## See more about each host
 
-<Screenshot
-  name="manage-hosts/details"
-  alt="The host list with Details switched on: each host's Farhelm version, sessions, and a renamed host's destination."
-/>
+Turn on **Details** at the top of the host list to see more under each host: for a connected host its Farhelm version and
+number of sessions, and the destination behind an alias. A host's row also opens by itself while a setup
+runs on it, or when its last setup or update failed.
 
 A Tensorlake host's details also show its sandbox name, recipe, CPU and memory, and tunnel mappings and status. A failed
 tunnel makes its dot amber and shows the reason. A suspended host's details say when suspension was noticed and whether

@@ -5,20 +5,14 @@ sidebar:
   order: 3
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
 The session list shows every session on every host, and what each agent is doing right now, so you can tell which one
 needs you without opening any of them.
 
 Drag the sidebar’s right edge to give the list more or less room. Double-click the edge to reset its width. Farhelm
-remembers the width on this device, so changing it here leaves your other screens alone.
+remembers the width.
 
-<Screenshot
-  name="session-list/row"
-  alt="One row of the session list, with its status, agent and permissions mark, and host and directory explained."
-/>
-
-The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Click a row
+Each row shows the session's status, its host's mark, its title, its agent and permissions marks and its age, with its
+host and directory on the line below. The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Click a row
 to open its terminal beside the list. Hovering over the dot or the marks beside the title says what each one means.
 [Permission modes](/docs/agents/#permission-modes) explains the shields, including when one turns to YOLO because
 Farhelm saw the agent switch modes.
@@ -35,8 +29,8 @@ the last session using it. The same mark appears beside the directory in the bar
 To hear when a session needs you away from Farhelm, subscribe to a private topic in the
 [ntfy app](https://docs.ntfy.sh/subscribe/phone/), then configure **ntfy alerts** under **Notifications** in Farhelm's
 settings. The server defaults to ntfy.sh; use the same server and topic you subscribed to. For a server that requires authentication, add
-an access token; changing the server later clears the saved token when you save, unless you enter a new one. Priority controls how urgently ntfy announces the alert. **Save** keeps these choices for every
-window using your [helm](/docs/how-it-works/the-pieces/), the program that shows you all your hosts' sessions.
+an access token; changing the server later clears the saved token when you save, unless you enter a new one. Priority controls how urgently ntfy announces the alert. **Save** keeps these choices in your
+[helm](/docs/how-it-works/the-pieces/), the program that shows you all your hosts' sessions.
 **Send test** uses the saved choices, including while alerts are switched off, and says whether it succeeded.
 When ready to receive automatic alerts, turn on **Send ntfy alerts** and select **Save**.
 
@@ -45,25 +39,16 @@ contains the session's title and host, so avoid sensitive text in titles if you 
 Farhelm waits briefly to avoid alerting on a passing waiting reading and sends once while a session keeps waiting.
 Approval cards and finished turns do not send ntfy alerts.
 
-Keep the desktop app's window open to receive alerts; it can be in the background. With a standalone helm running,
-you can close every browser window. See [The pieces](/docs/how-it-works/the-pieces/) for which part keeps running.
+Keep Farhelm's window open to receive alerts; it can be in the background. See
+[The pieces](/docs/how-it-works/the-pieces/) for which part keeps running.
 
 ## Managed checkout trash
 
 The trash can beside the list's title, left of the templates and new session buttons, holds [managed
-checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted.
-
-<Screenshot
-  name="session-list/trash-button"
-  alt="The trash button at the top of the session list, its lid open and a count of 3, explained."
-/>
+checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout) whose last session was deleted. Its count says
+how many there are.
 
 Open it to see the checkouts grouped by host, newest first, with their repository, archive time and disk usage.
-
-<Screenshot
-  name="session-list/trash-dialog"
-  alt="The trash dialog listing archived checkouts on two hosts, with where they are on disk explained."
-/>
 
 **Delete all** in the footer deletes the trash on every reachable host, and **Delete all on** a host only on that one. Each
 asks you to confirm, and work in the trash that was never committed or pushed is lost. Each checkout also has its own
@@ -82,8 +67,7 @@ Confirming **Delete all** closes the dialog immediately. The trash can turns ups
 running; hover it to see which hosts are freeing space. An individual **Delete** keeps the dialog open. Errors remain
 available in the trash, and the trash button tells you to open it for details.
 
-Nothing empties ordinary archived checkouts automatically. Cleanup started in another window updates this window's
-count and progress too. A failed cleanup also appears in the
+Nothing empties ordinary archived checkouts automatically. A failed cleanup also appears in the
 [navigation rail's bell](/docs/using/session-list/#notices-about-a-host).
 
 ### Notices about a host
@@ -96,17 +80,15 @@ to the full list of archived checkouts.
 
 Closing the panel marks the items you saw as read and quiets the bell. A problem stays listed until its files are gone,
 then turns grey and says **Resolved**; **Clear resolved** removes that history. Repeated cleanup failures update the
-same notice without making it unread again. The desktop app and browser windows connected to the same
-[helm](/docs/how-it-works/the-pieces/), the program that shows all your hosts' sessions, share that history and which
-items you have read. An unreachable host keeps its last known notices. Session warnings still use
+same notice without making it unread again. Your [helm](/docs/how-it-works/the-pieces/), the program that shows all
+your hosts' sessions, keeps that history and which items you have read across restarts. An unreachable host keeps its last known notices. Session warnings still use
 [the bell on their row](/docs/using/session-list/#when-a-row-shows-a-bell).
 
 ## What the statuses mean
 
-<Screenshot
-  name="session-list/statuses"
-  alt="The session list with a waiting session, an idle unread session, and an ended session each explained."
-/>
+A live session's status is the mark before its title: a pulsing green circle while it runs, a red triangle while it
+waits for you, and while it is idle, a blue diamond if it has output you have not seen yet or a grey ring once you have.
+On a host Farhelm cannot reach, the mark turns grey and still, since it only shows the last status Farhelm knew.
 
 Waiting is the status worth watching for: the agent has stopped to ask you something, such as approving a command, and
 does nothing until you answer. Not every agent can tell Farhelm when it is waiting; [Supported agents](/docs/agents/)
@@ -136,10 +118,10 @@ a web link and keeps the click from reaching the program, so agents such as Code
 
 Choose **Open in Farhelm and also pass the click on** if your program needs link clicks; it may open a second browser
 tab. Choose **Pass the click on only** to leave links entirely to the program. If that program does not handle mouse
-clicks, clicking opens nothing. This choice does not change file downloads. This choice applies to every client of your helm; other
-open windows pick it up when they reload.
+clicks, clicking opens nothing. This choice does not change file downloads. Your helm keeps this choice, and it takes
+effect at once.
 
-In the desktop app, this section also has **File types to open with Cmd-click** (**Ctrl-click** on Linux). The field
+This section also has **File types to open with Cmd-click** (**Ctrl-click** on Linux). The field
 defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; save a comma-separated list to change which
 downloaded files open in their default app. Save an empty field to download without opening. A warning appears beside
 each type Farhelm does not recognize as safe.
@@ -148,19 +130,19 @@ each type Farhelm does not recognize as safe.
 
 Farhelm plays a bell when a session starts waiting and a ding-dong when an agent asks for your approval. You can also
 turn on a soft pluck when an agent finishes its turn and becomes idle. Open **Settings** from the gear at the foot of the
-navigation rail and choose **Notifications** to turn each sound on or off under **Sounds**; your choices stay on this device.
+navigation rail and choose **Notifications** to turn each sound on or off under **Sounds**; Farhelm remembers your
+choices.
 
 The session you have open stays quiet while you are looking at its window. Waiting and finished-turn sounds follow the
 sessions in your current list; changing the host or status it shows does not beep for a session already waiting. New
-approval requests can sound whatever the filter is. Opening or reloading Farhelm does not sound for requests already waiting. In a browser, interact
-with the page once to allow sound. Sounds your browser blocks are skipped, rather than played later.
+approval requests can sound whatever the filter is. Opening Farhelm does not sound for requests already waiting.
 
 ## Find a session
 
-<Screenshot
-  name="session-list/controls"
-  alt="The list's title, which sets its order, the status filter under it, and a host on the navigation rail, each explained."
-/>
+The list's title names the order the list is in. Click it to choose **Recently active**, **Newest created** or **Title
+A–Z**, or to turn on **Compact**, which shows each session on one line. Under the title, **All**, **Running**,
+**Waiting** and **Idle** narrow the list by status; ended sessions show only under **All**. Choosing a host on the
+[navigation rail](/docs/using/manage-hosts/) shows only that host's sessions.
 
 The number beside the list's title counts every session; when a host or status narrows the list, it says how many
 match, as in `3 of 12`. There is no search box in the sidebar; with many sessions, narrow the list by host or status,
@@ -173,7 +155,7 @@ part of the filter.
 ### Mark several sessions
 
 Shift-click a row to mark every session from the one you have open to that row, in the order shown. Cmd-click on a Mac,
-or Ctrl-click elsewhere, adds or removes a single mark without opening the session. Marked rows have a side marker and
+or Ctrl-click on Linux, adds or removes a single mark without opening the session. Marked rows have a side marker and
 tint; the session you have open keeps its blue highlight.
 
 The bar at the top counts the marked sessions currently shown. **Stop** and **Delete** act on those sessions; see
@@ -185,10 +167,10 @@ still goes to the agent.
 
 ### Jump with the keyboard
 
-For the full list, including the differences between the Mac app and a browser, see
+For the full list, including the differences between the Mac and Linux apps, see
 [Keyboard shortcuts](/docs/using/keyboard-shortcuts/). **? → Keyboard shortcuts** shows the keys for your window.
 
-Press Cmd+K on a Mac, or Ctrl+Shift+K elsewhere, to open the quick switcher, even while typing in a terminal. Type a few
+Press Cmd+K on a Mac, or Ctrl+Shift+K on Linux, to open the quick switcher, even while typing in a terminal. Type a few
 letters from a session's name, host or directory. Matches in the name come first; within each group, the most recently
 active sessions come first. The search covers every host and status, whatever the sidebar shows.
 
@@ -202,33 +184,28 @@ To start something new, type its name and choose **New session named "…"** bel
 [templates](/docs/using/launch-templates/) instead; `tl:` on its own lists them all. Choosing one opens the
 launcher with the template applied. These choices leave the launcher open for you to review and press **Launch**.
 
-Press Cmd+J on a Mac, or Ctrl+Shift+J elsewhere, to search only templates by name. Enter starts the highlighted one;
+Press Cmd+J on a Mac, or Ctrl+Shift+J on Linux, to search only templates by name. Enter starts the highlighted one;
 typing its exact name highlights it even if another name also contains your query. Each row shows its choices and any
-shortcut assigned to it. A template that needs more choices opens the launcher for you to finish. The desktop app
-accepts this chord; [browser shortcuts can take precedence](/docs/using/launch-templates/#quick-launch).
+shortcut assigned to it. A template that needs more choices opens the launcher for you to finish.
 
-With nothing typed, the separate **Quick launch** row starts your [marked template](/docs/using/launch-templates/#quick-launch) directly, as Cmd+P on a Mac or Ctrl+Shift+P elsewhere does. With no marked template, it opens Templates to help you choose one.
+With nothing typed, the separate **Quick launch** row starts your [marked template](/docs/using/launch-templates/#quick-launch) directly, as Cmd+P on a Mac or Ctrl+Shift+P on Linux does. With no marked template, it opens Templates to help you choose one.
 
-You can also give templates [number shortcuts](/docs/using/launch-templates/#number-shortcuts): Cmd+0–9 in the Mac app,
-or Ctrl+Shift+0–9 everywhere else, including a browser on a Mac. A template that can launch on its own starts directly,
+You can also give templates [number shortcuts](/docs/using/launch-templates/#number-shortcuts): Cmd+0–9 on a Mac, or
+Ctrl+Shift+0–9 on Linux. A template that can launch on its own starts directly,
 without opening the quick switcher; one that only changes some choices opens the session launcher instead.
 
 To combine templates, start a [launch sequence](/docs/using/launch-templates/#combine-templates-from-the-keyboard) with
-Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, then their number keys and Enter.
+Cmd+X on a Mac, or Ctrl+Shift+X on Linux, then their number keys and Enter.
 With New, Clone or Replace with open, the marked-template chord, number keys and completed sequence apply their
 templates to the current draft instead; you decide when to press **Launch**.
 
 ## Rename it, or mark it read
 
-<Screenshot
-  name="session-list/row-menu"
-  alt="A session's menu, opened from the row's three dots, with rename and mark read explained."
-/>
+The `⋯` at the end of a row opens the session's menu. It starts with **Rename**, then **Mark read** or **Mark unread**.
+Clicking the blue dot does the same as **Mark read**. The rest of the menu pins, clones, replaces, stops, or
+deletes the session; pinning is covered [below](#pin-a-session-to-the-top) and the rest in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
-Clicking the blue dot does the same as **Mark read**. The rest of the menu clones, replaces, stops, or deletes the
-session, and is covered in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
-
-**Cmd+L** in the Mac app, or **Ctrl+Shift+L** in a browser, opens Rename for the open session, even if a filter hides its
+**Cmd+L** on a Mac, or **Ctrl+Shift+L** on Linux, opens Rename for the open session, even if a filter hides its
 row. Saving or cancelling returns you to its terminal.
 
 ## Pin a session to the top
@@ -241,8 +218,7 @@ choice applies to unpinned rows; host and status choices still apply to both.
 Rows normally wait to move until you leave the list or keep the pointer still for five seconds with the menu closed.
 Pins already in the group can be rearranged during that wait. A newly pinned row becomes movable when the wait ends.
 
-Pins and their order are kept by the [helm](/docs/how-it-works/the-pieces/), so every browser and the desktop app
-connected to it agree, and pins work on unreachable hosts. [Replacing](/docs/using/stop-restart-resume/) a session
+Pins and their order are kept by the [helm](/docs/how-it-works/the-pieces/), so pins work on unreachable hosts. [Replacing](/docs/using/stop-restart-resume/) a session
 carries its pin and position over. The [quick switcher](#jump-with-the-keyboard) keeps its usual order.
 
 ## When a row shows a bell
@@ -260,8 +236,8 @@ notification opens that page when you click it.
 A red, filled bell means at least one notification is new. Click it to list them, newest first, with the ones you have
 not seen before marked **New**. Clicking the bell does not open the session. Closing the list, by clicking elsewhere,
 pressing Escape, or clicking the bell again, marks everything in it read, and the bell turns grey. **Clear all** removes
-them, and the bell goes away until something new happens. Read and cleared notifications are the same in every window
-connected to the same [helm](/docs/how-it-works/the-pieces/), and a session keeps only its 10 most recent ones.
+them, and the bell goes away until something new happens. The [helm](/docs/how-it-works/the-pieces/) keeps which
+notifications you have read or cleared, and a session keeps only its 10 most recent ones.
 
 If the agent later tells Farhelm which conversation it is in, or its missing conversation record comes back, and
 **Restart** can resume again, the warning stays in the list but is greyed and marked **Resolved**. It counts as read even if you have never opened it. If
