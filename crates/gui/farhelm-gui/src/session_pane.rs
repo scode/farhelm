@@ -56,6 +56,10 @@
 //!   ends or its first attempt fails ([`AttachedTerminal`](crate::terminal::attached::AttachedTerminal)'s
 //!   `recovery_held`). A stall's or refusal's band and the exit line are not held: the decision named only the card,
 //!   and only the agent's terminal is held, since a Restart detaches no tab.
+//! - **A Suspend of the open session's host** from this window holds back the reconnect card too (decided by this area
+//!   on 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold): it ends the stream at once, but the helm
+//!   pushes the window nothing until its command answers, so the row reads fresh and the card would show for the whole
+//!   Suspend. Not held: a shown tab's card (the set holds only the agent's), and another session's row's Suspend.
 //!
 //! The pane acts from observers (the selection, the user's choices, the connection), never from drawing: focus moves
 //! made while a frame is drawn are not reliably drawn themselves, and observers also run for a window that is not drawn
@@ -84,7 +88,9 @@
 //!   its host is away gets none until then. While the card shows it is home, and an inert terminal holds no focus, so
 //!   focus one of the session's terminals held goes home to the card through the focus coordinator. For a suspended or
 //!   stopped host the card offers Resume, and a session's own suspended environment reads "Session suspended" in its
-//!   provider's words (`unavailable.rs`, "A suspended or stopped host offers Resume").
+//!   provider's words (`unavailable.rs`, "A suspended or stopped host offers Resume"). When the host answers, retained
+//!   terminals skip what is left of their reconnect wait (up to 30 seconds), as the old app's did when the session's
+//!   `unavailable` flag cleared (`terminal.js` `sync`).
 //! - **The retired card.** A retired containerized session supports Delete only and has no terminal to attach to, so
 //!   the pane mounts none for it, ever, and draws the retired card ([`retired`]) where the terminals would be, with the
 //!   card as home, while its host is reachable; the unavailable card stands there alone while it is not. A set made
@@ -137,7 +143,7 @@ use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::local_time;
 use crate::session::{self, PerSession, UiSession};
-use crate::session_list::{age, delete, restart};
+use crate::session_list::{age, delete, environment, restart};
 use std::rc::Rc;
 
 use crate::terminal::CellMetrics;
@@ -251,6 +257,8 @@ struct Mounted {
     /// changes, and `render` draws the key of the `Mounted` it holds), so the key only states that in the value, and
     /// `render` asserts it in debug builds.
     card_row: Option<(String, SessionRow)>,
+    /// The row's stale reading at the last `sync`, kept per open session so a session switch never reads as recovery.
+    stale: bool,
 }
 
 impl Mounted {
@@ -276,6 +284,7 @@ impl Mounted {
             card_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             card_row: None,
+            stale: false, // The `sync` that mounts this sets it at once.
         })
     }
 
@@ -319,12 +328,12 @@ fn terminals(
     // with its own), so the stores it reads are always the ones its Delete or Restart went through and its row arrives
     // in. Everything is held while a Delete runs (see the module docs) and while the unavailable card shows over the
     // terminals, which says why they are not live, so their own reconnect card would only say it again; the reconnect
-    // card alone while this window's Restart is in flight. A Delete and a Restart never overlap: one request per
+    // card alone while this window's Restart or Suspend is in flight. A Delete and a Restart never overlap: one per
     // session at a time.
     let hold: SharedHold = Rc::new(move |cx| {
         if delete::in_flight(&held, cx).is_some() || unavailable::shows(&held, cx) {
             Hold::Everything
-        } else if restart::in_flight(&held, cx) {
+        } else if restart::in_flight(&held, cx) || environment::suspend_in_flight(&held, cx) {
             Hold::ReconnectCard
         } else {
             Hold::Nothing
@@ -456,6 +465,20 @@ impl SessionPane {
             && let Some(set) = &mounted.set
         {
             set.update(cx, |set, cx| set.set_inert(unavailable, cx));
+        }
+        // The host answering again ends every reconnect wait (the module docs, "The unavailable card"). An attempt
+        // already dialing is not cut short, as in the old app: the helm refuses it, and the stream waits its next rung.
+        if let Some(mounted) = mounted.as_mut() {
+            if mounted.stale
+                && !unavailable
+                && let Some(set) = &mounted.set
+            {
+                let terminals: Vec<_> = set.read(cx).terminals().cloned().collect();
+                for terminal in terminals {
+                    terminal.update(cx, |terminal, cx| terminal.reconnect_now(cx));
+                }
+            }
+            mounted.stale = unavailable;
         }
         // Every time, not only when the pane mounted something else: a reset drops the mounted terminals when `mounted`
         // is next reached (above) while the selection stays, so the key compares equal, and home would otherwise keep

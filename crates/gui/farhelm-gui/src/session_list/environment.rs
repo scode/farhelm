@@ -58,8 +58,9 @@
 //!   ([`held`]), as the old claim lasted for the whole change. Any other refusal stays on the session's key and shows on
 //!   the row and the header as a lifecycle refusal does (`super::outcome`, "Sandbox: " or "Stop: " before the helm's
 //!   words). The changing phase is `HostStateView::TensorlakeChanging` for every provider, despite its name: a
-//!   container's pause and unpause go through the helm's shared `environment::lifecycle::perform`, which pushes it while
-//!   the change runs, just as a sandbox's does.
+//!   container's pause and unpause go through the helm's shared `environment::lifecycle::perform`, just as a sandbox's
+//!   do. Other windows are pushed it while the change runs; the window that asked gets it only with its command's
+//!   answer (a 504 included), since the UI channel pushes a window nothing while its own command runs.
 //!
 //! NOTE: A container host first checks its container over SSH, before the helm pushes the changing phase. When that
 //! check alone outlasts the 20-second bound, the 504 arrives before any changing phase, and the session looks idle (its
@@ -315,6 +316,32 @@ pub(crate) fn pending(key: &str, environment: Environment, cx: &App) -> Option<P
         }),
         _ => None,
     }
+}
+
+/// Whether this window has a Suspend in flight for the host that session `key` runs on: a Suspend or Stop and suspend
+/// on the session's key, or the Hosts panel's Suspend on the host's key. The session pane holds back the reconnect card
+/// meanwhile. No provider is compared: every provider's Suspend ends the terminal's stream.
+pub(crate) fn suspend_in_flight(key: &str, cx: &App) -> bool {
+    let Some(operations) = session::current_operations(cx) else {
+        return false;
+    };
+    let operations = operations.read(cx);
+    if matches!(
+        operations.in_flight(&OpKey::session(key)),
+        Some(Work::Suspend | Work::StopAndSuspend)
+    ) {
+        return true;
+    }
+    let host = session::current_store(cx).and_then(|store| {
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(key)
+            .map(|row| row.host)
+    });
+    host.is_some_and(|host| {
+        operations.in_flight(&OpKey::host(&HostView::key(host))) == Some(Work::Suspend)
+    })
 }
 
 /// [`pending`] for the row the current UI session's store holds under `key`, with its environment looked up; `None`
