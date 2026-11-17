@@ -33,11 +33,10 @@
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the rest of managed checkouts (`checkout` says which); the
-//! escaped display of a prompt, Custom flags, a seeded model, or a command line or resume command copied by Clone or
-//! Replace with, holding invisible characters (the wrapper prefix, and Restart with's stored command line and resume
-//! command, are `stored`); and keyboard scrolling of an overflowing notice (the old region took focus once it
-//! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
+//! NOTE: Not built yet, each with the piece that brings it: the rest of managed checkouts (`checkout` says which); and
+//! keyboard scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one
+//! or two lines). Launch text holding invisible characters is spelled out by `shown_text`. The model field is
+//! `model_field`, the host picker
 //! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
 //! `browse`, the recent setups strip `recents`, the escalation banner `escalation`, Save as template's side `save`. The
 //! floating lists under the model, folder, search and repository fields share `field_list`, and the debounced reads
@@ -114,7 +113,7 @@ mod placement;
 mod recents;
 mod save;
 mod search;
-mod stored;
+mod shown_text;
 pub(in crate::launcher) mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
@@ -133,6 +132,9 @@ const TILE_ICON: f32 = 22.;
 const NO_AGENT: &str = "none";
 /// The initial prompt starts three rows high, as the old `<textarea rows=3>`.
 const PROMPT_ROWS: usize = 3;
+/// The line under a prompt shown read-only because it holds an invisible character (`shown_text`), the old launcher's.
+const PROMPT_SPELLED_OUT: &str =
+    "Invisible formatting is shown escaped. Clear the message to replace it.";
 
 /// Why Launch waits in Replace with or Restart with while the source has another request in flight (see
 /// [`Launcher::source_busy`]): the old app disabled Launch without a reason while its page-wide operation token was
@@ -547,6 +549,9 @@ pub(crate) struct Launcher {
     pub(super) flags: TextInputState,
     /// The model field's text: the chosen model while closed, what is typed while its list is open.
     pub(super) model_input: TextInputState,
+    /// The command line and resume command the launcher opened with, which alone are spelled out while editable
+    /// (`shown_text`).
+    opened: shown_text::Opened,
     /// The model field's list and what the user is doing in it.
     model_field: model_field::ModelField,
     /// The composer search box's text: what the user is searching for, emptied when they take a row.
@@ -568,7 +573,7 @@ pub(crate) struct Launcher {
     /// The host button's focus handle; leaving it closes the host list.
     pub(super) host_focus: gpui::FocusHandle,
     /// The Command tab's command line and resume command fields; a stored value holding invisible characters shows
-    /// escaped there (`stored`).
+    /// spelled out there (`shown_text`).
     pub(super) command: TextInputState,
     pub(super) resume: TextInputState,
     /// Cancel's focus handle, where Restart with starts.
@@ -630,6 +635,16 @@ enum Input {
     Resume,
 }
 
+impl Input {
+    /// Whether the field shows its value through `shown_text`'s rules, which an edit can change.
+    fn shown_through_text_rules(self) -> bool {
+        match self {
+            Input::Wrapper | Input::Prompt | Input::Flags | Input::Command | Input::Resume => true,
+            Input::Folder | Input::Name | Input::Conversation => false,
+        }
+    }
+}
+
 impl Launcher {
     fn new(
         draft: LaunchDraft,
@@ -657,44 +672,28 @@ impl Launcher {
             window,
             cx,
         );
-        // A stored value holding invisible characters starts escaped and read-only (`stored`); `sync_fields` keeps it
-        // so as the draft changes.
-        let escaped = stored::wrapper(&draft);
-        let wrapper = field(
-            escaped.as_deref().unwrap_or(&draft.agent.wrapper),
-            window,
-            cx,
-        );
-        wrapper.set_read_only(escaped.is_some(), cx);
+        // A value holding invisible characters starts spelled out, and read-only where the old field was (`shown_text`);
+        // `sync_fields` keeps it so as the draft changes.
+        let opened = shown_text::Opened::of(&draft);
+        let wrapper = TextInputState::new(window, cx);
         wrapper.set_placeholder("with-endpoint --profile work --", window, cx);
         let prompt = TextInputState::new_growing(PROMPT_ROWS, window, cx);
-        prompt.set_text(draft.prompt.clone(), window, cx);
-        let flags = field(&draft.agent.permission_flags, window, cx);
-        let escaped = stored::command(&draft);
-        let command = field(
-            escaped.as_deref().unwrap_or(&draft.command.command),
-            window,
-            cx,
-        );
-        command.set_read_only(escaped.is_some(), cx);
-        let escaped = stored::resume(&draft);
-        let resume = field(
-            escaped.as_deref().unwrap_or(&draft.command.resume),
-            window,
-            cx,
-        );
-        resume.set_read_only(escaped.is_some(), cx);
+        let flags = TextInputState::new(window, cx);
+        let command = TextInputState::new(window, cx);
+        let resume = TextInputState::new(window, cx);
+        for (state, shown) in [
+            (&wrapper, shown_text::wrapper(&draft)),
+            (&prompt, shown_text::prompt(&draft)),
+            (&flags, shown_text::flags(&draft)),
+            (&command, shown_text::command(&draft, &opened)),
+            (&resume, shown_text::resume(&draft, &opened)),
+        ] {
+            state.set_text(shown.text, window, cx);
+            state.set_read_only(shown.read_only, cx);
+        }
         // The model field is not a plain text edit: what is typed filters its list, and Enter, focus and blur drive it
         // (`model_field`), so it has its own subscriptions.
-        let model_input = field(
-            draft
-                .agent
-                .model
-                .as_deref()
-                .unwrap_or(model_field::HARNESS_DEFAULT),
-            window,
-            cx,
-        );
+        let model_input = field(&model_field::model_display(&draft), window, cx);
         // The search box is not a plain text edit either: what is typed is a query, and Enter takes a row (`search`).
         let search = TextInputState::new(window, cx);
         search.set_placeholder(search::SEARCH_PLACEHOLDER, window, cx);
@@ -779,9 +778,9 @@ impl Launcher {
                             launcher.folder_typed(window, cx);
                         }
                         launcher.edited(which, input.text(cx).to_string(), cx);
-                        // A typed or pasted invisible character makes the value one shown escaped, as a stored one
-                        // is (`stored`), so the field is put in step at once rather than at the next resync.
-                        if matches!(which, Input::Wrapper | Input::Command | Input::Resume) {
+                        // A typed or pasted invisible character can change how the field shows its value
+                        // (`shown_text`), so it is put in step at once rather than at the next resync.
+                        if which.shown_through_text_rules() {
                             launcher.sync_fields(window, cx);
                         }
                     }
@@ -833,6 +832,7 @@ impl Launcher {
             prompt,
             flags,
             model_input,
+            opened,
             model_field: model_field::ModelField::default(),
             search,
             search_box: search::SearchBox::default(),
@@ -1005,29 +1005,29 @@ impl Launcher {
 
     /// Put the text fields the draft can change on its own back in step with it (after Reset choices, or a template
     /// batch, which can set the name, the command and its resume command too). A field already showing the draft's
-    /// value is left alone, so its caret and selection stay where they were. A stored value holding invisible
-    /// characters is shown escaped and read-only (`stored`), and becomes editable again once it no longer is; that is
-    /// why an edit of the wrapper prefix, command line or resume command calls this too, so typed or pasted text
-    /// holding one is escaped at once.
+    /// value is left alone, so its caret and selection stay where they were. The launch text fields show their values
+    /// through `shown_text`: spelled out while they hold an invisible character, read-only where the old field was. An
+    /// edit of one of them calls this too ([`Input::shown_through_text_rules`]), so text typed or pasted into a field
+    /// whose rule judges what it holds (the wrapper prefix, the prompt, Custom flags) is spelled out at once.
     fn sync_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let escaped = [
-            (&self.wrapper, stored::wrapper(&self.draft)),
-            (&self.command, stored::command(&self.draft)),
-            (&self.resume, stored::resume(&self.draft)),
-        ];
-        for (state, shown) in &escaped {
-            state.set_read_only(shown.is_some(), cx);
-        }
-        let [wrapper, command, resume] = escaped.map(|(_, shown)| shown);
-        let pairs = [
+        for (state, shown) in [
+            (&self.wrapper, shown_text::wrapper(&self.draft)),
+            (&self.prompt, shown_text::prompt(&self.draft)),
+            (&self.flags, shown_text::flags(&self.draft)),
             (
-                &self.wrapper,
-                wrapper.unwrap_or_else(|| self.draft.agent.wrapper.clone()),
+                &self.command,
+                shown_text::command(&self.draft, &self.opened),
             ),
+            (&self.resume, shown_text::resume(&self.draft, &self.opened)),
+        ] {
+            state.set_read_only(shown.read_only, cx);
+            if state.text(cx).as_ref() != shown.text {
+                state.set_text(shown.text, window, cx);
+            }
+        }
+        let pairs = [
             (&self.conversation, self.draft.conversation.clone()),
             (&self.folder, self.draft.folder.value().clone()),
-            (&self.prompt, self.draft.prompt.clone()),
-            (&self.flags, self.draft.agent.permission_flags.clone()),
             // While a managed checkout is chosen the field shows the name the checkout gets, which ignores an untouched
             // copied title.
             (&self.name, self.draft.shown_name()),
@@ -1039,14 +1039,6 @@ impl Launcher {
                     .map(|checkout| checkout.field_text())
                     .unwrap_or_default(),
             ),
-            (
-                &self.command,
-                command.unwrap_or_else(|| self.draft.command.command.clone()),
-            ),
-            (
-                &self.resume,
-                resume.unwrap_or_else(|| self.draft.command.resume.clone()),
-            ),
         ];
         for (state, value) in pairs {
             if state.text(cx).as_ref() != value {
@@ -1055,7 +1047,7 @@ impl Launcher {
         }
         // The model field shows the chosen model only while its list is closed; open, it holds what is being typed.
         if !self.model_list_open(window, cx) {
-            let shown = self.model_display();
+            let shown = model_field::model_display(&self.draft);
             if self.model_input.text(cx).as_ref() != shown {
                 self.model_input.set_text(shown, window, cx);
             }
@@ -1787,6 +1779,10 @@ impl Launcher {
                 )
                 .into_any_element(),
             );
+            // The old line under a read-only prompt (`shown_text`), saying why it cannot be edited and what to do.
+            if shown_text::prompt(&self.draft).read_only {
+                fields.push(help_line(PROMPT_SPELLED_OUT, palette).into_any_element());
+            }
             if !self.draft.prompt.is_empty() {
                 fields.push(
                     div()
@@ -1826,8 +1822,8 @@ impl Launcher {
             )
             .into_any_element(),
         );
-        if stored::wrapper(&self.draft).is_some() {
-            fields.push(stored::clear_button(
+        if shown_text::wrapper(&self.draft).read_only {
+            fields.push(shown_text::clear_button(
                 "launcher-clear-wrapper",
                 "Clear wrapper prefix",
                 "Clear wrapper prefix: remove this value before editing",
@@ -1937,8 +1933,8 @@ impl Launcher {
             )
             .into_any_element(),
         ];
-        if stored::command(&self.draft).is_some() {
-            fields.push(stored::clear_button(
+        if shown_text::command(&self.draft, &self.opened).read_only {
+            fields.push(shown_text::clear_button(
                 "launcher-clear-command",
                 "Clear agent command",
                 "Clear agent command: remove this stored command before editing",
@@ -2097,8 +2093,8 @@ impl Launcher {
                     )
                     .into_any_element(),
                 );
-                if stored::resume(&self.draft).is_some() {
-                    fields.push(stored::clear_button(
+                if shown_text::resume(&self.draft, &self.opened).read_only {
+                    fields.push(shown_text::clear_button(
                         "launcher-clear-resume",
                         "Clear resume command",
                         "Clear resume command: remove this stored resume command before editing",

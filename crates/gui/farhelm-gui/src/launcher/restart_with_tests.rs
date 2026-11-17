@@ -351,7 +351,8 @@ fn e_stores_invisible_characters(helm: &mut FakeHelm, cx: &mut VisualTestContext
 /// Restart with shows a stored command line and resume command holding invisible characters escaped and read-only,
 /// each with its own Clear (the old launcher's Clear agent command and Clear resume command), so a stored command that
 /// came from elsewhere cannot hide what it runs. Specified: both fields show their `<U+…>` spellings and refuse typing
-/// until their Clear empties them; the stored command pasted back in is shown escaped again at once, with its Clear.
+/// until their Clear empties them; the stored command typed back in is the stored command again, so it is shown
+/// spelled out and read-only with its Clear (typed text is shown as typed until then, `view::shown_text`).
 #[gpui::test]
 fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -381,7 +382,8 @@ fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
                 layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
             launcher.read(cx).command.text(cx).to_string()
         }),
-        "make<U+200B>  watch {farhelm_args}  "
+        "make<U+200B>  watch {farhelm_args}  ",
+        "typed back in, the stored command is spelled out again"
     );
     assert!(
         cx.debug_bounds("launcher-clear-command").is_some(),

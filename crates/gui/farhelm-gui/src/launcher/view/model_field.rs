@@ -35,7 +35,7 @@ use super::field_list::{Drawn, FieldList};
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::host_text::{HostSentence, HostText};
-use crate::launcher::draft::{Field, harness_label};
+use crate::launcher::draft::{Field, LaunchDraft, harness_label};
 use crate::launcher::model::{
     ModelEnterTarget, ModelOption, NEEDS_HARNESS, model_enter_target, model_options,
     owned_elsewhere_message,
@@ -65,6 +65,16 @@ pub(super) struct ModelField {
     error: Option<String>,
 }
 
+/// What the closed field shows: the chosen model, spelled out while it holds an invisible character (`shown_text`; the old
+/// field showed a seeded model escaped too), or the agent type's default. The field empties itself when focused for
+/// typing, so the escaped spelling never becomes a typed model.
+pub(super) fn model_display(draft: &LaunchDraft) -> String {
+    match &draft.agent.model {
+        Some(model) => super::shown_text::display(model),
+        None => HARNESS_DEFAULT.to_owned(),
+    }
+}
+
 impl Launcher {
     /// Whether the model list is open: opened by the field and not since closed by the layer manager.
     pub(super) fn model_list_open(&self, window: &Window, cx: &App) -> bool {
@@ -84,15 +94,6 @@ impl Launcher {
             rows.retain(|row| *row != ModelOption::ShowAll);
         }
         rows
-    }
-
-    /// What the closed field shows: the chosen model, or the agent type's default.
-    pub(super) fn model_display(&self) -> String {
-        self.draft
-            .agent
-            .model
-            .clone()
-            .unwrap_or_else(|| HARNESS_DEFAULT.to_owned())
     }
 
     /// Whether the field holds a model not yet applied: typed into its open list, or said under it as not applicable.
@@ -212,7 +213,7 @@ impl Launcher {
     /// Close the list if it is open, drop the highlight, and show the chosen model in the field.
     fn close_model_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.model_field.list.close(window, cx);
-        let shown = self.model_display();
+        let shown = model_display(&self.draft);
         self.model_input.set_text(shown, window, cx);
     }
 
