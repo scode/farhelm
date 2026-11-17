@@ -44,6 +44,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **An exited session without a terminal keeps "reconnecting" forever.** When a session's terminal host has died (for
+  example after a container was stopped and started from outside Farhelm), the session correctly reads "Exited", but its
+  pane stays on "Session unavailable — reconnecting" and retries every 30 seconds. The supervisor refuses the attach
+  ("has no terminal on this host"), the helm reports that to the app as an ordinary disconnect, and the app keeps
+  retrying a connection that cannot come back. The browser app behaved the same. Agreed fix (2026-11-16): add a "has a
+  terminal" fact to the session row (protocol and supervisor), and have the pane show a no-terminal card with Restart
+  and Replace instead of mounting a terminal, reusing the interrupted card's path. This widens SPEC's rule for sessions
+  with no terminal after a reboot. Rejected: a new disconnect reason that stops the retrying, because the same refusal
+  may be transient while a Restart relaunches the terminal.
+
 - **One slow host holds up every other action for up to 20 seconds.** The desktop app sends its commands to the helm one
   at a time, each starting when the previous one has answered. Saving a replacement credential (delivered to every host,
   at most 20 seconds per host) and deleting from Trash (at most 20 seconds per host) can therefore keep every later
