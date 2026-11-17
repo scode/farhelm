@@ -7,8 +7,9 @@ app. Farhelm no longer serves a page or offers a browser sign-in, and the `farhe
 `farhelm helm token rotate` commands are removed. On Linux the desktop app needs a Wayland session: started without one,
 it exits with a message saying so.
 
-(Curator: this draft is written while the migration is under way and was last revised at its second milestone, on
-2026-11-16. The new app now covers the old app's daily work: the session list with pinning, marking and bulk Stop and
+(Curator: this draft is written while the migration is under way and was last revised late on 2026-11-16, during its
+third milestone. On Linux the desktop app runs its own helm, as it does on a Mac, but no Linux desktop package ships
+yet. The new app now covers the old app's daily work: the session list with pinning, marking and bulk Stop and
 Delete, the session launcher, templates and quick launch, the terminal with tabs, file links and attachments, Settings,
 the Hosts panel, approval cards, Trash, notices and status sounds. What is still being ported is tracked in
 `docs/gpui/parity/`. The paragraphs below are candidates for their own entries; most belong under Changed.)
@@ -29,6 +30,20 @@ reaches the program.
 
 The prompt boxes in the session launcher and the template editor grow with their text up to a limit and then scroll;
 you can no longer drag them to resize.
+
+When Enter or Escape closes the last open dialog or menu, the same key pressed again within half a second does nothing,
+so a double-tapped Escape no longer reaches the terminal and interrupts the agent in it.
+
+Opening a session whose host cannot be reached, or one that has ended, now marks its output as seen, as opening any other
+session does.
+
+A question that stays open while Farhelm works, such as Remove host, no longer moves your focus back to Cancel when the
+request is refused, if you had already moved on to another control. The version shown in the window's corner explains
+itself in full on hover instead of a cut-off line.
+
+Block characters in the terminal are drawn as exact cell-sized rectangles, so progress bars and graphs no longer show
+thin stripes at text sizes other than the default. (Curator: confirm the released app striped before keeping this; if
+only early builds of the new app did, drop it.)
 
 On Linux, when the desktop does not draw window title bars (GNOME, for example), the app draws its own, with the title
 and the minimize, maximize and close buttons. (Curator: KDE, which draws its own title bars, has not been tried yet.)
