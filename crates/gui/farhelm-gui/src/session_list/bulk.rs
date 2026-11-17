@@ -17,14 +17,15 @@
 //!   no Stop while every mark shown is one ([`super::marking`]). The bar's Delete takes it like any other mark. The old
 //!   app's bar did the same.
 //! - **Ask once, or not at all.** The question opens when any target would ask on its own row (a Stop with terminal
-//!   tabs, a Delete of anything alive), unless Skip session confirmations is on ([`super::menu::skips_questions`]).
-//!   Otherwise the batch starts at the press. Opening the question counts as a marking choice.
-//! - **The question's answer authorizes only what it drew.** One row per target (status, title, full host, what the
-//!   action does, and for a Delete the managed checkout's line). Confirming runs the frozen targets still shown and
-//!   still marked, never one marked since. While the question is open, a listing that changes anything a target's
-//!   row draws or its request carries (its status words too) rewords it in place ([`prompt::Open::reword`]), as the
-//!   old question replaced itself: it stays open, focus stays where it was, and until the new words are on screen
-//!   every answer but Cancel does nothing. A listing that proves a target gone removes it, and one that only leaves it
+//!   tabs, a Delete of anything alive), unless Skip session confirmations is on ([`super::menu::skips_questions`]);
+//!   an environment Delete always asks ("Environment sessions" below). Otherwise the batch starts at the press.
+//!   Opening the question counts as a marking choice.
+//! - **The question's answer authorizes only what it drew.** One row per target (environment sessions: below) with its
+//!   status, title, full host, what the action does, and for a Delete the managed checkout's line. Confirming runs the
+//!   frozen targets still shown and still marked, never one marked since. While the question is open, a listing that
+//!   changes anything a target's row draws or its request carries (its status words too) rewords it in place
+//!   ([`prompt::Open::reword`]), as the old question replaced itself: it stays open, focus stays where it was, and
+//!   until the new words are on screen every answer but Cancel does nothing. A listing that proves a target gone removes it, and one that only leaves it
 //!   out (filtered, cut, failed) does not. A question with no target left closes. Cancel, Close and Escape keep the
 //!   marks.
 //! - **Focus.** Every close of the question returns focus to the marked bar's ⋯, as the old question's Cancel did (to
@@ -56,12 +57,39 @@
 //! session's header and card draw it as any other line of the session's ([`super::outcome`]), and the session's next
 //! operation clears it.
 //!
-//! NOTE: Sandbox and recipe container rows get nothing of their own yet beyond being left out of the question and the
-//! batch, with the reason on their rows, while their environment is being deleted ([`not_started`]): which Delete each gets, one whole-resource
-//! Delete per resource, continued billing for Stop, a batch with an environment Delete always asking, and the bar's
-//! Stop and Delete drawn unavailable when every mark's environment is being deleted come with the environments work.
+//! **Environment sessions** (a session in its own Tensorlake sandbox or Podman container,
+//! [`super::environment_delete`]). Ported from the old `list/lifecycle.rs` (`sends_delete`, `delete_requests`,
+//! `question_targets`, `DialogCopy`, `row_consequence`) and `list/marking.rs` (`LifecycleOffer`) at the reference
+//! commit:
+//!
+//! - **Each gets the Delete its lane allows**, picked from the hosts read at the press
+//!   ([`super::environment_delete::lane`]) and frozen with the question, every reword included ([`Target`]'s
+//!   `environment`). A marked session of an environment the helm can ask gets its own session-lane Delete; that
+//!   environment's Farhelm takes them one at a time (they share its host's queue), and the last one seals it. The marked
+//!   sessions of an environment it cannot ask share one whole-environment Delete, the first one's, since that destroys
+//!   the rest with it: they send nothing of their own, the question draws only that first row, and the batch still
+//!   clears their marks.
+//! - **Always asked.** A batch holding an environment Delete asks whatever Skip session confirmations says, as the
+//!   single environment Delete does. Each such row states its lane's consequence in the provider's words. With a
+//!   whole-environment row the title, answer and help become "Delete marked sessions and whole environments?", "Delete
+//!   sessions and environments" and "Delete each listed session, and each environment marked as deleted whole with
+//!   everything in it"; with only session-lane rows the help says "an environment goes too with its last session". A
+//!   bulk Stop's row for an environment session adds what plain Stop leaves running there (the provider's Stop help).
+//! - **Settled as the single Delete settles**, with no way to ask again: a 404 counts as deleted, an "unasked" answer
+//!   leaves the helm's words on the row and opens nothing, and each success hands its "stays" count or its retirement
+//!   to the Delete notice band in the order the replies arrive ([`super::delete_notice::publish_environment`]).
+//! - **A 504 stops the environment's queue.** The helm's 504 at its bound settles that row quietly, its Delete still
+//!   running, and every row still queued for that host is not sent but left [`AFTER_CARRIES_ON`]'s line, so nothing
+//!   goes into an environment whose Farhelm is still busy (decided by the GPUI migration's orchestrator on 2026-11-16;
+//!   the old app waited up to nine minutes for each reply instead). This departs from SPEC.md, "Sandbox sessions" ("A
+//!   refusal or a missing answer partway through leaves that row with its reason"): the row that met the 504 shows no
+//!   reason, and SPEC.md does not yet say that the rest are not sent. Its wording is to be revised to match the
+//!   decision.
+//! - **Being deleted.** A session whose environment is being deleted is left out of the question and the batch, with
+//!   the reason on its row ([`not_started`]), and the bar's Stop and Delete are drawn unavailable while every mark each
+//!   would act on is such a session ([`all_being_deleted`]).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 use farhelm_helm_client::Collections;
@@ -73,6 +101,8 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use super::environment::Environment;
+use super::environment_delete::{self, Lane};
 use super::row_marks::{self, Locality};
 use super::status::{self, EndedWords, Live};
 use super::{SessionList, delete, menu, outcome, retired, stop};
@@ -103,6 +133,22 @@ use crate::theme::{self, metrics};
 /// bulk action still did not happen once the request settles, and a refusal it settles with replaces the line, as a
 /// later error replaced the old app's row error.
 pub(super) fn not_started(key: &str, work: Work, label: &str, cx: &mut App) {
+    let reason = match super::environment::deleting_reason(key, cx) {
+        Some(reason) => reason.to_owned(),
+        None => format!("not started, {}", NotStarted::BUSY_REASON),
+    };
+    leave_line(key, work, label, &reason, cx);
+}
+
+/// Why a queued environment Delete was not sent after an earlier one into the same environment met the helm's 504
+/// (the module docs' "Environment sessions"). The app's own words for the rule the GPUI migration's orchestrator
+/// decided on 2026-11-16; the old app waited instead, so it had none to port. They name no provider, as the helm's 504
+/// does not.
+pub(super) const AFTER_CARRIES_ON: &str = "not started, an earlier Delete in this environment was still running. Try \
+                                           again once the list shows how that Delete ended.";
+
+/// Leave `key`'s row `reason` after the name of `work` ([`not_started`] has the rules), recorded as `work`.
+fn leave_line(key: &str, work: Work, label: &str, reason: &str, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
@@ -111,10 +157,7 @@ pub(super) fn not_started(key: &str, work: Work, label: &str, cx: &mut App) {
     } else {
         String::new()
     };
-    let words = HostText::from_host(match super::environment::deleting_reason(key, cx) {
-        Some(reason) => format!("{lead}{reason}"),
-        None => format!("{lead}not started, {}", NotStarted::BUSY_REASON),
-    });
+    let words = HostText::from_host(format!("{lead}{reason}"));
     operations.update(cx, |operations, cx| {
         operations.note(&OpKey::session(key), work, words, cx)
     });
@@ -165,6 +208,10 @@ pub(super) struct Target {
     guard: Guard,
     /// Whether this target's own row would ask before acting, Skip session confirmations aside.
     asks: bool,
+    /// For a Delete of a session in a disposable environment, the environment Delete it gets, with its lane as the
+    /// hosts read at the press picked it (the module docs' "Environment sessions"); `None` for an ordinary session and
+    /// for every Stop. Kept through every reword, so the answer sends the lane its row said.
+    environment: Option<environment_delete::Asked>,
 }
 
 /// What a target's status says in the question: a live word, an ended status's words, or "Unknown" for one nobody
@@ -185,12 +232,31 @@ enum Guard {
 }
 
 impl Target {
-    /// `row`, filed under `key`, as a target of `action`, with its host placed through `collections`' registry.
+    /// `row`, filed under `key`, as a target of `action`, with its host placed through `collections`' registry. A
+    /// Delete of an environment session takes its lane from `collections`' hosts read now
+    /// ([`environment_delete::asked_in`]).
     pub(super) fn of(
         action: Lifecycle,
         key: &str,
         row: &SessionRow,
         collections: &Collections,
+    ) -> Target {
+        let environment = match action {
+            Lifecycle::Stop => None,
+            Lifecycle::Delete => environment_delete::asked_in(row, collections),
+        };
+        Target::frozen_as(action, key, row, collections, environment)
+    }
+
+    /// `row` as a target of `action` whose environment Delete, if any, is `environment` as already frozen: what a
+    /// reword freezes afresh, so a hosts read that changed since the press never changes the lane a row was asked in,
+    /// nor makes an ordinary row an environment one (the old `reconcile` kept its `sandbox` and `whole` the same way).
+    fn frozen_as(
+        action: Lifecycle,
+        key: &str,
+        row: &SessionRow,
+        collections: &Collections,
+        environment: Option<environment_delete::Asked>,
     ) -> Target {
         let local = row_marks::locality(row, collections) == Some(Locality::Local);
         let status = match (status::live(row), status::ended_words(row, false)) {
@@ -198,13 +264,27 @@ impl Target {
             (None, Some(ended)) => Status::Ended(ended),
             (None, None) => Status::Unknown,
         };
-        let (consequence, guard, asks) = match action {
-            Lifecycle::Stop => (
-                stop::consequence(row),
+        let (consequence, guard, asks) = match (action, &environment) {
+            // An environment session's Stop also says what plain Stop leaves running there, as the old bulk row added
+            // the provider's Stop help (not the row question's Stop and suspend note: the batch offers no such answer).
+            (Lifecycle::Stop, _) => (
+                match Environment::of(row, collections) {
+                    Some(environment) => {
+                        format!("{} {}", stop::consequence(row), environment.ui.stop_help())
+                    }
+                    None => stop::consequence(row),
+                },
                 Guard::Stop(stop::guard(row)),
                 stop::asks(row, false),
             ),
-            Lifecycle::Delete => (
+            // An environment Delete states its lane's consequence and always asks; its request carries no guard, so the
+            // one kept here only fills the shape the question's answer hands back.
+            (Lifecycle::Delete, Some(asked)) => (
+                asked.lane_consequence().to_owned(),
+                Guard::Delete(delete::guard(row)),
+                true,
+            ),
+            (Lifecycle::Delete, None) => (
                 delete::consequence(row),
                 Guard::Delete(delete::guard(row)),
                 !delete::shows_nothing_alive(row),
@@ -217,17 +297,29 @@ impl Target {
             host_name: (!row.host_name.is_empty()).then(|| identity::named(&row.host_name, local)),
             status,
             consequence,
-            managed: action == Lifecycle::Delete && row.info.working_copy.is_some(),
+            // An environment's checkouts go with it or are discarded, so its rows have no managed-checkout line.
+            managed: action == Lifecycle::Delete
+                && environment.is_none()
+                && row.info.working_copy.is_some(),
             guard,
             asks,
+            environment,
         }
+    }
+
+    /// Whether this target gets the whole-environment Delete.
+    fn whole(&self) -> bool {
+        self.environment
+            .as_ref()
+            .is_some_and(|asked| asked.lane == Lane::Whole)
     }
 
     /// The work this target's request is, which its row draws pending while it is held and in flight.
     fn work(&self) -> Work {
-        match self.guard {
-            Guard::Stop(_) => Work::Stop,
-            Guard::Delete(guard) => Work::Delete(guard),
+        match (self.guard, &self.environment) {
+            (Guard::Stop(_), _) => Work::Stop,
+            (Guard::Delete(_), Some(_)) => Work::EnvironmentDelete,
+            (Guard::Delete(guard), None) => Work::Delete(guard),
         }
     }
 
@@ -239,11 +331,29 @@ impl Target {
         }
     }
 
-    /// Send this target's request through its row's own send, running `then` once it has settled.
-    fn start(&self, then: impl FnOnce(&mut App) + 'static, cx: &mut App) -> Result<(), NotStarted> {
-        match self.guard {
-            Guard::Stop(guard) => stop::start(&self.key, guard, then, cx),
-            Guard::Delete(guard) => delete::start(&self.key, guard, then, cx),
+    /// Send this target's request through its row's own send, running `then` once it has settled, told whether the
+    /// helm answered an environment Delete with the 504 that says it carries on (never for any other request).
+    fn start(
+        &self,
+        then: impl FnOnce(bool, &mut App) + 'static,
+        cx: &mut App,
+    ) -> Result<(), NotStarted> {
+        match (self.guard, &self.environment) {
+            (Guard::Stop(guard), _) => stop::start(&self.key, guard, |cx| then(false, cx), cx),
+            // No way to ask again: in a batch an "unasked" answer leaves the helm's words on the row.
+            (Guard::Delete(guard), Some(asked)) => environment_delete::start(
+                delete::Frozen {
+                    key: self.key.clone(),
+                    guard,
+                    environment: Some(asked.clone()),
+                },
+                None,
+                then,
+                cx,
+            ),
+            (Guard::Delete(guard), None) => {
+                delete::start(&self.key, guard, |cx| then(false, cx), cx)
+            }
         }
     }
 
@@ -311,14 +421,20 @@ struct Asked {
 }
 
 /// What `asked`'s targets are after a listing that `collections` now holds: each one the store holds, frozen afresh
-/// from its row; each one a listing proves gone, left out; and each one only missing (a filtered, cut or failed
-/// listing), kept as drawn. Never one more.
+/// from its row with the environment Delete it was asked with ([`Target::frozen_as`]); each one a listing proves gone,
+/// left out; and each one only missing (a filtered, cut or failed listing), kept as drawn. Never one more.
 fn reconciled(asked: &Asked, collections: &Collections) -> Vec<Target> {
     asked
         .targets
         .iter()
         .filter_map(|drawn| match collections.get::<SessionRow>(&drawn.key) {
-            Some(row) => Some(Target::of(asked.action, &drawn.key, row, collections)),
+            Some(row) => Some(Target::frozen_as(
+                asked.action,
+                &drawn.key,
+                row,
+                collections,
+                drawn.environment.clone(),
+            )),
             None if session::listing_proves_gone(collections, &drawn.key) => None,
             None => Some(drawn.clone()),
         })
@@ -333,11 +449,39 @@ pub(super) const STOP_ID: &str = "session-marked-stop";
 /// The marked bar's Delete's element id.
 pub(super) const DELETE_ID: &str = "session-marked-delete";
 
+/// The marked bar's Stop's or Delete's hover help while it is drawn unavailable ([`all_being_deleted`]): the old
+/// `ALL_BEING_DELETED`, word for word.
+pub(super) const ALL_BEING_DELETED: &str =
+    "The marked sessions' environments are being deleted, so their actions are unavailable";
+
+/// Whether the marked bar's `action` would act on nothing of `shown`, the marks the last frame showed, because every
+/// one it would take is a session whose environment is being deleted, which takes no action: the bar then draws it
+/// unavailable (the old `LifecycleOffer`). Stop never takes a retired session ([`super::retired`]), which is never an
+/// environment session either, so Stop counts only the others; a mark with no row in the store is no target of either.
+/// `false` when there is nothing to count.
+pub(super) fn all_being_deleted(action: Lifecycle, shown: &[String], cx: &App) -> bool {
+    let Some(store) = session::current_store(cx) else {
+        return false;
+    };
+    let collections = store.read(cx).collections();
+    let mut takes = shown
+        .iter()
+        .filter(|key| {
+            collections
+                .get::<SessionRow>(key.as_str())
+                .is_some_and(|row| action == Lifecycle::Delete || !retired::is(row))
+        })
+        .peekable();
+    takes.peek().is_some()
+        && takes.all(|key| super::environment::deleting_reason(key, cx).is_some())
+}
+
 impl SessionList {
     /// The marked bar's Stop or Delete was pressed: freeze the marked rows the last frame showed as targets of
     /// `action`, then ask about them, or, when no target would ask on its own row or Skip session confirmations is on,
-    /// run them at once. Nothing happens while a bulk question is open (a second press queued before the question took
-    /// the window's input) or when no shown mark has a row in the store.
+    /// run them at once; a batch holding an environment Delete always asks. Nothing happens while a bulk question is
+    /// open (a second press queued before the question took the window's input) or when no shown mark has a row in the
+    /// store.
     pub(super) fn bulk_lifecycle(
         &mut self,
         action: Lifecycle,
@@ -380,7 +524,9 @@ impl SessionList {
         if targets.is_empty() {
             return;
         }
-        if skips || !targets.iter().any(|target| target.asks) {
+        // An environment Delete is never skipped, so a batch holding one always asks (the old `needs_confirmation`).
+        let must_ask = targets.iter().any(|target| target.environment.is_some());
+        if !must_ask && (skips || !targets.iter().any(|target| target.asks)) {
             self.run_batch(targets, window, cx);
             return;
         }
@@ -465,16 +611,25 @@ impl SessionList {
     // ---- Running -----------------------------------------------------------------------------------------------------
 
     /// Accept `targets` as one batch: give each refused target its not-started line, hold the rest in the operation
-    /// store and queue them by host, and send each host's first.
+    /// store and queue them by host, and send each host's first. Of the targets that get one environment's
+    /// whole-environment Delete, only the first held is queued; the rest send nothing of their own, since that one
+    /// Delete destroys them with everything else in it, and the batch still clears their marks.
     fn run_batch(&mut self, targets: Vec<Target>, window: &mut Window, cx: &mut Context<Self>) {
         let mut hosts: Vec<i64> = Vec::new();
         let mut queues: HashMap<i64, VecDeque<Target>> = HashMap::new();
+        let mut wholes: HashSet<i64> = HashSet::new();
         let keys = targets.iter().map(|target| target.key.clone()).collect();
         for target in targets {
+            if target.whole() && wholes.contains(&target.host) {
+                continue;
+            }
             let held = !menu::refused(&target.key, cx) && target.hold(cx).is_ok();
             if !held {
                 not_started(&target.key, target.work(), target.label(), cx);
                 continue;
+            }
+            if target.whole() {
+                wholes.insert(target.host);
             }
             if !queues.contains_key(&target.host) {
                 hosts.push(target.host);
@@ -528,10 +683,15 @@ impl SessionList {
                 continue;
             }
             let (list, handle) = (cx.weak_entity(), window.window_handle());
-            let next = move |cx: &mut App| {
+            let next = move |carries_on: bool, cx: &mut App| {
                 // A window that has gone takes its queues with it.
                 let _ = handle.update(cx, |_, window, cx| {
-                    list.update(cx, |list, cx| list.advance(id, host, window, cx))
+                    list.update(cx, |list, cx| {
+                        if carries_on {
+                            list.give_up_on_host(id, host, cx);
+                        }
+                        list.advance(id, host, window, cx)
+                    })
                 });
             };
             match target.start(next, cx) {
@@ -542,6 +702,35 @@ impl SessionList {
                 // Inert, or a key no helm serves (logged where it was built): nothing to show on a row.
                 Err(NotStarted::Retired | NotStarted::Path(_)) => {}
             }
+        }
+    }
+
+    /// Batch `id`'s request on `host` met the helm's 504 at its bound, an environment Delete still running there: end
+    /// the hold of every row the host still has queued and leave each the line that says why it was not sent
+    /// ([`AFTER_CARRIES_ON`]), so nothing more goes into an environment whose Farhelm is still busy with the first
+    /// (decided by the GPUI migration's orchestrator on 2026-11-16, in place of the old app's waiting). The host's queue
+    /// is left empty, for [`Self::advance`] to finish.
+    fn give_up_on_host(&mut self, id: u64, host: i64, cx: &mut Context<Self>) {
+        let Some(queue) = self
+            .current
+            .current(cx)
+            .bulk
+            .batches
+            .get_mut(&id)
+            .and_then(|batch| batch.queues.get_mut(&host))
+        else {
+            return;
+        };
+        let queued = std::mem::take(queue);
+        for target in queued {
+            target.release(cx);
+            leave_line(
+                &target.key,
+                target.work(),
+                target.label(),
+                AFTER_CARRIES_ON,
+                cx,
+            );
         }
     }
 
@@ -636,24 +825,71 @@ impl SessionList {
 /// less.
 const QUESTION_WIDTH: f32 = 620.;
 
-/// The bulk question about `targets`: "Stop 2 sessions?" or "Delete 1 session?", with one row per target in its body,
-/// and the old dialog's answers and their help. Its answer acts on `targets` as frozen here. Built both to ask and to
-/// reword, which reads only its words and `targets`: where closing returns focus is the asker's ([`SessionList`]'s
-/// `ask_bulk`).
-fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
+/// The bulk question's words besides its rows: the old `DialogCopy`.
+struct Words {
+    /// The question's title.
+    title: String,
+    /// The confirming answer's label.
+    answer: String,
+    /// The confirming answer's hover help.
+    help: String,
+}
+
+/// The bulk question's [`Words`] for `action` on `targets`. A whole-environment Delete changes the title and the
+/// answer, so the destructive scope is never only in the rows; environment Deletes that ask their Farhelm keep the
+/// ordinary title, since each still deletes just its session unless it is the last, and say so in the help.
+fn words(action: Lifecycle, targets: &[Target]) -> Words {
+    if action == Lifecycle::Delete && targets.iter().any(Target::whole) {
+        return Words {
+            title: "Delete marked sessions and whole environments?".to_owned(),
+            answer: "Delete sessions and environments".to_owned(),
+            help: "Delete each listed session, and each environment marked as deleted whole with everything in it"
+                .to_owned(),
+        };
+    }
     let verb = action.label();
     let noun = if targets.len() == 1 {
         "session"
     } else {
         "sessions"
     };
+    let help = if targets.iter().any(|target| target.environment.is_some()) {
+        "Delete the sessions listed in this question; an environment goes too with its last session"
+            .to_owned()
+    } else {
+        format!("{verb} the sessions listed in this question")
+    };
+    Words {
+        title: format!("{verb} {} {noun}?", targets.len()),
+        answer: format!("{verb} {noun}"),
+        help,
+    }
+}
+
+/// The targets the question draws a row for, in order: every target but the second and later of one environment's
+/// whole-environment Delete, which that first row's warning covers, as the old `question_targets` drew them. The
+/// answer still carries every target, so the batch clears all their marks.
+fn drawn(targets: &[Target]) -> Vec<&Target> {
+    let mut wholes = HashSet::new();
+    targets
+        .iter()
+        .filter(|target| !target.whole() || wholes.insert(target.host))
+        .collect()
+}
+
+/// The bulk question about `targets`: "Stop 2 sessions?" or "Delete 1 session?" ([`words`]), with one row per drawn
+/// target in its body ([`drawn`]), and the old dialog's answers and their help. Its answer acts on `targets` as frozen
+/// here. Built both to ask and to reword, which reads only its words and `targets`: where closing returns focus is the
+/// asker's ([`SessionList`]'s `ask_bulk`).
+fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
+    let Words {
+        title,
+        answer,
+        help,
+    } = words(action, &targets);
     Question::new(
-        format!("{verb} {} {noun}?", targets.len()),
-        Answer::new(
-            format!("{verb} {noun}"),
-            HoverHelp::tooltip(format!("{verb} the sessions listed in this question")),
-            Tier::Danger,
-        ),
+        title,
+        Answer::new(answer, HoverHelp::tooltip(help), Tier::Danger),
         targets,
     )
     .cancel_answer(Answer::new(
@@ -679,10 +915,11 @@ struct Rows {
 impl Render for Rows {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
+        let rows = drawn(&self.targets);
         div()
             .flex()
             .flex_col()
-            .children(self.targets.iter().enumerate().map(|(index, target)| {
+            .children(rows.into_iter().enumerate().map(|(index, target)| {
                 let key = &target.key;
                 let id = |part: &str| SharedString::from(format!("bulk-target-{part}-{key}"));
                 let status: Line = match &target.status {
@@ -736,7 +973,11 @@ impl Render for Rows {
                             .text_color(theme::color(palette.fg_2))
                             .child(host),
                     )
-                    .child(div().mt(px(8.)).child(target.consequence.clone()))
+                    // A sentence of the app's own words, so a test can read a row's whole consequence by its id: an
+                    // environment row's says which of its two Deletes it gets.
+                    .child(div().mt(px(8.)).child(
+                        HostSentence::new(id("consequence")).text(target.consequence.clone()),
+                    ))
                     .when(self.action == Lifecycle::Delete && target.managed, |row| {
                         row.child(div().mt(px(8.)).child(delete::MANAGED_CHECKOUT))
                     })

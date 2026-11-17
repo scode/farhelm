@@ -10,27 +10,33 @@
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::SessionRow;
-use gpui::{TestAppContext, VisualTestContext};
+use farhelm_proto::ProviderKind;
+use farhelm_proto::ui_channel::{HostView, SessionRow};
+use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::bulk::{DELETE_ID, STOP_ID};
-use super::delete::MANAGED_CHECKOUT;
-use super::environment_tests::{Provider, deleting, environment_host, registry};
-use super::host_rail::tests::filtered;
+use super::bulk::{AFTER_CARRIES_ON, ALL_BEING_DELETED, DELETE_ID, STOP_ID};
+use super::delete::{MANAGED_CHECKOUT, deleted_here};
+use super::delete_notice::TEXT_ID;
+use super::environment_tests::{
+    Provider, connected, deleting, environment_host, push_host, registry, suspended_at,
+};
+use super::host_rail::tests::{filtered, hover_help};
 use super::marking::{CLEAR_ID, COUNT_ID, MENU_ID, MENU_TOGGLE_ID};
 use super::marking_tests::{
     click_with, count, ctrl, fleet, open_list, requests, rows, start_rename, stored,
 };
-use super::menu_tests::{drawn, ended, label_of, push, snapshot};
+use super::menu_tests::{any_layer, drawn, ended, label_of, push, snapshot};
 use super::pins_tests::away;
 use super::retired_tests::retired;
 use super::row_tests::texts_within;
 use super::status::{self, Live};
-use super::tests::{change, listing_meta, painted, selected, session};
+use super::tests::{Fixture, change, listing_meta, painted, selected, session};
 use crate::components::Role;
+use crate::environment_ui::ProviderUi;
 use crate::focus;
 use crate::layers;
+use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session;
 use crate::terminal::tunnels;
 use crate::test_support::{self, focused_id, frame, show_next_frame};
@@ -1365,4 +1371,508 @@ fn with_no_menu_toggle_cancel_returns_focus_to_the_pressed_button(cx: &mut TestA
     assert_eq!(lifecycle(fake.commands()).0.len(), 0);
     assert!(stored(&list, "r", cx));
     assert_eq!(focused_id(cx).as_deref(), Some(DELETE_ID));
+}
+
+// ---- Environment sessions ------------------------------------------------------------------------------------------
+//
+// Sessions on host 2, which the registry lists as a session-owned sandbox or container (`environment_tests.rs`'s
+// fixtures), against an ordinary session on the local host 1 that stays open. The old cases are
+// `tensorlake-sandbox-sessions.spec.ts` ":929" and ":986" and the old `list/lifecycle.rs` and `list/marking.rs` tests
+// of the same rules, at reference commit `24bc0580`.
+
+/// What the helm answers when it could not ask the environment's own Farhelm (`sandbox.rs`'s `EnvironmentUnasked`).
+const UNASKED: &str = "this environment's own Farhelm could not be asked to delete the session; nothing was \
+                       decided, and an unanswered request may still have been acted on, which the next listing shows";
+
+/// The sandbox provider's words, which the rows' consequences are compared with (the words themselves are
+/// `environment_delete_tests.rs`'s).
+fn sandbox() -> ProviderUi {
+    ProviderUi(ProviderKind::Tensorlake)
+}
+
+/// The real main view over `rows` (each with its tab count), with ordinary o on the local host open first, Skip session
+/// confirmations as `skip` says, and the registry listing host 2 as `host`.
+fn open_environment<'a>(
+    cx: &'a mut TestAppContext,
+    rows: &[(Fixture, usize)],
+    skip: bool,
+    host: &HostView,
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let mut all = vec![(session("o").host(1), 0)];
+    all.extend(rows.iter().cloned());
+    let mut snapshot = snapshot(&all, skip);
+    snapshot.push(registry(host));
+    let (mut fake, _list, cx) = open_list(cx, snapshot);
+    requests(&mut fake);
+    (fake, cx)
+}
+
+/// Mark each of `rows` (row selectors) with SPEC.md's toggle gesture on this platform: Cmd-click on macOS, Ctrl-click
+/// elsewhere, as GPUI's secondary key names it.
+fn toggle(cx: &mut VisualTestContext, rows: &[&'static str]) {
+    let modifiers = cx.update(|_, cx| Modifiers::secondary_key(cx));
+    for row in rows {
+        click_with(cx, row, modifiers);
+    }
+}
+
+/// The Deletes sent since the last look, in the order sent, left unanswered; every other command is answered with
+/// success at once. The fake answers in order, so this works only while nothing sent before it waits.
+fn sent_deletes(fake: &mut FakeHelm) -> Vec<FakeCommand> {
+    let (deletes, others) = lifecycle(fake.commands());
+    answer(fake, &others);
+    deletes
+}
+
+/// The paths of `commands`, sorted: what went out together on different hosts, whose order between them is the
+/// list's display order and no rule's.
+fn sorted_paths(commands: &[FakeCommand]) -> Vec<&str> {
+    let mut paths: Vec<&str> = commands
+        .iter()
+        .map(|command| command.path.as_str())
+        .collect();
+    paths.sort_unstable();
+    paths
+}
+
+/// The work in flight, or held, on session `key`'s own key.
+fn in_flight(cx: &mut VisualTestContext, key: &str) -> Option<Work> {
+    cx.update(|_, cx| {
+        session::current_operations(cx)
+            .and_then(|operations| operations.read(cx).in_flight(&OpKey::session(key)))
+    })
+}
+
+/// The old e2e ":929", "bulk Delete of a connected sandbox's sessions sends one environment Delete each": only the
+/// sandbox's own Farhelm knows which session is its last, so each marked session must be its own session-lane request,
+/// one at a time; one whole-sandbox Delete would destroy sessions nobody marked. SPEC.md never skips an environment
+/// Delete, bulk included, since one outcome destroys the sandbox, and a "stays" count is true only until a later Delete
+/// on the same sandbox. Specified, Skip on, a and b ended with no tabs on a connected sandbox: Delete asks, though an
+/// ordinary batch would not; the question is "Delete 2 sessions?" answered "Delete sessions", helped by "Delete the
+/// sessions listed in this question; an environment goes too with its last session", each row stating the sandbox's
+/// session-lane consequence; nothing is sent before the answer; the answer sends a's
+/// `?delete_environment_session=true` alone; its count of 1 shows "The sandbox stays: 1 other session is in it" and
+/// sends b's; b's sealing reply, with no count, retires the band; both marks are gone.
+#[gpui::test]
+fn a_connected_environments_marked_sessions_each_get_their_own_delete(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open_environment(cx, &[(ended("a"), 0), (ended("b"), 0)], true, &host);
+    toggle(cx, &["session-row-a", "session-row-b"]);
+    assert_eq!(count(cx).as_deref(), Some("2 marked"), "the premise");
+
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert!(
+        drawn(cx, "prompt"),
+        "asked, though skipped and nothing alive"
+    );
+    assert!(texts(cx).iter().any(|text| text == "Delete 2 sessions?"));
+    assert_eq!(
+        label_of(cx, "prompt-confirm").as_deref(),
+        Some("Delete sessions")
+    );
+    assert_eq!(
+        hover_help(cx, "prompt-confirm").as_deref(),
+        Some(
+            "Delete the sessions listed in this question; an environment goes too with its last session"
+        )
+    );
+    assert_eq!(question_rows(cx), ["a", "b"]);
+    for key in ["a", "b"] {
+        assert_eq!(
+            label_of(cx, &format!("bulk-target-consequence-{key}")).as_deref(),
+            Some(sandbox().session_delete_consequence()),
+            "{key}"
+        );
+    }
+    assert_eq!(
+        sent_deletes(&mut fake).len(),
+        0,
+        "nothing before the answer"
+    );
+
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    let first = sent_deletes(&mut fake);
+    assert_eq!(
+        owned(&first),
+        [delete("/api/sessions/a?delete_environment_session=true")]
+    );
+    assert_eq!(
+        in_flight(cx, "b"),
+        Some(Work::EnvironmentDelete),
+        "b waits its turn"
+    );
+    fake.reply(first[0].id, 200, Some(json!({"environment_remaining": 1})));
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, TEXT_ID).as_deref(),
+        Some("The sandbox stays: 1 other session is in it")
+    );
+    let second = sent_deletes(&mut fake);
+    assert_eq!(
+        owned(&second),
+        [delete("/api/sessions/b?delete_environment_session=true")]
+    );
+    fake.reply(second[0].id, 200, Some(json!({})));
+    test_support::settle(cx);
+    assert!(!drawn(cx, TEXT_ID), "the sealing reply retired the count");
+    assert_eq!(count(cx), None, "the batch cleared its targets");
+}
+
+/// The old `sandbox_delete_question_coalesces_resources_without_shrinking_stop_consent` and `DialogCopy` tests: the helm
+/// cannot ask a suspended sandbox's Farhelm, so its marked sessions can only go with the whole sandbox, and the first
+/// whole Delete destroys the rest; a second request would only fail. The destructive scope must be in the question's
+/// title and answer, not only in a row. Specified, a and b running on a suspended sandbox: Delete asks "Delete marked
+/// sessions and whole environments?", answered "Delete sessions and environments", helped by "Delete each listed
+/// session, and each environment marked as deleted whole with everything in it", with a's row alone, stating the
+/// sandbox's whole-environment warning; the answer sends a's `?delete_sandbox=true` and nothing for b, which is not
+/// held; once it is answered, nothing more is sent, b's row has no line, and both marks are gone.
+#[gpui::test]
+fn an_unconnected_environments_marked_sessions_share_one_whole_delete(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, suspended_at(0));
+    let (mut fake, cx) =
+        open_environment(cx, &[(session("a"), 0), (session("b"), 0)], false, &host);
+    toggle(cx, &["session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert!(
+        texts(cx)
+            .iter()
+            .any(|text| text == "Delete marked sessions and whole environments?")
+    );
+    assert_eq!(
+        label_of(cx, "prompt-confirm").as_deref(),
+        Some("Delete sessions and environments")
+    );
+    assert_eq!(
+        hover_help(cx, "prompt-confirm").as_deref(),
+        Some(
+            "Delete each listed session, and each environment marked as deleted whole with everything in it"
+        )
+    );
+    assert_eq!(question_rows(cx), ["a"], "one row for the one Delete");
+    assert_eq!(
+        label_of(cx, "bulk-target-consequence-a").as_deref(),
+        Some(sandbox().whole_delete_warning())
+    );
+
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    let sent = sent_deletes(&mut fake);
+    assert_eq!(
+        owned(&sent),
+        [delete("/api/sessions/a?delete_sandbox=true")]
+    );
+    assert_eq!(in_flight(cx, "b"), None, "b sends nothing of its own");
+    fake.reply(sent[0].id, 200, Some(json!({})));
+    test_support::settle(cx);
+    assert_eq!(sent_deletes(&mut fake).len(), 0);
+    assert_eq!(label_of(cx, "session-outcome-b"), None);
+    assert_eq!(count(cx), None, "the batch cleared both marks");
+}
+
+/// SPEC.md: a bulk Delete sends each marked session the Delete its own row would, so an ordinary session beside an
+/// environment session keeps its guarded ordinary Delete, and different hosts progress independently. The old client
+/// counted a 404 as deleted: an earlier Delete, perhaps another window's, already sealed and destroyed the environment.
+/// Specified, with ordinary c running on the local host and a and b running on a connected sandbox, all marked: the
+/// question rows say c's ordinary consequence and a's session-lane one; the answer sends c's plain Delete and a's
+/// session-lane Delete together; a answered 404 leaves no line on a's row and counts as this window's Delete, and b's
+/// is sent next; b's count of 0 shows "The sandbox stays: no other sessions are in it".
+#[gpui::test]
+fn mixed_marks_keep_each_rows_delete_and_a_404_counts_as_deleted(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open_environment(
+        cx,
+        &[
+            (session("c").host(1).unmanaged(), 0),
+            (session("a"), 0),
+            (session("b"), 0),
+        ],
+        false,
+        &host,
+    );
+    toggle(cx, &["session-row-c", "session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert!(texts(cx).iter().any(|text| text == "Delete 3 sessions?"));
+    assert_eq!(
+        label_of(cx, "bulk-target-consequence-c").as_deref(),
+        Some("Still running — deleting kills the agent:")
+    );
+    assert_eq!(
+        label_of(cx, "bulk-target-consequence-a").as_deref(),
+        Some(sandbox().session_delete_consequence())
+    );
+
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    let first = sent_deletes(&mut fake);
+    assert_eq!(
+        sorted_paths(&first),
+        [
+            "/api/sessions/a?delete_environment_session=true",
+            "/api/sessions/c"
+        ],
+        "both hosts at once"
+    );
+    for command in &first {
+        if command.path.starts_with("/api/sessions/a") {
+            fake.reply(command.id, 404, Some(json!("no such session")));
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, "session-outcome-a"),
+        None,
+        "a 404 is a deletion"
+    );
+    assert!(cx.update(|_, cx| deleted_here("a", cx)));
+    let next = sent_deletes(&mut fake);
+    assert_eq!(
+        owned(&next),
+        [delete("/api/sessions/b?delete_environment_session=true")]
+    );
+    fake.reply(next[0].id, 200, Some(json!({"environment_remaining": 0})));
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, TEXT_ID).as_deref(),
+        Some("The sandbox stays: no other sessions are in it")
+    );
+}
+
+/// The old bulk Delete never escalated: "unasked" offers the warned whole-environment Delete only where the user asked
+/// one session's Delete, and a batch must not open a question per row behind the user's back, nor widen its consent to
+/// a whole environment on its own. Specified, a and b on a connected sandbox: a's session-lane Delete answered 409 with
+/// the helm's unasked marker opens nothing and leaves the helm's words on a's row, and b's session-lane Delete is still
+/// sent.
+#[gpui::test]
+fn an_unasked_answer_in_a_batch_stays_on_its_row_and_opens_nothing(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) =
+        open_environment(cx, &[(session("a"), 0), (session("b"), 0)], false, &host);
+    toggle(cx, &["session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    let first = sent_deletes(&mut fake);
+    assert_eq!(
+        owned(&first),
+        [delete("/api/sessions/a?delete_environment_session=true")]
+    );
+    fake.reply_marked(
+        first[0].id,
+        409,
+        vec![HelmMarker::EnvironmentUnasked],
+        Some(json!(UNASKED)),
+    );
+    test_support::settle(cx);
+    assert!(!any_layer(cx), "nothing opens");
+    assert_eq!(label_of(cx, "session-outcome-a").as_deref(), Some(UNASKED));
+    assert_eq!(
+        owned(&sent_deletes(&mut fake)),
+        [delete("/api/sessions/b?delete_environment_session=true")]
+    );
+}
+
+/// The helm answers 504 once its 20-second bound passes while the environment's Farhelm still works on the Delete
+/// (decided by the migration's orchestrator on 2026-11-16, with this rule for a batch): shown as a failure it would
+/// invite a second Delete, and sending the host's next Delete would only queue behind the first and meet "busy" or
+/// another 504 there. Specified, a, b and c on a connected sandbox and ordinary e on the local host, all marked: a's
+/// Delete and e's go out together; a answered 504 leaves no line on a's row and frees its key, while e's success goes
+/// on; b and c are never sent, their keys are freed, and each row says "Delete: not started, an earlier Delete in this
+/// environment was still running. Try again once the list shows how that Delete ended."; the batch then clears its
+/// marks.
+#[gpui::test]
+fn a_504_settles_its_row_quietly_and_stops_its_environments_queue(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open_environment(
+        cx,
+        &[
+            (session("a"), 0),
+            (session("b"), 0),
+            (session("c"), 0),
+            (session("e").host(1).unmanaged(), 0),
+        ],
+        false,
+        &host,
+    );
+    toggle(
+        cx,
+        &[
+            "session-row-a",
+            "session-row-b",
+            "session-row-c",
+            "session-row-e",
+        ],
+    );
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    let first = sent_deletes(&mut fake);
+    assert_eq!(
+        sorted_paths(&first),
+        [
+            "/api/sessions/a?delete_environment_session=true",
+            "/api/sessions/e"
+        ],
+        "both hosts at once"
+    );
+    for command in &first {
+        if command.path.starts_with("/api/sessions/a") {
+            fake.reply(
+                command.id,
+                504,
+                Some(json!(
+                    "this environment's own Farhelm did not answer within 20 seconds; it may still delete this session"
+                )),
+            );
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, "session-outcome-a"),
+        None,
+        "the 504 is not a failure"
+    );
+    assert_eq!(
+        sent_deletes(&mut fake).len(),
+        0,
+        "nothing more goes into the sandbox"
+    );
+    let line = format!("Delete: {AFTER_CARRIES_ON}");
+    for key in ["a", "b", "c"] {
+        assert_eq!(in_flight(cx, key), None, "{key}'s key is free");
+    }
+    for key in ["b", "c"] {
+        assert_eq!(
+            label_of(cx, &format!("session-outcome-{key}")),
+            Some(line.clone()),
+            "{key}"
+        );
+    }
+    assert_eq!(
+        line,
+        "Delete: not started, an earlier Delete in this environment was still running. Try again once the list \
+         shows how that Delete ended."
+    );
+    assert_eq!(count(cx), None, "the batch finished and cleared its marks");
+}
+
+/// The old bulk Stop's row added the provider's Stop help, since plain Stop of a sandbox session leaves the sandbox
+/// running and billing, which the user consents to by answering. Specified: a bulk Stop of a with one tab on a
+/// connected sandbox asks with a's row saying "Stop the agent and close 1 terminal tab? The sandbox keeps running and
+/// billing until you suspend or delete it."; Confirm sends a's ordinary Stop.
+#[gpui::test]
+fn a_bulk_stop_of_an_environment_session_says_what_keeps_running(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open_environment(cx, &[(session("a"), 1)], false, &host);
+    toggle(cx, &["session-row-a"]);
+    test_support::click(cx, STOP_ID);
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, "bulk-target-consequence-a").as_deref(),
+        Some(
+            "Stop the agent and close 1 terminal tab? The sandbox keeps running and billing until you suspend or \
+             delete it."
+        )
+    );
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    assert_eq!(owned(&lifecycle(fake.commands()).0), [stop("a")]);
+}
+
+/// The old e2e ":986", its bulk half, and the old `LifecycleOffer`: a control whose every target's environment is being
+/// deleted would do nothing, so it is drawn unavailable and says why, while a mixed selection keeps it, since the batch
+/// leaves those targets out with their reason. Specified, a on a sandbox being deleted and ordinary b on the local host:
+/// with a alone marked, the bar's Stop and Delete are helped by "The marked sessions' environments are being deleted,
+/// so their actions are unavailable", and a click on Delete opens nothing, sends nothing and leaves no line; with b
+/// marked too, Delete is helped by "Delete the marked sessions currently shown" again.
+#[gpui::test]
+fn the_bars_stop_and_delete_are_unavailable_while_every_marks_environment_is_being_deleted(
+    cx: &mut TestAppContext,
+) {
+    let host = environment_host(Provider::Sandbox, deleting(None));
+    let (mut fake, cx) = open_environment(
+        cx,
+        &[(session("a"), 0), (session("b").host(1), 0)],
+        false,
+        &host,
+    );
+    toggle(cx, &["session-row-a"]);
+    for button in [STOP_ID, DELETE_ID] {
+        assert_eq!(
+            hover_help(cx, button).as_deref(),
+            Some(ALL_BEING_DELETED),
+            "{button}"
+        );
+    }
+    assert_eq!(
+        ALL_BEING_DELETED,
+        "The marked sessions' environments are being deleted, so their actions are unavailable"
+    );
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(lifecycle(fake.commands()).0.len(), 0);
+    assert_eq!(label_of(cx, "session-outcome-a"), None);
+
+    toggle(cx, &["session-row-b"]);
+    assert_eq!(
+        hover_help(cx, DELETE_ID).as_deref(),
+        Some("Delete the marked sessions currently shown")
+    );
+}
+
+/// SPEC.md bases a row's Delete on whether the helm could ask its sandbox "when the modal opened", and the answer
+/// authorizes only the consequence the question drew. A reword that took the lane from a newer hosts read would turn a
+/// session-lane row into a whole-sandbox Delete the user never saw warned, or the reverse. Specified, a and b running
+/// on a connected sandbox: with the question open, the sandbox pushed as suspended and a pushed as exited, a's row is
+/// reworded (it says "Exited (code 0)") but the title is still "Delete 2 sessions?", a's row still states the session
+/// lane's consequence, and once the new words are on screen the answer sends a's `?delete_environment_session=true`.
+#[gpui::test]
+fn a_reword_keeps_the_lane_the_question_was_asked_in(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) =
+        open_environment(cx, &[(session("a"), 0), (session("b"), 0)], false, &host);
+    toggle(cx, &["session-row-a", "session-row-b"]);
+    test_support::click(cx, DELETE_ID);
+    test_support::settle(cx);
+    assert!(
+        texts(cx).iter().any(|text| text == "Delete 2 sessions?"),
+        "the premise: asked in the session lane"
+    );
+
+    push_host(
+        &mut fake,
+        &environment_host(Provider::Sandbox, suspended_at(0)),
+        cx,
+    );
+    push(&mut fake, &["o", "a", "b"], &[(ended("a"), 0)], cx);
+    assert!(
+        status_words(cx, "a").contains(&"Exited (code 0)".to_owned()),
+        "the premise: a's row was reworded"
+    );
+    assert!(
+        texts(cx).iter().any(|text| text == "Delete 2 sessions?"),
+        "no whole-environment title"
+    );
+    assert_eq!(
+        label_of(cx, "bulk-target-consequence-a").as_deref(),
+        Some(sandbox().session_delete_consequence())
+    );
+
+    show_next_frame(cx);
+    test_support::click(cx, "prompt-confirm");
+    test_support::settle(cx);
+    assert_eq!(
+        owned(&sent_deletes(&mut fake)),
+        [delete("/api/sessions/a?delete_environment_session=true")]
+    );
 }
