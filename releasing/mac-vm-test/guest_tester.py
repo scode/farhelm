@@ -238,6 +238,10 @@ this task contains its complete acceptance instructions.
 No browser backend, host/Tart UI, AppleScript, private OS input or product
 HTTP/DB manipulation. Never grant OS/CUA permissions or log in during this
 test. Stop immediately on an operation error, tool refusal or permission prompt.
+An explicit brick_action status not-ready is a successful read-only prerequisite
+response, not an operation error. Follow its corrective instruction, then request
+the sample after establishing the prerequisite. It supplies no receipt and does
+not satisfy the checkpoint. Repeated deferrals are bounded by the bridge.
 For the actual Restart to update button use brick_ui method restart with
 coordinates from its fresh native menu image, never an AX index or ordinary
 click. The harness clicks once and waits for the candidate process
@@ -248,7 +252,9 @@ command. Query readiness or state; never infer success from elapsed time.
 
 Context: {json.dumps(task['context'])}
 Checkpoint: {task['check_id']}
-Required fixed operations for this selected path: {', '.join(sorted(required))}.
+Required fixed operations (an unordered checklist, NOT execution order): {', '.join(sorted(required))}.
+Follow the checkpoint instructions below for their order. In particular, observe
+the captured old conversation before sampling its baseline terminal host.
 {task['instructions']}
 
 Return only JSON matching the supplied output schema: status and detail.

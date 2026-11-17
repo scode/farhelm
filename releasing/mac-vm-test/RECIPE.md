@@ -59,10 +59,11 @@ can capture a different foreground app and cannot replace that image.
 ## P0 checks: install, upgrade and basic agent execution
 
 Run these seven checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
-group: report all seven results and a separate P0 verdict. Stop at the first failed or unavailable check and retain its
-diagnostics. A successful step never substitutes for a later step. A request to **stop after P0 checks** ends after P0
-evidence is recorded and its successful fixtures are cleaned up, without sending feedback. Otherwise, report P0
-promptly, run P1 on the last pair, and only then continue bonus work.
+group: report all seven results and a separate P0 verdict. Preserve a failed or unavailable attempt and pause its
+dependent checks; the host diagnoses, repairs and continues under BRICK-TEST.md's "Repair and continue". A successful
+step never substitutes for a later step. A request to **stop after P0 checks** ends after P0 evidence is recorded and
+its successful fixtures are cleaned up, without sending feedback. Otherwise, report P0 promptly, run P1 on the last
+pair, and only then continue bonus work.
 
 Use three independent guest pairs: `p0-fresh` for step 1, `p0-installer-upgrade` for step 2, and `p0-updater-upgrade`
 for steps 3–7. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,

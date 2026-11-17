@@ -970,6 +970,137 @@ it never retries feedback, uncertain actions or failed cleanup.
             self.selected(pass_id)['tester']['phase'] = 'complete'
             self.save()
 
+    def retry_unavailable(self, pass_id, reason):
+        """Retain an unavailable observation before retrying its repaired fixture.
+
+The host must inspect retained native actions and explain why repeating this
+checkpoint is safe after repair. This transition never clears a product fail,
+an automation error, a pending action or any feedback attempt. It records the
+operator's judgment beside the unchanged original result and its byte hashes.
+"""
+        if not isinstance(reason, str) or not 20 <= len(reason.strip()) <= 2000:
+            raise Refused('explain the fixture repair and why this checkpoint can be repeated safely')
+        with self.tester_owner(), self.locked():
+            entry = self.selected(pass_id)
+            claim = entry.get('tester', {})
+            check = claim.get('check_id')
+            result = entry['results'].get(check, {})
+            if (entry['phase'] != 'ready' or claim.get('phase') != 'failed'
+                    or claim.get('termination_observed') is not True or entry.get('automation_failure')
+                    or result.get('status') != 'could-not-run'
+                    or entry['required'][check].get('priority', entry.get('priority')) == 'P1'
+                    or len(entry.get('checkpoint_retries', [])) >= 3
+                    or not self.result_evidence_retained(result)):
+                raise Refused('retry only a stopped unavailable checkpoint with intact evidence, never feedback')
+            ordered = list(entry['required'])
+            if any(key in entry['results'] for key in ordered[ordered.index(check) + 1:]):
+                raise Refused('later checkpoint observations prevent replaying this fixture boundary')
+            native = result.get('native', {})
+            rows = [json.loads(line) for line in artifact(self.directory, native['events'],
+                                                        limit=96 * 1024 * 1024).splitlines() if line]
+            native_events(rows)
+            started = {row['item']['id'] for row in rows if row.get('type') == 'item.started'
+                       and row.get('item', {}).get('type') == 'mcp_tool_call'}
+            completed = {row['item'].get('id') for row in rows if row.get('type') == 'item.completed'
+                         and row.get('item', {}).get('type') == 'mcp_tool_call'}
+            if started - completed:
+                raise Refused('unavailable checkpoint has an uncertain tool call')
+            c = self.pair(pass_id)
+            with c.locked():
+                if any(c.state(role)['State'] != 'running' for role in ('mac', 'linux')):
+                    raise Refused('retry requires both unchanged owned guests running')
+            entry.setdefault('checkpoint_retries', []).append({
+                'reason': reason.strip(), 'tester': dict(claim), 'result': result})
+            del entry['results'][check]
+            entry['tester'] = {'phase': 'retry-ready', 'check_id': check}
+            self.save()
+            self.note('decision', f'Retained unavailable `{pass_id}/{check}` before a repaired-fixture retry: {reason}')
+
+    def retry_readiness(self, pass_id):
+        """Release only a proven pre-action early-agent-sample failure for a fresh attempt.
+
+Older bridges made that read-only prerequisite fatal. Retained task, execution
+and strict event records must prove that the tester stopped before any product
+action. Successful checkpoints stay accepted; the failed attempt and its byte
+hashes stay visible in recovery history. No permission, transport, product or
+uncertain-action failure is cleared by this transition.
+"""
+        with self.tester_owner(), self.locked():
+            entry = self.selected(pass_id)
+            claim = entry.get('tester', {})
+            check = claim.get('check_id')
+            if (entry['phase'] != 'ready' or claim.get('phase') != 'failed'
+                    or claim.get('termination_observed') is not True
+                    or check not in ('local-supervisor-agent', 'remote-supervisor-agent')
+                    or check in entry['results'] or not entry.get('automation_failure')
+                    or len(entry.get('readiness_retries', [])) >= 3):
+                raise Refused('readiness retry needs a stopped, unfinished early-agent-sample failure')
+            prefix = pass_id + '/tester-' + claim['attempt'] + '.tar::./'
+            refs = {key: prefix + filename for key, filename in (
+                ('task', 'task.json'), ('execution', 'execution.json'), ('events', 'events.jsonl'),
+                ('failure', 'managed-failure.json'))}
+            raw = {key: artifact(self.directory, ref, limit=96 * 1024 * 1024) for key, ref in refs.items()}
+            envelope, execution = json.loads(raw['task']), json.loads(raw['execution'])
+            expected = {'run_id': self.data['run_id'], 'pass_id': pass_id,
+                        'attempt': claim['attempt'], 'check_id': check}
+            observation = execution.get('result') or execution.get('unverified_result') or {}
+            if (any(envelope.get(key) != value for key, value in expected.items())
+                    or envelope.get('settings') != self.profile.values['guest_tester']['settings']
+                    or execution.get('status') != 'automation-failure' or execution.get('cleanup_error')
+                    or observation.get('identity') != expected or observation.get('status') != 'automation-failure'
+                    or json.loads(raw['failure']).get('error') !=
+                    'RuntimeError: sample the new session terminal hosts only after the new agent session exists'):
+                raise Refused('retained failure does not prove the supported read-only readiness mistake')
+            rows = [json.loads(line) for line in raw['events'].splitlines() if line]
+            started = set()
+            completed = set()
+            refused = 0
+            operation = 'remote_terminal_hosts' if check.startswith('remote-') else 'terminal_hosts'
+            for row in rows:
+                item = row.get('item', {})
+                if item.get('type') != 'mcp_tool_call':
+                    continue
+                if row.get('type') == 'item.started':
+                    started.add(item['id'])
+                    continue
+                if row.get('type') != 'item.completed':
+                    continue
+                completed.add(item['id'])
+                args, result = item.get('arguments', {}), item.get('result') or {}
+                # Codex can lift MCP isError into the event's failed status,
+                # leaving only text in result. Both spellings still need the
+                # exact fixed-operation failure record checked above.
+                error = (item.get('status') == 'failed' or item.get('error')
+                         or result.get('isError') or result.get('is_error'))
+                allowed = (item.get('server') == 'cua_repl' and item.get('status') in ('completed', 'failed')
+                           and ((item.get('tool') == 'brick_ui' and args.get('method') in
+                                 ('getState', 'bind', 'getAXState', 'getAXStateAndScreenshot', 'getScreenshot')
+                                 and not error)
+                                or (item.get('tool') == 'brick_action' and args == {'operation': 'prior_receipts'}
+                                    and not error)
+                                or (item.get('tool') == 'brick_action' and args == {'operation': operation}
+                                    and error and not refused)))
+                if not allowed or refused:
+                    raise Refused('readiness retry refuses product actions, other errors or work after refusal')
+                refused += bool(error)
+            if refused != 1 or started - completed:
+                raise Refused('readiness retry needs one completed sampling refusal and no uncertain call')
+            if any(result['status'] != 'pass' or not self.result_evidence_retained(result)
+                   for result in entry['results'].values()):
+                raise Refused('earlier checkpoint evidence is not intact')
+            c = self.pair(pass_id)
+            with c.locked():
+                if any(c.state(role)['State'] != 'running' for role in ('mac', 'linux')):
+                    raise Refused('retry requires both unchanged owned guests running')
+            entry.setdefault('readiness_retries', []).append({
+                'tester': dict(claim), 'failure': entry['automation_failure'], 'native': refs,
+                'sha256': {ref: hashlib.sha256(raw[key]).hexdigest() for key, ref in refs.items()}})
+            del entry['automation_failure']
+            entry['tester'] = {'phase': 'retry-ready', 'check_id': check}
+            self.save()
+            self.note('decision', f'Retained early sampling failure for `{pass_id}/{check}`; '
+                      'proven no product action, fresh checkpoint attempt authorized after repair.')
+
     def reconcile_tester(self, pass_id):
         """Release an abandoned claim only after independently observed guest termination.
 
@@ -1168,6 +1299,10 @@ including the larger bound for the guest-native event stream.
         results = entry['results']
         if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])):
             return 'could not run'
+        if any(not self.result_evidence_retained(row) for row in entry.get('readiness_retries', [])):
+            return 'could not run'
+        if any(not self.result_evidence_retained(row['result']) for row in entry.get('checkpoint_retries', [])):
+            return 'could not run'
         failure = entry.get('automation_failure', {})
         if failure.get('check_id') == 'native-preflight' or failure.get('check_id') in entry['required']:
             return 'could not run' if failure.get('status') == 'could-not-run' else 'fail'
@@ -1229,9 +1364,16 @@ of its fixture's full verdict but excluded from P0's projections.
                         if entry.get('automation_failure', {}).get('kind') == 'harness-failure'}
             retries = {key: entry['provider_retries'] for key, entry in self.data['passes'].items()
                        if entry.get('provider_retries')}
-            output['automation'] = {'verdict': ('fail' if failures else 'recovered provider interruption'
+            readiness = {key: entry['readiness_retries'] for key, entry in self.data['passes'].items()
+                         if entry.get('readiness_retries')}
+            repaired = {key: entry['checkpoint_retries'] for key, entry in self.data['passes'].items()
+                        if entry.get('checkpoint_retries')}
+            output['automation'] = {'verdict': ('fail' if failures else 'recovered readiness failure'
+                                               if readiness else 'recovered fixture prerequisite'
+                                               if repaired else 'recovered provider interruption'
                                                if retries else 'no failure observed'),
-                                    'failures': failures, 'provider_retries': retries}
+                                    'failures': failures, 'provider_retries': retries, 'readiness_retries': readiness,
+                                    'checkpoint_retries': repaired}
             # An aborted turn cannot prove a product failure, but losing turn
             # completion must not relabel its observed break as harmless setup.
             claims = [{ 'pass_id': key, 'check_id': entry['tester']['check_id'],
@@ -1425,7 +1567,7 @@ def main():
             scope.add_argument('--stop-after-p1', action='store_true',
                                help='complete P0 and the feedback P1 check, then stop')
     sub.add_parser('smoke')
-    for name in ('serve', 'test', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
+    for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
         if name not in ('status', 'stop-after-p0', 'stop-after-p1'):
@@ -1434,6 +1576,8 @@ def main():
             child.add_argument('--headless', action='store_true')
         elif name == 'test':
             child.add_argument('--timeout', type=int, default=1200, help='hard deadline per guest tester turn')
+        elif name == 'retry-unavailable':
+            child.add_argument('--reason', required=True, help='fixture repair and why repeating the checkpoint is safe')
         elif name == 'record':
             child.add_argument('check_id')
             child.add_argument('--status', required=True, choices=('pass', 'fail', 'could-not-run'))
@@ -1474,6 +1618,14 @@ def main():
                 print(json.dumps(run.report(), indent=2))
         return
     run = Run(args.run_dir, profile)
+    if args.action in ('retry-readiness', 'retry-unavailable'):
+        if args.action == 'retry-readiness':
+            run.retry_readiness(args.pass_id)
+        else:
+            run.retry_unavailable(args.pass_id, args.reason)
+        with run.locked():
+            print(json.dumps(run.report(), indent=2))
+        return
     if args.action == 'test':
         run.test(args.pass_id, timeout=args.timeout)
         with run.locked():
