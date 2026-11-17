@@ -320,8 +320,14 @@ Tests: 1. Covers: a web view document that never initializes is refused within i
 keeps running detached.
 
 superseded: the fault was in the web view's document; a GPUI window that cannot open reports through the same pre-window
-refusal as a bootstrap failure (`Host::on_startup_failure`), and the supervisor is detached from the app in any case
-(`scripts/gui-lifecycle.py` steps 06 and 08)
+refusal as a bootstrap failure (`Host::on_startup_failure`; the bullet below), and the supervisor is detached from the
+app in any case (`scripts/gui-lifecycle.py` steps 06 and 08)
+
+- `bootstrap::tests::a_window_that_cannot_open_reaches_the_hosts_startup_failure_once` (in `crates/gui/farhelm-gui`): on
+  a test platform whose window renderer cannot be made, the startup fails at the window and its error reaches
+  `on_startup_failure` once, with no window left open. `run`'s one-line call into that branch and the desktop binary's
+  own startup-failure handler are not run by any test; `scripts/gui-lifecycle.py` step 02 shows the same refusal (one
+  `farhelm-desktop: ` line, exit 1) from the pre-window path.
 
 #### the pixel-driven create and terminal round trip (`DESKTOP_SMOKE_LEGACY_INTERACTION=1`)
 
