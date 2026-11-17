@@ -116,6 +116,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   looks like a timing problem in the page's capture steps. Until it is fixed, the docs screenshots cannot be refreshed
   (`.agents/docs-media.md`, "Docs screenshots").
 
+- **Test that the template editor ignores New sandbox or New container with nothing left to place it on.** The launcher
+  and the template editor share one placement picker (#4068). The editor ignores a press on the already chosen New
+  sandbox or New container segment once nothing is left to place it on (the last container host removed while the editor
+  was open, say), where passing the press on would move the template to Existing host; the launcher ignores the same
+  press on its own. `docs/gpui/parity/templates-and-quick-launch.md` states the behavior, but no test covers it, so a
+  later change to the shared picker could break it unnoticed.
+
 - **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
   repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
