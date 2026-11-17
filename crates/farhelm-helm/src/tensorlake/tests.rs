@@ -820,8 +820,8 @@ fn the_fake_accepts_only_a_marked_directory_inside_the_state_directory() {
     assert!(E2eTensorlake::new(root, state.path()).is_err());
 }
 
-/// Why: the browser spec proves the helm sends the key it saved, and that a
-/// rejected key reaches the page, through this fake.
+/// Why: the removed browser suite proved through this fake that the helm sends
+/// the key it saved and that a rejected key reaches the page; no other test uses that check.
 ///
 /// Spec: with no config every key is accepted and the account is empty; with
 /// `accepted_key` only that key lists the configured sandboxes and any other

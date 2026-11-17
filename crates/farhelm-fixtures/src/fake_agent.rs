@@ -342,8 +342,9 @@ pub fn run(
 
 /// Drive the public spawn CLI from inside a supervised session.
 ///
-/// Keeping this fixture on the real executable is the point: the browser
-/// acceptance leg crosses launch-time credential injection, the private
+/// Keeping this fixture on the real executable is the point: the desktop
+/// app's end-to-end smoke (its approval card steps, `scripts/gui-e2e-smoke.py`)
+/// crosses launch-time credential injection, the private
 /// supervisor admission path, explicit parent-bundle reuse, and the
 /// public session list before it observes success. The line protocol avoids
 /// a test-only environment knob and lets one long-lived terminal choose an
@@ -1253,9 +1254,9 @@ fn product_farhelm() -> anyhow::Result<std::path::PathBuf> {
 /// (`fake-agent --report-conversation`), so a session launched with it has a
 /// captured conversation as soon as the fixture is up.
 ///
-/// Restart only ever resumes a captured conversation, and the browser specs
-/// that restart a real session cannot easily type `report <id>` into it, so
-/// this reports at start instead. It goes through [`hook_report`], the same
+/// Restart only ever resumes a captured conversation, and the old browser
+/// specs that restarted a real session could not easily type `report <id>`
+/// into it, so this reports at start instead. It goes through [`hook_report`], the same
 /// genuine hook, socket and inherited credential the typed form uses. This
 /// process is the report's emitter; wrappers above it remain launch ancestry.
 /// The markers [`run_report_hook`] prints land above the script's own output.
@@ -1637,8 +1638,9 @@ fn basic() -> anyhow::Result<()> {
             out.flush()?;
             return Ok(());
         }
-        // Report the real PTY geometry on demand. The browser resize test
-        // uses this rather than trusting the page's local dimensions, which
+        // Report the real PTY geometry on demand. The desktop app's
+        // end-to-end smoke (its text size step) uses this rather than
+        // trusting the app's own idea of the terminal's size, which
         // can change even when the resize path to the terminal is
         // disconnected.
         if trimmed == "size" {
@@ -1827,8 +1829,8 @@ pub const FLOOD_RECORDS: u64 = 800_000;
 /// - **A gate on one input byte.** Emitting fast enough to outrun every
 ///   consumer can mean, on a fast host, that the ENTIRE burst is already
 ///   in the terminal's history before a test even finishes attaching; the
-///   browser-driven flood test (e2e/tests/grid-flood.spec.ts) needs the
-///   opposite: a LIVE producer racing a client that is already attached and
+///   removed browser-driven flood test (e2e/tests/grid-flood.spec.ts) needed
+///   the opposite: a LIVE producer racing a client that is already attached and
 ///   watching. Gating on real terminal input — sent only once the test's own
 ///   viewer is attached — removes that race entirely: nothing streams until
 ///   the test says so.
@@ -2123,7 +2125,7 @@ fn mouse_modes() -> anyhow::Result<()> {
                 if word == "links" {
                     link_sequence += 1;
                     // Mouse echoes and sync acknowledgements must not move a
-                    // link away after the browser establishes pointer ownership.
+                    // link away after the client establishes pointer ownership.
                     // Keep the candidates above a separate scrolling log region;
                     // only this opt-in cue changes the normal hex-echo layout.
                     write!(out, "\x1b[r\x1b[2J\x1b[H")?;
@@ -2881,7 +2883,8 @@ mod tests {
     /// would fold them into whatever cue is typed next — silently
     /// preventing it from ever matching. A real button click reports
     /// press AND release, so this pins both reports in sequence, followed
-    /// by a genuine cue, exactly as the browser-driven e2e test drives it.
+    /// by a genuine cue, exactly as the removed browser-driven e2e test
+    /// drove it.
     ///
     /// The three data bytes in each report are deliberately chosen as
     /// LOWERCASE ASCII LETTERS (`x`/`y`/`z`, `p`/`q`/`r`) rather than the
@@ -2953,7 +2956,7 @@ mod tests {
     /// [`mouse_escape`] is the ONE place a recognized word turns into a
     /// mode change; pinned against the EXACT bytes (not merely "some
     /// escape came back") because 1002/1003 (motion tracking) would
-    /// satisfy a browser-level test just as well as 1000 — only an exact
+    /// satisfy an end-to-end test just as well as 1000 — only an exact
     /// byte comparison catches the wrong DECSET code. `legacy`'s DECRST
     /// 1006 prefix is pinned here too: see `mouse_escape`'s own docs for
     /// why cueing `legacy` must actively turn SGR back off, not merely

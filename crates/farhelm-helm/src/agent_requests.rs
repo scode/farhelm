@@ -969,7 +969,7 @@ impl AgentRequestHandler for HelmAgentRequests {
 /// creating verb's refusal (an unknown session, a rejected title, a
 /// non-connected host, a directory the target does not have, a request the
 /// user declined) is exactly the kind of thing a caller can act on
-/// differently, and an agent deserves the same distinction a browser gets.
+/// differently, and an agent deserves the same distinction the desktop app gets.
 /// The read-only verbs rarely produce a classifiable error at all (a listing
 /// failure has nothing upstream to classify against), so this falls back to
 /// `Internal` for them.
@@ -15768,7 +15768,7 @@ mod tests {
         assert_eq!(h.store.list_hosts().await.unwrap().len(), before);
     }
 
-    /// A delivered verdict still cannot authorize browser discovery when
+    /// A delivered verdict still cannot authorize the client's discovery when
     /// the origin is retired before the handler's final acceptance point.
     /// This gate distinguishes receipt semantics from send-success semantics.
     #[farhelm_testtrace::test]

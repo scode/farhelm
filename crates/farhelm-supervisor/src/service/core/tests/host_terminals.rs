@@ -3580,7 +3580,7 @@ async fn a_takeover_displaces_a_host_agents_grid_attachment() {
 /// stalled.
 ///
 /// Why: the helm relies on the stall detach to end the attachment of a
-/// browser that stops reading without closing its socket. Spec: with a
+/// client that stops reading without closing its socket. Spec: with a
 /// 300 ms stall timeout, a grid viewer that pauses its channel after the
 /// catch-up is sent a `Detached` with the stalled code.
 #[farhelm_testtrace::test]
@@ -3650,8 +3650,8 @@ async fn poll_until(what: &str, mut done: impl FnMut() -> bool) {
 ///
 /// Why: a pause names only a channel, and the winner's connection numbers
 /// its channels from 1 like the loser's. Without the connection half of
-/// the ownership check (`connection::set_attachment_paused`), one browser
-/// tab's stale pause would silence the terminal another tab now holds.
+/// the ownership check (`connection::set_attachment_paused`), one client's
+/// stale pause would silence the terminal another client now holds.
 /// Spec: viewer `a` attaches `s1` on channel 1 and viewer `b`, on its own
 /// connection, takes it over on channel 1 (premise: `a` is told it was
 /// taken over); `a` then pauses channel 1, and once a round trip on `a`'s

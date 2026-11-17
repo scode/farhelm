@@ -365,7 +365,7 @@ mod tests {
         recipes::{RecipeBase, RecipeSave, RecipeSize},
     };
 
-    /// A private, marked browser fake exercises the same ownership and
+    /// A private, marked Tensorlake fake exercises the same ownership and
     /// snapshot calls as production without changing ambient configuration.
     async fn fixture() -> (tempfile::TempDir, HelmStore, Tensorlake, Arc<E2eTensorlake>) {
         let dir = tempfile::tempdir().unwrap();
@@ -577,7 +577,7 @@ mod tests {
         );
     }
 
-    /// A failed snapshot sweep must survive loss of the browser and even
+    /// A failed snapshot sweep must survive loss of the client and even
     /// the vendor's terminated sandbox record. The canonical ID retained by
     /// the helm is enough to finish exact-source cleanup on explicit retry.
     #[farhelm_testtrace::test]

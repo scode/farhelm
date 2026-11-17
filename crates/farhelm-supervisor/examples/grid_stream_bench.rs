@@ -1,9 +1,11 @@
-//! Generate the browser benchmark's inputs through the production grid packer.
+//! Generate a grid client benchmark's inputs through the production grid packer.
 //!
 //! Synthetic cells isolate encoding and client storage from emulator throughput.
 //! The private file envelope is a big-endian u32 length followed by one encoded
 //! grid message; it never becomes part of the product protocol. Run in release
-//! with a new output directory, then use `e2e/grid-client/benchmark.mts`.
+//! with a new output directory. The benchmark that read these files,
+//! `e2e/grid-client/benchmark.mts`, went with the old browser client, and
+//! nothing in the tree reads them now.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -171,7 +173,7 @@ impl Stream {
     }
 }
 
-/// Keep production packing, its limits and the browser's attach order in the fixture.
+/// Keep production packing, its limits and a grid client's attach order in the fixture.
 fn generate(directory: &Path, workload: Workload) -> anyhow::Result<Input> {
     let file = format!("{}.frames", workload.name());
     let output = OpenOptions::new()

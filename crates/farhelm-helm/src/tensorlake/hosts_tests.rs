@@ -1458,7 +1458,7 @@ async fn delete_sandbox_session(
 
 /// Whole-sandbox Delete is deliberately destructive for every leftover. It
 /// works suspended with an incomplete cache and needs explicit unconditional
-/// consent, so an old page cannot silently inherit this new consequence.
+/// consent, so an old browser page could not silently inherit this new consequence.
 #[farhelm_testtrace::test]
 async fn session_delete_destroys_the_whole_suspended_sandbox_with_explicit_consent() {
     let api = FakeApi::default()

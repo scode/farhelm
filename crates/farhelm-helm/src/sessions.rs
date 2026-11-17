@@ -153,7 +153,7 @@ pub(crate) struct LaunchHistoryBody {
     checkout_config_revision: i64,
 }
 
-/// A browser request to inspect one directory on the selected host.
+/// A client request to inspect one directory on the selected host.
 ///
 /// Automatic folder checks opt out of listing and history refinement; an
 /// ordinary Browse request keeps both by omitting `membership_only`.
@@ -175,7 +175,7 @@ pub(crate) struct BrowseDirectoryBody {
     truncated: bool,
 }
 
-/// A browser request to preview a fresh GitHub checkout: the repo text and
+/// A client request to preview a fresh GitHub checkout: the repo text and
 /// title as typed, scoped to the selected host. This request supplies neither
 /// the checkout root nor the hook — the helm resolves its own
 /// configuration and the supervisor does the host-side naming.
@@ -214,13 +214,13 @@ struct GithubRepositoriesBody {
     truncated: bool,
     scan_error: Option<String>,
     /// This is effective host configuration, not the global setting's absence.
-    /// The browser must never offer setup over a command-line host override.
+    /// The client must never offer setup over a command-line host override.
     needs_checkout_root: bool,
 }
 
 /// The status a failed repository search shows, chosen by the helm.
 ///
-/// The supervisor's own error text never reaches the browser here (it may
+/// The supervisor's own error text never reaches the client here (it may
 /// carry config text or URLs), so the helm picks one of its own sentences.
 /// A supervisor that refused the search because every management slot was
 /// taken gets the shared busy sentence, since "verify Git" would send the
@@ -421,7 +421,7 @@ pub(crate) async fn github_checkout_preview(
 }
 
 /// Bind a preview to the connection the caller will dispatch on. Agent
-/// approvals and the browser use the same configuration snapshot and target
+/// approvals and the client use the same configuration snapshot and target
 /// naming rules; neither may silently retarget an accepted directory.
 pub(crate) async fn preview_github_checkout(
     state: &AppState,
@@ -660,7 +660,7 @@ struct CheckoutTrashBody {
 }
 
 /// Empty an explicitly selected set on one observed host. The router owns this
-/// action, so a browser disconnect cannot cancel its deletion request.
+/// action, so a client disconnect cannot cancel its deletion request.
 ///
 /// The wait is bounded by [`HOST_REPLY_BOUND`] like the other host commands
 /// ([`within_host_reply_bound_saying`]), not converted to an accepted form: a
@@ -1174,13 +1174,13 @@ pub(crate) struct CreateReq {
     /// command-launch rules and otherwise sent as written.
     command: Option<farhelm_proto::CommandLaunch>,
     /// Fields retired with launch kinds (protocol 39), accepted by the
-    /// decoder only so a body that still sends one (a page loaded before
-    /// the upgrade, an old script) is refused with a message naming what
+    /// decoder only so a body that still sends one (an old script, say)
+    /// is refused with a message naming what
     /// replaced it rather than launching something else. See
     /// [`RetiredCreateFields::refusal`].
     #[serde(flatten)]
     retired: RetiredCreateFields,
-    /// Start a YOLO launch even though its host asks before YOLO launches. The browser sets
+    /// Start a YOLO launch even though its host asks before YOLO launches. The client sets
     /// it only after the user confirms the refusal it got without it
     /// (`farhelm_proto::http::YOLO_CONFIRMATION_HEADER`).
     #[serde(default)]
@@ -1400,7 +1400,7 @@ impl CreateReq {
         // future local refusal applies before billing as well as before RPC.
         // An agent's environment launch is already composed (a clone copies
         // its source's stored launch, which today's catalog need not offer
-        // any more); only a fresh browser choice is compiled here.
+        // any more); only a fresh client choice is compiled here.
         let launch = match &self.agent {
             Some(agent) => agent.launch.as_launch().clone(),
             None => create_mode(&mut self.clone())?,
@@ -1513,7 +1513,7 @@ fn github_checkout_resolution(
             ),
         ))));
     }
-    // Browser compositions use this same snapshot for agent trust. An agent
+    // Client compositions use this same snapshot for agent trust. An agent
     // launch instead retains the choice already shown on its approval card.
     let Some(root) = config.root.clone() else {
         return Some(Err(anyhow::Error::new(SupervisorError::helm(
@@ -1583,7 +1583,7 @@ pub(crate) fn default_rows() -> u16 {
 /// The helm's refusal of a launch to a host it has no entry for: a
 /// not-found error saying "no such host". One constructor so every launch
 /// path that meets an unknown host (routing here, and the YOLO guard's
-/// missing-row case in `yolo_guard`) shows the browser, the command line and
+/// missing-row case in `yolo_guard`) shows the desktop app, the command line and
 /// agents the same text.
 pub(crate) fn no_such_host(host: store::HostId) -> anyhow::Error {
     anyhow::Error::new(SupervisorError::helm(
@@ -1713,9 +1713,9 @@ fn create_target(
 ///   recorded, so a mutation whose result was not recorded leaves the row
 ///   showing the PREVIOUS state for a poll interval. A user who restarts an
 ///   exited session and watches the list keep saying `exited` has been shown
-///   their own successful action as a failure (observed in the browser
-///   suite, which is this behavior's regression test). Recording the reply
-///   the host just sent costs nothing and closes it.
+///   their own successful action as a failure (observed in the old browser
+///   suite). Recording the reply the host just sent costs nothing and closes
+///   it.
 ///
 /// Goes through the MANAGER rather than straight to the store, and that is
 /// not indirection for its own sake. The manager is what knows the two
@@ -1769,7 +1769,7 @@ pub(crate) async fn record_session(
 /// has recorded. Leaving the row behind means the list shows a deleted
 /// session until the owning host's next refresh — and a client that deletes
 /// and immediately re-creates then sees BOTH, which is indistinguishable
-/// from a duplicate. That is precisely how the browser suite found it, in
+/// from a duplicate. That is precisely how the old browser suite found it, in
 /// its own shared-session reset.
 ///
 /// Best effort on the same terms as a seed: the delete SUCCEEDED and the
@@ -1899,7 +1899,7 @@ pub(crate) async fn create_in_session_sandbox(
 /// The optional owned target is supplied only by initial sandbox provisioning;
 /// it does not turn a public host selector into permission to reuse that host.
 /// The router owns this through cache/history publication: disconnecting the
-/// browser loses only its reply, never the accepted session's bookkeeping.
+/// client loses only its reply, never the accepted session's bookkeeping.
 async fn create_session_request(
     state: &AppState,
     mut req: CreateReq,
@@ -2388,7 +2388,7 @@ pub(crate) struct CreateSpec {
     /// for why the check cannot simply run at the call site afterwards.
     pub(crate) accept_result: Option<CreatedSessionCheck>,
     /// Start a YOLO launch even though its host asks before YOLO launches: the caller
-    /// confirmed it explicitly (the browser's confirmation, the command line's flag). See
+    /// confirmed it explicitly (the desktop app's confirmation, the command line's flag). See
     /// `yolo_guard`.
     pub(crate) confirm_yolo: bool,
     /// The mode and settings were copied from a listed session row (a plain
@@ -2417,7 +2417,7 @@ pub(crate) struct CreateSpec {
 
 /// Whose successful create may shape the user's launch suggestions.
 ///
-/// The shared creation pipeline serves both browser REST requests and relay
+/// The shared creation pipeline serves both client REST requests and relay
 /// requests from agents. They produce the same session side effects except
 /// for the explicit selection recorded for remembered launch settings and
 /// recent setups, which belong to the user rather than an agent that happens
@@ -2507,7 +2507,7 @@ async fn create_fresh_session(
 
 /// Authority and retry inputs beside a fresh request. A pre-resolved mode
 /// belongs to the agent path and retains the trust choice shown on its card;
-/// the browser must compile only after lookup.
+/// a client's choice must compile only after lookup.
 struct FreshCreateContext {
     intent_key: Option<String>,
     client_identity: String,
@@ -2516,7 +2516,7 @@ struct FreshCreateContext {
     resolved_mode: Option<TrustResolvedLaunch>,
 }
 
-/// Fresh admission after either a browser choice or an approved agent
+/// Fresh admission after either a client choice or an approved agent
 /// request. Lookup precedes launch compilation; agents supply their already
 /// resolved launch and cannot record a GUI selection or override YOLO.
 async fn create_fresh_session_resolved(
@@ -2698,7 +2698,7 @@ pub(crate) async fn reconcile_agent_checkout(
 /// today's mutable template. The digest identifies the raw request, whose
 /// resolved repository may since have changed; neither that new destination
 /// nor descriptive peer metadata may rewrite the first create's suggestions.
-/// Browser requests retain their original preview and keep full bookkeeping.
+/// Client requests retain their original preview and keep full bookkeeping.
 async fn accept_fresh_reconciled(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -2832,7 +2832,7 @@ mod workspace_trust_tests {
     /// Spec: an agent's environment launch request carries the launch its card
     /// showed, workspace trust included, and speaks with the agent's origin,
     /// its direct-Allow answering any wrapper the agent supplied; a request
-    /// decoded from a browser body carries neither (SPEC.md, "Agents and
+    /// decoded from a client body carries neither (SPEC.md, "Agents and
     /// environments").
     ///
     /// Why: the create runs minutes after the Allow, through the launcher's
@@ -3313,7 +3313,7 @@ pub(crate) async fn get_session(
 ///
 /// There is no mode: a restart always resumes the session's own
 /// conversation, and the supervisor refuses one whose CURRENT offer is not
-/// Resume. A `mode` field sent by an older page is ignored like any other
+/// Resume. A `mode` field, which old browser pages sent, is ignored like any other
 /// unknown field, which is harmless because the only mode that could still
 /// succeed was `resume`.
 ///
@@ -3425,7 +3425,7 @@ pub(crate) async fn do_restart_session(
 
 /// Resolve a restart's optional edit and selector before the typed dispatch tail.
 ///
-/// Only the browser supplies the selector. Agent and plain restarts continue
+/// Only the client supplies the selector. Agent and plain restarts continue
 /// through the value-less wrapper, with their existing identity proof gates.
 /// Local validation precedes routing; destination trust precedes the final
 /// selector construction. Keeping those phases here preserves their distinct
@@ -3862,12 +3862,13 @@ pub(crate) async fn within_host_read_bound_until<T>(
 /// The query string of `DELETE /api/sessions/{id}`.
 ///
 /// Both flags are passed straight to the supervisor as
-/// `farhelm_proto::DeleteGuard`: the browser sets the one matching the
-/// confirmation it showed (none at all, or one that said nothing was alive,
-/// sets `only_if_nothing_alive`; one that warned only about open tabs sets
-/// `only_if_agent_ended`), so a row that looked ended but is running again is
-/// refused rather than killed. Absent means false, the unconditional delete
-/// every other caller wants.
+/// `farhelm_proto::DeleteGuard`: the desktop app sends the guard of the row
+/// its question (or the click that asked nothing) was drawn from
+/// (`only_if_nothing_alive` for a row that showed nothing alive,
+/// `only_if_agent_ended` for an ended agent with open tabs, neither for an
+/// agent that has not ended or whose status is unknown), so a row that looked
+/// ended but is running again is refused rather than killed. Absent means
+/// false, the unconditional delete every other caller wants.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct DeleteQuery {
     #[serde(default)]
@@ -3876,15 +3877,15 @@ pub(crate) struct DeleteQuery {
     only_if_agent_ended: bool,
     /// The caller showed the warned whole-environment confirmation (offered
     /// when the environment's own Farhelm cannot be asked). Omission must not
-    /// let an older page's ordinary session Delete destroy a machine.
+    /// let an ordinary session Delete destroy a machine.
     #[serde(default)]
     delete_sandbox: bool,
     /// The caller showed the environment Delete's confirmation, which states
     /// both outcomes (only this session, or this session and the whole
     /// environment if it is the last): ask the environment's own supervisor
-    /// (`sandbox::delete_environment_session`). Only pages that show that
+    /// (`sandbox::delete_environment_session`). Only clients that show that
     /// confirmation send it; a plain DELETE of an environment session is
-    /// still refused, so an older page cannot reach a Delete it never warned
+    /// still refused, so a client cannot reach a Delete it never warned
     /// about.
     #[serde(default)]
     delete_environment_session: bool,
@@ -3996,7 +3997,7 @@ pub(crate) async fn delete_session(
 }
 
 /// Delete through the same approval denial, teardown and local cleanup for
-/// browser and agent requests. Only agent requests refuse a busy target fence:
+/// client and agent requests. Only agent requests refuse a busy target fence:
 /// their own retained request fence makes waiting vulnerable to crossing deletes.
 /// The agent's connection is also the one whose snapshot its approval showed;
 /// rerouting after approval must not carry consent onto a replacement host.
@@ -4379,7 +4380,7 @@ async fn raise_notification_marks(
 /// [`do_replace_session`]), and an optional override of what that create
 /// launches — SPEC.md's "replace with".
 ///
-/// The delete half deliberately gets no key of its own: a browser fires one
+/// The delete half deliberately gets no key of its own: the desktop app fires one
 /// request per confirmation and never retries a replace on its own, so the
 /// one place a retry can land is the create — see `do_replace_session`'s own
 /// doc for what a retry after a fully successful replace answers instead.
@@ -4418,22 +4419,24 @@ pub(crate) struct ReplaceReq {
     /// - `intent_key`: this create's real idempotency key is always the
     ///   TOP-LEVEL `intent_key` on this struct, never this field — the wire
     ///   body would otherwise carry two candidate keys for one create, and
-    ///   callers that build `with` from the same body-building
-    ///   code path an ordinary create uses (see the browser client's
-    ///   `create_body`) naturally send the same value in both places. A
-    ///   `with.intent_key` that is `Some` and DIFFERS from the top-level key
-    ///   is refused with `InvalidRequest` (400): a caller sending two
-    ///   different keys for what is supposed to be one intended create is
-    ///   describing an ambiguity this route will not silently resolve by
-    ///   picking one.
+    ///   callers that build `with` from the same body-building code path an
+    ///   ordinary create uses naturally send the same value in both places
+    ///   (as the old browser client's `create_body` did; the desktop app
+    ///   sends no key). A `with.intent_key` that is `Some` and DIFFERS from
+    ///   the top-level key is refused with `InvalidRequest` (400): a caller
+    ///   sending two different keys for what is supposed to be one intended
+    ///   create is describing an ambiguity this route will not silently
+    ///   resolve by picking one.
     with: Option<CreateReq>,
     /// The same preconditions as [`DeleteQuery`]'s, applied to the source
-    /// delete that ends a successful replace. The browser sets the one
-    /// matching the Replace prompt it showed, or `only_if_nothing_alive` when
-    /// it showed none. A refusal lands in the existing "the replacement was
-    /// created, the source could not be deleted, both sessions exist" reply;
-    /// nothing is rolled back and no separate liveness check runs before the
-    /// create.
+    /// delete that ends a successful replace. The desktop app sends the guard
+    /// of the row its Replace question (or, with session confirmations
+    /// skipped, its click) was drawn from; for the launcher's Replace with,
+    /// the guard of the warning it showed about the source at the press
+    /// (`only_if_nothing_alive` if the source is no longer listed). A refusal
+    /// lands in the existing "the replacement was created, the source could
+    /// not be deleted, both sessions exist" reply; nothing is rolled back and
+    /// no separate liveness check runs before the create.
     #[serde(default)]
     only_if_nothing_alive: bool,
     /// See `only_if_nothing_alive`.
@@ -4480,7 +4483,7 @@ pub(crate) struct ReplaceReq {
 ///
 /// `intent_key` reaches [`do_create_session`] exactly as an ordinary create
 /// would, so a retried request cannot double-create. The delete half has no
-/// such protection and needs none in practice — a browser fires one request
+/// such protection and needs none in practice — the desktop app fires one request
 /// per confirmation and does not retry on its own. A retry sent AFTER a
 /// fully successful replace answers 404 for the (now-deleted) source,
 /// through the ordinary `route_session` refusal that precedes everything
@@ -5029,7 +5032,7 @@ fn replace_reply(
 /// minted tab id a client needs before it can attach
 /// (`?tab=<id>` on `term_ws`). Every refusal the supervisor can give
 /// (vanished working directory, an agent terminal that is gone or cannot
-/// be read, a shell dead by reply time) reaches the browser through the
+/// be read, a shell dead by reply time) reaches the client through the
 /// same `http_error` mapping every other endpoint uses, verbatim.
 pub(crate) async fn open_tab(
     State(state): State<Arc<AppState>>,

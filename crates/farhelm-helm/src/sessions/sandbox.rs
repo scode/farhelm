@@ -419,7 +419,7 @@ pub(crate) fn spawn_seal_finisher(state: Arc<AppState>) -> tokio::task::JoinHand
 }
 
 /// Refuse session-only deletion of a resource whose files belong to its user.
-/// The same refusal closes the agent helper and an older page's Delete path.
+/// The same refusal closes the agent helper and a plain Delete without the environment confirmation.
 pub(super) fn user_only_delete() -> anyhow::Error {
     anyhow::Error::new(SupervisorError::helm(
         ErrorKind::Conflict,

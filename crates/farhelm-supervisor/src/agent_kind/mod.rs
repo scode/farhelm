@@ -51,7 +51,7 @@
 //!   agent's name for people and the moment it normally reports a
 //!   conversation Restart can resume. The supervisor's `not_captured`
 //!   refusal (`RestartOffer::unavailable_reason`), the agent instructions,
-//!   the silent-hook notification, and the browser's Restart explanations
+//!   the silent-hook notification, and the desktop app's Restart explanations
 //!   all word that one fact; a new kind that reports conversations needs an entry there, or every surface
 //!   falls back to wording that names no agent.
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in

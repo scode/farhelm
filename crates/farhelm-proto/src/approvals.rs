@@ -134,7 +134,7 @@ pub enum ApprovalAction {
         alias: Option<String>,
     },
     /// A browser request, shown as exact peer-controlled URL data. A preapproved request
-    /// still needs an Open click in a web client; desktop opens through the helm's native sink.
+    /// needed an Open click in the old web client; the desktop opens through the helm's native sink.
     OpenUrl {
         url: String,
         local_network: bool,

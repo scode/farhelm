@@ -35,7 +35,7 @@ const PROXY_VARIABLES: [&str; 10] = [
     "NO_PROXY",
 ];
 
-/// Inputs used by the real provider. These never enter browser JSON or logs.
+/// Inputs used by the real provider. These never enter client JSON or logs.
 #[derive(Clone)]
 pub(crate) struct ReadyPlace {
     pub(crate) architecture: String,
@@ -52,7 +52,7 @@ pub(crate) struct ReadyPlace {
     pub(crate) proxy: BTreeMap<String, String>,
 }
 
-/// A browser-safe projection, including hosts never checked in this process.
+/// A client-safe projection, including hosts never checked in this process.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ProbeView {
     pub(crate) checked_at: Option<u64>,
@@ -295,7 +295,7 @@ struct Cache {
 }
 
 /// One helm's probe cache and in-flight admission. Refresh tasks retain the
-/// service until they publish an observation, even if the requesting page closes.
+/// service until they publish an observation, even if the requesting client goes away.
 pub(crate) struct PodmanPlaces {
     commands: Arc<dyn PlaceCommands>,
     cache: Mutex<Cache>,

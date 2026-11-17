@@ -292,11 +292,13 @@ const ESC: &str = "\x1b";
 /// shift, a lone capital, the keydown after a dead key) before it sends a
 /// `key` message (module docs, "Keys").
 ///
-/// `key`, `code` and `kc` are the browser's `key`, `code` and `keyCode`; `mods`
+/// `key`, `code` and `kc` are DOM-shaped `key`, `code` and `keyCode` values
+/// (the desktop app's input mapping, `crates/gui/farhelm-input-mapping`,
+/// derives them from native keys); `mods`
 /// is the grid format's [`modifiers`] bit set, which is the xterm encoding's
 /// modifier number less one. Where the ported original measures `key` in UTF-16
 /// code units or slices `code`, so does this, and a lone surrogate it would
-/// produce becomes U+FFFD as the page's `TextEncoder` makes it.
+/// produce becomes U+FFFD as the old browser client's `TextEncoder` made it.
 ///
 /// Shift+Enter is recognized by `key` and exactly the Shift modifier.
 /// AltGraph and composition never reach the supervisor (the grid client
@@ -403,7 +405,7 @@ fn key_sequence(
                 ESC.to_owned()
             }
         }
-        // The arrows, which are left to the browser under Meta.
+        // The arrows, which are left to the client under Meta.
         37..=40 if meta => return None,
         37 => cursor('D'),
         39 => cursor('C'),
@@ -496,7 +498,7 @@ fn other_key(
     if is_mac || !alt || meta {
         if is_mac && !alt && !ctrl && !shift && meta {
             // Cmd alone on a Mac: Cmd+A selects locally, the rest are the
-            // browser's.
+            // client's.
             return None;
         }
         if !key.is_empty() && !ctrl && !alt && !meta && kc >= 48 && utf16_len(key) == 1 {
@@ -584,11 +586,10 @@ fn utf16_len(text: &str) -> usize {
 ///   `text.replace(/\x1b\[201~|\x1b/g, "")`: every end-of-paste marker goes
 ///   whole and every other ESC alone, so pasted text can never close the
 ///   bracketed paste around it and have the rest run as typed commands.
-///   The page applies it before handing a paste to the terminal;
-///   applying it again changes nothing (the first pass
-///   leaves no ESC). It is applied here as well because the supervisor now
-///   writes the markers, so the guarantee that pasted text stays inside them
-///   belongs here.
+///   The old browser client applied it before handing a paste to the
+///   terminal; the desktop app sends the text as it is and leaves the
+///   sanitizing to this encoder. The supervisor writes the markers, so the
+///   guarantee that pasted text stays inside them belongs here.
 /// - Conversion is `text.replace(/\r?\n/g, "\r")`, as in xterm.js: every
 ///   CRLF and every lone LF becomes one CR, so a pasted line ends the way a
 ///   typed Enter does.

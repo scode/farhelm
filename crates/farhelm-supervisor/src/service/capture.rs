@@ -178,7 +178,7 @@ impl Supervisor {
 /// carriage return ([`submits_a_line`]). The query answers never reach that
 /// check (the supervisor's own emulator writes them to the terminal host,
 /// apart from viewer input), and the focus reports the supervisor encodes
-/// from the page's focus messages, `CSI I` and `CSI O`, carry no carriage
+/// from the client's focus messages, `CSI I` and `CSI O`, carry no carriage
 /// return. That firing is a user-facing notification, so it must be true
 /// (SPEC.md, Status). The whole frame must have been accepted for the
 /// terminal (`grid_stream::HostAttach::send_input`).

@@ -8,7 +8,7 @@
 //! tests pin the wire format without async machinery. Transport-agnostic
 //! async read/write helpers live in `io`.
 //!
-//! It also holds the few tokens the helm's HTTP API hands the browser UI for
+//! It also holds the few tokens the helm's HTTP API hands the desktop app for
 //! the UI to branch on (`http`): the UI already depends on this crate, and
 //! these need one definition both sides read, just like the frame types do.
 //!
@@ -42,8 +42,8 @@
 //! through a lossy conversion — the inserted path IS the product here, so
 //! a path that merely resembles the real one is worse than a refusal. This is a deliberate v1 contract for *this specific
 //! boundary*, not an oversight: a bytes-preserving encoding was considered
-//! and rejected, because JSON, the web UI, and SQLite all fight arbitrary
-//! bytes, while every place a session `cwd` actually enters the system
+//! and rejected, because JSON and SQLite fight arbitrary bytes (as did the
+//! old web UI), while every place a session `cwd` actually enters the system
 //! (clap's `String` args, JSON request bodies) already rejects non-UTF-8
 //! input on its own.
 //!
@@ -118,7 +118,7 @@ pub mod approvals;
 // rustdoc resolve the module's links from this file, where its items are not
 // in scope.
 pub mod grid;
-/// Stable remote-host identity choices shared with the browser UI.
+/// Stable remote-host identity choices shared with the desktop app.
 pub mod host_appearance;
 /// The display-only short-name rule; callers retain raw text until rendering.
 pub mod host_name;
@@ -169,7 +169,7 @@ pub mod text;
 
 /// UTC calendar arithmetic shared by the crates that print dates.
 pub mod time;
-/// Build classification shared by browser wording and native release decisions.
+/// Build classification shared by the GUI's wording and native release decisions.
 pub mod version;
 pub use launch::{
     ContainerConfig, ContainerEngine, LaunchEffort, LaunchHarness, LaunchPermission,
@@ -277,7 +277,7 @@ pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
 /// A claim cannot exceed the recipe's existing mapping limit.
 pub const MAX_TCP_TUNNEL_PORTS: usize = 32;
 
-/// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
+/// Both hosts enforce this decimal 100 MB cap, set when the old browser client's saves buffered the body.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
 
 /// The host's answer to a hover. Refusals are data so the UI can distinguish a
@@ -314,7 +314,7 @@ pub struct DownloadFileInfo {
 /// wrong (a runaway agent spawning sessions, retained sessions nobody deletes)
 /// rather than an ordinary fleet — while staying small enough that every
 /// consumer downstream (the helm merging and sorting every host's reply
-/// in memory, a browser holding and rendering the capped array) does so in
+/// in memory, the desktop app holding and rendering the capped array) does so in
 /// milliseconds. It is also what keeps a whole reply under
 /// [`MAX_FRAME_LEN`] for any ordinary fleet: a `SessionInfo` is a few
 /// hundred bytes, or about three kilobytes for a session holding its full
@@ -474,7 +474,7 @@ pub enum ErrorKind {
     /// another client holds the terminal. Added with `PROTOCOL_VERSION` 31,
     /// replacing a `Conflict` whose message text the helm had to compare
     /// against [`ATTACH_REFUSED_TAKEN_OVER`]; the message still reads that
-    /// way for people. The helm relays it to the browser as
+    /// way for people. The helm relays it to the client as
     /// [`DetachCode::TakenOver`].
     TakenOver,
     /// The supervisor is sealed: a Delete found its environment's last
@@ -510,7 +510,7 @@ pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
 /// crate, so the emitters and the tests that match on it cannot drift
 /// independently.
 ///
-/// Clients display `reason` inside their own detach banner (terminal.js
+/// Clients display `reason` inside their own detach banner (the desktop app
 /// prefixes "Detached: "), so this string must read as a bare cause with
 /// no leading "detached:" of its own, one line, user-legible.
 pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stalled)";
@@ -519,9 +519,10 @@ pub const DETACH_REASON_STALLED: &str = "terminal stopped consuming output (stal
 /// refused: another client holds this session.
 ///
 /// This is the text a person sees; nothing decides behavior from it. The
-/// refusal itself is [`ErrorKind::TakenOver`], which the helm relays to the
-/// browser as [`DetachCode::TakenOver`], and that code is what makes the
-/// view show its take-control surface rather than keep reconnecting.
+/// refusal itself is [`ErrorKind::TakenOver`]. Older helms made this attach
+/// and relayed the refusal as [`DetachCode::TakenOver`], on which the old
+/// browser client latched a takeover and showed its take-control surface.
+/// The current helm never makes it (see `Attach::if_unowned`).
 ///
 /// The wording is deliberately IDENTICAL to what a displaced client is
 /// told when it is taken over while attached, because the fact is
@@ -920,8 +921,8 @@ impl SessionStatus {
     /// it under one of the answers.
     ///
     /// Exhaustive for the same reason `is_live` is, with one extra edge: a
-    /// default-`false` here reads as "not finished", which for the browser's
-    /// delete confirmation means a new status would start prompting rather
+    /// default-`false` here reads as "not finished", which for the desktop
+    /// app's delete confirmation means a new status would start prompting rather
     /// than silently skipping the prompt. That is the safe direction, which is
     /// exactly why it would go unnoticed, so this side gets the compile error
     /// too.
@@ -1232,10 +1233,11 @@ pub struct SessionNotification {
 /// when the sender supplied one (positive), `created_at` otherwise.
 ///
 /// A free function rather than only [`SessionInfo::effective_activity`] because
-/// the browser's session row is the helm's HTTP view, not a `SessionInfo`, and
-/// it must apply exactly this fallback: the seen/unseen comparison and the
-/// rendered age would otherwise drift from every other reader. Both zero stays
-/// zero, which callers read as "no stamp", never as 1970.
+/// the old browser client's session row was the helm's HTTP view, not a
+/// `SessionInfo`, and had to apply exactly this fallback: the seen/unseen
+/// comparison and the rendered age would otherwise have drifted from every
+/// other reader. Both zero stays zero, which callers read as "no stamp",
+/// never as 1970.
 pub fn effective_activity(last_activity_at: i64, created_at: i64) -> i64 {
     if last_activity_at > 0 {
         last_activity_at
@@ -2141,7 +2143,7 @@ impl AgentVerb {
             | AgentVerb::TemplateEdit { .. }
             | AgentVerb::TemplateDelete { .. }
             // Host changes affect the helm's registry, which every client
-            // and every later agent request reads. Add accepts a browser
+            // and every later agent request reads. Add accepts a client
             // continuation, so a lost answer is not proof that it never began.
             | AgentVerb::HostAdd { .. }
             | AgentVerb::HostEdit { .. }
@@ -2321,7 +2323,7 @@ pub enum AgentOutcome {
 #[serde(tag = "reply", rename_all = "snake_case")]
 pub enum AgentReply {
     /// The user opened or allowed the link, or the desktop's native opener returned success.
-    /// A web browser does not expose whether its popup blocker accepted the new window.
+    /// The old web client could not tell whether its popup blocker accepted the new window.
     UrlOpened {},
     Hosts {
         hosts: Vec<AgentHost>,
@@ -3203,7 +3205,7 @@ pub enum ControlMsg {
         /// credential or selector validation — the payload is
         /// helm-supplied, resolved from helm-side configuration (checkout
         /// root, post-clone hook) that a spawned session must never see or
-        /// influence. Browser Settings can read the all-hosts command,
+        /// influence. Settings can read the all-hosts command,
         /// but never this host-resolved payload. The resolved value travels TO the
         /// supervisor; nothing on this wire ever carries it back out to a
         /// client.
@@ -3320,7 +3322,7 @@ pub enum ControlMsg {
     /// List immediate child directories on the supervisor's filesystem.
     ///
     /// `cwd` may use the same `~` spelling as a create request. The
-    /// supervisor expands and validates it; neither the helm nor the browser
+    /// supervisor expands and validates it; neither the helm nor the client
     /// is allowed to substitute its own home directory.
     BrowseDirectory {
         req_id: u64,
@@ -3378,7 +3380,7 @@ pub enum ControlMsg {
     /// peer is refused with `Unauthorized` by the restricted dispatcher's
     /// off-list refusal, because a checkout preview is a question about
     /// where new work may be materialized on the host — a full-authority
-    /// question. The browser never sends this frame and never sees its
+    /// question. The client never sends this frame and never sees its
     /// reply's raw plumbing; the helm owns the preview REST surface, and
     /// the effective post-clone command it resolves server-side never
     /// appears in a preview reply. Settings exposes the all-hosts command
@@ -3407,8 +3409,8 @@ pub enum ControlMsg {
     /// Helm→supervisor control connections ONLY, for the same
     /// full-authority reason as [`ControlMsg::GithubCheckoutPreview`]: a
     /// session-authenticated peer gets the restricted dispatcher's
-    /// off-list `Unauthorized` refusal. The browser talks to the helm's
-    /// completion REST surface, never to this frame.
+    /// off-list `Unauthorized` refusal. The client asks the helm, never this
+    /// frame.
     GithubRepoSearch {
         req_id: u64,
         claim: ClaimContext,
@@ -3774,7 +3776,7 @@ pub enum ControlMsg {
         /// supervisor itself refuses to make.
         title: String,
         /// `Some` makes this an exact compare-and-mutate operation.
-        /// Browser callers use `None`; agent rename always uses `Some`.
+        /// The client's renames use `None`; agent rename always uses `Some`.
         expected_title: Option<String>,
     },
     /// Success reply to `RenameSession`, shaped like `SessionCreated` and
@@ -3857,8 +3859,8 @@ pub enum ControlMsg {
         terminal: TerminalSelector,
         /// The client identity this attachment belongs to, minted by the
         /// CLIENT (one per session view instance) — not by the helm,
-        /// because every browser tab multiplexes over the helm's single
-        /// supervisor connection, so connection identity cannot tell
+        /// because every client session view multiplexes over the helm's
+        /// single supervisor connection, so connection identity cannot tell
         /// clients apart (the same fact that put `channel` on `Resize`).
         /// The supervisor groups a session's terminal channels by this
         /// value to enforce the session-scoped takeover described above.
@@ -4033,7 +4035,7 @@ pub enum ControlMsg {
     /// resize still in flight from a client that just lost a takeover would
     /// reflow the winner's terminal. `channel` is what makes that
     /// enforceable when several clients multiplex over one connection (every
-    /// browser tab rides the helm's single supervisor connection, so
+    /// client session view rides the helm's single supervisor connection, so
     /// connection identity alone cannot tell them apart). A grid terminal
     /// ignores a resize to the size it already has ([`grid`], "Client to
     /// supervisor").
@@ -6357,12 +6359,13 @@ mod tests {
         );
     }
 
-    /// Why this matters: the browser's `terminal.js` matches these exact
-    /// spellings to latch a takeover, hold a stalled view, and hide a closed
-    /// tab, and nothing in Rust compiles against that file.
+    /// Why this matters: these spellings are the wire contract a client acts
+    /// on (the desktop app holds a stalled view and hides a closed tab). The
+    /// old browser client's `terminal.js` matched them as strings, with
+    /// nothing in Rust compiling against that file.
     ///
     /// Specification: every `DetachCode` serializes to the snake_case word
-    /// the browser matches, and `ErrorKind::TakenOver` to `taken_over`.
+    /// pinned here, and `ErrorKind::TakenOver` to `taken_over`.
     #[farhelm_testtrace::test]
     fn detach_code_spellings_are_pinned() {
         for (code, word) in [
@@ -6935,9 +6938,9 @@ mod tests {
     }
 
     /// Why this matters: a WRONG answer from either predicate is silent
-    /// everywhere else. The browser's restart gate reads `is_live`, where a
-    /// false negative restarts a running agent without asking; its delete
-    /// gate reads `has_ended`, where a false positive deletes a live session
+    /// everywhere else. The old browser client's restart gate read `is_live`,
+    /// where a false negative restarts a running agent without asking; the
+    /// desktop app's delete gate reads `has_ended`, where a false positive deletes a live session
     /// with no prompt. Neither shows up as a crash or a failed request.
     ///
     /// Specification: [`SessionStatus::is_live`] and
@@ -7379,7 +7382,7 @@ mod tests {
     /// one rule rather than left to each of them.
     ///
     /// It matters because two readers disagreeing about what `0` means do not
-    /// merely render differently: the browser renders each row's age from
+    /// merely render differently: the desktop app renders each row's age from
     /// this value and compares it against the seen stamp, so a second,
     /// subtly different fallback would show ages that disagree with the
     /// seen/unseen dots beside them. The `0` case is the whole point — a

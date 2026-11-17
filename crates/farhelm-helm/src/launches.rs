@@ -1,6 +1,6 @@
 //! Release-owned structured harness catalog and command compiler.
 //!
-//! The browser sends a [`LaunchSelection`] as intent, never an argv fragment.
+//! The client sends a [`LaunchSelection`] as intent, never an argv fragment.
 //! This module is the single place that turns that intent into the invocation
 //! the existing create path accepts. It deliberately does not probe installed
 //! binaries or a vendor service: a launch must be reproducible from the
@@ -788,7 +788,7 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     }
     // The harness default (`None`) is always accepted; which explicit modes
     // each harness offers is `LaunchHarness::offers_permission`'s table, the
-    // same one the browser offers buttons from.
+    // same one the desktop app offers buttons from.
     if let Some(permission) = selection.permissions
         && !selection.harness.offers_permission(permission)
     {

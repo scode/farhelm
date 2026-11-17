@@ -3,7 +3,7 @@
 //!
 //! Every terminal runs in a terminal host and reaches its viewers this way.
 //! This module is the contract the supervisor's sender, its input encoder,
-//! the helm's relay and the browser's grid client are built against.
+//! the helm's relay and the desktop app's grid client are built against.
 //!
 //! # Why this shape
 //!
@@ -13,18 +13,19 @@
 //!
 //! - **Not a permanent format.** The helm and the supervisor speak one
 //!   `PROTOCOL_VERSION` (an older helm sees a newer supervisor as Too new and
-//!   must be upgraded), and the browser's JavaScript is served by the helm.
+//!   must be upgraded), and the desktop app embeds the helm it talks to.
 //!   So the grid stream changes with ordinary protocol bumps and has no
 //!   version of its own. Contrast the terminal host's protocol and the
 //!   snapshot format, which are permanent.
 //! - **Binary rows and JSON controls.** The measured full-scrollback attach
 //!   pays heavily for repeated JSON run/style objects, especially with a
 //!   different color in every cell. Rows, frames and history therefore use
-//!   fixed-width binary fields. Their row-length prefixes also let the page
-//!   retain history close to its received form and decode requested lines.
-//!   Small controls and all input stay readable JSON. The browser decoder is
-//!   bounds-checked and held to Rust-generated fixtures; there is no second
-//!   compatible encoding, compression or state shared across messages.
+//!   fixed-width binary fields. Their row-length prefixes let the old browser
+//!   client retain history close to its received form and decode requested
+//!   lines; the desktop app decodes history as it arrives. Small controls and
+//!   all input stay readable JSON. Clients decode with this module's
+//!   bounds-checked decoder; there is no second compatible encoding,
+//!   compression or state shared across messages.
 //! - **The helm relays without interpreting.** Grid messages travel on the
 //!   attachment's data channel (the one `ControlMsg::Attach` named), and the
 //!   helm relays each data frame as one WebSocket binary message in each
@@ -38,13 +39,13 @@
 //! the stall detach work as their declarations in the crate root define
 //! them; pause means "send nothing until the resume", history included, and
 //! the supervisor coalesces (see "Flow control"). The grid client itself
-//! sends no pause or resume: it applies messages as they arrive and draws at
-//! most once per animation frame, so no backlog builds up in the page. Its
-//! backlog builds up in the helm instead, which pauses and resumes the
-//! supervisor from its own queue.
+//! sends no pause or resume: when the desktop app falls behind, its terminal
+//! stream stops reading the socket (`farhelm-helm-client`'s bounded event
+//! queue), so the backlog builds up in the helm instead, which pauses and
+//! resumes the supervisor from its own queue.
 //!
 //! The helm relays frames up to [`GRID_MAX_MESSAGE`] in a queue bounded in
-//! bytes as well as in messages, and forwards each browser input message as
+//! bytes as well as in messages, and forwards each client input message as
 //! one frame (see "Flow control").
 //!
 //! # Framing
@@ -124,7 +125,7 @@
 //!   all printable ASCII has `width` equal to the text's length. Any other run
 //!   holds exactly one cell's content, the cell's character with its
 //!   combining characters, at `width` 1, or 2 for a wide character; the client
-//!   lays it out as one box of that width. The browser cannot reproduce the
+//!   lays it out as one box of that width. The client cannot reproduce the
 //!   emulator's grouping of characters into cells (combining marks, joiners
 //!   and variation selectors as the emulator counts them), so the format never
 //!   asks it to. Spacer cells of wide characters are not sent.
@@ -274,9 +275,10 @@
 //!
 //! A resize to the size the terminal already has is a no-op for a grid
 //! terminal: the supervisor does not resize the pty, reflow, redraw or reset
-//! history for it. The browser sends one whenever a grid attachment's socket
-//! opens and sometimes a second, identical one after `hello`, so acting on
-//! it would cost a history reset and a full resend on every attach.
+//! history for it. The old browser client sent one whenever a grid
+//! attachment's socket opened and sometimes a second, identical one after
+//! `hello`, so acting on it cost a history reset and a full resend on every
+//! attach.
 //!
 //! Each `key` message says whether the viewer runs on a Mac (`mac`, absent
 //! meaning false), since some keys encode differently there (see
@@ -317,11 +319,11 @@
 //! The stall timeout and stall detach stay as they are.
 //!
 //! The helm reads the connection without waiting on any one attachment, so
-//! a browser that falls behind never fills the supervisor's writer queue;
+//! a client that falls behind never fills the supervisor's writer queue;
 //! the helm's queue for that attachment fills instead. So the helm pauses
 //! a grid stream (`PauseOutput`) once its queue for it passes a mark, and
-//! resumes it once the browser has drained it, and a pause that outlives
-//! the stall timeout, from a browser that stopped reading, ends the
+//! resumes it once the client has drained it, and a pause that outlives
+//! the stall timeout, from a client that stopped reading, ends the
 //! attachment as stalled.
 //!
 //! # What this module checks
@@ -411,7 +413,7 @@ pub const GRID_MAX_MESSAGE: usize = 1024 * 1024;
 /// escaping would take it past this ("Client to supervisor"). It also keeps
 /// what one viewer can make the supervisor parse in a single message small.
 /// Both ends enforce it, so changing it is a protocol change. The helm
-/// forwards each browser message as one data frame, unchanged, and ends the
+/// forwards each client message as one data frame, unchanged, and ends the
 /// attachment on a message over this bound rather than forward it.
 pub const GRID_MAX_INPUT_MESSAGE: usize = 64 * 1024;
 
@@ -454,17 +456,17 @@ pub const GRID_MAX_CLIPBOARD_PART_BYTES: usize = 512 * 1024;
 /// sender drops a larger write rather than send part of it.
 pub const GRID_MAX_CLIPBOARD_BYTES: usize = 8 * 1024 * 1024;
 
-/// Longest `key` or `code` in a `key` input message, in bytes. The browser's
+/// Longest `key` or `code` in a `key` input message, in bytes. The DOM-style
 /// values are short names (`"ArrowUp"`, `"KeyA"`) or one character.
 pub const GRID_MAX_KEY_BYTES: usize = 64;
 
 /// Largest `rev` and absolute history line number: JavaScript's largest
 /// exactly representable integer (`Number.MAX_SAFE_INTEGER`).
 ///
-/// The client compares these for continuity and ordering, and a larger value
-/// would silently round in the browser, so a gap or a repeat could go
-/// unnoticed. At a million lines a second the counter takes centuries to get
-/// here.
+/// The client compares these for continuity and ordering. The bound comes
+/// from the old browser client, in which a larger value would silently round,
+/// so a gap or a repeat could go unnoticed. At a million lines a second the
+/// counter takes centuries to get here.
 pub const GRID_MAX_LINE_NUMBER: u64 = (1 << 53) - 1;
 
 /// The `flags` bits of a [`Style`].
@@ -544,7 +546,7 @@ fn check_len(len: usize, max: usize) -> Result<(), GridError> {
 ///
 /// serde reads an internally tagged enum from an array too (the tag first,
 /// then the fields in order), so `["hello",80,24,0]` would otherwise decode as
-/// a `hello` the browser's client refuses. Checked on the bytes, because
+/// a `hello` the old browser client refused. Checked on the bytes, because
 /// the tagged enum's own decoder cannot be told to want an object; the
 /// structs inside a message use [`object_only`] instead.
 fn check_object(bytes: &[u8]) -> Result<(), GridError> {
@@ -878,8 +880,8 @@ impl<'de> Deserialize<'de> for Row {
 ///
 /// A derived struct decoder also takes an array of its fields in order, so
 /// without this `[false,[]]` would decode as a row and
-/// `[0,0,true,"block",true]` as a cursor, where the browser's client, which
-/// checks for objects, refuses them. Every struct the format writes as an
+/// `[0,0,true,"block",true]` as a cursor, where the old browser client, which
+/// checked for objects, refused them. Every struct the format writes as an
 /// object decodes through here (the outermost message is checked on its
 /// bytes, by [`check_object`]).
 fn object_only<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
@@ -1381,8 +1383,8 @@ impl GridOutput {
 /// clipboard writes arriving whole with nothing else inside them, and a
 /// clipboard write's parts naming one target and staying within
 /// [`GRID_MAX_CLIPBOARD_BYTES`].
-/// It is what a Rust receiver of a grid stream runs (the browser's grid
-/// client applies the same rules in JavaScript), and what sender tests use to
+/// It is what a Rust receiver of a grid stream runs (the desktop app's grid
+/// model among them), and what sender tests use to
 /// show a stream they produced is one a client accepts. The one ordering rule
 /// it cannot see is named in the module docs, "What this module checks".
 ///
@@ -1539,7 +1541,7 @@ pub enum MouseEventKind {
     Up,
     Move,
     /// The wheel moved; `button` 0 is up, 1 is down. One message per
-    /// browser wheel event that scrolls at least one line, and so one report
+    /// wheel event that scrolls at least one line, and so one report
     /// (or one arrow key) per such event, however many lines it scrolls.
     Wheel,
 }
@@ -1556,7 +1558,8 @@ pub enum MouseEventKind {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum GridInput {
     /// A keydown that has a sequence of its own at keydown. `key`, `code`
-    /// and `kc` (`keyCode`) are the browser's values; the supervisor encodes
+    /// and `kc` (`keyCode`) are DOM `KeyboardEvent` values, which the desktop
+    /// app infers from native key events; the supervisor encodes
     /// them as the xterm terminal family encodes keys, which shells and
     /// agents expect, including Shift+Enter as ESC CR in one write. The
     /// bytes for every keydown are Farhelm's key table
@@ -1568,7 +1571,7 @@ pub enum GridInput {
     /// supervisor never second-guesses it. The client sends no `key` for its
     /// own shortcuts (Cmd+K/J, Ctrl+Shift+K/J, the text-size keys), for a
     /// keydown the key table gives no sequence for, nor for one it leaves
-    /// to the browser's text input or drops: a third-level shift (Option
+    /// to its text input or drops: a third-level shift (Option
     /// without Ctrl or Meta on a Mac, Ctrl+Alt or AltGraph on Windows, as
     /// AltGr) on a key code above 47 or of 0, a single capital A to Z without
     /// Ctrl, Alt or Meta, and the first sending keydown after a dead key or

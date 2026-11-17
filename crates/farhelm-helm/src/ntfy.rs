@@ -426,7 +426,7 @@ pub(crate) async fn put(
 }
 
 /// One user-initiated send waits under the short HTTP timeout, independently of
-/// background work. Closing the page does not retract its accepted request.
+/// background work. A client going away does not retract its accepted request.
 /// The authenticated router owns the saved-settings read and the send together.
 pub(crate) async fn test(State(state): State<Arc<AppState>>) -> Response {
     match state.ntfy.test().await {

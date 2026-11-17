@@ -44,7 +44,7 @@ use tracing::warn;
 /// and what can still arrive after the helm pauses it ([`GRID_PAUSE_BYTES`])
 /// is counted in frames: the supervisor's writer queue alone holds 64, and a
 /// link's buffers more. A bound of a few hundred events would end an
-/// attachment whose browser is still reading on those frames rather than on
+/// attachment whose client is still reading on those frames rather than on
 /// their bytes. This limit only bounds the per-event overhead (a few dozen
 /// bytes each) of a queue whose payload the byte budget already bounds.
 ///
@@ -76,37 +76,37 @@ const TERM_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 /// # Why the helm pauses grid streams
 ///
 /// The grid client sends no pause or resume: it applies each message as it
-/// arrives, so its backlog is never in the page but here, in this queue,
-/// while the socket to the browser drains. Without
+/// arrives, so its backlog is never in the client but here, in this queue,
+/// while the socket to the client drains. Without
 /// a pause from this end the supervisor's sender would never see its writer
 /// queue fill (this side reads the connection without waiting on any one
-/// terminal), and a browser slower than the supervisor's link, at a large
+/// terminal), and a client slower than the supervisor's link, at a large
 /// catch-up or a flood, would overflow the queue and be detached as stalled.
 /// A paused grid stream sends nothing, history included, until the resume,
 /// then the history lines it owes (or a history reset) and one screen update
 /// from where the viewer is, so pausing costs screen frames, never output
 /// (`farhelm_proto::grid`, "Flow control").
 ///
-/// # The marks, and the slowest browser that is not detached
+/// # The marks, and the slowest client that is not detached
 ///
 /// The supervisor ends an attachment that stays paused past its stall
 /// timeout (60 s), counted from the pause, whoever sent it. That is what
-/// ends a browser which stopped reading, and it is also the floor below
-/// which a browser that reads is ended: after the pause it must drain the
+/// ends a client which stopped reading, and it is also the floor below
+/// which a client that reads is ended: after the pause it must drain the
 /// queue from its peak to the resume mark within the timeout. The peak is
 /// the pause mark plus what was already on its way when the pause was
 /// decided: up to the supervisor's writer queue (64 frames, about 2 MiB at
 /// its sender's 32 KiB packing), what the link holds (a unix socket's buffer
 /// of a few hundred KiB locally; over ssh, its channel window and socket
 /// buffers, a few MiB more), and the sender's 8 ms cycles while the pause
-/// crosses. With the resume mark 512 KiB below the pause mark, the browser
+/// crosses. With the resume mark 512 KiB below the pause mark, the client
 /// must drain 512 KiB plus that in-flight data within 60 s:
 ///
 /// - about 47 KB/s locally during a scrollback catch-up, the realistic
 ///   case for a pause: the sender then fills its writer queue
 ///   (512 KiB + 2.2 MiB);
 /// - about 10 KB/s when little was in flight, as in live output that a
-///   browser falls behind slowly;
+///   client falls behind slowly;
 /// - about 110 KB/s over ssh, if its channel window and socket buffers hold
 ///   about 4 MiB more on top of a full writer queue (512 KiB + about
 ///   6 MiB); the figure moves with however much the link actually holds.
@@ -116,10 +116,10 @@ const TERM_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 /// terminals' control messages are already there, and the supervisor's
 /// deadline runs until it arrives.
 ///
-/// A slower browser is ended as stalled, which the browser shows as any
+/// A slower client is ended as stalled, which the desktop app shows as any
 /// stall, waiting for the user to reconnect.
 ///
-/// Rearming the supervisor's deadline while the browser keeps draining would
+/// Rearming the supervisor's deadline while the client keeps draining would
 /// remove the floor, but needs the helm to report progress and the
 /// supervisor to act on it: a protocol and supervisor change, for a floor
 /// these marks already keep low. Not done.
@@ -130,7 +130,7 @@ const TERM_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 /// packed message goes alone in a message of up to 1 MiB, and a writer queue
 /// full of such rows (output that makes huge rows, such as long lines of
 /// distinct wide or combining characters, or rows of many links) can exceed
-/// the budget, which ends the attachment as stalled; the browser shows it as
+/// the budget, which ends the attachment as stalled; the desktop app shows it as
 /// any stall until the user reconnects. The budget stays the hard bound;
 /// per-attachment credits that would avoid this are not built.
 const GRID_PAUSE_BYTES: usize = 2 * 1024 * 1024;
@@ -143,7 +143,7 @@ const GRID_PAUSE_EVENTS: usize = GRID_EVENT_QUEUE / 8;
 /// 384 events.
 ///
 /// A quarter below the pause marks. Close to them, because everything a
-/// browser must drain between the pause and the resume counts against the
+/// client must drain between the pause and the resume counts against the
 /// supervisor's stall deadline ([`GRID_PAUSE_BYTES`]); far enough below that
 /// each pause moves at least 512 KiB, rather than a pause and a resume for
 /// every message of a queue hovering at a mark.
@@ -194,14 +194,14 @@ const WRITER_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// obligation and "a window that stays open with no advancing ack" the
 /// definition of a stalled transfer. Without it a peer that keeps the
 /// connection open but stops writing bytes parks the relay — and the HTTP
-/// handler behind it — forever, because the browser-facing body timeout
+/// handler behind it — forever, because the client-facing body timeout
 /// is not running while this hop is the one that is blocked.
 ///
 /// Only a STRICTLY advancing ack rearms it. A receiver repeating its last
 /// cumulative count is reporting no progress, so treating a duplicate as
 /// liveness would let a peer hold a transfer open indefinitely with acks
 /// that never move. Sixty seconds matches [`WRITER_STALL_TIMEOUT`] and the
-/// helm's browser-facing body timeout, so every hop of one transfer is
+/// helm's client-facing body timeout, so every hop of one transfer is
 /// declared stalled on the same generous timescale.
 const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -357,10 +357,11 @@ pub(crate) fn supervisor_reply_error_for_test(kind: ErrorKind, message: String) 
 ///
 /// The same `ErrorKind` name does not mean the same thing at both levels.
 /// A supervisor's `Unauthorized` says a session-scoped peer asked for
-/// something outside its slice; the helm's HTTP 401 tells a browser that it
-/// is signed out. Passing the first through as the second let any remote
-/// supervisor, which the helm treats as untrusted, force every browser tab
-/// back to the token prompt. So the HTTP layer translates a
+/// something outside its slice; the helm's HTTP 401 tells the client that
+/// the helm refused its credential. Passing the first through as the second
+/// once let any remote supervisor, which the helm treats as untrusted, force
+/// every tab of the old browser client back to its token prompt. So the HTTP
+/// layer translates a
 /// [`ErrorOrigin::SupervisorReply`] kind case by case (`http_error` in
 /// `lib.rs` carries the reasoning for each), while a helm-decided kind maps
 /// directly. SPEC_impl.md states the general rule.
@@ -691,8 +692,8 @@ impl TermEvent {
 /// [`DetachCode`](farhelm_proto::DetachCode) a consumer may act on.
 ///
 /// The helm decides nothing from `reason`'s text; it relays both to the
-/// browser, which acts on the code (latch a takeover, hold a stall, hide a
-/// closed tab) and shows the text.
+/// client, which acts on the code (the desktop app holds a stall until the
+/// user reconnects and hides a closed tab) and shows the text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detach {
     pub reason: String,
@@ -726,7 +727,7 @@ impl std::fmt::Display for Detach {
 /// is finished — that is, definitionally, the stalled-terminal case — so a
 /// notice that needed queue capacity could not be delivered to the one
 /// consumer that most needs it, and the sender would sit pinned behind a
-/// browser that has stopped reading. A watch never blocks and never needs
+/// client that has stopped reading. A watch never blocks and never needs
 /// capacity.
 struct TerminalHandle {
     events: mpsc::Sender<TermEvent>,
@@ -905,7 +906,7 @@ impl GaugeState {
 /// Exposes `recv()` with the obvious semantics — events in order, then a
 /// final `Detached`, then `None` — while keeping the detach signal
 /// separately observable via [`Self::detach_signal`] so a consumer parked
-/// on something else (a WebSocket write to a browser that stopped reading)
+/// on something else (a WebSocket write to a client that stopped reading)
 /// can be woken and torn down without that write ever completing.
 #[derive(Debug)]
 pub struct TermStream {
@@ -2144,7 +2145,7 @@ impl SupervisorClient {
     /// hop must never have): every terminal, every pending request, and
     /// the control channel itself are multiplexed over the SINGLE reader
     /// loop that calls this function. Awaiting capacity on one terminal's
-    /// channel would stall all of them — one wedged browser tab freezing
+    /// channel would stall all of them — one wedged client terminal freezing
     /// every other session's output and every control reply on the
     /// connection.
     ///
@@ -2159,9 +2160,9 @@ impl SupervisorClient {
     /// recoverable by reattaching, whereas the alternative is an
     /// unbounded, invisible stall of everything else.
     ///
-    /// A grid stream's browser sends no pause of its own, so for those the
+    /// A grid stream's client sends no pause of its own, so for those the
     /// helm pauses the supervisor itself well before the queue fills
-    /// (`GRID_PAUSE_BYTES`); the detach stays the backstop for a browser
+    /// (`GRID_PAUSE_BYTES`); the detach stays the backstop for a client
     /// that stopped reading, and for a supervisor that ignores the pause.
     async fn dispatch(self: &Arc<Self>, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
@@ -2500,7 +2501,7 @@ impl SupervisorClient {
     ///
     /// Both demultiplexer cleanup and explicit detach use this task. Waiting
     /// for writer capacity on the reader loop would stall every terminal and
-    /// pending request; waiting in the browser's teardown future would lose
+    /// pending request; waiting in the socket handler's teardown future would lose
     /// the notification when that future times out. The task owns its sender
     /// clone, so caller cancellation cannot abandon the send. Connection
     /// shutdown still closes the queue and ends any pending send.
@@ -3004,7 +3005,7 @@ impl SupervisorClient {
                 let error = anyhow::Error::new(SupervisorError::from_reply(kind, message));
                 // Only a create can use this proof. A peer cannot attach it
                 // to Delete's failure and make a successful replacement look
-                // unaccepted to the browser.
+                // unaccepted to the client.
                 if create_unaccepted && matches!(msg, ControlMsg::CreateSession { .. }) {
                     Err(error.context(crate::SettledCreateUnaccepted))
                 } else {
@@ -3114,10 +3115,10 @@ impl SupervisorClient {
     /// [`SupervisorClient::create_session`] carrying a client-supplied
     /// idempotency key (PLAN_M3.md item 6).
     ///
-    /// The key belongs to whoever can RETRY — the browser, ultimately —
+    /// The key belongs to whoever can RETRY — the client, ultimately —
     /// which is why this parameter is threaded through from the HTTP
     /// request body rather than minted here: a key the helm invented would
-    /// be a fresh one on every retry the browser made, deduplicating
+    /// be a fresh one on every retry the client made, deduplicating
     /// nothing. `None` is the pre-M3 path, where each request is its own
     /// create.
     ///
@@ -3789,7 +3790,7 @@ impl SupervisorClient {
             .map(|_notice| ())
     }
 
-    /// [`Self::delete_session`] with the precondition the browser derived
+    /// [`Self::delete_session`] with the precondition the client derived
     /// from the confirmation it showed: under any guard but
     /// `Unconditional`, the supervisor refuses with `Conflict` instead of
     /// deleting if more is alive at handling time than the guard allows (see
@@ -4105,7 +4106,7 @@ impl SupervisorClient {
     /// which the grid client never sends) is not forwarded. It ends the
     /// attachment here instead, as the supervisor would end it, with the detach
     /// notice published to the attachment's stream and the supervisor released.
-    /// Refusing here keeps a browser's message, which can be up to
+    /// Refusing here keeps a client's message, which can be up to
     /// `MAX_FRAME_LEN`, from becoming a frame the shared connection's writer
     /// cannot encode, which would end every attachment on it.
     ///
@@ -4114,7 +4115,7 @@ impl SupervisorClient {
     /// earlier oversized message), so nothing sent after an oversized
     /// message is ever forwarded, whoever calls next. Input accepted after
     /// some was lost can turn a command into a different one. The caller
-    /// stops reading its browser.
+    /// stops reading its client.
     pub async fn send_grid_input(&self, channel: u32, message: Vec<u8>) -> Result<(), Detach> {
         let mut terminals = self.terminals.lock().await;
         if !terminals.contains_key(&channel) {
@@ -4155,9 +4156,9 @@ impl SupervisorClient {
     /// connection.
     ///
     /// These are the only pause and resume the supervisor gets from the
-    /// helm: the socket relay forwards none from the browser (`terminal.rs`,
+    /// helm: the socket relay forwards none from the client (`terminal.rs`,
     /// the inbound task), since the supervisor keeps one paused flag per
-    /// attachment and a browser's would undo the helm's or hold the stream
+    /// attachment and a client's would undo the helm's or hold the stream
     /// paused until the stall detach.
     fn spawn_grid_flow(&self, channel: u32, mut decisions: watch::Receiver<bool>) {
         let writer_tx = self.writer_tx.clone();
@@ -4186,7 +4187,7 @@ impl SupervisorClient {
     }
 
     /// Set the session's terminal size. Fire-and-forget by design: a
-    /// browser emits these on every drag frame, so there is nothing to
+    /// client may send these on every drag frame, so there is nothing to
     /// await and nothing to report. `channel` is the attach-time channel:
     /// the supervisor drops the resize unless that channel still holds
     /// the session's attachment, so a resize in flight from a client
@@ -4245,7 +4246,7 @@ impl SupervisorClient {
     /// an accepted upload is an OBLIGATION: the supervisor is holding a
     /// temp file and admission capacity until this side either commits or
     /// aborts, and "the relay's future was dropped" is a perfectly
-    /// ordinary way for that side to end (a browser resetting the
+    /// ordinary way for that side to end (a client resetting the
     /// connection mid-body cancels the axum handler outright, running no
     /// error branch of any kind). Ownership makes the abort structural:
     /// dropping the guard enqueues one, whatever the reason for the drop.
@@ -4400,7 +4401,7 @@ impl UploadGuard {
     ///
     /// The relay selects on this while reading its HTTP body so a
     /// supervisor-side abort ends the request promptly instead of after
-    /// the browser's next chunk (or, for a browser that has gone quiet,
+    /// the client's next chunk (or, for a client that has gone quiet,
     /// after the body stall timeout). Cancel-safe: dropping the returned
     /// future loses nothing, since the watch's version counter, not this
     /// call, is what tracks what has been observed.
@@ -4883,7 +4884,7 @@ mod tests {
         }
     }
 
-    /// Dropping a browser teardown future must not strand its upstream seat.
+    /// Dropping a socket handler's teardown future must not strand its upstream seat.
     ///
     /// Reserving every writer slot establishes backpressure without timing a
     /// slow peer. Polling detach once removes the local terminal, then dropping
@@ -6183,7 +6184,7 @@ mod tests {
     /// never have. Every terminal, every request, and the control channel
     /// itself are multiplexed over one reader task, so the obvious
     /// implementation — await capacity on the per-terminal channel — turns
-    /// a single wedged browser tab into a supervisor-wide outage for that
+    /// a single wedged client terminal into a supervisor-wide outage for that
     /// helm. The assertion that catches it is the LAST one: a second,
     /// healthy terminal still receiving data after the first has
     /// overflowed. The first two assertions (a `Detach` reaches the
@@ -6238,7 +6239,7 @@ mod tests {
             .unwrap();
 
         // `stalled_rx` is deliberately never drained: it stands in for a
-        // browser that has stopped consuming entirely.
+        // client that has stopped consuming entirely.
         let detach = timeout(Duration::from_secs(5), peer_reader.read_frame())
             .await
             .expect("the overflowing terminal never sent a Detach upstream")
@@ -6417,9 +6418,9 @@ mod tests {
     /// gap, the event, byte and frame bounds, and no pause once the
     /// attachment has ended.
     ///
-    /// Why: these numbers decide whether a browser behind a slow link is
+    /// Why: these numbers decide whether a client behind a slow link is
     /// paused (cheap, no output lost) or detached as stalled (a visible
-    /// failure), how slow a reading browser may be before the supervisor's
+    /// failure), how slow a reading client may be before the supervisor's
     /// stall deadline ends it, and how much of the helm's memory a hostile
     /// program's output can hold. The socket
     /// tests see only that a pause and a resume happen; this pins where.
@@ -7214,7 +7215,7 @@ mod tests {
     /// `request` registers its `req_id` so a reply can be correlated, and
     /// that entry is only ever removed by a reply arriving. Registering it
     /// BEFORE awaiting queue capacity means a cancellation in that window
-    /// — an axum handler whose browser disconnected, a `select!` losing a
+    /// — an axum handler whose client disconnected, a `select!` losing a
     /// race — orphans it in a map nothing sweeps, for the life of the
     /// process. Reserving capacity first is what closes that, and this is
     /// the only test that can tell the two orderings apart.
@@ -7939,7 +7940,7 @@ mod tests {
     /// CommitUpload`'s docs — and passes each outcome through unchanged:
     /// the published path on success, the supervisor's own
     /// [`SupervisorError`] (message, kind and supervisor origin) on a refusal, since a size
-    /// mismatch has to reach the browser as a 400 with the supervisor's
+    /// mismatch has to reach the client as a 400 with the supervisor's
     /// words rather than a locally invented failure.
     ///
     /// Both arms keep the scripted peer's halves ALIVE past the

@@ -662,7 +662,7 @@ async fn hostile_and_empty_filenames_publish_under_safe_generated_names() {
 /// The two paths are one mechanism on purpose (dropping the channel's
 /// route is what ends the transfer either way), and the failure they
 /// prevent is a state directory that accumulates a half-written temp file
-/// for every cancelled drop and every browser tab that closed mid-paste.
+/// for every cancelled drop and every client that went away mid-paste.
 #[farhelm_testtrace::test]
 async fn an_abandoned_transfer_leaves_no_temp_file_behind() {
     let h = harness().await;

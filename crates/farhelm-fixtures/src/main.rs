@@ -63,8 +63,8 @@ enum Cmd {
         /// Fire the real Claude `SessionStart` hook for this conversation id
         /// before the script starts, so the session has a captured
         /// conversation and Restart (which only ever resumes) is available,
-        /// without a test having to type into the terminal. The browser
-        /// specs use it; a resume command that passes the resumed id here
+        /// without a test having to type into the terminal. The old browser
+        /// specs used it; a resume command that passes the resumed id here
         /// keeps a restarted session resumable. Works with every script.
         #[arg(long)]
         report_conversation: Option<String>,
@@ -309,7 +309,7 @@ mod tests {
     /// vendor tail, so the hook flags a Claude-kind launch appends after it
     /// are still captured as `extra` and the id is not swallowed.
     ///
-    /// Why: the browser specs' resumable sessions put the flag on the
+    /// Why: the old browser specs' resumable sessions put the flag on the
     /// command line and their resume command, and a launch whose report
     /// silently never fired would leave Restart unavailable with no clue
     /// why.

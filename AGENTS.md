@@ -236,11 +236,11 @@ Before creating, updating, or merging a PR, or claiming work is done, make a jud
 add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
 not by itself a reason to launch it. For a documentation-only change that cannot affect generated artifacts or
 executable examples — ordinary Markdown documentation, a lore entry, agent instructions, or comments with no doctest or
-generation role — do NOT run Rust, JavaScript, desktop, installer, provisioning, or browser tests. Run only formatters,
-linters, link checkers, or other checks that actually inspect the changed files, if any exist. Reuse is per command.
-Failed, interrupted, poorly identified runs, or runs whose coverage no longer applies are not evidence of a pass. Report
-checks run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with
-the reason.
+generation role — do NOT run Rust, JavaScript, desktop, installer, or provisioning tests. Run only formatters, linters,
+link checkers, or other checks that actually inspect the changed files, if any exist. Reuse is per command. Failed,
+interrupted, poorly identified runs, or runs whose coverage no longer applies are not evidence of a pass. Report checks
+run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with the
+reason.
 
 Run local and worker runtime tests through `python3 scripts/record-test-run.py`, including each reproduction attempt.
 Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof

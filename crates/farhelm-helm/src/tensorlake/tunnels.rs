@@ -184,7 +184,7 @@ impl Tunnels {
 }
 
 impl Tensorlake {
-    /// Keep the marked Tensorlake browser fake on the same shared relay
+    /// Keep the marked Tensorlake fake on the same shared relay
     /// implementation; production relays know only their supervisor client.
     pub(crate) async fn start_tunnels(
         &self,

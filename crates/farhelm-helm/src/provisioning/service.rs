@@ -253,7 +253,7 @@ pub(crate) struct ProvisioningService {
     /// the row under the earlier one's run (see [`Self::start_add`]).
     add_confirmations: Arc<tokio::sync::Mutex<()>>,
     /// Bound fleet-wide transport inspection without serializing unrelated
-    /// rows behind the browser's page lock.
+    /// rows behind one lock.
     plan_slots: tokio::sync::Semaphore,
     /// Feed bumps can make every mounted row read at once. Queue those cheap
     /// reads modestly so fleet size cannot become handler fan-out.
@@ -796,8 +796,8 @@ impl ProvisioningService {
     ///
     /// On a helm-owned task (see `crate::run_owned`): the backend's probe
     /// starts a child in its own process group and kills that group only on
-    /// its own exit paths, so a request dropped mid-probe (a page closed or
-    /// reloaded during a probe of up to `PROBE_TIMEOUT`) killed only the
+    /// its own exit paths, so a request dropped mid-probe (its client gone,
+    /// during a probe of up to `PROBE_TIMEOUT`) killed only the
     /// direct child and could leave helpers it started, such as a
     /// user-configured ssh `ProxyCommand`, running. A dropped request now
     /// loses only the reply. The probe then runs to its end, so one that
@@ -1035,7 +1035,7 @@ impl ProvisioningService {
     ///
     /// Registration saves the row and then reconciles the actor set and dials
     /// the host. Run on the request's task, a request dropped between those
-    /// steps (a reload, a closed tab) left a saved host with no actor: absent
+    /// steps (its client gone) left a saved host with no actor: absent
     /// from the host list and never dialed, or for a re-probed host, still
     /// dialing its old paths, until something unrelated re-read the
     /// registry. A dropped request now loses only the reply. The probe that
@@ -1616,9 +1616,9 @@ impl ProvisioningService {
     ) -> anyhow::Result<RunAccepted> {
         // On a helm-owned task (see `crate::run_owned`): the claim marks the
         // host busy before the run that clears it is spawned, with awaits
-        // between, so a request dropped in between (a reload while an update
-        // starts) left the host busy, and refusing every later update, until
-        // the helm restarted.
+        // between, so a request dropped in between (its client gone while an
+        // update starts) left the host busy, and refusing every later update,
+        // until the helm restarted.
         let service = Arc::clone(self);
         crate::run_owned(async move { service.start_update_owned(host, request).await }).await
     }

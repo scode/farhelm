@@ -1693,7 +1693,7 @@ impl FakeSupervisor {
 
 /// A deliberately minimal WebSocket client: enough to complete the
 /// upgrade, send text/binary frames, and — crucially — to STOP
-/// READING whenever a test wants to model a wedged browser.
+/// READING whenever a test wants to model a wedged client.
 ///
 /// Hand-rolled rather than pulled from a crate because no WebSocket
 /// client is a dependency of this workspace, and the two behaviors
@@ -1764,7 +1764,7 @@ impl WsTestClient {
     /// [`Self::connect`], over a socket whose receive buffer is asked to be
     /// `bytes` before it connects.
     ///
-    /// For the tests whose premise is a browser that stopped reading with
+    /// For the tests whose premise is a client that stopped reading with
     /// the server's sends genuinely blocked: a loopback socket's receive
     /// buffer otherwise grows to megabytes, which would hide how much the
     /// server has queued behind it. The kernel rounds the request up to its

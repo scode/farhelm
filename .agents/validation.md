@@ -33,9 +33,8 @@ identifying one is not diligence.
 
 For a documentation-only change that cannot affect generated artifacts or executable examples — ordinary Markdown
 documentation, a lore entry, agent instructions, or comments with no doctest or generation role — do NOT run Rust,
-JavaScript, desktop, installer, provisioning, or browser tests. Run only formatters, linters, link checkers, or other
-checks that actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full
-gate list.
+JavaScript, desktop, installer, or provisioning tests. Run only formatters, linters, link checkers, or other checks that
+actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full gate list.
 
 When building a stack, use targeted checks at each review unit to catch likely regressions while they are cheap to
 localize. At the tip, assess the combined diff for interactions those checks did not cover. Stack completion does not
@@ -78,9 +77,9 @@ systemd or SSH substrate ran.
   `real_ssh_environment_managed_checkout_and_ordinary_features` variant runs the same scenario through a real localhost
   SSH place on an owned, preconfigured machine. Select it with `--run-ignored only` and its exact test name when SSH
   acceptance is requested. It fails if strict passwordless localhost SSH is unavailable. This protocol coverage leaves
-  native desktop opening and browser file-link gestures to their own checks. It requires the production rootless Podman
-  probe to pass (Linux, at least 4.9.3, cgroup v2, systemd cgroup manager and usable user scopes), a working engine
-  event backend, and the cached managed base
+  native desktop opening and the desktop app's file-link gestures to their own checks. It requires the production
+  rootless Podman probe to pass (Linux, at least 4.9.3, cgroup v2, systemd cgroup manager and usable user scopes), a
+  working engine event backend, and the cached managed base
   `docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`. The fixture
   requires that image to be present before it starts. Its production recipe build uses the network for apt and both
   official agent installers and clones the public repository from GitHub. Agent turns use a stand-in. Select it with
@@ -472,7 +471,7 @@ systemd or SSH substrate ran.
   supervisor process with the same host process, its screen (the ready line and a line echoed before) and its input; a
   state directory whose `supervisor.sock` path is 103 bytes, macOS's longest, holds its host sockets (each path shorter
   than the supervisor's) and the terminal works; with a real helm on the same state directory, a session created through
-  the helm's API reaches a hand-rolled browser WebSocket as grid messages showing the agent's screen, and `text` and
+  the helm's API reaches a hand-rolled client WebSocket as grid messages showing the agent's screen, and `text` and
   `key` messages sent up the socket reach the program; and a bare supervisor given a recording `FARHELM_TMUX` running no
   tmux at all through a host session's create, attach, tab, listing, rename, several ticker intervals, Delete and
   SIGTERM, with no tmux socket left. Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run
@@ -621,19 +620,19 @@ systemd or SSH substrate ran.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
-  beat the attach reply reaching the browser first, replay-complete ordering, heartbeat, frame and queue bounds, the
-  stall detach, teardown, and the client's requests, uploads and relays, and the attachment trace (the
-  `farhelm_helm::terminal_attachments` debug events) reporting each attachment's start and end once. The grid stream:
-  relayed unread both ways (a 200 KiB frame sent before the reply, a browser message of exactly the 64 KiB input bound
-  arriving as one frame, resize, and a browser's pause and resume dropped after it), a message over that bound ending
-  the attachment with nothing forwarded after it (on the socket, and in the client whoever sends next), a slow browser
-  paused by the helm and resumed once it catches up with no frame lost, at 32 KiB messages with a writer queue's worth
-  arriving after the pause and at 1 MiB rows with 8 arriving after it, a browser's own pause and resume never touching
-  that flow, the queue's pause and resume marks, event and byte bounds and frame bounds, an ended attachment never
-  paused again, and a wedged browser's handler ended by the stall detach (premise: parked mid-send with the attachment
-  live; oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the workspace
-  nextest run. Run it when the helm's terminal relay, its client's terminal queue or the protocol's attach messages
-  change.
+  beat the attach reply reaching the WebSocket client first, replay-complete ordering, heartbeat, frame and queue
+  bounds, the stall detach, teardown, and the supervisor client's requests, uploads and relays, and the attachment trace
+  (the `farhelm_helm::terminal_attachments` debug events) reporting each attachment's start and end once. The grid
+  stream: relayed unread both ways (a 200 KiB frame sent before the reply, a client message of exactly the 64 KiB input
+  bound arriving as one frame, resize, and a client's pause and resume dropped after it), a message over that bound
+  ending the attachment with nothing forwarded after it (on the socket, and in the supervisor client whoever sends
+  next), a slow client paused by the helm and resumed once it catches up with no frame lost, at 32 KiB messages with a
+  writer queue's worth arriving after the pause and at 1 MiB rows with 8 arriving after it, a client's own pause and
+  resume never touching that flow, the queue's pause and resume marks, event and byte bounds and frame bounds, an ended
+  attachment never paused again, and a wedged client's handler ended by the stall detach (premise: parked mid-send with
+  the attachment live; oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the
+  workspace nextest run. Run it when the helm's terminal relay, its supervisor client's terminal queue or the protocol's
+  attach messages change.
 - `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
   proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
