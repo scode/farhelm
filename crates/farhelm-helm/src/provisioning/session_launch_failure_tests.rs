@@ -416,6 +416,55 @@ async fn cold_container_launch_success_establishes_real_task_and_session_premise
     f.commands.assert_ownership_accounted().await;
 }
 
+/// A cold container launch's progress says SPEC.md's container words
+/// ("Container sessions"): **Preparing <recipe> on <host>…**, **Creating a
+/// <recipe> container on <host>…** and **Starting Farhelm in the container…**,
+/// with the place host named as Hosts shows it (its alias, not its
+/// destination), under the step ids every provider shares. Why: the
+/// launcher's pill shows these names as they are, and the shared launch used
+/// to show provider-neutral ones and a "Prepare snapshot" step for a
+/// container. Specified on the run's listed steps while its create is held at
+/// the session run, after preparation has been needed.
+#[farhelm_testtrace::test]
+async fn cold_container_launch_progress_names_its_steps_in_container_words() {
+    let f = Fixture::new().await;
+    assert!(
+        f.store
+            .update_alias(f.place, Some("build-box"))
+            .await
+            .unwrap(),
+        "premise: the place host's alias differs from its destination"
+    );
+    f.commands.gate_session();
+    let (_, result) = f.start().await;
+    let host = f.at_session_run().await;
+    let runs = f.service.runs().await.runs;
+    let run = runs.iter().find(|run| run.host_id == host).unwrap();
+    let names: Vec<_> = run
+        .steps
+        .iter()
+        .map(|step| (step.step.as_str(), step.name.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("build-snapshot", "Select the recipe source"),
+            ("prepare-snapshot", "Preparing dev on build-box…"),
+            ("create-sandbox", "Creating a dev container on build-box…"),
+            (
+                "configure-agents",
+                "Configure credentials and agent endpoints"
+            ),
+            ("attach-supervisor", "Starting Farhelm in the container…"),
+            ("create-session", "Launch the session"),
+        ]
+    );
+    let peer = f.peer(host, false);
+    f.commands.release_session();
+    f.finish(host, result).await.unwrap();
+    assert_eq!(peer.await.unwrap(), 1);
+}
+
 /// `POST /api/environment-sessions` at a container host: a 202 naming the
 /// launch's host and run while its create is still held, then a refused first
 /// session's "Not launched." reason on that run in the pushed host progress

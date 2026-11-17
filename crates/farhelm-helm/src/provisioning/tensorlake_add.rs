@@ -50,6 +50,9 @@ struct SessionPreparation<'a> {
     service: &'a ProvisioningService,
     host: HostId,
     visible: std::sync::atomic::AtomicBool,
+    /// The provider's name for the step ([`crate::environment::LaunchStepNames`]),
+    /// fixed when the launch was admitted like the run's other step names.
+    name: String,
 }
 
 #[async_trait::async_trait]
@@ -62,7 +65,7 @@ impl crate::environment::PreparationProgress for SessionPreparation<'_> {
                     1,
                     StepView {
                         step: step.id,
-                        name: step.name,
+                        name: self.name.clone(),
                         paths: step.paths,
                         explanation: step.explanation,
                         status: StepStatus::Running,
@@ -397,6 +400,19 @@ impl ProvisioningService {
         if let Some(reason) = available.reason {
             return Err(refused(reason));
         }
+        // A container's progress names its place host as Hosts shows it.
+        // Read before the row is registered, so a failed read needs no cleanup.
+        let place_name = match place.host() {
+            Some(id) => {
+                let row = self.host_row(id).await?;
+                Some(crate::aggregate::host_display_name(
+                    row.kind,
+                    row.destination.as_deref(),
+                    row.alias.as_deref(),
+                ))
+            }
+            None => None,
+        };
         let _confirming = Arc::clone(&self.add_confirmations).lock_owned().await;
         let tag = helm_tag(&self.store.registry_namespace().await?);
         let name = sandbox_name("farhelm-sess-", &tag, &recipe);
@@ -428,23 +444,28 @@ impl ProvisioningService {
             self.manager.forget_cache_lock(host);
             return Err(error);
         }
+        let crate::environment::LaunchStepNames {
+            preparing,
+            creating,
+            starting,
+        } = crate::environment::LaunchStepNames::at(place, &recipe, place_name.as_deref());
         let steps = PlanSteps {
             lead: format!("Launch a session on {recipe}"),
             kept: None,
             steps: [
-                ("build-snapshot", "Select the recipe source"),
-                ("create-sandbox", "Create the environment"),
+                ("build-snapshot", "Select the recipe source".to_owned()),
+                ("create-sandbox", creating),
                 (
                     "configure-agents",
-                    "Configure credentials and agent endpoints",
+                    "Configure credentials and agent endpoints".to_owned(),
                 ),
-                ("attach-supervisor", "Connect to Farhelm in the environment"),
-                ("create-session", "Launch the session"),
+                ("attach-supervisor", starting),
+                ("create-session", "Launch the session".to_owned()),
             ]
             .into_iter()
             .map(|(id, name)| PlanStep {
                 id: id.into(),
-                name: name.into(),
+                name,
                 paths: vec![],
                 explanation: None,
             })
@@ -502,11 +523,11 @@ impl ProvisioningService {
                 let mut index = 0;
                 let result = service
                     .environment_session_steps(
-                        host,
                         &recipe,
                         &definition,
                         place,
                         binding,
+                        preparing,
                         &mut index,
                     )
                     .await;
@@ -584,13 +605,15 @@ impl ProvisioningService {
     /// only that create's saved facts, never a newly renewed recipe image.
     async fn environment_session_steps(
         &self,
-        host: HostId,
         name: &str,
         recipe: &StoredRecipe,
         place: farhelm_proto::Place,
         binding: crate::environment::EnvironmentBinding,
+        preparing: String,
         index: &mut usize,
     ) -> anyhow::Result<()> {
+        // The new environment's own host row, which its binding was read from.
+        let host = binding.host;
         let provider = self
             .manager
             .providers()
@@ -601,6 +624,7 @@ impl ProvisioningService {
             service: self,
             host,
             visible: false.into(),
+            name: preparing,
         };
         let selected = match provider
             .ensure_prepared(
