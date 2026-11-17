@@ -34,6 +34,7 @@
 mod banner;
 mod button;
 mod checkbox;
+mod command_well;
 mod copy_button;
 mod copy_field;
 mod custom_flags;
@@ -66,6 +67,7 @@ mod tests;
 pub use banner::Banner;
 pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
+pub use command_well::{COMMAND_TEXT, CommandWell};
 pub use copy_button::{copy_button, copy_button_then};
 pub use copy_field::{CONFIRMATION, COPIED, CopyFeedback, CopyField};
 pub use custom_flags::CustomFlags;

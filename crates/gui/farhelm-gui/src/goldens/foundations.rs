@@ -4,8 +4,9 @@
 
 use crate::assets::Icon;
 use crate::components::{
-    Button, Checkbox, DialogFrame, HoverHelp, IconButton, RadioGroup, RadioOption, Role, ScrollBox,
-    Select, SelectOption, SequenceChip, SequencePill, TabOption, TabStrip, TextInput, Tier,
+    Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, RadioGroup, RadioOption,
+    Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, TabOption, TabStrip,
+    TextInput, Tier,
 };
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
@@ -52,6 +53,32 @@ pub(super) fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElemen
         .child(row(switch("off")))
         .child(row(switch("on").checked(true)))
         .child(row(switch("on-off").checked(true).disabled(true)))
+        .into_any_element()
+}
+
+/// The command well (`.ssh-help-command` and `.tensorlake-command` in the old stylesheet) at SSH help's width: a short
+/// command whose BEL shows escaped, and a long one that wraps inside its well, each with Copy centered beside it.
+pub(super) fn command_wells(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let well = |id: &'static str, command: String| {
+        let help = HoverHelp::tooltip("Golden scene control");
+        CommandWell::new(id, HostText::from_host(command), "Copy", help)
+    };
+    let long = format!(
+        "ssh -o ControlPath=/tmp/{} -N 'user@host.example.invalid'",
+        "control-path-".repeat(20)
+    );
+    div()
+        .w(px(560.))
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .text_color(theme::color(palette.fg_0))
+        .child(well(
+            "short",
+            "ssh -N -f -o ControlPath=/state/s.sock -- 'dev@build\u{7}box'".to_owned(),
+        ))
+        .child(well("long", long))
         .into_any_element()
 }
 
