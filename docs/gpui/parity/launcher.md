@@ -189,12 +189,10 @@ host or connection is dropped by the same key rule as an earlier path, which onl
 clears with the refusal, which any edit drops, tested for the refusal alert by the launch tests); the field's mark is a
 warning-colored border without an accessible "invalid" state, which GPUI's text field does not expose (a deviation);
 superseded: "failed asynchronous launch preparation is an announced refusal", whose preparation was minting a launch
-request key, which the GUI does not do (SPEC.md, "Losing the connection to the helm"); not yet ported: a Save as
-template refusal after a refused Launch press taking the "Not launched." alert away ("a save-as-template refusal is not
-labelled Not launched"; its test would sit in `templates::save_tests`)
+request key, which the GUI does not do (SPEC.md, "Losing the connection to the helm")
 
-- "a save-as-template refusal is not labelled Not launched", without a press before it:
-  `templates::save_tests::a_wrapper_that_does_not_parse_refuses_on_a_plain_line`.
+- "a save-as-template refusal is not labelled Not launched": the plain wrapper error replaces the preceding refused
+  Launch alert: `templates::save_tests::a_wrapper_that_does_not_parse_refuses_on_a_plain_line`.
 
 ### `tests/cursor-composer.spec.ts`
 
@@ -1247,7 +1245,8 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
   note, if the host's row was retargeted onto another install while the launcher stayed open, and this one keeps the
   host it opened with, sending the row's install as it stands at Launch; Restart with refuses ("This session's launch
   settings changed; close and reopen restart with") when the source's stored launch changed, and that refusal is shown
-  in advance as the hover reason rather than only after a press.
+  in advance as the hover reason rather than only after a press
+  (`launcher::restart_with_tests::restart_with_hover_explains_a_changed_stored_launch`).
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
 - A launch on a suspended environment or a stopped one that offers Resume names its host and asks you to resume it in
@@ -1288,7 +1287,8 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
   labelled node beside the field) rather than an invalid field.
 - Replace with (and Restart with) refuses Launch with "Wait for this session's other operation to finish" while its
   source has another request in flight; the old app disabled it without a reason while its page-wide operation token was
-  held.
+  held. The Restart with hover help is covered by
+  `launcher::restart_with_tests::restart_with_hover_explains_its_sources_other_operation`.
 - Replace with's Launch does not name the source warning as its accessible description, as the old button did with
   `aria-describedby`; the warning beside it is its own announced status instead. The button's description comes from its
   hover help, and putting the long warning into a tooltip would change what sighted users see.
@@ -1311,10 +1311,11 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
   `launcher::launch_tests::a_create_the_host_never_accepted_is_not_launched`,
   `launcher::launch_tests::a_timed_out_create_the_user_moved_on_from_has_its_own_notice`.
 - While one of the window's host-registry changes is in flight, Launch is refused with a reason ("Wait for the host
-  change to finish") as its hover text and after "Not launched." on a press; the old app only disabled it. A new host's
-  probe counts as such a change, which the old app's token left out, and a save of a registered host's settings (its
-  destination and alias included) does not, which the old token covered; both decided by the migration's orchestrator on
-  2026-11-14 (`launcher::launch_tests::launch_does_not_wait_for_a_host_settings_save`).
+  change to finish") as its hover text and after "Not launched." on a press; the old app only disabled it. Restart with
+  gives the same hover reason (`launcher::restart_with_tests::restart_with_hover_explains_a_host_registry_change`). A
+  new host's probe counts as such a change, which the old app's token left out, and a save of a registered host's
+  settings (its destination and alias included) does not, which the old token covered; both decided by the migration's
+  orchestrator on 2026-11-14 (`launcher::launch_tests::launch_does_not_wait_for_a_host_settings_save`).
 - A managed checkout's create that the helm leaves ambiguous (a timeout, a lost reply) is not retained and retried as
   the same request: the GUI sends no launch request keys, so the old "Retry reconciles the original request at this
   path" has no counterpart, and pressing Launch again asks for a new checkout (decided for every launch: duplicates

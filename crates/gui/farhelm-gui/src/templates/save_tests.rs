@@ -29,6 +29,7 @@ use crate::launcher::environment_launch_tests::container_draft;
 use crate::launcher::view_tests::search_focused;
 use crate::layers;
 use crate::main_view::MainView;
+use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{listing, preferences, session};
 use crate::test_support::{self, click, focused_id, keys, settle};
 
@@ -814,17 +815,35 @@ fn save_as_template_works_while_the_checkout_preview_is_refused(cx: &mut TestApp
     assert_eq!(body["name_kind"], json!("fixed"));
 }
 
-/// SPEC.md: "Errors that are not a refused launch, such as "Save as template" refusing a wrapper, keep the plain line".
-/// Specified: with a wrapper prefix that does not parse, Save as template opens no panel and says why, without "Not
-/// launched.".
+/// After Launch refuses a wrapper prefix that does not parse, Save as template gives its own reason on a plain line
+/// and opens no panel. Both refusals appear in the footer, where a lingering "Not launched." would describe the
+/// wrong action (SPEC.md, "Creation" and launch-refusal.spec.ts, line 306 at the reference commit).
 #[gpui::test]
 fn a_wrapper_that_does_not_parse_refuses_on_a_plain_line(cx: &mut TestAppContext) {
     let mut draft = codex_draft();
     draft.edit_wrapper("with-endpoint 'unclosed".into());
     let (_helm, cx) = launcher_on(cx, draft, &[]);
+    click(cx, "launcher-launch");
+    assert!(
+        drawn(cx, "launcher-refusal"),
+        "the premise: Launch was refused"
+    );
+    assert!(painted(cx).contains("Not launched. Correct the wrapper prefix before launching"));
     click(cx, "launcher-save-template");
     assert!(!drawn(cx, "save-template-panel"));
-    assert!(drawn(cx, "launcher-save-template-refusal"));
+    assert!(
+        !drawn(cx, "launcher-refusal"),
+        "the launch alert was replaced"
+    );
+    // The wrapper field also explains the parse error. Read the footer's own text to check this action's refusal.
+    let frame = test_support::frame(cx);
+    let refusal = "launcher-save-template-refusal";
+    assert!(
+        texts_within(&frame, refusal).iter().any(|line| {
+            !line.visible_bounds.is_empty() && line.text.starts_with("Invalid wrapper prefix:")
+        }),
+        "Save as template paints its own wrapper error"
+    );
     assert!(!painted(cx).contains("Not launched."));
 }
 
