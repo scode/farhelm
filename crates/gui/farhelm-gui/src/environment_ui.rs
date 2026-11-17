@@ -390,10 +390,10 @@ impl ProviderUi {
         }
     }
 
-    /// What the launcher says under a chosen recipe about registering Farhelm's SSH key with the provider's account,
-    /// once that key exists (`account`, as the launcher read it; `None` while it is out or failed): the old launcher's
-    /// note, its command and its copy button's words. SPEC.md, "Sandbox sessions": "The selected recipe shows the
-    /// existing copyable SSH-key registration command and explains that Farhelm cannot check account registration".
+    /// What the launcher says about registering Farhelm's SSH key with the provider's account, once that key exists
+    /// (`account`, as the launcher read it; `None` while it is out or failed): the old launcher's note, its command and
+    /// its copy button's words. SPEC.md, "Sandbox sessions": "Once Farhelm's SSH key exists, New sandbox shows the
+    /// existing copyable SSH-key registration command, whether or not a recipe is chosen".
     /// A container has no account to register with.
     pub(crate) fn registration_note(
         self,
@@ -817,13 +817,21 @@ impl ProviderUi {
 /// container on <host>"): the old `target_label`. `place_name` is the helm's name for a container's place host, and a
 /// place the helm could not name reads "host <id>". Raw host text (the recipe and the place's name are the helm's), for
 /// the caller to escape. Decided here, over the place, so shared code names no provider.
+///
+/// A target with no recipe chosen (an empty name, which the launcher's Runs on switch enters when the catalog offers
+/// the provider none) names the bare environment, "sandbox" or "container on <host>", so the footer reads "new
+/// sandbox". The old label had no such case and read "new  sandbox" there.
 pub(crate) fn target_label(target: &LaunchTarget, place_name: Option<&str>) -> String {
     let noun = ProviderUi(target.provider()).noun();
+    let named = match target.recipe() {
+        "" => noun.to_owned(),
+        recipe => format!("{recipe} {noun}"),
+    };
     match target.place() {
-        Place::TensorlakeAccount => format!("{} {noun}", target.recipe()),
+        Place::TensorlakeAccount => named,
         Place::PodmanHost(host) => {
             let name = place_name.map_or_else(|| format!("host {host}"), str::to_owned);
-            format!("{} {noun} on {name}", target.recipe())
+            format!("{named} on {name}")
         }
     }
 }

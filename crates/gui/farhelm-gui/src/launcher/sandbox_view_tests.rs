@@ -1,12 +1,13 @@
 //! Tests of New sandbox in the real main view over the helm client's fake: the Tensorlake account the launcher reads as
 //! it opens, the segment it shows, the recipe its segment enters on, its recipes listed with their mark, size and
-//! refusals, the registration note, and "Create a sandbox for this session?": a press asking it, its answers, the
-//! setting that skips it, an edit retiring it, and a quick launch prepared out of sight waiting for the account and
-//! coming back to ask it. SPEC.md, "Creation" (the Runs on bullet), "Sandbox sessions" and "Keyboard focus".
+//! refusals, the registration note, the footer's words when no recipe can be chosen (New container's too, from the
+//! same window), and "Create a sandbox for this session?": a press asking it, its answers, the setting that skips it,
+//! an edit retiring it, and a quick launch prepared out of sight waiting for the account and coming back to ask it.
+//! SPEC.md, "Creation" (the Runs on bullet), "Sandbox sessions" and "Keyboard focus".
 //!
 //! The fleet is the helm's pinned fixture's first three hosts, as in `environment_view_tests`; the catalog holds
-//! `plain`, with no snapshot, then `ready`, with one, both on managed Ubuntu at 2 CPUs, 4 GB memory and 20 GB disk. The
-//! account read is answered with each test's [`Settings`] (`answer_with`).
+//! `plain`, with no snapshot, then `ready`, with one, both on managed Ubuntu at 2 CPUs, 4 GB memory and 20 GB disk,
+//! except where a test pushes an empty one. The account read is answered with each test's [`Settings`] (`answer_with`).
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ProviderKind;
@@ -136,9 +137,9 @@ fn sandbox_recipes_are_listed_with_their_mark_size_and_refusal(cx: &mut TestAppC
 /// SPEC.md, "Sandbox sessions": "The selected recipe shows the existing copyable SSH-key registration command and
 /// explains that Farhelm cannot check account registration." A key that exists but was never registered fails only at
 /// launch, minutes later, so the note is the one place the user learns the step. Specified: in New sandbox with the key
-/// made, the note says the old sentences and names the helm's command shown escaped (it holds a zero-width space), and
-/// its "Copy registration command" puts the raw command on the clipboard byte for byte; back on Existing host the note
-/// is gone.
+/// made, the note says the old sentences and names the helm's command shown escaped (it holds a zero-width space) in
+/// its command well, and the well's "Copy registration command" puts the raw command on the clipboard byte for byte;
+/// back on Existing host the note is gone.
 #[gpui::test]
 fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
     let (_helm, cx) = opened(cx, &usable());
@@ -161,10 +162,10 @@ fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
         "shown escaped"
     );
     assert_eq!(
-        name_of(cx, "launcher-registration-copy").as_deref(),
+        name_of(cx, "launcher-registration-command-copy").as_deref(),
         Some("Copy registration command")
     );
-    test_support::click(cx, "launcher-registration-copy");
+    test_support::click(cx, "launcher-registration-command-copy");
     assert_eq!(
         cx.read_from_clipboard()
             .and_then(|item| item.text())
@@ -177,6 +178,51 @@ fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
     );
     test_support::click(cx, "launcher-runs-on-Existing host");
     assert_eq!(cx.debug_bounds("launcher-registration-note"), None);
+}
+
+/// With no recipe in the catalog, entering New sandbox or New container chooses none (an empty name), and the footer
+/// and Launch's name used to say "new  sandbox", with two spaces around the missing recipe, as the old footer did too.
+/// SPEC.md, "Creation": the footer names the target, and Launch's accessible name keeps it, so a screen reader reads
+/// these words aloud. Specified: with an empty catalog and a usable account, New sandbox's footer target is "Command ·
+/// new sandbox · ~" and Launch's name "Launch" before it; New container's are "Command · new container on host1 · ~".
+/// New sandbox also shows the SSH-key registration note with no recipe chosen, as the old launcher did.
+#[gpui::test]
+fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppContext) {
+    let empty = CollectionState {
+        collection: Collection::Recipes,
+        meta: meta(&[]),
+        entries: Vec::new(),
+    };
+    let hosts = fixture_hosts(&[0, 1, 2]);
+    let (mut helm, cx) =
+        window_with_more(cx, command_draft(), hosts, plain_preferences(), vec![empty]);
+    answer_with(&mut helm, cx, Some(&usable()), |_| false);
+    for (segment, named) in [
+        ("launcher-runs-on-New sandbox", "new sandbox"),
+        ("launcher-runs-on-New container", "new container on host1"),
+    ] {
+        test_support::click(cx, segment);
+        let recipe = draft(cx).target.map(|target| target.recipe().to_owned());
+        assert_eq!(
+            recipe.as_deref(),
+            Some(""),
+            "the premise: {segment} with no recipe"
+        );
+        let words = format!("Command · {named} · ~");
+        assert_eq!(name_of(cx, "launcher-summary-target"), Some(words.clone()));
+        assert_eq!(
+            name_of(cx, "launcher-launch"),
+            Some(format!("Launch {words}"))
+        );
+        // The old launcher showed the registration note with no recipe chosen too (its check passed for the empty
+        // name), so New sandbox keeps it here; a container has no account to register with.
+        let note = cx.debug_bounds("launcher-registration-note").is_some();
+        assert_eq!(
+            note,
+            segment == "launcher-runs-on-New sandbox",
+            "{segment}: the registration note"
+        );
+    }
 }
 
 // ---- "Create a sandbox for this session?" ---------------------------------------------------------------------------
