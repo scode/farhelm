@@ -371,9 +371,9 @@ pub(super) fn version_readout_menu_setup(state: &SceneState, window: &mut Window
 /// The reinstall readout's hover words exactly as `farhelm_desktop::updater::readout` builds them for an idle updater
 /// that cannot install the newer release (`ReinstallReason::UpgradeFloor`): the advice, the idle hover for this build,
 /// then the reinstall command, last with nothing after it because the user retypes it. This is the longest of the
-/// reinstall notices, so it is the one the tooltip's eight-line cut hurts most. Copied rather than called, since this
-/// crate cannot depend on the desktop crate (it depends on this one), so a change to that wording should be copied
-/// here.
+/// reinstall notices, so it shows best that the whole of it, command included, fits the hover. Copied rather than
+/// called, since this crate cannot depend on the desktop crate (it depends on this one), so a change to that wording
+/// should be copied here.
 fn reinstall_tooltip() -> String {
     format!(
         "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit \
@@ -414,11 +414,11 @@ pub(super) fn version_readout_tooltip(
     ))
 }
 
-/// The check button's hover help for the reinstall readout, with the pointer come to rest over its version: the short
-/// tooltip, cut at eight lines in its 280-pixel card, as the old app's was, and placed as the old app placed the
-/// version's help at the window's top edge, centered below the button with the 28-pixel gap that clears the pointer.
-/// With this notice the cut hides the reinstall command at the end of the words, a known risk the parity file records
-/// (the coordinator kept the old app's cut on 2026-11-14).
+/// The check button's hover help for the reinstall readout, with the pointer come to rest over its version: the
+/// paragraph help, up to 440 pixels wide with no line limit, so the reinstall command at the end of the words shows
+/// (the old app's short tooltip cut it at eight lines; the maintainer chose the wider help on 2026-11-16), placed as
+/// the old app placed the version's help at the window's top edge, centered below the button with the 28-pixel gap
+/// that clears the pointer.
 pub(super) fn version_readout_tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     rest_pointer_on_control(state, "app-version-check", window, cx);
 }

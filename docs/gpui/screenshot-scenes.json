@@ -2697,7 +2697,7 @@
     },
     {
       "golden": "version-readout-tooltip",
-      "title": "The check button's hover help for a reinstall readout, on the short tooltip cut at eight lines",
+      "title": "The check button's hover help for a reinstall readout, in the wider paragraph help that shows the whole reinstall command",
       "reference": null
     },
     {

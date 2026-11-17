@@ -242,8 +242,8 @@ linux/version-readout-outcomes--dark.png ab7dff6566bc1e4dbb96651d3835f16e1c56387
 linux/version-readout-outcomes--light.png fb0ee0460745cfe69c86f689b038fbbb34338091
 linux/version-readout-progress--dark.png 5785dba0d53229c64018d55f8c1691588546f6d7
 linux/version-readout-progress--light.png 267678bcf43be46fdb2143bb031e74528edd52ae
-linux/version-readout-tooltip--dark.png 8cc2d012d494063a4cb254770f1a42199f466345
-linux/version-readout-tooltip--light.png 9c484ad653d34702cdca6e13300cdd51bb17cb62
+linux/version-readout-tooltip--dark.png 4752ad9a9f76602b3ce227ad53fe674ba858b719
+linux/version-readout-tooltip--light.png 59e6f78390780d3d60eb53c62b6e029b16eed12f
 linux/version-readout-update-ready--dark.png 217f0ad55b205daab2ff49057d3fa20df9327c8e
 linux/version-readout-update-ready--light.png f065dc0c509234f55551eea36ffdb6d9ab29324c
 linux/welcome-dialog--dark.png c19ee27856e603f42e40e23247f66b8e17889219
