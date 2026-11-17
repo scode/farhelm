@@ -3,16 +3,17 @@
 //! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it. Notices given a stop have
 //! it on the same rule, between the body and the answers in Tab's order, scroll through it, and scroll on Page Up, Page
 //! Down, Home and End from an answer inside them (and from nowhere else), which keeps its other keys; notices without
-//! the opt-in take no keys. The notices sit above the answers' row unless asked to sit under it, and a footer of notices
-//! alone draws no empty answers row. And the frame's size caps against the window's content area, as pure arithmetic
-//! since no test window reports client decorations.
+//! the opt-in take no keys. Every body scrolls on those keys from a control inside it (and from nowhere else), while a
+//! button keeps its arrows and Space and a text field the keys it uses. The notices sit above the answers' row unless
+//! asked to sit under it, and a footer of notices alone draws no empty answers row. And the frame's size caps against
+//! the window's content area, as pure arithmetic since no test window reports client decorations.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    FocusHandle, IntoElement, Modifiers, ParentElement as _, ScrollDelta, ScrollEvent, Styled as _,
-    TestAppContext, VisualTestContext, div, point, px, size,
+    FocusHandle, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, ScrollDelta,
+    ScrollEvent, Styled as _, TestAppContext, VisualTestContext, div, point, px, size,
 };
 
 use crate::components::dialog::frame_limits;
@@ -589,9 +590,10 @@ fn page_keys_scroll_the_notices_from_an_answer_inside_them(cx: &mut TestAppConte
     );
 }
 
-/// Why this matters: taking keys from a control inside a region is the notices' opt-in, not a property of every
-/// notices region (SPEC_impl.md, "The component layer and theme": the only other region that takes keys from a control
-/// inside it is an anchored question's capped host-value line). The launcher's notices, for one, do not opt in.
+/// Why this matters: for the notices, taking keys from a control inside them is an opt-in, not a property of every
+/// notices region (SPEC_impl.md, "The component layer and theme", names plain notices among the exceptions to the rule
+/// that a scrolling region scrolls with the page keys from a control inside it). The launcher's notices, for one, do
+/// not opt in.
 ///
 /// Specified, in the same overflowing question drawn through plain notices (no `notices_stop`), with Tab on Delete
 /// permanently (which scrolls the notices to show it): Page Up and Home leave the notices where they are, and the
@@ -623,6 +625,100 @@ fn notices_without_the_opt_in_take_no_keys_from_their_answers(cx: &mut TestAppCo
         "plain notices took no keys from their answer"
     );
     assert!(!notices_stop_drawn(cx), "and have no stop");
+}
+
+// ---- The body's page keys -------------------------------------------------------------------------------------------
+
+/// Where the body's first line (`line-0`) is drawn, which moves exactly as far as the body scrolls.
+fn first_line(cx: &mut VisualTestContext) -> gpui::Pixels {
+    bounds(cx, "line-0").top()
+}
+
+/// Why this matters: SPEC.md, "Reaching everything by keyboard", has every scrollable region scrolled from the keyboard,
+/// and the old app's browser scrolled the container around a focused control. A body holding controls is no stop of its
+/// own, so without these keys the rest of a long body (the Templates editor's) is reached only by tabbing through it.
+///
+/// Specified, in a dialog whose body holds a button above lines running past it, with Tab on the button: Page Down
+/// scrolls the body forward and Home back to the start, focus staying on the button; with focus on Close in the
+/// answers' row, outside the body, Page Down leaves the body where it is.
+#[gpui::test]
+fn page_keys_scroll_a_dialog_body_from_a_button_inside_it(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        let apply = Button::new("apply", "Apply", HoverHelp::tooltip("Apply"), Role::Button);
+        let close = Button::new("close", "Close", HoverHelp::tooltip("Close"), Role::Button);
+        let body = div().child(apply).child(lines(80, "Body line"));
+        DialogFrame::new("form", "A long form", body, vec![close]).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("apply"), "the premise");
+    let (last, body) = (bounds(cx, "line-79"), bounds(cx, "form-body"));
+    assert!(last.bottom() > body.bottom(), "the premise: it overflows");
+    let start = first_line(cx);
+    keys(cx, "pagedown");
+    assert!(first_line(cx) < start, "Page Down scrolled the body");
+    keys(cx, "home");
+    assert_eq!(first_line(cx), start, "Home scrolled it back");
+    assert_eq!(focused_id(cx).as_deref(), Some("apply"), "focus stayed");
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("close"), "the premise");
+    keys(cx, "pagedown");
+    assert_eq!(first_line(cx), start, "a key from outside moved nothing");
+}
+
+/// Why this matters: the body takes the keys only from a control with no use for them. A body that took a text field's
+/// Home and End, or a multi-line box's Page Down, would scroll away from the text being edited and leave its caret.
+/// GPUI Kit's single-line field binds Page Up and Page Down but handles them only when multi-line, so they scroll.
+///
+/// Specified, with lines, a single-line field holding "abc", a multi-line box and a tall block in the body, and Tab on
+/// the field (which leaves the body away from both of its ends): End, "y", Home, "x", End, "z" leave "xabcyz" and the
+/// body where it is, and Page Down then scrolls it; with Tab on to the box, Page Down leaves the body where it is.
+#[gpui::test]
+fn a_text_field_in_a_dialog_body_keeps_the_keys_it_uses(cx: &mut TestAppContext) {
+    let kept: Rc<RefCell<Option<(TextInputState, TextInputState)>>> = Rc::default();
+    let drawn = kept.clone();
+    let cx = open(cx, move |window, cx| {
+        let (field, notes) = drawn
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                let field = TextInputState::new(window, cx);
+                field.set_text("abc", window, cx);
+                (field, TextInputState::new_growing(3, window, cx))
+            })
+            .clone();
+        let help = |text: &'static str| HoverHelp::tooltip(text);
+        let body = div()
+            .child(lines(30, "Body line"))
+            .child(TextInput::new("field", &field, "Name", help("Name")))
+            .child(TextInput::new("notes", &notes, "Notes", help("Notes")))
+            .child(div().debug_selector(|| "tail".into()).h(px(1200.)));
+        DialogFrame::new("form", "A long form", body, Vec::new()).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    let (field, _) = kept.borrow().clone().expect("the fields were drawn");
+    // Both ends out of view, so a key the body took in either direction would move it.
+    let away_from_both_ends = |cx: &mut VisualTestContext| {
+        let body = bounds(cx, "form-body");
+        first_line(cx) < body.top() && bounds(cx, "tail").bottom() > body.bottom()
+    };
+    keys(cx, "tab");
+    assert!(away_from_both_ends(cx), "the premise, on the field");
+    let shown = first_line(cx);
+    keys(cx, "end y home x end z");
+    let text = cx.update(|_, cx| field.text(cx));
+    assert_eq!(text.as_ref(), "xabcyz", "End and Home moved the caret");
+    assert_eq!(first_line(cx), shown, "the body took neither");
+    keys(cx, "pagedown");
+    assert!(first_line(cx) < shown, "Page Down scrolled the body");
+    keys(cx, "tab");
+    assert!(away_from_both_ends(cx), "the premise, on the box");
+    let shown = first_line(cx);
+    keys(cx, "pagedown");
+    assert_eq!(first_line(cx), shown, "the box kept its Page Down");
 }
 
 // ---- The content area -----------------------------------------------------------------------------------------------
