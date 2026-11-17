@@ -510,9 +510,42 @@ Of its 21 cases, 8 are this area's: the host's lifecycle in the Hosts panel. The
 details half of "suspend confirmation and sandbox details use the standard frame in ${palette}" is ported: a sandbox's
 row details name it, its recipe and size ("Sandbox: <name> · Recipe: <recipe> · 2 CPUs · 4 GB memory"), and a
 container's its container host, `hosts/identity/phase/tests.rs` `a_machines_details_name_it_and_its_forwards`; a
-deletion's details in the provider's words, `a_deletion_is_worded_for_the_hosts_provider`. The rest (Suspend with its
-question, Resume inline and from the menu, the session card's Resume host, the pending verb, and when Suspend asks)
-waits for Suspend and Resume.
+deletion's details in the provider's words, `a_deletion_is_worded_for_the_hosts_provider`. Replacing tests for Resume
+and Suspend, in `crates/gui/farhelm-gui/src/hosts/environment_tests.rs` unless named otherwise:
+
+- "a pending ${verb} names its transition rather than a confirmed suspension", its resume half: the row's Resume sends
+  the host's Resume, the row reads "Resuming…" while it is out and while the pushed phase says so, its Resume
+  unavailable meanwhile, and a 504 at the helm's bound is no failure,
+  `the_rows_resume_sends_the_hosts_resume_and_a_late_answer_is_no_failure`; the details name whom Farhelm asked,
+  `hosts/identity/phase/tests.rs` `a_change_names_whom_farhelm_asked`; the status counts the seconds since Farhelm
+  asked, `a_changing_row_counts_the_seconds_since_farhelm_asked`. Its suspend half: the menu's Suspend reads
+  "Suspending…" while it is out and while the pushed phase says so, and a 504 is no failure,
+  `suspend_goes_at_once_when_every_session_there_is_idle`.
+- "a suspended host has inline Resume and can suspend from its menu", its Resume half: the same test, and the menu's
+  Resume with a refusal in the host refusal dialog, `the_menus_resume_shows_a_refusal_in_the_refusal_dialog`; none on a
+  connected sandbox, `a_connected_sandbox_offers_no_resume`; offered where the old row's `offers_resume` was,
+  `hosts/offers/tests.rs` `resume_is_offered_where_the_old_row_offered_it`; a launch elsewhere does not hold it,
+  `a_launch_elsewhere_does_not_hold_resume`; no working row or rail ring while it is out,
+  `a_resume_in_flight_is_no_live_work`. Its Suspend half: a connected sandbox's menu offers Suspend,
+  `suspend_goes_at_once_when_every_session_there_is_idle`, with a refusal in the host refusal dialog,
+  `the_menus_suspend_shows_a_refusal_in_the_refusal_dialog`; none while the machine is being deleted or its deletion
+  failed, and unavailable while the host is busy, `hosts/offers/tests.rs`
+  `suspend_is_offered_on_a_running_machine_until_its_deletion`; a launch elsewhere does not hold it,
+  `a_launch_elsewhere_does_not_hold_suspend`.
+- "a suspended session banner resumes its host": the session pane's, `session_pane/environment_tests.rs`
+  `the_suspended_card_says_so_and_resumes`.
+- "Suspend asks when an agent is working or its status is unknown" (working, unknown, a stale idle session) and "an
+  unreachable host still offers Suspend": `suspend_asks_when_an_agent_works_or_its_activity_is_unknown`, which also
+  answers with a truncated listing and a failed read, and asks on a host already unreachable at the click.
+- "an empty cached listing asks when the host disconnects during the read / before the click": the host pushed
+  connecting while the read is out, then an empty listing, asks,
+  `suspend_asks_when_the_host_disconnects_during_its_read`; the click-time case is the unreachable one above.
+- The question and the host changing under it: `the_suspend_question_follows_its_host`; the read answering after the
+  user moved on, `a_suspend_read_after_the_user_moved_on_says_so`.
+- "Suspend acts at once when every agent is idle or waiting": `suspend_goes_at_once_when_every_session_there_is_idle`.
+- "suspend confirmation and sandbox details use the standard frame in ${palette}", its confirmation half: the question
+  is the prompt's, whose frame and palettes the prompt's own tests cover; its title, line, answers in order and focus on
+  Cancel are checked by `suspend_asks_when_an_agent_works_or_its_activity_is_unknown`.
 
 ## `tests/provisioning.spec.ts`, Add host's dialog, probe and setup
 
@@ -1735,6 +1768,27 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The Hosts panel
 
+- **Resume and Suspend have hover help.** The old inline Resume and menu items had none; here they carry the provider's
+  help ("Resume this environment; preserved processes continue", or a stopped machine's starting words, and Suspend's
+  what freezing keeps and costs), as every control has its help.
+- **A changing container's status names whom Farhelm asked in its own words.** The old row's elapsed read "asked
+  Tensorlake N s ago" for every provider; a container's here reads "asked the container host N s ago", the provider's
+  words its details line uses too.
+- **Suspend's menu item draws the Pause glyph.** The old menu drew it with the Stop glyph; here Pause's two bars, the
+  app's mark for a suspended environment, name it.
+- **No refusal of Suspend or Resume during a launch on the same host yet.** The old page refused either while a launch
+  targeted or was waking that host ("A launch on this host is in progress; try again once it finishes"). The launcher
+  exposes no pending target yet, so neither the Hosts panel nor a session refuses them here; the helm's lifecycle lock
+  answers such a collision as busy, which the refusal dialog shows. A launch on another host never held them, there or
+  here.
+- **The Suspend question is the prompt's.** The old page drew its own modal with Cancel and Suspend; here it is a
+  question on the prompt, as every question is, with the same title, words and answers, starting on Cancel as the old
+  one did. It closes when the registry drops the host, as the other host questions do, and its Suspend sends nothing
+  once the host no longer offers Suspend (suspended, changing or being deleted meanwhile); the old question stayed and
+  sent.
+- **A Suspend whose activity read answers after the user moved on says so.** The old page always opened its question;
+  here a question never opens over what the user turned to, so the row says "Farhelm checked this host's sessions after
+  you moved on. Choose Suspend again to see the question.", as Uninstall's plan does.
 - **The running status's hover is the progress card, made only while it shows.** As SPEC.md asks, hovering a row's
   running status opens the card beside the sidebar (the old `HostProgressCard`). The card is made when the tooltip shows
   and dropped when it hides, since it holds the ticker's clock and its running step's pulse; the old page kept a hidden

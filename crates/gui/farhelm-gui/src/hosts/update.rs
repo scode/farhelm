@@ -216,15 +216,15 @@ fn start_with(host: i64, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
                 // it stays under the row, the one place left to show it.
                 Outcome::Refused(refusal) => {
                     super::status::failed(host, super::status::Action::Update, cx);
-                    let refusal = refusal.clone();
-                    let shown = window
-                        .update(cx, |_, window, cx| {
-                            refused(host, &refusal, mark, window, cx)
-                        })
-                        .unwrap_or(false);
-                    if shown && let Some(operations) = session::current_operations(cx) {
-                        operations.update(cx, |operations, cx| operations.forget(&planned, cx));
-                    }
+                    refusal::show_and_forget(
+                        host,
+                        "Update host",
+                        refusal,
+                        &planned,
+                        &mark,
+                        window,
+                        cx,
+                    );
                 }
                 // The plan request is answered 200; an accepted reply would mean the helm started something without a
                 // plan, which it never does for this route.
@@ -273,28 +273,6 @@ fn confirm(host: i64, key: &OpKey, body: Option<serde_json::Value>, cx: &mut App
     if let Err(not_started) = started {
         tracing::debug!(?not_started, "host update confirmation not sent");
     }
-}
-
-/// Show `host`'s refused plan, `refusal`, in the host refusal dialog, with the host as the registry lists it now;
-/// whether it opened. Nothing opens once the user has moved on since `mark`, or when the registry no longer lists the
-/// host.
-fn refused(
-    host: i64,
-    refusal: &crate::operations::Refusal,
-    mark: Mark,
-    window: &mut Window,
-    cx: &mut App,
-) -> bool {
-    let Some(view) = listed(host, cx) else {
-        return false;
-    };
-    refusal::open(
-        refusal::Refusal::of("Update host", &view, refusal),
-        &mark,
-        window,
-        cx,
-    )
-    .is_some()
 }
 
 /// Record `message` under `key` where the row shows a refusal of work on the host: from the plan request's completion,

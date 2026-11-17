@@ -135,6 +135,24 @@ impl ProviderUi {
         }
     }
 
+    /// The hover help of the Suspend answer of the Hosts panel's Suspend question, the old question's words for this
+    /// provider's machine.
+    pub(crate) fn host_suspend_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Suspend: pause this sandbox until it is resumed",
+            ProviderKind::Podman => "Suspend: pause this container until it is resumed",
+        }
+    }
+
+    /// Whom Farhelm asked to suspend or resume this provider's machine, as a changing host's details name it ("Asked
+    /// Tensorlake to resume at …; waiting for confirmation"): the old `lifecycle_request_detail`'s `asked`.
+    pub(crate) fn lifecycle_asked(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => "Tensorlake",
+            ProviderKind::Podman => "the container host",
+        }
+    }
+
     /// What a host whose machine is being deleted says about it under its row; with `failed`, that the deletion failed
     /// and Retry finishes it (the old `deleting_detail`).
     pub(crate) fn deleting_detail(self, failed: bool) -> &'static str {

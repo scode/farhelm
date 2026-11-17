@@ -8,7 +8,7 @@ use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
 use super::{
-    HostKind, Locality, Offers, Rerun, SetupRerun, Update, adoptable, menu_offers,
+    HostKind, Lifecycle, Locality, Offers, Rerun, SetupRerun, Update, adoptable, menu_offers,
     needs_app_supervisor, offers,
 };
 use crate::hosts::tests::{connected, host, local_down, run, skew};
@@ -24,6 +24,7 @@ fn idle_ssh() -> Offers {
         delete: None,
         uninstall: Some(true),
         retry: Some(true),
+        lifecycle: None,
         adopt: None,
     }
 }
@@ -80,8 +81,10 @@ fn a_too_new_host_is_not_offered_update() {
 }
 
 /// Why this matters: a suspended sandbox refuses new connections until it is resumed, so Update or a rerun of its
-/// setup could only fail (the helm refuses both before dialing). Specified: suspended, or with a suspend or resume in
-/// progress, a host with a failed setup is offered neither Update nor the rerun, and the rest is unchanged.
+/// setup could only fail (the helm refuses both before dialing), and Resume is its way back (the old row's
+/// `offers_resume`). Specified: a connected sandbox is offered no Resume; suspended, or with a suspend or resume in
+/// progress, a host with a failed setup is offered neither Update nor the rerun, and Resume instead, available while
+/// suspended and unavailable while the change runs; the rest is unchanged.
 #[test]
 fn a_suspended_host_is_not_offered_update_or_rerun() {
     let failed_setup = run(5, ProvisioningOperation::Add, RunStatus::Failed);
@@ -92,17 +95,24 @@ fn a_suspended_host_is_not_offered_update_or_rerun() {
     );
     assert_eq!(running.update, Some(Update::Available));
     assert_eq!(running.rerun, Some((Rerun::Setup, true)));
-    for state in [
-        HostStateView::Suspended {
-            observed_at: 0,
-            suspended_by_farhelm_at: None,
-            resume_failed: None,
-        },
-        HostStateView::TensorlakeChanging {
-            starting: false,
-            direction: LifecycleDirection::Resuming,
-            requested_at: 0,
-        },
+    assert_eq!(running.lifecycle, Some((Lifecycle::Suspend, true)));
+    for (state, resume) in [
+        (
+            HostStateView::Suspended {
+                observed_at: 0,
+                suspended_by_farhelm_at: None,
+                resume_failed: None,
+            },
+            true,
+        ),
+        (
+            HostStateView::TensorlakeChanging {
+                starting: false,
+                direction: LifecycleDirection::Resuming,
+                requested_at: 0,
+            },
+            false,
+        ),
     ] {
         let suspended = host(5, "tensorlake", state);
         assert_eq!(
@@ -110,8 +120,73 @@ fn a_suspended_host_is_not_offered_update_or_rerun() {
             Offers {
                 update: None,
                 rerun: None,
+                lifecycle: Some((Lifecycle::Resume, resume)),
                 ..running
             }
+        );
+    }
+}
+
+/// Why this matters: Resume is a stopped or suspended machine's way back, so the menu and the row offer it exactly
+/// where the old row's `offers_resume` did, and never on a stopped container whose container host is gone (nothing to
+/// start yet); with work in flight on the host the old item was disabled. Specified: a stopped container with its
+/// place available is offered Resume, available; one waiting for its place is offered Suspend instead, as the old menu
+/// offered it wherever Resume was not; a suspended sandbox with work in flight is offered Resume, unavailable.
+#[test]
+fn resume_is_offered_where_the_old_row_offered_it() {
+    let stopped = |waiting_for_place| HostStateView::Stopped {
+        start_failed: None,
+        waiting_for_place,
+    };
+    assert_eq!(
+        offers(&host(5, "podman", stopped(false)), None, false).lifecycle,
+        Some((Lifecycle::Resume, true))
+    );
+    assert_eq!(
+        offers(&host(5, "podman", stopped(true)), None, false).lifecycle,
+        Some((Lifecycle::Suspend, true)),
+        "nothing to resume yet, so the old menu's Suspend"
+    );
+    let suspended = HostStateView::Suspended {
+        observed_at: 0,
+        suspended_by_farhelm_at: None,
+        resume_failed: None,
+    };
+    assert_eq!(
+        offers(&host(4, "tensorlake", suspended), None, true).lifecycle,
+        Some((Lifecycle::Resume, false))
+    );
+}
+
+/// Why this matters: Suspend is offered on a running machine, reachable or not, as the old menu offered it, but never
+/// on a machine being deleted or whose deletion failed: Retry or Delete is that machine's only remedy, which is why
+/// this rule differs from the "deletion under way" one that withholds Retry. Specified: a connected and an unreachable
+/// sandbox are offered Suspend, available; with work in flight, Suspend unavailable; a sandbox being deleted, and one
+/// whose deletion failed, are offered neither Suspend nor Resume.
+#[test]
+fn suspend_is_offered_on_a_running_machine_until_its_deletion() {
+    let unreachable = HostStateView::Unreachable {
+        cause: "transport-failure".into(),
+        last_error: "socket closed".into(),
+    };
+    for state in [connected(), unreachable] {
+        assert_eq!(
+            offers(&host(4, "tensorlake", state.clone()), None, false).lifecycle,
+            Some((Lifecycle::Suspend, true)),
+            "{state:?}"
+        );
+    }
+    assert_eq!(
+        offers(&host(4, "tensorlake", connected()), None, true).lifecycle,
+        Some((Lifecycle::Suspend, false)),
+        "busy"
+    );
+    for failure in [None, Some("the provider refused".to_owned())] {
+        let deleting = HostStateView::Deleting { failure };
+        assert_eq!(
+            offers(&host(4, "tensorlake", deleting.clone()), None, false).lifecycle,
+            None,
+            "{deleting:?}"
         );
     }
 }
@@ -141,6 +216,7 @@ fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_re
             delete: None,
             uninstall: Some(false),
             retry: Some(false),
+            lifecycle: None,
             adopt: None,
         }
     );
@@ -165,6 +241,7 @@ fn a_running_run_holds_the_host_until_it_ends() {
             delete: None,
             uninstall: Some(false),
             retry: Some(false),
+            lifecycle: None,
             adopt: None,
         }
     );
@@ -245,6 +322,7 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
             delete: None,
             uninstall: None,
             retry: Some(true),
+            lifecycle: None,
             adopt: None,
         }
     );
@@ -323,6 +401,7 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
             delete: None,
             uninstall: None,
             retry: Some(true),
+            lifecycle: None,
             adopt: None,
         }
     );
@@ -358,6 +437,7 @@ fn each_kind_decides_its_own_offers() {
             delete: None,
             uninstall: None,
             retry: Some(true),
+            lifecycle: None,
             adopt: None,
         }
     );

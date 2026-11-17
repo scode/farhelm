@@ -71,11 +71,12 @@
 //! while no host's Update is) and the add button, then one row per host in the registry's order, session-owned hosts
 //! included (SPEC.md: they "participate in ordinary host management"). A row is the host's identity mark, its name (the
 //! alias, else the helm's display name, "Local (this machine)" for the local host under the registry's own name; the
-//! destination behind an alias shows in the details), its phase dot and words ([`identity::phase`]) with the inline
-//! `↑ Update` after them for a host on an older build whose Update is available, and the ⋯ toggle that opens its
-//! actions menu. Under it, while the row is open, the details: the destination behind an alias, what the helm knows
-//! about the phase (for a connected host its version, identity and session count) and the remedy where waiting will not
-//! help. The last refusal of work on the host shows under the row whether it is open or not.
+//! destination behind an alias shows in the details), a suspended or stopped sandbox's or container's inline Resume
+//! ([`lifecycle`]), its phase dot and words ([`identity::phase`]) with the inline `↑ Update` after them for a host on
+//! an older build whose Update is available, and the ⋯ toggle that opens its actions menu. Under it, while the row is
+//! open, the details: the destination behind an alias, what the helm knows about the phase (for a connected host its
+//! version, identity and session count) and the remedy where waiting will not help. The last refusal of work on the
+//! host shows under the row whether it is open or not.
 //!
 //! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): a setup is running on
 //! it that the user has not folded, its last provisioning run failed, the last work on it was refused, or it is the
@@ -87,13 +88,17 @@
 //! of its own under its name in place of the phase words and the inline Update, and an open row shows the run's steps
 //! under its details ([`progress`], which also keeps the one fact the UI holds about a host's run: when it first saw the
 //! run, and whether the user folded it). A running setup or uninstall opens its row; a running Update leaves it
-//! folded, and its failure opens it like any failure.
+//! folded, and its failure opens it like any failure. A Suspend's or Resume's request, and the provider's change after
+//! it, also put the status on a line of its own, "Suspending…" or "Resuming…" with how long ago Farhelm asked, while an
+//! inline Resume stays on the name's line.
 //!
-//! While any row shows a run's elapsed time (a setup, an Update or an uninstall), the panel holds the ticker's shared
-//! one-second clock ([`ticker::every_second`]), which redraws it once a second in an inactive window and under reduced
-//! motion too, so the count moves on with nothing pushed; while its window is active and a row shows a run in progress,
-//! it also holds the shared pulse. It lets go of both the moment the sidebar hides it ([`HostsPanel::hidden`]) and when
-//! a reset replaces the UI session, so a panel nobody sees keeps no ticker loop awake.
+//! While any row shows a run's elapsed time (a setup, an Update or an uninstall) or how long ago Farhelm asked a
+//! provider to suspend or resume a machine ([`phase::asked_ago`]), the panel holds the ticker's shared one-second clock
+//! ([`ticker::every_second`]), which redraws it once a second in an inactive window and under reduced motion too, so
+//! the count moves on with nothing pushed; while its window is active and a row shows a run in progress or a machine
+//! changing, it also holds the shared pulse, which is the changing row's spinner (SPEC.md, "Topology"). It lets go of
+//! both the moment the sidebar hides it ([`HostsPanel::hidden`]) and when a reset replaces the UI session, so a panel
+//! nobody sees keeps no ticker loop awake.
 //!
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
@@ -107,6 +112,7 @@
 
 pub mod add;
 pub(crate) mod identity;
+mod lifecycle;
 mod menu;
 pub(crate) mod offers;
 pub(crate) mod progress;
@@ -139,7 +145,8 @@ use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostVie
 use gpui::{
     AnyElement, App, Context, Div, EntityId, FocusHandle, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, Role, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, px,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::assets::Icon;
@@ -437,8 +444,13 @@ struct RowInput<'a> {
     status: Option<progress::Status>,
     /// Whether the host's Update is available ([`update::available`]), which the inline Update needs.
     updatable: bool,
+    /// The host's lifecycle offer ([`offers::Offers::lifecycle`]), which the inline Resume needs.
+    lifecycle: Option<(offers::Lifecycle, bool)>,
     /// The viewer's time zone for this frame, for the times the row's details give.
     zone: Zone,
+    /// How long ago Farhelm asked the provider to change the host's machine, which its status gives after the changing
+    /// phase's words ([`phase::asked_ago`]); `None` unless it is changing.
+    asked_ago: Option<String>,
 }
 
 impl Render for HostsPanel {
@@ -512,9 +524,14 @@ impl Render for HostsPanel {
                             operations.and_then(|operations| operations.in_flight(&op_key));
                         let status = progress::status(progress, seen, in_flight, now);
                         let available = update::available(host, progress, in_flight.is_some());
+                        let lifecycle =
+                            offers::offers(host, progress, in_flight.is_some()).lifecycle;
                         any_updatable |= available;
-                        pulsing |= status.is_some();
-                        counting |= matches!(status, Some(progress::Status::Running { .. }));
+                        let asked_ago = phase::asked_ago(host, now);
+                        // A changing machine's dot is its spinner, for as long as the pushed phase says it changes.
+                        pulsing |= status.is_some() || asked_ago.is_some();
+                        counting |= matches!(status, Some(progress::Status::Running { .. }))
+                            || asked_ago.is_some();
                         let input = RowInput {
                             host,
                             progress,
@@ -522,7 +539,9 @@ impl Render for HostsPanel {
                             seen,
                             status,
                             updatable: available,
+                            lifecycle,
                             zone,
+                            asked_ago,
                         };
                         self.row(
                             &input,
@@ -790,6 +809,43 @@ impl HostsPanel {
         // Progress takes a line of its own under the name, lined up with it, so a long step cannot take the name's
         // place; the toggle stays on the name's line (`.host-row-main:has(.host-status.updating)`).
         let main = match &input.status {
+            // A Suspend's or Resume's request, and the provider's change it starts (the pushed phase, counting the
+            // seconds since Farhelm asked), put the status on a line of its own under the name, as the old row's grid
+            // moved `.host-status` to its second row beside `.host-lifecycle-progress`; the unavailable inline Resume
+            // stays on the name's line before the toggle, as the old grid kept `.host-resume` there.
+            Some(status @ progress::Status::Lifecycle(_)) => {
+                let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
+                main.child(
+                    line.children(lifecycle::button(host, input.lifecycle, opener))
+                        .children(toggle),
+                )
+                .child(
+                    div()
+                        .pl(px(MARK + ROW_GAP))
+                        .pr(px(DETAIL_PAD_X))
+                        .min_w_0()
+                        .child(progress::status_mark(id, &name, status, pulse, palette)),
+                )
+            }
+            None if input.asked_ago.is_some() => {
+                let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
+                main.child(
+                    line.children(lifecycle::button(host, input.lifecycle, opener))
+                        .children(toggle),
+                )
+                .child(
+                    div()
+                        .pl(px(MARK + ROW_GAP))
+                        .pr(px(DETAIL_PAD_X))
+                        .min_w_0()
+                        .child(phase_status(
+                            host,
+                            input.asked_ago.as_deref(),
+                            pulse,
+                            palette,
+                        )),
+                )
+            }
             Some(status) => main.child(line.children(toggle)).child(
                 div()
                     .pl(px(MARK + ROW_GAP))
@@ -800,7 +856,14 @@ impl HostsPanel {
             None => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
-                    line.child(phase_status(host, palette))
+                    // The inline Resume sits between the name and the phase, as the old row drew it.
+                    line.children(lifecycle::button(host, input.lifecycle, opener.clone()))
+                        .child(phase_status(
+                            host,
+                            input.asked_ago.as_deref(),
+                            pulse,
+                            palette,
+                        ))
                         .children(update::button(host, input.updatable, opener))
                         .children(toggle),
                 )
@@ -1006,8 +1069,17 @@ fn identity_mark(host: &HostView, locality: Locality, palette: &Palette) -> AnyE
 
 /// A host's phase (`.host-status`): the dot and the words in the phase's tone, the words cut short before the toggle's
 /// place leaves the row. Named by its words; its hover is the words, or for a host running a newer Farhelm both
-/// versions and the remedy, which is then also its description, as the old status described only Too new.
-fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
+/// versions and the remedy, which is then also its description, as the old status described only Too new. A changing
+/// sandbox or container adds `asked_ago` after its words ("asked Tensorlake 12 s ago"), outside its name, as the old
+/// elapsed was hidden from assistive technology, wrapping under the words where the line is too narrow; and its dot
+/// pulses at `pulse`, the old row's spinner (SPEC.md, "Topology": "with a spinner"), still under reduced motion, where
+/// the pulse stays full.
+fn phase_status(
+    host: &HostView,
+    asked_ago: Option<&str>,
+    pulse: f32,
+    palette: &Palette,
+) -> AnyElement {
     let words = phase::words(&host.state);
     // The host's tone, which turns amber for failed forwards beside a working connection ([`phase::host_tone`]).
     let tone = phase::host_tone(host);
@@ -1025,7 +1097,26 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
             )
             .ink(ink)
             .described(offers::runs_newer_version(&host.state))
-            .content(phase_dot_and_words(&host.state, tone, palette)),
+            .content(
+                phase_dot_and_words(
+                    &host.state,
+                    tone,
+                    if asked_ago.is_some() { pulse } else { 1. },
+                    palette,
+                )
+                // The count wraps under the words where the line is too narrow for both, as the old
+                // `.host-lifecycle-progress` wrapped, and is cut short only when it alone does not fit.
+                .when(asked_ago.is_some(), |line| line.flex_wrap())
+                // `.host-lifecycle-elapsed`: subdued and a size smaller than the words.
+                .children(asked_ago.map(|ago| {
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(11.))
+                        .text_color(theme::color(palette.fg_2))
+                        .child(ago.to_owned())
+                })),
+            ),
         )
         .into_any_element()
 }
@@ -1034,8 +1125,8 @@ fn phase_status(host: &HostView, palette: &Palette) -> AnyElement {
 /// status and the host settings' header both show (the old `.host-status` span, which both drew). The host rail's
 /// connection dot takes its ink from the same tone ([`tone_ink`]), so the rail and the panel cannot disagree on a
 /// phase's color; change them together. `tone` is the phase's, or the host's where the caller knows the host
-/// ([`phase::host_tone`]).
-fn phase_dot_and_words(state: &HostStateView, tone: Tone, palette: &Palette) -> Div {
+/// ([`phase::host_tone`]). The dot is drawn at `pulse` opacity, 1 for a still one.
+fn phase_dot_and_words(state: &HostStateView, tone: Tone, pulse: f32, palette: &Palette) -> Div {
     let ink = tone_ink(tone, palette);
     div()
         .flex()
@@ -1049,7 +1140,8 @@ fn phase_dot_and_words(state: &HostStateView, tone: Tone, palette: &Palette) -> 
                 .flex_none()
                 .size(metrics::STATUS_DOT)
                 .rounded_full()
-                .bg(theme::color(ink)),
+                .bg(theme::color(ink))
+                .when(pulse < 1., |dot| dot.opacity(pulse)),
         )
         .child(div().min_w_0().truncate().child(phase::words(state)))
 }

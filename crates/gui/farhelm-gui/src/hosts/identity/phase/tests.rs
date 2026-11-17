@@ -763,3 +763,88 @@ fn credentials_not_delivered_are_said_and_turn_the_host_amber() {
     assert_eq!(host_tone(&undelivered), Tone::Advisory);
     assert_eq!(tone(&undelivered.state), Tone::Pending);
 }
+
+/// Why this matters: while a sandbox or container changes, its details say whom Farhelm asked and when, so a change
+/// that hangs can be told from one just asked; the old row named the provider ("Asked Tensorlake …", "Asked the
+/// container host …"), which the shared words without a provider cannot.
+///
+/// Specified: a sandbox asked to resume says "Asked Tensorlake to resume at <time>; waiting for confirmation", and a
+/// container asked to suspend "Asked the container host to suspend at <time>; waiting for confirmation", the time in
+/// the viewer's zone.
+#[test]
+fn a_change_names_whom_farhelm_asked() {
+    let mut sandbox = sandbox(None);
+    sandbox.state = HostStateView::TensorlakeChanging {
+        starting: false,
+        direction: LifecycleDirection::Resuming,
+        requested_at: 1_700_000_000_000,
+    };
+    assert!(
+        lines_for(&sandbox).iter().any(|(_, line)| line
+            == "Asked Tensorlake to resume at 2023-11-14 22:13:20; waiting for confirmation"),
+        "{:?}",
+        lines_for(&sandbox)
+    );
+    let container = host(
+        5,
+        "podman",
+        HostStateView::TensorlakeChanging {
+            starting: false,
+            direction: LifecycleDirection::Suspending,
+            requested_at: 1_700_000_000_000,
+        },
+    );
+    assert!(
+        lines_for(&container).iter().any(|(_, line)| line
+            == "Asked the container host to suspend at 2023-11-14 22:13:20; waiting for confirmation"),
+        "{:?}",
+        lines_for(&container)
+    );
+}
+
+/// Why this matters: the changing row's count is the only sign a slow provider is still being waited on (SPEC.md,
+/// "Topology"), and it reads the helm's timestamp against the viewer's clock, which can run behind it: the old
+/// `lifecycle_age_secs` clamped that rather than show a negative age. A host that is not changing, or has no provider,
+/// counts nothing.
+///
+/// Specified: a sandbox asked 12 seconds before `now` reads "asked Tensorlake 12 s ago"; one asked 5 seconds after
+/// `now` reads "asked Tensorlake 0 s ago"; a container asked 3 seconds before reads "asked the container host 3 s
+/// ago"; a connected sandbox and a changing SSH host give nothing.
+#[test]
+fn the_count_since_farhelm_asked_clamps_and_names_whom_it_asked() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use super::asked_ago;
+
+    let now = UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let asked = |kind: &str, at: i64| {
+        host(
+            4,
+            kind,
+            HostStateView::TensorlakeChanging {
+                starting: false,
+                direction: LifecycleDirection::Suspending,
+                requested_at: at,
+            },
+        )
+    };
+    assert_eq!(
+        asked_ago(&asked("tensorlake", 999_988_000), now).as_deref(),
+        Some("asked Tensorlake 12 s ago")
+    );
+    assert_eq!(
+        asked_ago(&asked("tensorlake", 1_000_005_000), now).as_deref(),
+        Some("asked Tensorlake 0 s ago"),
+        "a viewer clock behind the helm's"
+    );
+    assert_eq!(
+        asked_ago(&asked("podman", 999_997_000), now).as_deref(),
+        Some("asked the container host 3 s ago")
+    );
+    assert_eq!(asked_ago(&host(4, "tensorlake", connected()), now), None);
+    assert_eq!(
+        asked_ago(&asked("ssh", 999_988_000), now),
+        None,
+        "no provider"
+    );
+}

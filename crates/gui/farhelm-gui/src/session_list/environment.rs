@@ -46,8 +46,10 @@
 //!   pending Resume refuses Delete), as `super::menu::refused` refuses on any request of the session; other sessions on
 //!   the same host are not held until the provider's change is pushed (next rule), as the old claim held only its own
 //!   session. The activity read holds the clicked session too ([`reading`]), as the old claim was held through it.
-//!   Settings-and-hosts' later Suspend and Resume from Hosts moves the key to [`OpKey::host`] and lifts the activity
-//!   read out of [`begin`] as `pub(crate)` for its own use.
+//!   The Hosts panel's Suspend and Resume (`crate::hosts::lifecycle`) run on the host's key instead, as the old panel's
+//!   own per-host hold did, and share only the activity read ([`read_activity`]) and the commands
+//!   ([`suspend_command`], [`resume_command`]) with these: neither surface waits for the other's request, which the
+//!   pushed phase and the helm's lifecycle lock coordinate, as they did in the old app.
 //! - **The 20-second bound is routine, and the change still holds the session.** The helm answers these routes within
 //!   its host reply bound, and work still running then answers a 504 that says it carries on; a Tensorlake Resume
 //!   routinely takes longer. That answer is not shown as a failure ([`settle`]): the row and header go on showing
@@ -71,8 +73,8 @@
 //! new environment, keep this one"), which would describe a Clone into a fresh environment the launcher does not make
 //! yet. The environment Delete is [`super::environment_delete`]'s, and its bulk form `super::bulk`'s.
 //!
-//! NOTE: A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while Hosts offers no
-//! Retry yet: it comes with settings-and-hosts' Delete sandbox. Nothing here offers Retry, as the old row did not.
+//! A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words: the Hosts panel's menu offers
+//! that Retry (`crate::hosts`'s remedies). Nothing here offers Retry, as the old row did not.
 
 use std::collections::HashSet;
 
@@ -110,8 +112,9 @@ const STOP_AND_SUSPEND_NOTE: &str = "Stop and suspend freezes the remaining proc
 /// (`within_host_reply_bound_saying` in the helm's sessions module): not a failure here (the module docs). It is not the
 /// only 504: a supervisor's own timeout inside the bound (Stop and suspend's Stop half, say) answers it too, and the
 /// helm marks neither, so such a refusal is dropped as well and only the session's pushed state shows what happened.
-/// The environment Delete drops it the same way (`super::environment_delete`).
-pub(super) const CARRIES_ON: u16 = 504;
+/// The environment Delete drops it the same way (`super::environment_delete`), and the Hosts panel's Suspend and Resume
+/// read it the same way (`crate::hosts::lifecycle`).
+pub(crate) const CARRIES_ON: u16 = 504;
 
 // ---- What a session's environment is --------------------------------------------------------------------------------
 
@@ -194,14 +197,7 @@ impl<'a> Environment<'a> {
     /// Whether the control reads Resume rather than Suspend: suspended, or stopped and not waiting for its place (the
     /// old `Controls`' `suspended`). Its row offers no Stop and suspend then.
     pub(crate) fn resumable(self) -> bool {
-        matches!(
-            self.host.state,
-            HostStateView::Suspended { .. }
-                | HostStateView::Stopped {
-                    waiting_for_place: false,
-                    ..
-                }
-        )
+        crate::hosts::offers::resumable(&self.host.state)
     }
 
     /// Whether the environment is between states, so neither Suspend nor Resume is offered: the provider is changing it
@@ -289,8 +285,12 @@ impl Pending {
     /// The words beside the spinner.
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Pending::Suspending => "Suspending…",
-            Pending::Resuming => "Resuming…",
+            Pending::Suspending => {
+                phase::changing_words(farhelm_proto::tensorlake::LifecycleDirection::Suspending)
+            }
+            Pending::Resuming => {
+                phase::changing_words(farhelm_proto::tensorlake::LifecycleDirection::Resuming)
+            }
             Pending::Stopping => super::stop::PROGRESS_LABEL,
         }
     }
@@ -411,33 +411,49 @@ pub(crate) fn begin(
     }
     // Stop and suspend also asks wherever an ordinary Stop of the clicked row would.
     let stop_asks = stop && super::stop::asks(&target.row, target.skips_questions);
-    let Ok(path) = ApiPath::api(&["sessions"])
-        .and_then(|path| path.with_query(&[("host", host.to_string().as_str())]))
-    else {
-        return;
-    };
     set_reading(key, true, cx);
     let reading = key.to_owned();
-    let sent =
-        operations::read::<SessionList>(path, "GET /api/sessions", cx, move |listing, cx| {
-            // Cleared here, outside the window, so a window closed meanwhile cannot leave the session's commands
-            // refused.
-            set_reading(&reading, false, cx);
-            let asks = stop_asks || activity_asks(listing.ok().as_ref(), host, cx);
-            let _ = window.update(cx, move |_, window, cx| {
-                // Nothing else may redraw if the question does not open (the user moved on), and the control must not
-                // stay drawn as reading.
-                window.refresh();
-                if asks {
-                    ask(asked, ui, window, cx);
-                } else {
-                    send(asked, cx);
-                }
-            });
+    let sent = read_activity(host, cx, move |activity_says_ask, cx| {
+        // Cleared here, outside the window, so a window closed meanwhile cannot leave the session's commands
+        // refused.
+        set_reading(&reading, false, cx);
+        let asks = stop_asks || activity_says_ask;
+        let _ = window.update(cx, move |_, window, cx| {
+            // Nothing else may redraw if the question does not open (the user moved on), and the control must not
+            // stay drawn as reading.
+            window.refresh();
+            if asks {
+                ask(asked, ui, window, cx);
+            } else {
+                send(asked, cx);
+            }
         });
+    });
     if !sent {
         set_reading(key, false, cx);
     }
+}
+
+/// Read host `host`'s activity for a Suspend and tell `then` whether the Suspend asks first: the module docs' activity
+/// rule, whose contract a caller must not loosen. The listing is a fresh `GET /api/sessions?host=<id>`, never the
+/// pushed list; it counts only when read whole; the host must read connected in the store when the read answers; every
+/// listed status must be conclusive; and a read that fails asks. Returns whether the read was sent; when it was not (no
+/// UI session, an id that cannot be a query), `then` is never called, and the caller asks nothing. The Hosts panel's
+/// Suspend reads through this too (`crate::hosts::lifecycle`), so the session's and the host's Suspend ask alike.
+pub(crate) fn read_activity(
+    host: i64,
+    cx: &mut App,
+    then: impl FnOnce(bool, &mut App) + 'static,
+) -> bool {
+    let Ok(path) = ApiPath::api(&["sessions"])
+        .and_then(|path| path.with_query(&[("host", host.to_string().as_str())]))
+    else {
+        return false;
+    };
+    operations::read::<SessionList>(path, "GET /api/sessions", cx, move |listing, cx| {
+        let asks = activity_asks(listing.ok().as_ref(), host, cx);
+        then(asks, cx);
+    })
 }
 
 /// Whether the activity `listing` of host `host` leaves Suspend to ask first (the module docs' contract): unless the
@@ -537,25 +553,13 @@ pub(crate) fn resume(key: &str, host: i64, cx: &mut App) {
     );
 }
 
-/// The command `asked` sends: `POST /api/hosts/{id}/suspend` or `/resume`, or `POST /api/sessions/{id}/stop-and-suspend`
-/// with both of Stop's preconditions spelled out, as an ordinary Stop sends them.
+/// The command `asked` sends: `POST /api/hosts/{id}/suspend` or `/resume` ([`suspend_command`], [`resume_command`]),
+/// or `POST /api/sessions/{id}/stop-and-suspend` with both of Stop's preconditions spelled out, as an ordinary Stop
+/// sends them.
 pub(super) fn command(asked: &Asked) -> Result<Command, PathError> {
-    let host = asked.host.to_string();
     Ok(match asked.verb {
-        Verb::Suspend => Command::new(
-            Work::Suspend,
-            Method::Post,
-            ApiPath::api(&["hosts", &host, "suspend"])?,
-            None,
-            "POST /api/hosts/[host]/suspend",
-        ),
-        Verb::Resume => Command::new(
-            Work::Resume,
-            Method::Post,
-            ApiPath::api(&["hosts", &host, "resume"])?,
-            None,
-            "POST /api/hosts/[host]/resume",
-        ),
+        Verb::Suspend => suspend_command(asked.host)?,
+        Verb::Resume => resume_command(asked.host)?,
         Verb::StopAndSuspend => Command::new(
             Work::StopAndSuspend,
             Method::Post,
@@ -565,6 +569,30 @@ pub(super) fn command(asked: &Asked) -> Result<Command, PathError> {
             "POST /api/sessions/[session]/stop-and-suspend",
         ),
     })
+}
+
+/// Host `host`'s Suspend, `POST /api/hosts/{id}/suspend` with no body, as [`Work::Suspend`]: what a session's Suspend
+/// sends, and the Hosts panel's too (`crate::hosts::lifecycle`), so the two cannot drift apart.
+pub(crate) fn suspend_command(host: i64) -> Result<Command, PathError> {
+    Ok(Command::new(
+        Work::Suspend,
+        Method::Post,
+        ApiPath::api(&["hosts", &host.to_string(), "suspend"])?,
+        None,
+        "POST /api/hosts/[host]/suspend",
+    ))
+}
+
+/// Host `host`'s Resume, `POST /api/hosts/{id}/resume` with no body, as [`Work::Resume`]: what a session's Resume
+/// sends, and the Hosts panel's too (`crate::hosts::lifecycle`).
+pub(crate) fn resume_command(host: i64) -> Result<Command, PathError> {
+    Ok(Command::new(
+        Work::Resume,
+        Method::Post,
+        ApiPath::api(&["hosts", &host.to_string(), "resume"])?,
+        None,
+        "POST /api/hosts/[host]/resume",
+    ))
 }
 
 /// Send `asked` through the operation store on its session's key. A session with a request in flight sends nothing.
