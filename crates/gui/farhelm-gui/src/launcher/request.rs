@@ -180,6 +180,16 @@ pub const UNVERIFIED_HOST: &str =
     "The host installation is not verified; a checkout cannot be created";
 
 impl LaunchDraft {
+    /// Why the draft's place cannot take a launch now: a new environment's reasons, which take the host's place since it
+    /// has no host yet, or else the chosen host's. The first of [`Self::refusal`]'s reasons, and the one the launcher
+    /// puts before its own waits (a `gh:` query not yet picked).
+    pub(super) fn place_refusal(&self, target: Target<'_>) -> Option<String> {
+        match &self.target {
+            Some(environment) => environment_refusal(environment, target),
+            None => self.host_refusal(target.hosts),
+        }
+    }
+
     /// Why this draft cannot launch now, or `None` when it can. The first reason in the old app's order wins, so the
     /// user fixes one thing at a time.
     ///
@@ -187,12 +197,7 @@ impl LaunchDraft {
     /// since the launcher opened is refused rather than restarted with edits made against what it was (the old app's
     /// "This session's launch settings changed" check).
     pub fn refusal(&self, target: Target<'_>, live: Option<&SessionLaunch>) -> Option<String> {
-        // A new environment's reasons take the host's place: it has no host yet.
-        let place = match &self.target {
-            Some(environment) => environment_refusal(environment, target),
-            None => self.host_refusal(target.hosts),
-        };
-        if let Some(reason) = place {
+        if let Some(reason) = self.place_refusal(target) {
             return Some(reason);
         }
         // The old order: the destination's reasons come right after the host's, before the launch kind's.

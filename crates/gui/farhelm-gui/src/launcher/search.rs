@@ -24,23 +24,27 @@
 //!
 //! Every row is a draft choice the view applies through the draft's own edit methods, the same ones a hand edit uses
 //! (a template row through the templates' application path); this module only builds rows. The group order is the old
-//! one with the group not built yet left out (GitHub repositories, between Folders and Recent setups), so it can be
-//! added in its place.
+//! one.
 //! - **From the launch history** (`super::view::history`'s read of the chosen host): saved folders, offered after a
 //!   typed path's "Use this path"; whole recent setups, last, ranked as the recent setups strip ranks them but neither
 //!   capped nor narrowed by the draft; and models from past launches that the catalog does not list, after the
 //!   catalog's own, each with the agent type it ran with.
 //!
-//! NOTE: Not built yet: `gh:` repositories (with the managed checkouts' search). The label is parsed already, so a
-//! `gh:` query says it has no match rather than becoming a name.
+//! - **Repositories** are offered only under `gh:`: the choices the managed-checkout destination gives the query
+//!   (`super::view::checkout`'s `repository_choices`, handed in by the view), so a valid typed `owner/repo` is always
+//!   the first row, whatever the host's discovery found (SPEC.md, "Managed checkouts": "Incomplete discovery is
+//!   visible and does not prevent selecting a valid manually entered pair"), and the host's discovered repositories
+//!   that match follow. Taking one makes the destination a managed checkout of it, as the repository field's pick
+//!   does. Ported from the old launcher's `SearchScope::Github` rows (`list/create_form.rs` at reference commit
+//!   `24bc0580`).
 
 use farhelm_proto::launcher::{EFFORT_ORDER, LaunchCatalogModel, compatible_efforts};
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+use farhelm_proto::{GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::ElementId;
 
-use super::draft::{Tab, harness_label};
+use super::draft::{Tab, harness_label, repo_identifier};
 use super::recents::{RecentFilter, destination_label, ranked, selection_summary};
 use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
@@ -236,6 +240,8 @@ pub enum Row {
         entry: Box<LaunchHistoryEntry>,
         placement: HostText,
     },
+    /// Start in a managed checkout of this repository (only under `gh:`).
+    Github(GithubRepo),
 }
 
 /// The groups rows are shown in, in this order; an empty group is left out.
@@ -249,6 +255,7 @@ pub enum Group {
     Efforts,
     Permissions,
     Folders,
+    Repositories,
     RecentSetups,
 }
 
@@ -264,6 +271,7 @@ impl Group {
             Group::Efforts => "Efforts",
             Group::Permissions => "Permissions",
             Group::Folders => "Folders",
+            Group::Repositories => "GitHub repositories",
             Group::RecentSetups => "Recent setups",
         }
     }
@@ -282,6 +290,7 @@ impl Row {
             Row::Permission(_) => Group::Permissions,
             Row::UsePath(_) | Row::BrowsePath(_) | Row::Folder(_) => Group::Folders,
             Row::Recent { .. } => Group::RecentSetups,
+            Row::Github(_) => Group::Repositories,
         }
     }
 
@@ -324,6 +333,9 @@ impl Row {
                 .host(placement)
                 .text(" · ")
                 .host(&HostText::from_host(selection_summary(&entry.selection))),
+            Row::Github(repo) => sentence
+                .text("Managed checkout: ")
+                .host(&HostText::from_host(repo_identifier(repo))),
         }
     }
 
@@ -357,6 +369,7 @@ impl Row {
                 "Use this folder: the session will start here".to_owned()
             }
             Row::BrowsePath(_) => "List the folders under this path".to_owned(),
+            Row::Github(_) => "Start in a managed checkout of this repository".to_owned(),
             // The setup without its "Recent setup:" lead, as the old row's tooltip said it.
             Row::Recent { entry, placement } => {
                 return sentence
@@ -384,7 +397,8 @@ impl Row {
             | Row::UsePath(_)
             | Row::BrowsePath(_)
             | Row::Folder(_)
-            | Row::Recent { .. } => None,
+            | Row::Recent { .. }
+            | Row::Github(_) => None,
         }
     }
 }
@@ -432,6 +446,8 @@ pub struct Inputs<'a> {
     /// The chosen host's launch history while it is read and current, and the host as its rows name it; `None` before
     /// or without one, which offers no saved folders, recent setups or past models.
     pub history: Option<(&'a LaunchHistoryReply, &'a HostText)>,
+    /// A `gh:` query's repository choices, in order (the module docs); only a `gh:` query reads them.
+    pub repositories: &'a [GithubRepo],
 }
 
 /// A line the results area shows when there are no rows, and whether it is a warning (drawn in the warning color) or a
@@ -641,6 +657,10 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     }),
             );
         }
+    }
+
+    if scope == Scope::Github {
+        rows.extend(inputs.repositories.iter().cloned().map(Row::Github));
     }
 
     // The name fallback: unlabelled text that offered nothing else names the session, unless it is a word that needs an
