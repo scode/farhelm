@@ -14,7 +14,7 @@ use gpui::{TestAppContext, VisualTestContext};
 
 use super::draft::{LaunchDraft, Tab};
 use super::view::{Launcher, open};
-use crate::components::TextInputState;
+use crate::components::{Role, TextInputState};
 use crate::focus::Mark;
 use crate::layers;
 use crate::main_view::MainView;
@@ -412,6 +412,20 @@ fn a_refused_press_says_why_beside_the_main_action(cx: &mut TestAppContext) {
         Some("Launch: start the session"),
         "a complete draft gets Launch's own help back"
     );
+}
+
+/// Specified: pressing Launch on New with no agent draws the refusal beside Launch with the Alert role. Why: the
+/// refusal must be exposed as an alert, not just ordinary text ("launcher refusals use warning colors in ${appearance}
+/// appearance", `e2e/tests/composer-word-search.spec.ts` at `24bc0580`, its `role="alert"` assertion).
+#[gpui::test]
+fn the_refusal_beside_launch_is_an_alert(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    test_support::click(cx, "launcher-launch");
+    let refusal = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-refusal"))
+        .expect("the premise: the refusal is drawn");
+    assert_eq!(refusal.role, Some(Role::Alert));
 }
 
 /// The hover help Launch shows once the pointer has rested on it for the hover delay, which for a draft Launch would
