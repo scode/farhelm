@@ -109,6 +109,10 @@
 //! owner puts it in, or loud ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its
 //! title as a red heading (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
 //!
+//! A question may carry one link ([`Question::link`]), drawn after its lines and before its answers in every
+//! presentation: SPEC.md's sandbox question, asked inline in the launcher, links Tensorlake pricing there. It opens in
+//! the browser and is not an answer. Approved by the GPUI migration's orchestrator on 2026-11-16.
+//!
 //! Some options belong to some presentations only: the body, tile, note, width and scroll stop to the centered
 //! question, the loud look to the inline one, and the empty-click rule and the Escape-home and named-control returns
 //! to the two layers. A debug build asserts, as the question opens, that none is set on a question asked a way that
@@ -182,6 +186,13 @@ pub struct Answer {
     pub tier: Tier,
 }
 
+/// The link a question carries ([`Question::link`]): app wording and an app URL, never a host's value.
+struct Link {
+    label: SharedString,
+    url: SharedString,
+    help: HoverHelp,
+}
+
 impl Answer {
     /// An answer button labelled `label`, with `help` as its hover help and `tier` as its look: the one way to build
     /// an answer, since every question builds two or more. The help stays a [`HoverHelp`]
@@ -219,6 +230,8 @@ pub struct Question<T> {
     returns_to: ReturnTo,
     /// Drawn inline in the loud look ([`Question::loud`]).
     loud: bool,
+    /// The link between the lines and the answers ([`Question::link`]).
+    link: Option<Link>,
     /// Builds the feature's body from the frozen value when the question opens ([`Question::body`]).
     body: Option<BuildBody<T>>,
     /// Draws the header's icon tile ([`Question::tile`]).
@@ -268,6 +281,7 @@ impl<T: Clone + 'static> Question<T> {
             keeps_focus_on_empty_click: false,
             returns_to: ReturnTo::Opener,
             loud: false,
+            link: None,
             body: None,
             tile: None,
             note: None,
@@ -385,6 +399,34 @@ impl<T: Clone + 'static> Question<T> {
     /// build asserts it is not set on a question asked another way, and a release build ignores it there.
     pub fn loud(mut self) -> Self {
         self.loud = true;
+        self
+    }
+
+    /// A link labelled `label`, with `help` as its hover help, that opens `url` in the browser through `cx.open_url`,
+    /// the opener the announcements, the Help menu and host setup's pricing link use. SPEC.md's sandbox question,
+    /// asked inline in the launcher, is the case it exists for: "linking Tensorlake pricing".
+    ///
+    /// It is drawn as a link button after the question's lines and before its answers, in every presentation (on the
+    /// centered question, above any [`Question::body`]), and sits in Tab's order between the text and the answers. It
+    /// is not an answer. A click on it, or Enter or Space while it has focus, opens `url` and leaves the question open
+    /// and unanswered, and it never counts towards the first answer winning. Everything else about the question stays
+    /// as it would be without it: focus never starts on it, Escape with focus on it is Cancel, the held-Enter guard is
+    /// the button's own, and an inline question returns focus from it as it does from an answer. A reword keeps it.
+    ///
+    /// The label is app wording and `url` an app constant; neither may carry a host's value, since neither goes
+    /// through [`crate::host_text`]. A question carries one link, and a debug build asserts this is called once.
+    pub fn link(
+        mut self,
+        label: impl Into<SharedString>,
+        url: impl Into<SharedString>,
+        help: HoverHelp,
+    ) -> Self {
+        debug_assert!(self.link.is_none(), "Question::link called twice");
+        self.link = Some(Link {
+            label: label.into(),
+            url: url.into(),
+            help,
+        });
         self
     }
 
@@ -672,6 +714,8 @@ pub struct Prompt<T: 'static> {
     confirm_focus: FocusHandle,
     cancel_focus: FocusHandle,
     alternative_focus: Vec<FocusHandle>,
+    /// The link's, made whether or not there is one, so an inline question can tell focus is on it ([`Prompt::close`]).
+    link_focus: FocusHandle,
 }
 
 /// How an open question is drawn, which decides its look and, inline, that it returns focus itself.
@@ -807,18 +851,41 @@ impl<T: Clone + 'static> Prompt<T> {
         })
     }
 
+    /// The question's link ([`Question::link`]), as every presentation draws it after the lines. It is in a row of its
+    /// own so that it sits at the start of its line, as the announcements' link does, rather than stretched across the
+    /// question's column with its words centered. Never busy: it is no answer, so an attempt in flight does not
+    /// freeze it.
+    fn link(&self) -> Option<gpui::Div> {
+        self.question.link.as_ref().map(|link| {
+            let url = link.url.clone();
+            div().flex().child(
+                Button::new(
+                    "prompt-link",
+                    link.label.clone(),
+                    link.help.clone(),
+                    Role::Link,
+                )
+                .tier(Tier::Link)
+                .focus(&self.link_focus)
+                .on_click(move |_, _, cx| cx.open_url(&url)),
+            )
+        })
+    }
+
     /// Take the question down: close its layer, or, inline, stop drawing it and return focus to what held it when it
-    /// opened, if focus is on one of its answers or a click ran the answer and the user has not moved on since.
+    /// opened, if focus is on one of its answers or its link, or a click ran the answer and the user has not moved on
+    /// since.
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
         if self.shown == Shown::Inline {
-            // Focus goes back only from an answer that holds it, so it stays wherever the user took it otherwise. The
-            // answer's own press or key is the action, so its mark is taken now.
+            // Focus goes back only from an answer or the link that holds it (Escape on the link is Cancel), so it stays
+            // wherever the user took it otherwise. The answer's own press or key is the action, so its mark is taken
+            // now.
             let holds = std::iter::once(&self.cancel_focus)
                 .chain(&self.alternative_focus)
-                .chain(std::iter::once(&self.confirm_focus))
+                .chain([&self.confirm_focus, &self.link_focus])
                 .any(|answer| answer.is_focused(window));
             // A click on an answer is an answer from inside the question wherever it left focus. The macOS click rule
             // focuses no button, and the press goes on to the owner's empty-space rule, which in a dialog that takes
@@ -973,6 +1040,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.warn_bright))
                 .children(lines.map(|line| div().child(line)))
+                .children(self.link())
                 .child(
                     div()
                         .debug_selector(|| "prompt-answers".into())
@@ -990,6 +1058,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .gap(px(8.))
             .text_color(theme::color(palette.fg_0))
             .children(question.lines.iter().cloned().map(|line| div().child(line)))
+            .children(self.link())
             .children(self.body.clone())
             .children(self.reason(cx));
         let mut frame = DialogFrame::new("prompt", question.title.clone(), body, answers);
@@ -1026,10 +1095,11 @@ fn when_shown(window: &Window, shown: impl FnOnce(&mut App) + 'static) {
     window.on_next_frame(move |_, cx| shown(cx));
 }
 
-/// An inline question, as [`ask_inline`] draws it: the title, the summary and the lines, the reason the last attempt
-/// failed (amber, as the old launcher's `.yolo-confirmation-error` was), then the answers right-aligned 8 pixels apart
-/// (`.dialog-actions`), in the plain or the loud look (see the module docs). Escape inside it is Cancel, and is taken
-/// even while an attempt is in flight (then it does nothing), so it never reaches the owning dialog.
+/// An inline question, as [`ask_inline`] draws it: the title, the summary and the lines, its link if it has one
+/// ([`Question::link`]), the reason the last attempt failed (amber, as the old launcher's `.yolo-confirmation-error`
+/// was), then the answers right-aligned 8 pixels apart (`.dialog-actions`), in the plain or the loud look (see the
+/// module docs). Escape inside it, the link included, is Cancel, and is taken even while an attempt is in flight (then
+/// it does nothing), so it never reaches the owning dialog.
 fn inline<T: Clone + 'static>(
     prompt: &Prompt<T>,
     answers: Vec<Button>,
@@ -1066,6 +1136,7 @@ fn inline<T: Clone + 'static>(
                 .child(summary)
         }))
         .children(question.lines.iter().cloned().map(|line| div().child(line)))
+        .children(prompt.link())
         .children(reason)
         .child(
             div()
@@ -1260,11 +1331,11 @@ impl<T: Clone + 'static> Open<T> {
     /// answers' actions. Returns whether it did.
     ///
     /// Everything else stays as the question opened, and the rest of `question` is not read: the layer, Cancel, the
-    /// extra answers and their actions, Confirm's tier, whether Confirm is enabled, the empty-click rule, where closing
-    /// returns focus, the tile, note, width and scroll stop, and a failed attempt's reason, which still says what the
-    /// last press did. A debug build asserts that `question` has as many extra answers and the same Confirm enabled,
-    /// since a question differing there would be drawn one way and answered another. Where focus starts is not read
-    /// either: the question has started.
+    /// extra answers and their actions, the link, Confirm's tier, whether Confirm is enabled, the empty-click rule,
+    /// where closing returns focus, the tile, note, width and scroll stop, and a failed attempt's reason, which still
+    /// says what the last press did. A debug build asserts that `question` has as many extra answers and the same
+    /// Confirm enabled, since a question differing there would be drawn one way and answered another. Where focus
+    /// starts is not read either: the question has started.
     ///
     /// Focus stays where it is. The answers keep their focus handles and the text's scroll stop its own, so an answer
     /// or the stop that held focus still holds it, and nothing closes, opens, moves or animates. A control inside the
@@ -1504,6 +1575,7 @@ fn build<T: Clone + 'static>(
     );
     let confirm_focus = cx.focus_handle().tab_stop(true);
     let cancel_focus = cx.focus_handle().tab_stop(true);
+    let link_focus = cx.focus_handle().tab_stop(true);
     let alternative_focus = question
         .alternatives
         .iter()
@@ -1542,6 +1614,7 @@ fn build<T: Clone + 'static>(
         confirm_focus,
         cancel_focus,
         alternative_focus,
+        link_focus,
     });
     (prompt, start)
 }
