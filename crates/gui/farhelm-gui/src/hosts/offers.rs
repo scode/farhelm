@@ -28,6 +28,7 @@
 //! or Delete container on one whose removal deletes its machine ([`Offers::delete`]); the inline Update and Update all
 //! ask the panel's own offer (`super::update::available`), which never includes the app's check.
 
+use farhelm_input_mapping::Platform;
 use farhelm_proto::ProviderKind;
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -77,8 +78,8 @@ impl HostKind {
     }
 
     /// Whether the panel's Update can update this host: the GUI's side of the helm's own rule. The helm refuses to
-    /// update its own machine, which is updated by running the installer again, so that row's Update is shown greyed
-    /// and never sends anything (SPEC.md, "Session list").
+    /// update its own machine, which is updated outside the panel (the installer again on macOS, a newer install on
+    /// Linux), so that row's Update is shown greyed and never sends anything (SPEC.md, "Session list").
     pub(crate) fn updates_from_panel(self) -> bool {
         match self {
             HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
@@ -441,12 +442,35 @@ impl Update {
         }
     }
 
-    /// The item's description line: what Update does, or for the greyed item how this machine is updated instead.
-    pub(crate) fn description(self) -> &'static str {
-        match self {
-            Update::Available => "Install the newer Farhelm version",
-            Update::Greyed => "Run the installer again to update this machine",
-            Update::CheckForRelease => "Check for a newer Farhelm and install it",
+    /// The item's description line: what Update does, or for the greyed item how this machine is updated instead on
+    /// `platform` (the build's own, [`crate::actions::THIS_PLATFORM`], which tests vary). macOS has a desktop installer
+    /// to run again; Linux has none, so there the line says to install a newer Farhelm, as the migration's orchestrator
+    /// decided on 2026-11-17 (SPEC.md, "Session list").
+    pub(crate) fn description(self, platform: Platform) -> &'static str {
+        match (self, platform) {
+            (Update::Available, _) => "Install the newer Farhelm version",
+            (Update::Greyed, Platform::Mac) => "Run the installer again to update this machine",
+            (Update::Greyed, Platform::Linux) => {
+                "Install a newer Farhelm on this machine to update it"
+            }
+            (Update::CheckForRelease, _) => "Check for a newer Farhelm and install it",
+        }
+    }
+
+    /// The item's hover help: what choosing it does, or for the greyed item the same platform's way to update this
+    /// machine as [`Update::description`] gives.
+    pub(crate) fn help(self, platform: Platform) -> &'static str {
+        match (self, platform) {
+            (Update::Available, _) => "Update: install this helm's Farhelm version on this host",
+            (Update::Greyed, Platform::Mac) => {
+                "Update: run the installer again to update this machine"
+            }
+            (Update::Greyed, Platform::Linux) => {
+                "Update: install a newer Farhelm on this machine to update it"
+            }
+            (Update::CheckForRelease, _) => {
+                "Update: check for a newer Farhelm release and install it"
+            }
         }
     }
 }

@@ -11,19 +11,18 @@
 //! draws Retry first, which tries the host's connection again now, then Adopt for a mismatched identity, naming the
 //! identity it accepts as the host reported it when the menu opened, which is the one the click sends
 //! ([`super::remedies`]), and which on a host whose machine's deletion failed deletes it again; then Re-run on an SSH
-//! host or a Tensorlake sandbox whose setup failed, which runs it again ([`super::setup::rerun`]),
-//! and on a host whose Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote
-//! host, which updates it without asking (the same request); Settings, which opens the host settings dialog
-//! ([`super::settings`]); on the helm's own machine the greyed Update with the reason it is greyed ("Run the installer
-//! again to update this machine"), which sends nothing (SPEC.md, "Session list"), as is a failed Update's Re-run there;
-//! in the installed desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a
-//! newer Farhelm and install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose
-//! progress and outcome show beside the version readout, so the menu just closes, as the old one did; and on an SSH
-//! host, behind a separator in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]),
-//! and Remove, which forgets the host ([`super::remove`]); on a Tensorlake sandbox or a container, Delete sandbox or
-//! Delete container in Remove's place, which deletes the machine after a question that always asks (the same module).
-//! Retry, Adopt, Settings, Uninstall, Remove and Delete are unavailable while the host has work in flight or a run
-//! going on.
+//! host or a Tensorlake sandbox whose setup failed, which runs it again ([`super::setup::rerun`]), and on a host whose
+//! Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote host, which updates it
+//! without asking (the same request); Settings, which opens the host settings dialog ([`super::settings`]); on the
+//! helm's own machine the greyed Update with the reason it is greyed, this platform's way to update it
+//! ([`Update::description`]), which sends nothing (SPEC.md, "Session list"), as is a failed Update's Re-run there; in
+//! the installed desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a newer
+//! Farhelm and install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose progress
+//! and outcome show beside the version readout, so the menu just closes, as the old one did; and on an SSH host, behind
+//! a separator in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]), and Remove,
+//! which forgets the host ([`super::remove`]); on a Tensorlake sandbox or a container, Delete sandbox or Delete
+//! container in Remove's place, which deletes the machine after a question that always asks (the same module). Retry,
+//! Adopt, Settings, Uninstall, Remove and Delete are unavailable while the host has work in flight or a run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so does the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -46,6 +45,7 @@ use gpui::{
 
 use super::identity::{display_name, phase};
 use super::offers::{self, HostKind, Lifecycle, Offers, Rerun, Update};
+use crate::actions::THIS_PLATFORM;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
 use crate::environment_ui::ProviderUi;
@@ -387,21 +387,14 @@ impl Render for HostMenu {
         });
         let update = offered.update.map(|offered| {
             let (menu, host) = (cx.weak_entity(), self.host);
-            let help = match offered {
-                Update::Available => "Update: install this helm's Farhelm version on this host",
-                Update::Greyed => "Update: run the installer again to update this machine",
-                Update::CheckForRelease => {
-                    "Update: check for a newer Farhelm release and install it"
-                }
-            };
             MenuItem::new(
                 "host-menu-update",
                 Icon::Update,
                 "Update",
-                HoverHelp::tooltip(help),
+                HoverHelp::tooltip(offered.help(THIS_PLATFORM)),
                 Role::MenuItem,
             )
-            .description(offered.description())
+            .description(offered.description(THIS_PLATFORM))
             .disabled(!offered.acts())
             .focus(&self.update_focus)
             .on_click(move |_, window, cx| {
