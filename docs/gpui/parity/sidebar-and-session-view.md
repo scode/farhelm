@@ -2222,9 +2222,8 @@ Where the port does not match the old app, and why. Each stays until the work na
   (`terminal/attached/tests.rs` `detached_and_refused_offer_reconnect` and
   `detached_refused_and_closed_streams_keep_the_red_band`).
 - Not yet ported, waiting for the launcher's environment work: Suspend and Resume refused while this window's own launch
-  targets or is waking the same host (the old "A launch on this host is in progress; try again once it finishes"), and
-  Clone's environment wording ("New session in a new environment, keep this one"), which would describe a Clone the
-  launcher does not make yet. The helm's lifecycle lock refuses a collision meanwhile.
+  targets or is waking the same host (the old "A launch on this host is in progress; try again once it finishes"). The
+  helm's lifecycle lock refuses a collision meanwhile.
 - While a session's environment is being deleted, its row menu's Rename, Mark read or Mark unread and pin items are
   unavailable too, where the old menu kept them while nothing else ran: every command refuses through the one refusal
   place (`session_list::menu::refused`), as it already did while a Suspend or Resume ran, which SPEC.md's "its actions

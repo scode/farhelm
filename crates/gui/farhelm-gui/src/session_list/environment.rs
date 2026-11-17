@@ -70,9 +70,8 @@
 //! NOTE: Waiting on the launcher's environment work, and not drawn: refusing Suspend and Resume while this window's own
 //! launch targets or is waking the same host (SPEC.md, "Creation"; the old `LAUNCH_ON_THIS_HOST`, "A launch on this host
 //! is in progress; try again once it finishes"), since the launcher exposes no predicate for its pending target yet;
-//! meanwhile the helm's lifecycle lock refuses a collision as busy. And Clone's environment wording ("New session in a
-//! new environment, keep this one"), which would describe a Clone into a fresh environment the launcher does not make
-//! yet. The environment Delete is [`super::environment_delete`]'s, and its bulk form `super::bulk`'s.
+//! meanwhile the helm's lifecycle lock refuses a collision as busy. The environment Delete is
+//! [`super::environment_delete`]'s, and its bulk form `super::bulk`'s.
 //!
 //! A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words: the Hosts panel's menu offers
 //! that Retry (`crate::hosts`'s remedies). Nothing here offers Retry, as the old row did not.
