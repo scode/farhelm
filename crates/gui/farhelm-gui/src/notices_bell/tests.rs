@@ -1,5 +1,6 @@
 //! Tests of a session row's notification bell and its list: what the bell says and how it looks, where the list opens
-//! and what it shows, the read mark every close sends, Clear all, and the docs-link rule.
+//! and what it shows, the read mark every close sends, Clear all, the docs-link rule, and the open list following its
+//! bell through what changes underneath it.
 //!
 //! The rules that are pure (the unread count, the bell's words and inks, the docs-link recogniser) are tested as
 //! functions. Everything a user sees or the helm receives is tested in the real main view over the helm client's fake,
@@ -7,10 +8,16 @@
 //! the sessions. Controls are found by their element ids in GPUI's driver record of the frame, and links are checked
 //! through GPUI's test platform, which records the address the app asked it to open, so nothing reaches a browser.
 
+use std::cmp::Ordering;
+use std::time::Duration;
+
+use farhelm_helm_client::Method;
 use farhelm_helm_client::collections::decode_changes;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::SessionNotification;
-use farhelm_proto::ui_channel::{CollectionState, SessionRow};
+use farhelm_proto::ui_channel::{
+    Availability, CollectionChanges, CollectionState, HostView, Preferences, SessionRow,
+};
 use gpui::{DriverNode, Modifiers, Role, TestAppContext, VisualTestContext, point, px, size};
 use serde_json::{Value, json};
 
@@ -21,10 +28,13 @@ use super::{
 use crate::assets::Icon;
 use crate::host_text::HostText;
 use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::hosts::tests::{connected, host, hosts};
 use crate::local_time;
+use crate::session_list::COUNT_ID;
+use crate::session_list::menu_tests::{self, drawn, ended, label_of};
 use crate::session_list::tests::{
-    Fixture, TEST_NOW, change, listing, listing_meta, open_main, painted, preferences, selected,
-    session,
+    Fixture, TEST_NOW, change, listing, listing_meta, open_main, painted, preferences,
+    preferences_state, row_order, selected, session,
 };
 use crate::test_support::{self, any_open, focused_id, frame};
 use crate::theme;
@@ -121,6 +131,15 @@ fn open_list(cx: &mut VisualTestContext) {
 /// The accessible name of `a`'s bell in a fresh frame, or `None` when no bell is drawn.
 fn bell_name(cx: &mut VisualTestContext) -> Option<String> {
     test_support::label(cx, BELL_A)
+}
+
+/// Whether focus is inside the open list, the topmost layer that takes focus. That a list is open is not enough: focus
+/// on the bell does not count as leaving its list, so the list stays open with focus outside it.
+fn focus_in_list(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| {
+        crate::layers::top_container(window, cx)
+            .is_some_and(|list| list.contains_focused(window, cx))
+    })
 }
 
 /// A notification decoded from its wire form.
@@ -388,10 +407,7 @@ fn the_bell_opens_its_list_beside_it_without_opening_the_session(cx: &mut TestAp
     );
     assert!(notification_commands(&mut fake).is_empty());
     let focused = focused_id(cx);
-    assert!(
-        cx.update(|window, cx| crate::layers::focus_layer_open(window, cx)),
-        "focus is in the list"
-    );
+    assert!(focus_in_list(cx), "focus is in the list");
     assert_ne!(
         focused.as_deref(),
         Some(CLEAR_ID),
@@ -726,4 +742,279 @@ fn a_refused_clear_says_why_in_the_list(cx: &mut TestAppContext) {
         test_support::label(cx, CLEAR_REFUSAL_ID).as_deref(),
         Some("Clear notifications: the session's host is not connected")
     );
+}
+
+// ---- The list through changes underneath ---------------------------------------------------------------------------
+
+/// The bell of row `b`, the row [`an_open_list_follows_its_bell_through_what_changes_underneath`] opens.
+const BELL_B: &str = "session-bell-b";
+
+/// Which way a step of [`an_open_list_follows_its_bell_through_what_changes_underneath`] moves b's bell, as the signs of
+/// its vertical and horizontal distances: down and right are greater than nothing.
+const DOWN: (Ordering, Ordering) = (Ordering::Greater, Ordering::Equal);
+const UP: (Ordering, Ordering) = (Ordering::Less, Ordering::Equal);
+const LEFT: (Ordering, Ordering) = (Ordering::Equal, Ordering::Less);
+const STILL: (Ordering, Ordering) = (Ordering::Equal, Ordering::Equal);
+
+/// What the supervisor writes when a deleted session's checkout could not be archived: d's Delete is answered with it.
+const NOT_ARCHIVED: &str = "The managed checkout at /work/d was not archived and stays where it is; Farhelm no \
+                            longer manages it.";
+
+/// A stop annotation long enough to wrap a's ended line onto several lines at any sidebar width.
+const LONG_ANNOTATION: &str = "stopped with a note long enough that the ended line it sits on cannot hold it, so the \
+                               line wraps under itself again and again until every last word of the note has a place";
+
+/// What one step of [`an_open_list_follows_its_bell_through_what_changes_underneath`] does while b's list is open.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    /// The helm answers d's Delete, held since before the list opened, with [`NOT_ARCHIVED`], which the Delete band
+    /// above the rows shows.
+    DeleteAnswered,
+    /// The test clock moves on this many seconds, through ticks of the ticker's 30-second clock, after which a's and
+    /// b's ages read these.
+    Clock(u64, &'static str, &'static str),
+    /// a pushed with this stop annotation on its ended line.
+    Annotation(&'static str),
+    /// The helm-wide compact preference pushed as this: the setup for a change compact hides.
+    Compact(bool),
+    /// The listing in this order, metadata only.
+    Order(&'static [&'static str]),
+    /// A complete listing without d, the row below b: d's Delete settling.
+    WithoutD,
+    /// The host registry in the other order. Neither host needs attention, so nothing above the rows changes.
+    HostsReversed,
+    /// The listing as one the helm's cap cut, whose count turns into a warning on a line of its own above the rows.
+    Cut,
+    /// The listing as one the helm could not read: the rows stay, under a line that says so.
+    Failed,
+    /// The listing read again, whole.
+    Read,
+}
+
+/// `state` as the push that replaces it whole.
+fn replacing(state: CollectionState) -> CollectionChanges {
+    CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    }
+}
+
+/// The host registry's ids in the order the store holds them.
+fn registry(cx: &mut VisualTestContext) -> Vec<i64> {
+    cx.update(|_, cx| {
+        let Some(store) = crate::session::current_store(cx) else {
+            return Vec::new();
+        };
+        let hosts = store.read(cx).collections().ordered::<HostView>();
+        hosts.iter().map(|host| host.id).collect()
+    })
+}
+
+/// The words painted inside what was drawn under `id` in a fresh frame: a row's age, here.
+fn painted_inside(cx: &mut VisualTestContext, id: &str) -> Vec<String> {
+    let nodes = frame(cx);
+    let Some(area) = node(&nodes, id).map(|drawn| drawn.bounds) else {
+        return Vec::new();
+    };
+    nodes
+        .iter()
+        .flat_map(|drawn| drawn.texts.iter())
+        .filter(|text| area.contains(&text.bounds.center()))
+        .map(|text| text.text.to_string())
+        .collect()
+}
+
+/// SPEC.md, "Things changing underneath": "When the session list reorders, a focused row, or its open menu, moves with
+/// its session", and "Nothing closes a dialog, menu, popup list or confirmation that it did not open". The old app
+/// closed a row's open notification list whenever something moved its bell (the bell cases of
+/// `popover-movement.spec.ts`, `popover-header-movement.spec.ts`, `popover-host-movement.spec.ts` and
+/// `popover-width-movement.spec.ts` at reference commit `24bc0580`, superseded by that rule), because its measured place
+/// went stale. Here the list is a popover anchored to the bell, and this pins that it stays open and moves with the bell
+/// through every kind of change those cases made: content above the rows growing, a row above rewrapping, compact rows,
+/// a reorder that puts the row at another index of the virtualized list, a change that moves nothing, and the bell
+/// sliding sideways as its own age widens. The list is opened by its keys with the pointer off the rows, so no order
+/// hold freezes a reorder; an open list keeps no hold (a recorded deviation in the sidebar parity file).
+///
+/// Specified: with a (open, ended), b (whose bell has one unread entry), c and d (ended) listed, d's Delete sent and
+/// unanswered, and b's list opened by Enter on its bell, each step of the table leaves the list open with focus inside
+/// it, and moves it by as much as b's bell, which moves the way the table says: down for the Delete band, a's ended
+/// line rewrapping, b moving down the order, and the cut or failed listing's line; up when b moves back up, when such
+/// a line goes, and when compact goes on; left as b's own age widens; nowhere for anything else.
+#[gpui::test]
+fn an_open_list_follows_its_bell_through_what_changes_underneath(cx: &mut TestAppContext) {
+    // Idle, so no status dot pulses through the clock steps, and seen when last active 9m45s and 9m15s before the
+    // clock's start: its first tick turns a's age to 10m, its second b's.
+    let idle = json!({"state": "idle"});
+    let a = ended("a")
+        .annotation("short")
+        .activity(TEST_NOW - 585)
+        .seen(Some(TEST_NOW - 585));
+    let b = session("b")
+        .status(idle.clone())
+        .activity(TEST_NOW - 555)
+        .seen(Some(TEST_NOW - 555))
+        .notifications(json!([note(1, 60, "one")]), 0);
+    let rows = [
+        (a.clone(), 0),
+        (b, 0),
+        (session("c").status(idle), 0),
+        (ended("d"), 0),
+    ];
+    let mut state = menu_tests::snapshot(&rows, false);
+    state.push(hosts(&[
+        host(2, "ssh", connected()),
+        host(3, "ssh", connected()),
+    ]));
+    let (mut fake, cx) = open_main(cx, state);
+    // Tall enough that the list never meets the window's bottom edge, which would hold it there rather than beside b.
+    cx.simulate_resize(size(px(900.), px(1100.)));
+    test_support::settle(cx);
+    for command in fake.commands() {
+        fake.reply(command.id, 200, None);
+    }
+    // An ended session with no tabs deletes from its menu without asking; its answer waits for the first step.
+    test_support::click(cx, "session-menu-d");
+    test_support::click(cx, "session-menu-delete");
+    let mut deletes = Vec::new();
+    for command in fake.commands() {
+        if command.method == Method::Delete {
+            deletes.push(command.id);
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    let [delete] = deletes[..] else {
+        panic!("the premise: d's Delete was sent once: {deletes:?}");
+    };
+    // The click and Escape leave focus on b's bell; moving the pointer to the window's far corner lets go of the hold
+    // the click took, and Enter opens the list.
+    test_support::click(cx, BELL_B);
+    test_support::keys(cx, "escape");
+    cx.simulate_mouse_move(point(px(890.), px(1090.)), None, Modifiers::none());
+    test_support::settle(cx);
+    test_support::keys(cx, "enter");
+    let (bell, list) = (
+        test_support::bounds(cx, BELL_B),
+        test_support::bounds(cx, LIST_ID),
+    );
+    assert!(
+        list.left() > bell.right() && (list.top() - bell.top()).abs() < px(8.),
+        "the premise: the list opened beside the bell, at {list:?} for the bell at {bell:?}"
+    );
+
+    let mut order: &[&str] = &["a", "b", "c", "d"];
+    for (change_made, moves) in [
+        (Step::DeleteAnswered, DOWN),
+        (Step::Clock(30, "10m", "9m"), STILL),
+        (Step::Clock(30, "10m", "10m"), LEFT),
+        (Step::Clock(60, "11m", "11m"), STILL),
+        (Step::Annotation(LONG_ANNOTATION), DOWN),
+        (Step::Order(&["a", "c", "b", "d"]), DOWN),
+        (Step::Order(&["c", "a", "b", "d"]), STILL),
+        (Step::Order(&["a", "b", "c", "d"]), UP),
+        (Step::WithoutD, STILL),
+        (Step::HostsReversed, STILL),
+        (Step::Cut, DOWN),
+        (Step::Read, UP),
+        (Step::Failed, DOWN),
+        (Step::Read, UP),
+        (Step::Compact(true), UP),
+        (Step::Annotation("short"), STILL),
+    ] {
+        let step = format!("{change_made:?}");
+        let (bell, list) = (
+            test_support::bounds(cx, BELL_B),
+            test_support::bounds(cx, LIST_ID),
+        );
+        let three = listing_meta(&["a", "b", "c"], 3, false);
+        match change_made {
+            Step::DeleteAnswered => {
+                fake.reply(delete, 200, Some(json!({ "notice": NOT_ARCHIVED })));
+            }
+            Step::Clock(seconds, _, _) => test_support::advance(cx, Duration::from_secs(seconds)),
+            Step::Annotation(annotation) => fake.push(change(
+                listing_meta(order, order.len() as u64, false),
+                &[a.clone().annotation(annotation)],
+                &[],
+            )),
+            Step::Compact(on) => fake.push(replacing(preferences_state(Preferences {
+                compact: Some(on),
+                visit_history: vec!["a".into()],
+                welcome_seen: Some(true),
+                ..Preferences::default()
+            }))),
+            Step::Order(next) => {
+                order = next;
+                fake.push(change(listing_meta(next, 4, false), &[], &[]));
+            }
+            Step::WithoutD => {
+                order = &["a", "b", "c"];
+                fake.push(change(three, &[], &["d"]));
+            }
+            Step::HostsReversed => fake.push(replacing(hosts(&[
+                host(3, "ssh", connected()),
+                host(2, "ssh", connected()),
+            ]))),
+            Step::Cut => fake.push(change(listing_meta(order, 10, true), &[], &[])),
+            Step::Failed => {
+                let mut failed = three;
+                failed.availability = Availability::Unavailable {
+                    error: "down".into(),
+                };
+                fake.push(change(failed, &[], &[]));
+            }
+            Step::Read => fake.push(change(three, &[], &[])),
+        }
+        test_support::settle(cx);
+        assert_eq!(row_order(&frame(cx)), order, "{step}: the premise: no hold");
+        match change_made {
+            Step::DeleteAnswered => assert!(
+                drawn(cx, "session-delete-notice"),
+                "{step}: the premise: the band shows"
+            ),
+            Step::Clock(_, a_age, b_age) => assert_eq!(
+                (
+                    painted_inside(cx, "session-row-a-age"),
+                    painted_inside(cx, "session-row-b-age")
+                ),
+                (vec![a_age.to_owned()], vec![b_age.to_owned()]),
+                "{step}: the premise: the ages a and b read"
+            ),
+            Step::HostsReversed => assert_eq!(registry(cx), [3, 2], "{step}: the premise"),
+            _ => {}
+        }
+        let cut = label_of(cx, COUNT_ID).is_some_and(|count| count.contains("could not read"));
+        assert_eq!(
+            cut,
+            matches!(change_made, Step::Cut),
+            "{step}: the premise: the cut warning shows over the cut listing alone"
+        );
+        assert_eq!(
+            label_of(cx, "session-list-error").is_some(),
+            matches!(change_made, Step::Failed),
+            "{step}: the premise: the failure line shows over the failed listing alone"
+        );
+
+        assert!(drawn(cx, LIST_ID), "{step}: b's list is still open");
+        assert!(focus_in_list(cx), "{step}: focus is still in the list");
+        let now = test_support::bounds(cx, BELL_B);
+        let moved = now.origin - bell.origin;
+        let followed = test_support::bounds(cx, LIST_ID).origin - list.origin;
+        assert!(
+            (followed.x - moved.x).abs() < px(1.) && (followed.y - moved.y).abs() < px(1.),
+            "{step}: the list moved {followed:?} with its bell's {moved:?}"
+        );
+        // Rounded to a whole pixel, so layout rounding does not read as a move.
+        let went = (
+            moved.y.round().partial_cmp(&px(0.)),
+            moved.x.round().partial_cmp(&px(0.)),
+        );
+        assert_eq!(
+            went,
+            (Some(moves.0), Some(moves.1)),
+            "{step}: b's bell moved {moved:?}"
+        );
+    }
 }
