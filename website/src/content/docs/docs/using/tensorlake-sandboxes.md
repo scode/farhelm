@@ -206,10 +206,12 @@ starting Farhelm in it.
 
 A [launch template](/docs/using/launch-templates/) can choose **New sandbox** and a recipe too. Started with its
 [quick-launch or number key](/docs/using/launch-templates/#quick-launch), it opens the launcher on the same question,
-unless that setting skips it. **Save as template** is not offered for a new sandbox. **Clone** of a sandbox session does
-not make a new sandbox: it opens the launcher on an ordinary host, with a note under **Host** saying the source's host
-was not carried over. Opening **+** (New session) while a sandbox session is open starts on the machine you are using,
-not on the sandbox or its recipe.
+unless that setting skips it. **Save as template** is not offered for a new sandbox. **Clone** of a sandbox session
+opens the launcher on **New sandbox** with the source's recipe, for a fresh sandbox with **Folder** at its home
+directory, or a fresh managed checkout of the same repository inside when the source was in one; nothing from the source
+sandbox's files comes along. If that recipe has been deleted since, it stays chosen and shows as unavailable, so you
+pick another before launching. Opening **+** (New session) while a sandbox session is open preselects its recipe the
+same way; a quick launch keeps its template's choices instead.
 
 An agent starts a sandbox session with `farhelm agent create --recipe <name>`, and Farhelm shows a card for it every
 time ([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)). If you type the
