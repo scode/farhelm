@@ -96,6 +96,8 @@ impl Launcher {
         // The chosen host's history rows name that host as its own field does, phase included.
         let placement = self.chosen_host(cx).map(host_name_with_phase);
         let history = self.launch_history(cx).zip(placement.as_ref());
+        // Empty unless the query is `gh:` (`checkout`).
+        let repositories = self.search_repositories(cx);
         search(&Inputs {
             query: &query,
             tab: self.draft.tab,
@@ -106,6 +108,7 @@ impl Launcher {
             hosts: &hosts,
             templates: templates.as_deref(),
             history,
+            repositories: &repositories,
         })
     }
 
@@ -271,9 +274,11 @@ impl Launcher {
             Row::Host { .. } => (Field::Host, "host"),
             // A recent setup sets the agent type too, but the old refusal named the destination, which every mode that
             // holds the agent type also holds.
-            Row::UsePath(_) | Row::BrowsePath(_) | Row::Folder(_) | Row::Recent { .. } => {
-                (Field::Destination, "destination")
-            }
+            Row::UsePath(_)
+            | Row::BrowsePath(_)
+            | Row::Folder(_)
+            | Row::Recent { .. }
+            | Row::Github(_) => (Field::Destination, "destination"),
             Row::Name(_) => (Field::Name, "session name"),
             // A template's own fields are checked against what the launcher holds when it applies, which removes the
             // ones repeating a held value and refuses the rest (`crate::templates::apply`).
@@ -387,6 +392,8 @@ impl Launcher {
             Row::Recent { entry, .. } => {
                 let _ = self.take_recent(&entry, window, cx);
             }
+            // A managed checkout of the repository, as the repository field's pick makes it (`checkout`).
+            Row::Github(repo) => self.pick_repository(repo, window, cx),
         }
     }
 
@@ -474,6 +481,8 @@ impl Launcher {
                     .child(field)
                     .child(tracker),
             )
+            // Under the box, an incomplete or failed scan for a `gh:` query (`checkout`).
+            .children(self.search_repository_note(window, cx))
             .into_any_element()
     }
 }
@@ -490,6 +499,7 @@ fn environment_refusal(row: &Row) -> Option<&'static str> {
         }
         Row::BrowsePath(_) => Some("A new sandbox cannot be browsed before it exists"),
         Row::Recent { .. }
+        | Row::Github(_)
         | Row::Name(_)
         | Row::Host { .. }
         | Row::Harness(_)

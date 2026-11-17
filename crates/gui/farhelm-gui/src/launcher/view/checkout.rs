@@ -15,7 +15,10 @@
 //!   field on the layer manager's non-focusing popover, as the model field's does (`field_list`): a valid `owner/repo`
 //!   typed into the field is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete
 //!   discovery is visible and does not prevent selecting a valid manually entered pair"), and an incomplete scan says
-//!   so under the field. Enter picks the highlighted row and never launches.
+//!   so under the field. Enter picks the highlighted row and never launches. While the composer search holds a `gh:`
+//!   query, that query is what the read asks about instead, with or without a managed checkout chosen, and the search
+//!   offers the same choices ([`Launcher::search_repositories`]); the old launcher's one discovery read served both the
+//!   same way ("global search takes priority only while the user explicitly searches with gh:").
 //! - **The preview** (`POST /api/github-checkout-preview`) is asked for whenever what it answers for changes: the host,
 //!   its connection and installation, the repository (or choosing it again), the checkout's name, the agent choices and
 //!   the configuration revision last observed (SPEC.md: "Host, installation, destination, title, agent choice and
@@ -79,11 +82,13 @@ use crate::launcher::draft::{
 };
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
+use crate::launcher::search::{Scope, scoped};
 use crate::settings::{CheckoutField, FolderScope, Saved};
 use crate::theme::{self, metrics};
 use crate::{operations, ticker};
 
-/// How long the repository field, host and connection must stay unchanged before suggestions are read.
+/// How long the query (the repository field's, or the search's `gh:` text), host and connection must stay unchanged
+/// before suggestions are read.
 const SUGGEST_AFTER: Duration = Duration::from_millis(150);
 /// The most rows the suggestions list offers, the old `repository_choices` cap.
 const MAX_CHOICES: usize = 100;
@@ -193,8 +198,8 @@ type SuggestAnswer = Result<GithubRepositoriesReply, HostText>;
 // ---------------------------------------------------------------------------------------------------------------------
 
 /// What the managed-checkout destination holds besides the draft: its two fields, the suggestions list, the reads, and
-/// the configuration revision observed. None of it is shared with any other surface, and none of it survives the
-/// launcher.
+/// the configuration revision observed. None of it is shared with any other surface (the composer search's `gh:` rows
+/// read the same suggestions, within the launcher), and none of it survives the launcher.
 pub(super) struct CheckoutState {
     /// The repository field: the chosen repository, or what is typed.
     pub(super) repository: TextInputState,
@@ -372,10 +377,52 @@ impl Launcher {
             .map(|(_, needs)| *needs)
     }
 
-    /// What a suggestions read would ask now: while the user is choosing, and also, with a repository chosen, once per
-    /// host while whether it needs a checkout folder is not known (so a Clone's checkout still learns it), on a host
-    /// that can be asked.
+    /// The `gh:` query the composer search holds, while it holds one.
+    fn search_repository_query(&self, cx: &App) -> Option<String> {
+        let text = self.search.text(cx);
+        let (scope, value) = scoped(&text);
+        (scope == Scope::Github).then(|| value.to_owned())
+    }
+
+    /// A suggestions read about `query` on the chosen host, while it can be asked.
+    fn suggest_key_for(&self, query: String, cx: &App) -> Option<SuggestKey> {
+        let host = self.connected_host(cx)?;
+        Some(SuggestKey {
+            host: host.id,
+            incarnation: host.incarnation,
+            identity: host.identity.unwrap_or_default(),
+            query,
+            reread: self.checkout.reread,
+        })
+    }
+
+    /// The repositories the suggestions answer lists, while it is about `key`; none otherwise.
+    fn discovered(&self, key: Option<SuggestKey>) -> &[GithubRepo] {
+        key.and_then(|key| self.checkout.suggestions.answer_for(&key))
+            .and_then(|answer| answer.as_ref().ok())
+            .map_or(&[], |reply| reply.repos.as_slice())
+    }
+
+    /// The search's rows for its `gh:` query: a valid typed pair first, then the host's discovered repositories that
+    /// match, from the suggestions answer while it is about this host and query (the module docs); empty for any other
+    /// query.
+    pub(super) fn search_repositories(&self, cx: &App) -> Vec<GithubRepo> {
+        let Some(query) = self.search_repository_query(cx) else {
+            return Vec::new();
+        };
+        repository_choices(
+            &query,
+            self.discovered(self.suggest_key_for(query.clone(), cx)),
+        )
+    }
+
+    /// What a suggestions read would ask now: the search's `gh:` query while there is one; otherwise, while the user is
+    /// choosing, and also, with a repository chosen, once per host while whether it needs a checkout folder is not known
+    /// (so a Clone's checkout still learns it), on a host that can be asked.
     fn suggest_key(&self, window: &Window, cx: &App) -> Option<SuggestKey> {
+        if let Some(query) = self.search_repository_query(cx) {
+            return self.suggest_key_for(query, cx);
+        }
         let checkout = self.draft.checkout.as_ref()?;
         if !self.choosing_repository(window, cx)
             && self.needs_root(cx).is_some()
@@ -383,19 +430,16 @@ impl Launcher {
         {
             return None;
         }
-        let host = self.connected_host(cx)?;
-        let host = HostKey {
-            host: host.id,
-            incarnation: host.incarnation,
-            identity: host.identity.unwrap_or_default(),
-        };
-        Some(SuggestKey {
-            host: host.host,
-            incarnation: host.incarnation,
-            identity: host.identity,
-            query: checkout.field_text(),
-            reread: self.checkout.reread,
-        })
+        self.suggest_key_for(checkout.field_text(), cx)
+    }
+
+    /// Whether the composer search holds a `gh:` query, which owns the repository suggestions and their note while it
+    /// is there (the module docs), and makes Launch wait: until a repository is picked (the query then goes), the launch
+    /// would quietly use a destination the user is replacing. SPEC.md, "Managed checkouts": "Invalid
+    /// `gh:` input cannot launch a hidden existing directory"; the old launcher's "Select a GitHub repository before
+    /// launching", after the host's own reasons.
+    pub(super) fn search_holds_repository_query(&self, cx: &App) -> bool {
+        self.search_repository_query(cx).is_some()
     }
 
     /// What a preview would answer for now, if a repository is chosen on a host that can be asked.
@@ -777,13 +821,7 @@ impl Launcher {
     /// The list's rows for the field as it is now, from the suggestions answer while it is about this host and text.
     fn repository_rows(&self, window: &Window, cx: &App) -> Vec<GithubRepo> {
         let query = self.checkout.repository.text(cx).to_string();
-        let discovered = self
-            .suggest_key(window, cx)
-            .and_then(|key| self.checkout.suggestions.answer_for(&key).cloned())
-            .and_then(Result::ok)
-            .map(|reply| reply.repos)
-            .unwrap_or_default();
-        repository_choices(&query, &discovered)
+        repository_choices(&query, self.discovered(self.suggest_key(window, cx)))
     }
 
     /// The user typed in the repository field: the draft's query, the highlight back to none, and the list open.
@@ -818,10 +856,20 @@ impl Launcher {
         }
     }
 
-    /// A row picked by a click or Enter: the draft's repository, the field showing it, the list closed.
-    fn pick_repository(&mut self, repo: GithubRepo, window: &mut Window, cx: &mut Context<Self>) {
+    /// A row picked by a click or Enter, here or as the search's `gh:` row: the draft's repository, the field showing
+    /// it, the list closed, and a `gh:` query in the search box gone, since the pick answers it (the old launcher's
+    /// "a deliberate field selection retires the older global gh: query").
+    pub(super) fn pick_repository(
+        &mut self,
+        repo: GithubRepo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.draft.choose_repository(repo);
         self.checkout.list.close(window, cx);
+        if self.search_holds_repository_query(cx) {
+            self.search.set_text("", window, cx);
+        }
         self.sync_fields(window, cx);
         self.changed(cx);
     }
@@ -957,12 +1005,14 @@ impl Launcher {
         rows.push(
             row("launcher-repository-row", "Repository", control, palette).into_any_element(),
         );
-        // The setup field says what the note would (no checkout folder), so the note waits while it shows.
+        // The setup field says what the note would (no checkout folder), so the note waits while it shows; while the
+        // search holds a `gh:` query the note is about that query, and is drawn under the search box instead.
         if self.choosing_repository(window, cx)
             && !setup_shown
-            && let Some(note) = self.repository_note(window, cx)
+            && !self.search_holds_repository_query(cx)
+            && let Some(note) = self.repository_note("launcher-repository-note", window, cx)
         {
-            rows.push(note);
+            rows.push(note.into_any_element());
         }
         if let Some(repo) = &checkout.repo {
             rows.push(self.preview_block(repo, palette, cx));
@@ -1008,30 +1058,40 @@ impl Launcher {
         )
     }
 
-    /// The note under the field on an incomplete scan, or a failed read (`.launch-composer-repository-note`): the
-    /// helm's reason in the warning color, or, for a scan it cut short without one, a quiet hint that a typed pair can
-    /// still be chosen.
-    fn repository_note(&self, window: &Window, cx: &App) -> Option<AnyElement> {
+    /// [`Self::repository_note`] for the search's `gh:` query, drawn under the search box, where the old launcher drew
+    /// it, so a Folder destination (which has no repository field) still shows an incomplete or failed scan (SPEC.md,
+    /// "Managed checkouts": "Incomplete discovery is visible"). Not while the checkout-folder setup shows above the
+    /// repository field, which says the same thing.
+    pub(super) fn search_repository_note(&self, window: &Window, cx: &App) -> Option<AnyElement> {
+        if !self.search_holds_repository_query(cx)
+            || (self.draft.checkout.is_some() && self.needs_root(cx) == Some(true))
+        {
+            return None;
+        }
+        // The search box spans the dialog, so its note starts at the box's edge rather than the fields' column.
+        self.repository_note("launcher-search-repository-note", window, cx)
+            .map(|note| note.pl_0().into_any_element())
+    }
+
+    /// The note on an incomplete scan, or a failed read (`.launch-composer-repository-note`), under the repository
+    /// field or, for a `gh:` query, the search box: the helm's reason in the warning color, or, for a scan it cut short
+    /// without one, a quiet hint that a typed pair can still be chosen.
+    fn repository_note(
+        &self,
+        id: &'static str,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Stateful<Div>> {
         let key = self.suggest_key(window, cx)?;
         let palette = theme::palette(cx);
         match self.checkout.suggestions.answer_for(&key)? {
             Ok(reply) => match &reply.scan_error {
-                Some(error) => Some(
-                    status_line("launcher-repository-note", error.clone(), palette)
-                        .into_any_element(),
-                ),
+                Some(error) => Some(status_line(id, error.clone(), palette)),
                 // A quiet hint, but announced as the other notes are.
-                None if reply.truncated => Some(
-                    help_line(INCOMPLETE, palette)
-                        .role(Role::Status)
-                        .into_any_element(),
-                ),
+                None if reply.truncated => Some(help_line(INCOMPLETE, palette).role(Role::Status)),
                 None => None,
             },
-            Err(words) => Some(
-                status_line("launcher-repository-note", words.raw().to_owned(), palette)
-                    .into_any_element(),
-            ),
+            Err(words) => Some(status_line(id, words.raw().to_owned(), palette)),
         }
     }
 

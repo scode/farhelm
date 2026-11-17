@@ -33,12 +33,11 @@
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the search's `gh:` repositories (`crate::launcher::search`
-//! says so); the rest of managed checkouts (`checkout` says which); the escaped display of a prompt, Custom flags, a
-//! seeded model, or a command line or resume command copied by Clone or Replace with, holding invisible characters
-//! (the wrapper prefix, and Restart with's stored command line and resume command, are `stored`); and keyboard
-//! scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one or two
-//! lines). The model field is `model_field`, the host picker
+//! NOTE: Not built yet, each with the piece that brings it: the rest of managed checkouts (`checkout` says which); the
+//! escaped display of a prompt, Custom flags, a seeded model, or a command line or resume command copied by Clone or
+//! Replace with, holding invisible characters (the wrapper prefix, and Restart with's stored command line and resume
+//! command, are `stored`); and keyboard scrolling of an overflowing notice (the old region took focus once it
+//! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
 //! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
 //! `browse`, the recent setups strip `recents`, the escalation banner `escalation`, Save as template's side `save`. The
 //! floating lists under the model, folder, search and repository fields share `field_list`, and the debounced reads
@@ -69,7 +68,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
-use super::request::{Recipes, Target, capitalized};
+use super::request::{Recipes, SELECT_REPOSITORY, Target, capitalized};
 use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
@@ -1128,6 +1127,13 @@ impl Launcher {
             preview: self.checkout_preview(cx),
             recipes: &recipes,
         };
+        // A `gh:` query not yet answered by a pick (`checkout`), after the place's own reasons.
+        if self.search_holds_repository_query(cx) {
+            return self
+                .draft
+                .place_refusal(target)
+                .or_else(|| Some(SELECT_REPOSITORY.to_owned()));
+        }
         self.draft.refusal(target, self.live_launch(cx).as_ref())
     }
 
