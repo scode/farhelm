@@ -50,11 +50,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   source's actual directory, while Clone starts on a managed checkout) and the current release does the same, but it
   confuses users. Look into how to make it not confusing. Unrelated to the GPUI migration.
 
-- **Managed checkout says no checkout folder is configured.** In the GPUI desktop app (a devbuild with fresh state),
-  choosing Managed checkout of a repository on a remote host showed "no checkout folder is configured; set one in this
-  host's settings or a default in Settings → Checkouts", and the Folder field read "Checkout preview unavailable". This
-  may be an existing bug unrelated to the GPUI port, or only the result of not having configured a checkout folder; dig
-  into which.
+- **Make the first managed checkout just work, or say clearly what is missing.** Assess the precise initial experience
+  of a user who types `gh:owner/repo` or chooses Managed checkout with nothing configured. Anything that keeps it from
+  just working has to fail with a clear message saying what to set up first; it has to behave sensibly by default.
+  Having to pick a checkout folder is fine, but the flow must make that clear. Seen in a GPUI devbuild with fresh state:
+  Managed checkout showed "no checkout folder is configured; set one in this host's settings or a default in Settings →
+  Checkouts" and the Folder field read "Checkout preview unavailable", and `gh:` search found no repository (a separate
+  launcher bug, being fixed in the migration). The maintainer gives the desired experience in detail when this is picked
+  up.
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
   and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
