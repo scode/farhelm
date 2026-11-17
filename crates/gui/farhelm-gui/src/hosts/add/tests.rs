@@ -421,10 +421,17 @@ fn a_discovered_host_closes_the_dialog(cx: &mut TestAppContext) {
 
 /// Every answer short of a registered host leaves the user something to correct or to try again, so it shows in the
 /// dialog with the destination still there (the old dialog's error line, and SPEC.md's bounded-host-wait rule that a
-/// timeout is an ordinary reply). Specified: for a `manual` reply, a 409 refusal and the 504 that says the check
-/// carries on, the dialog stays open with the helm's words in its error line, `dev@newbox` still in the destination
-/// field, the key free and Add reading "Add" again; a 200 whose body is no probe reply says the reply could not be
-/// read.
+/// timeout is an ordinary reply). A 200 the app cannot decode may still have registered a host, so it must say so rather
+/// than be dropped silently. One such reply is a plan without its steps: the old page kept a plain-text renderer for
+/// older helms that sent the plan's text alone (`provisioning.spec.ts`, "unstructured ${operation} plan keeps a named
+/// keyboard entry"), but this app's helm is the one built with it and its reply type requires the steps
+/// (`farhelm_proto::provisioning::ProbeReply`), so such a reply must not open a confirmation built from nothing.
+///
+/// Specified: for a `manual` reply, a 409 refusal and the 504 that says the check carries on, the dialog stays open with
+/// the helm's words in its error line, `dev@newbox` still in the destination field, the key free and Add reading "Add"
+/// again. For a 200 whose result the app does not know, and for a 200 `provisionable` reply with a probe id, a plan and
+/// its text but no steps, no confirmation opens, the dialog stays open with the destination, and the error line says
+/// the reply could not be read.
 #[gpui::test]
 fn manual_setup_refusals_and_the_timeout_show_in_the_dialog_with_the_destination_kept(
     cx: &mut TestAppContext,
@@ -463,16 +470,37 @@ fn manual_setup_refusals_and_the_timeout_show_in_the_dialog_with_the_destination
         assert_eq!(label(cx, "add-host-submit").as_deref(), Some("Add"));
     }
 
-    // A reply the app cannot read may still have registered a host, so it says what happened rather than nothing.
-    click(cx, "add-host-submit");
-    let (id, _) = one_probe(&mut helm);
-    helm.reply(id, 200, Some(json!({ "result": "something newer" })));
-    settle(cx);
-    let line = error_line(cx).unwrap_or_default();
-    assert!(
-        line.starts_with("The helm accepted the host probe, but its reply could not be read: "),
-        "{line}"
-    );
+    // Replies the app cannot read: a result newer than it knows, and an older helm's plan with its text but no steps.
+    let unreadable = [
+        json!({ "result": "something newer" }),
+        json!({
+            "result": "provisionable",
+            "probe_id": "unstructured-setup-plan",
+            "plan": {},
+            "confirmation": "Plan line 1: inspect the complete host changes before deciding.\n",
+        }),
+    ];
+    for body in unreadable {
+        click(cx, "add-host-submit");
+        let (id, _) = one_probe(&mut helm);
+        helm.reply(id, 200, Some(body.clone()));
+        settle(cx);
+        assert!(
+            cx.debug_bounds("prompt-confirm").is_none(),
+            "{body}: no confirmation opened"
+        );
+        assert!(any_open(cx), "{body}: Add host stays open");
+        assert_eq!(
+            destination(cx),
+            "dev@newbox",
+            "{body}: the destination is kept"
+        );
+        let line = error_line(cx).unwrap_or_default();
+        assert!(
+            line.starts_with("The helm accepted the host probe, but its reply could not be read: "),
+            "{body}: {line}"
+        );
+    }
 }
 
 // ---- Closing while a probe is out ----------------------------------------------------------------------------------

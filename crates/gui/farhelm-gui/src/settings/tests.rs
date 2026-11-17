@@ -515,6 +515,172 @@ fn escape_and_both_close_controls_return_focus_to_the_gear(cx: &mut TestAppConte
     }
 }
 
+/// Why this matters: Enter on a dialog itself presses the dialog's main action (SPEC.md, "Opening and closing"), and
+/// Settings has none on purpose (`settings.rs`), since every choice in it saves on its own; a main action there would
+/// toggle or save something the user never pressed. The old spec `settings.spec.ts`, "settings gap keeps focus while
+/// text and container Enter keep their own behavior", pinned that container Enter changed no choice and wrote no
+/// preference. Specified: with Settings open at Sessions and Skip session confirmations off, focus moved onto the
+/// dialog itself, Enter leaves Settings open with the dialog itself still holding focus, the switch still off, and
+/// nothing sent.
+#[gpui::test]
+fn enter_on_the_dialog_itself_does_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let skip = Choice::SkipSessionConfirmations.id();
+    assert_eq!(switch_on(cx, skip), Some(false), "the premise: it is off");
+    // Whatever opening sent is not what this test is about.
+    let _ = sent(&mut helm);
+    // Focus on the dialog itself, as the layer manager recovers it there when the focused control goes; a click on
+    // Settings' empty space keeps focus on the control in use instead (its `keeps_focus_on_empty_click`).
+    cx.update(|window, cx| {
+        let dialog = layers::top_container(window, cx).expect("Settings is open");
+        let mark = Mark::take(cx);
+        focus::focus_in_layer(&dialog, &mark, window, cx);
+    });
+    settle(cx);
+    assert!(
+        dialog_holds_focus(cx),
+        "the premise: the dialog itself has focus"
+    );
+
+    keys(cx, "enter");
+    assert!(any_open(cx), "Settings stayed open");
+    assert!(dialog_holds_focus(cx), "focus stayed on the dialog itself");
+    assert_eq!(
+        switch_on(cx, skip),
+        Some(false),
+        "the switch did not toggle"
+    );
+    let commands = sent(&mut helm);
+    assert!(commands.is_empty(), "Enter sent nothing: {commands:?}");
+}
+
+/// The colors of the 2-pixel rings painted in a fresh frame over the control drawn under `id`: a focus ring is a
+/// painted quad with a 2-pixel border that meets the control's bounds (the switch's track has a one-pixel edge and its
+/// knob none), as `components/tests/list_row.rs` finds a row's. The off switch's ring stands outside its track, which
+/// ends at the control's right edge, so the quad is matched by meeting the control's bounds, not by lying inside them.
+fn rings_at(cx: &mut VisualTestContext, id: &'static str) -> Vec<gpui::Hsla> {
+    test_support::redraw(cx);
+    let control = bounds(cx, id);
+    let (scale, quads) = cx.update(|window, _| (window.scale_factor(), window.painted_quads()));
+    let (control, width) = (control.scale(scale), px(2.).scale(scale));
+    quads
+        .into_iter()
+        .filter(|quad| quad.border_widths.top == width && quad.bounds.intersects(&control))
+        .map(|quad| quad.border_color)
+        .collect()
+}
+
+/// Why this matters: a keyboard user must see which switch holds focus, and on a switch that is on, an accent ring
+/// would sink into the accent track; the old stylesheet drew that ring in the on-fill ink inside the track
+/// (`.control-switch:checked:focus-visible`, offset -3px), and the old spec `settings.spec.ts`, "settings focus stays
+/// on its painted fill and descriptions stay with their labels", checked it on a focused switch that was on. Specified:
+/// with Skip session confirmations off and Name sessions on quick launch on (the helm stored no choice), Tab from the
+/// first switch to the naming switch adds a 2-pixel ring over it, in the on-fill ink only; Shift+Tab back adds one over
+/// the first switch, in the accent only.
+#[gpui::test]
+fn a_focused_switch_that_is_on_wears_its_ring_in_the_on_fill_ink(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let (skip, naming) = (
+        Choice::SkipSessionConfirmations.id(),
+        Choice::NameSessionsOnQuickLaunch.id(),
+    );
+    assert_eq!(
+        (switch_on(cx, skip), switch_on(cx, naming)),
+        (Some(false), Some(true)),
+        "the premise: the first switch is off and the naming switch on"
+    );
+    let (accent, on_fill) = cx.update(|_, cx| {
+        let palette = theme::palette(cx);
+        (theme::color(palette.accent), theme::color(palette.on_fill))
+    });
+    assert_ne!(accent, on_fill, "the premise: the two inks differ");
+
+    // Other 2-pixel borders can meet a switch's bounds whether or not it holds focus (a track's own edge, a
+    // neighbour's), so each check takes what focus adds: the quads over the switch focused, less those over it
+    // unfocused.
+    let unfocused = rings_at(cx, naming);
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(naming));
+    let ring = added(&unfocused, rings_at(cx, naming));
+    assert!(
+        !ring.is_empty() && ring.iter().all(|color| *color == on_fill),
+        "the naming switch's ring, in the on-fill ink: {ring:?}"
+    );
+    let unfocused = rings_at(cx, skip);
+    keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(skip));
+    let ring = added(&unfocused, rings_at(cx, skip));
+    assert!(
+        !ring.is_empty() && ring.iter().all(|color| *color == accent),
+        "the first switch's ring, in the accent: {ring:?}"
+    );
+}
+
+/// The colors in `now` beyond those in `before`, each of `before`'s matched once: what a change painted over a
+/// control, apart from what was there already.
+fn added(before: &[gpui::Hsla], mut now: Vec<gpui::Hsla>) -> Vec<gpui::Hsla> {
+    for color in before {
+        if let Some(at) = now.iter().position(|seen| seen == color) {
+            now.remove(at);
+        }
+    }
+    now
+}
+
+/// Why this matters: each switch's help explains that switch, so it must read as belonging to it, closer under its own
+/// label than to the next switch (`.setting-group`, whose 4-pixel gap the port keeps as `choices::GROUP_GAP`); the old
+/// spec `settings.spec.ts`, "settings focus stays on its painted fill and descriptions stay with their labels",
+/// measured exactly that in Sessions. Specified: in Sessions, under each of its three switches some help text is
+/// painted, its first line starting at or below the switch's bottom edge; for the first two, the gap from the switch to
+/// its help is smaller than the gap from the help's last line to the next switch.
+#[gpui::test]
+fn each_switchs_help_sits_under_it_nearer_than_the_next_switch(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let switches = [
+        Choice::SkipSessionConfirmations,
+        Choice::NameSessionsOnQuickLaunch,
+        Choice::ColorTerminalFrames,
+    ]
+    .map(|choice| bounds(cx, choice.id()));
+    let lines: Vec<gpui::Bounds<gpui::Pixels>> = frame(cx)
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.bounds))
+        .collect();
+    for (n, switch) in switches.iter().enumerate() {
+        let next = switches.get(n + 1);
+        // The help is the text painted below this switch, in its column, and above the next switch if there is one.
+        let help: Vec<&gpui::Bounds<gpui::Pixels>> = lines
+            .iter()
+            .filter(|line| {
+                line.top() >= switch.bottom()
+                    && line.left() < switch.right()
+                    && line.right() > switch.left()
+                    && next.is_none_or(|next| line.bottom() <= next.top())
+            })
+            .collect();
+        let (Some(first), Some(last)) = (
+            help.iter().map(|line| line.top()).reduce(|a, b| a.min(b)),
+            help.iter()
+                .map(|line| line.bottom())
+                .reduce(|a, b| a.max(b)),
+        ) else {
+            panic!("switch {n}: no help is painted under it");
+        };
+        let within = first - switch.bottom();
+        assert!(within >= px(0.), "switch {n}: its help starts below it");
+        if let Some(next) = next {
+            let between = next.top() - last;
+            assert!(
+                between > within,
+                "switch {n}: its help is {within:?} under it and {between:?} above the next switch"
+            );
+        }
+    }
+}
+
 /// The frame must not move when the user switches sections (SPEC.md: "The dialog keeps one height across sections,
 /// capped by the window"); a section change that resized it would jump Close away from under the pointer. Specified: in
 /// a window 1000 pixels tall, Settings is 760 by 780 pixels and stays exactly where it was, its header close control

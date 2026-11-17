@@ -368,6 +368,60 @@ fn the_editor_opens_at_its_top_from_a_scrolled_list(cx: &mut TestAppContext) {
     assert!(back_shows_whole(cx), "Edit opens at the editor's top");
 }
 
+/// Why this matters: the editor's Cancel and Save are pinned in the dialog's footer region, outside the scrolling body
+/// the fields are in (see "Recipes" under the parity file's Deviations), so a keyboard user must still reach them from
+/// the form, in the form's order, or the answers that keep the draft would be out of reach; the old spec
+/// `tensorlake-recipes.spec.ts`, "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}",
+/// tabbed from the editor's last field to Cancel and then Save. Specified: with a new recipe's editor open and focus on
+/// Back, Tab walks on through the editor's fields until it reaches Cancel, and one more Tab reaches Save.
+#[gpui::test]
+fn tab_from_the_editors_fields_reaches_its_pinned_cancel_then_save(cx: &mut TestAppContext) {
+    let (mut helm, cx) = show(cx, one_recipe());
+    open_editor(&mut helm, cx, "recipe-new");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("recipe-back"),
+        "the premise: focus starts on Back"
+    );
+    // The form is long (the base cards, each base's fields, packages, tunnels, the GitHub and Agents blocks), so the
+    // walk is bounded by a count well above its stops rather than by a list of them that every new field would break;
+    // it records each stop before Cancel, so the order can be checked against the form's later blocks.
+    let mut before_cancel: Vec<String> = Vec::new();
+    for _ in 0..80 {
+        let Some(id) = focused_id(cx) else { break };
+        if id == "recipe-cancel" {
+            break;
+        }
+        before_cancel.push(id);
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("recipe-cancel"),
+        "Tab reached Cancel: {before_cancel:?}"
+    );
+    // Cancel comes after every field: the tunnels' Add, the GitHub picker and the Agents block's last choice, Codex's
+    // mode, all come first.
+    for field in ["recipe-add-tunnel", "recipe-github"] {
+        assert!(
+            before_cancel.iter().any(|id| id == field),
+            "{field} comes before Cancel: {before_cancel:?}"
+        );
+    }
+    assert!(
+        before_cancel
+            .last()
+            .is_some_and(|id| id.starts_with("recipe-codex-mode-")),
+        "the stop right before Cancel is the form's last, Codex's mode: {before_cancel:?}"
+    );
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("recipe-save"),
+        "Save comes right after Cancel"
+    );
+}
+
 // ---- Saving a recipe that exists -----------------------------------------------------------------------------------
 
 /// Save writes the whole recipe, so a draft that dropped or blanked a choice the user never touched would silently

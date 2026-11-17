@@ -9,29 +9,29 @@ agree across surfaces and follow connection detail", "host progress previews onl
 current step" with its no-steps variant, "a one-step host card keeps a fitting multiline diagnosis whole"), Update all
 and the single Update ("Update all includes required and optional rows but no other attention", "one listed update uses
 its own Update action"). The first two hover the card from an attention row and from the Hosts panel; the one-step test
-only from an attention row. These five drive the card, Update all and Update through attention rows, so they also wait
-for the attention list. The other ten, the attention list itself and its Always update, are in
-[Sidebar and session view](sidebar-and-session-view.md). What Always update does (the requests, the preference save, its
-failure and Try again) is this area's (`crates/gui/farhelm-gui/src/hosts/status.rs`), tested where the row below names
-it; the sidebar's row keeps the cases that draw it.
+only from an attention row. These five drive the card, Update all and Update through attention rows, whose halves the
+attention list's tests cover (the entry below names them). The other ten, the attention list itself and its Always
+update, are in [Sidebar and session view](sidebar-and-session-view.md). What Always update does (the requests, the
+preference save, its failure and Try again) is this area's (`crates/gui/farhelm-gui/src/hosts/status.rs`), tested where
+the row below names it; the sidebar's row keeps the cases that draw it.
 
 ### `tests/settings.spec.ts`
 
 Tests: 27. Covers: settings focus stays on its painted fill and descriptions stay with their labels.
 
-partly (below)
+replaced (below)
 
 ### `tests/credentials-settings.spec.ts`
 
 Tests: 3. Covers: credentials keep fixed names, replace write-only values and discard login drafts.
 
-partly (below)
+replaced (below)
 
 ### `tests/credential-delivery.spec.ts`
 
 Tests: 2. Covers: saved credentials report delivery failures without retaining the secret draft.
 
-partly (below)
+replaced (below)
 
 ### `tests/ntfy-settings.spec.ts`
 
@@ -43,25 +43,26 @@ replaced (below)
 
 Tests: 6. Covers: Tensorlake settings save a write-only key, test the saved key and clear it.
 
-partly (below)
+replaced (below)
 
 ### `tests/tensorlake-recipes.spec.ts`
 
 Tests: 10. Covers: Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}.
 
-partly (below)
+replaced (below)
 
 ### `tests/tensorlake-hosts.spec.ts`
 
 Tests: 8. Covers: Add host pins inline recipe answers and focuses Name in ${palette}.
 
-partly (below)
+replaced (below)
 
 ### `tests/tensorlake-lifecycle.spec.ts`
 
 Tests: 21. Covers: wake-to-create leaves ${elsewhere} alone (${mode}).
 
-partly (below)
+replaced for this area's 8 cases (below); the other 13, wake-to-create and launch-after-resume, are the launcher's, not
+yet ported there ([Launcher](launcher.md), its `tests/tensorlake-lifecycle.spec.ts` entry)
 
 ### `tests/tensorlake-tunnels.spec.ts`
 
@@ -73,24 +74,35 @@ replaced (below)
 
 Tests: 2. Covers: Hosts swaps ordinary content and preserves filters, sort, selection and details.
 
-partly: crates/gui/farhelm-gui/src/hosts/tests.rs `the_heading_counts_the_hosts_the_helm_lists` (the region named "Host
-management"), `details_open_and_close_every_row` (the Details choice lives in the one panel the sidebar keeps, so it
-survives the swap). The swap, from the sidebar's Hosts control on the host rail's foot:
+replaced for its first case, this area's; its second case is Sidebar and session view's, not yet ported there (the end
+of this entry): crates/gui/farhelm-gui/src/hosts/tests.rs `the_heading_counts_the_hosts_the_helm_lists` (the region
+named "Host management"), `details_open_and_close_every_row` (the Details choice lives in the one panel the sidebar
+keeps, so it survives the swap). The swap, from the sidebar's Hosts control on the host rail's foot:
 crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs `hosts_swaps_the_list_for_the_panel_and_back_keeping_focus`
 (the panel in place of the list, Hosts pressed and keeping focus, nothing sent, so the host choice, sort and selection
 stay, the selection also checked, and Details kept across the swap),
 `choosing_all_or_a_host_returns_from_the_panel_to_sessions`; scripts/gui-e2e-smoke.py
 `test_39_the_rail_foot_toggles_hosts_and_opens_settings`; the `hosts-shown-with-a-host-chosen` golden (the panel in
 place of the list, Hosts pressed, the chosen avatar in the quieter look). Hosts also reports itself expanded while the
-panel shows, which no test reads back, since GPUI's driver record has no expanded field. Waiting: a quick-switcher pick
-or New handoff returning to Sessions (the sidebar's); the second case, the header's Clone from Hosts, is the session
-header's
+panel shows, which no test reads back, since GPUI's driver record has no expanded field. A quick-switcher pick or the
+list's New returning from Hosts to Sessions is the sidebar's, recorded in
+[Sidebar and session view](sidebar-and-session-view.md) (crates/gui/farhelm-gui/src/session_list/quick_switcher/tests.rs
+`a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices` and
+`a_click_on_the_new_row_opens_new_and_returns_from_the_hosts_panel`,
+crates/gui/farhelm-gui/src/session_list/order/tests.rs `the_new_action_leaves_the_hosts_panel_only_when_new_opens`). The
+second case, "header Clone from Hosts reveals Sessions and restores launcher focus", is the session header's Clone,
+which is Sidebar and session view's (its file names the header's Clone among its controls), and is not yet ported there:
+the header's Clone opens the launcher and Cancel returns focus to Clone
+(crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+`the_with_choices_and_clone_open_the_launcher_and_return_focus_on_cancel`), but nothing returns from Hosts to Sessions
+when it is pressed with Hosts shown (it does not call `session_list::show_sessions`, which the quick launches do); the
+migration's orchestrator routed it to that area on 2026-11-16
 
 ### `tests/host-updates.spec.ts`
 
 Tests: 5. Covers: host progress cards agree across surfaces and follow connection detail.
 
-partly: the Hosts heading's Update all, which the old cases reached through the attention list, is
+replaced: the Hosts heading's Update all, which the old cases reached through the attention list, is
 crates/gui/farhelm-gui/src/hosts/update/tests.rs `update_all_updates_every_available_remote_host_and_skips_the_rest` and
 `update_all_lets_each_host_keep_its_own_result` (see "Update" below). The per-host state the attention list reads is
 crates/gui/farhelm-gui/src/hosts/status/tests.rs: which hosts get an Update row, required or optional ("Update all
@@ -114,15 +126,20 @@ with the share and the exact fit (the one-step case) in
 `the_shorter_text_stays_whole_and_the_longer_ones_share_the_rest` and
 `a_fitting_text_stays_whole_and_a_preview_keeps_whole_lines`; the goldens `host-progress-card` and
 `host-progress-card-preview`. The Hosts-row halves are ported: hovering a row's running status shows the card beside the
-sidebar and leaving takes it away, `hovering_the_running_status_shows_the_card_beside_the_sidebar` in the same file.
-Still waiting: the attention-row halves of all five cases (the card on a working row, and Update all and Update drawn
-through attention rows), which wait for the attention list
+sidebar and leaving takes it away, `hovering_the_running_status_shows_the_card_beside_the_sidebar` in the same file. The
+attention-row halves of all five cases are the attention list's, recorded in
+[Sidebar and session view](sidebar-and-session-view.md)'s entry for this spec.
+
+- The card as a working row's hover: crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+  `a_working_rows_hover_is_the_progress_card_once_its_run_shows`
+- Update and Update all drawn through attention rows: the same file's
+  `update_and_update_all_send_exactly_the_displayed_hosts`
 
 ### `tests/host-checkout-folder.spec.ts`
 
 Tests: 1. Covers: host checkout folder saves, inherits, clears and reaches launch preview.
 
-partly (below)
+replaced (below)
 
 ### `tests/provisioning.spec.ts`
 
@@ -149,47 +166,63 @@ progress, failure and rerun (below, "Setup progress, failure and rerun"). Update
 Update all (below, "Update"). Uninstall, its refusals, run and removal notice (below, "Uninstall"). The rail's entry
 points: crates/gui/farhelm-gui/src/session_list/host_rail/avatar_menu_tests.rs
 `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it` (the avatar opens its host's menu as the opener every
-dialog from it returns to). Waiting: the menu's other commands
+dialog from it returns to). Every command of the old menu is ported (Retry, Suspend and Resume, Adopt, Re-run, Update,
+Settings, Uninstall, and Remove or its Delete sandbox and Delete container) except the local row's "Set up
+automatically" (Deviations, "The Hosts panel").
+
+- "two provisioning-busy rows reconcile independently": crates/gui/farhelm-gui/src/hosts/offers/tests.rs
+  `a_running_run_holds_the_host_until_it_ends` (a run holds its own host's Settings until it ends) and
+  crates/gui/farhelm-gui/src/hosts/menu/tests.rs `settings_waits_for_the_hosts_own_work_in_flight` (another host's work
+  holds none of its commands); Add host is not held back meanwhile (Deviations, "The setup confirmation", "Add is not
+  held back while a setup request is out").
+- "agent host add asks before setup despite preference and after refusal reopen" is the approvals area's, recorded in
+  [Approvals and agent-spawned sessions](approvals-and-agent-spawned-sessions.md).
+- Not yet ported: "rail ${action} modal stays visible over Sessions and returns to its avatar" (setup, uninstall and a
+  refused update), which opens the setup rerun's question, the uninstall confirmation and the update's refusal dialog
+  from an avatar's menu with Hosts closed, checks that Hosts stays closed, and that Cancel or Close returns focus to the
+  avatar. The avatar opening the menu as its opener is `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`;
+  no test opens one of these dialogs from there.
 
 ### `tests/ssh-help.spec.ts`
 
 Tests: 4. Covers: ssh help displays and copies both registered-host commands.
 
-ported (below)
+replaced (below)
 
 ### `tests/workspace-trust.spec.ts`
 
 Tests: 3. Covers: managed-checkout trust switches persist independently of Claude's legacy route.
 
-partly (below)
+replaced for this area's case (below); the two hint-band cases are Sidebar and session view's
+([Sidebar and session view](sidebar-and-session-view.md))
 
 ### `tests/appearance.spec.ts`
 
 Tests: 4. Covers: ${initial.name} before application mount.
 
-partly (below)
+replaced (below)
 
 ### `tests/podman-environments.spec.ts`
 
 Tests: 10. Covers: Containers Settings keeps failed cleanup explicit.
 
-partly (below)
+replaced for this area's two cases (below); the other eight are the launcher's, the session view's and the templates
+area's, in their files
 
-## `tests/settings.spec.ts`, partly
+## `tests/settings.spec.ts`, replaced
 
-The dialog's shell and its Sessions, Appearance, Hosts, Containers, Credentials, Terminal, Checkouts, Agent trust,
-Notifications and App sections are ported; the cases about the other sections (Recipes) wait for them. Tensorlake is
-listed in its place, between Recipes and Containers, with part of its content (its own cases are in
-`tests/tensorlake-settings.spec.ts`, below). Containers' own cases are in `tests/podman-environments.spec.ts`, and
-Credentials' in `tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, below. App, listed only in
-the installed desktop app (where its updater runs), had no browser spec, since the web interface never showed it.
-Notifications' own cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's
-Notifications half (the "ntfy alerts" group under its 16-pixel sub-heading, below the 18-pixel section heading) is the
-golden `settings-notifications`, which also shows its Sounds half (the sub-heading and its three switches, which the
-other-dialogs area added with the status sounds; their tests are listed under `tests/sounds.spec.ts` in
-`docs/gpui/parity/other-dialogs.md`). Appearance's own cases are in `tests/appearance.spec.ts`, below. Agent trust's are
-split between `tests/workspace-trust.spec.ts` (below) and this spec, whose hint-switch cases are mapped in the Agent
-trust bullet.
+The dialog's shell and all its sections are ported: Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers,
+Credentials, Terminal, Checkouts, Agent trust, Notifications and App. This spec has no case about Recipes or Tensorlake;
+their own cases are in `tests/tensorlake-recipes.spec.ts` and `tests/tensorlake-settings.spec.ts`, below. Containers'
+own cases are in `tests/podman-environments.spec.ts`, and Credentials' in `tests/credentials-settings.spec.ts` and
+`tests/credential-delivery.spec.ts`, below. App, listed only in the installed desktop app (where its updater runs), had
+no browser spec, since the web interface never showed it. Notifications' own cases are in `tests/ntfy-settings.spec.ts`,
+below; of this spec's, the navigation case's Notifications half (the "ntfy alerts" group under its 16-pixel sub-heading,
+below the 18-pixel section heading) is the golden `settings-notifications`, which also shows its Sounds half (the
+sub-heading and its three switches, which the other-dialogs area added with the status sounds; their tests are listed
+under `tests/sounds.spec.ts` in `docs/gpui/parity/other-dialogs.md`). Appearance's own cases are in
+`tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below) and this
+spec, whose hint-switch cases are mapped in the Agent trust bullet.
 
 Terminal shows the link choice, the tunnel consent switch and the **File types to open with Cmd-click** field. The
 switch is the old Mac app's, and like it is drawn only on the Mac, where the terminal offers tunnels: turning it on asks
@@ -275,9 +308,10 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `checkouts_reads_its_routes_once_and_stays_locked_until_they_answer` (read-only and no Save until the read answers, a
   stored explicit disable shown empty, an untouched Save writing nothing). Superseded: "post-clone commands with
   carriage returns refuse edits but can be cleared", since the field keeps a carriage return (Deviations);
-  `a_stored_carriage_return_survives_an_edit` pins that premise. "a pending post-clone save orders reopened settings
-  before the next save" is the UI channel's ordering: a reopened Settings' read is admitted only after the pending
-  save's reply, so the field it fills is read-only until then and shows the saved command; no Settings code orders it.
+  `a_stored_carriage_return_survives_an_edit` pins that premise. Superseded too: "a pending post-clone save orders
+  reopened settings before the next save", since the UI channel delivers in order (decided by the migration's
+  orchestrator on 2026-11-16): a reopened Settings' read is admitted only after the pending save's reply, so the field
+  it fills is read-only until then and shows the saved command; no Settings code orders it.
 - Checkouts' drafts across sections ("checkout drafts survive switching sections and are discarded on close"):
   `an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog` (an unsaved command kept through a section
   switch with nothing sent, and the stored one shown after closing and opening again), and
@@ -300,12 +334,46 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   the web interface, which has no App section.
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
-the UI channel's pushes, which their own tests cover; "settings gap keeps focus ..." is the layer manager's empty-space
-rule (`keeps_focus_on_empty_click` is on for Settings), with no Settings-specific test yet; the text selection half of
-it does not apply, since GPUI labels are not selectable; "settings reverses a permanent removal answer without
-reloading" is Remove host's, below, for its removal half (the switch's own save is this section's preference switch
-tests); the narrow list path is not built (Deviations); "settings ignores a superseded link-choice failure" has no newer
-choice to supersede, since a second click while any Settings save is in flight is refused (Deviations).
+the UI channel's pushes, which their own tests cover; the text selection half of "settings gap keeps focus while text
+and container Enter keep their own behavior" does not apply, since GPUI labels are not selectable; "settings reverses a
+permanent removal answer without reloading" is Remove host's, below, for its removal half (the switch's own save is this
+section's preference switch tests); the narrow list path is not built (Deviations); "settings ignores a superseded
+link-choice failure" has no newer choice to supersede, since a second click while any Settings save is in flight is
+refused (Deviations).
+
+Superseded: "settings frame-color rollback survives closing before failure". Settings keeps no optimistic copy (see
+"Every switch reports its refused save" under Deviations), so the terminal frames follow only the stored preference and
+never show the unsaved choice, and there is nothing to roll back; a save in flight when the dialog closes is
+`a_save_in_flight_goes_on_after_the_dialog_closes`. "settings gear stays clickable in the rail beside a long version in
+narrow windows": the build's version is in the sidebar's header here, not beside the gear on the rail's foot, and no
+window is narrower than 720 pixels; the gear's fixed place on the foot is the sidebar's
+(crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs
+`the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help` and
+`a_long_host_list_scrolls_above_the_foot_which_stays_put`).
+
+Replacing tests for the remaining cases, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named otherwise:
+
+- "settings focus stays on its painted fill and descriptions stay with their labels": the ring on a focused switch that
+  is on, in the on-fill ink, and the accent ring on one that is off,
+  `a_focused_switch_that_is_on_wears_its_ring_in_the_on_fill_ink`; each help under its own switch nearer than the next
+  switch, `each_switchs_help_sits_under_it_nearer_than_the_next_switch`; the gap click keeping focus, the layer
+  manager's empty-space rule, which Settings turns on (`keeps_focus_on_empty_click`) and `layers_tests.rs`
+  `the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus` tests for any dialog; Checkouts' untouched
+  Save, which is busy, drawn in the retired look (the old `--fg-2` ink at full opacity), `components/tests/button.rs`
+  `a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own`, and pictured in both palettes by the
+  golden `settings-checkouts`, whose fields have read their routes and are untouched. The 390-pixel width does not
+  apply: the window's minimum is above it.
+- "settings gap keeps focus while text and container Enter keep their own behavior": the gap click as above; Enter on
+  the dialog itself does nothing, since Settings registers no main action, `enter_on_the_dialog_itself_does_nothing`.
+- "settings dismisses a row menu, isolates the page and returns focus on Escape": the gear's press closing an open host
+  menu and opening Settings at its first switch, and Escape back to the gear,
+  crates/gui/farhelm-gui/src/hosts/menu/tests.rs
+  `the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch`; Space on a switch,
+  `components/tests/checkbox.rs` `a_checkbox_toggles_on_a_click_or_space_and_not_on_enter`, and its save,
+  `each_switch_saves_its_own_preference_field_under_the_preferences_key`; the page behind taking no input is the layer
+  manager's invariant, checked after every test step; the switches' size and alignment are the section goldens'.
+- "host removal container Enter confirms once and respects the disabled button", Remove host's question:
+  `hosts/remove/tests.rs` `enter_on_the_question_itself_removes_only_while_remove_is_available`.
 
 ## `tests/ntfy-settings.spec.ts`, replaced
 
@@ -336,7 +404,7 @@ Not ported here, and why: the 390-pixel width and the stacked actions, since the
 persistence across a reload and the token never being returned, which are the helm route's own and covered by its tests;
 the tint of an unavailable Save after a failed read, which no golden shows.
 
-## `tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, partly
+## `tests/credentials-settings.spec.ts` and `tests/credential-delivery.spec.ts`, replaced
 
 Settings → Credentials is ported: the three lists, the in-place editor with its write-only secret, the agent-login kinds
 with Codex's `auth.json` pasted or chosen through the platform's file dialog, the "Not encrypted on disk" warnings,
@@ -370,21 +438,23 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
   account with its own label, warning and typed key, is
   `a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key`
   (`crates/gui/farhelm-gui/src/settings/tensorlake_tests.rs`).
-- "recipe references refresh deletion guards and preserve unavailable picker choices": partly. An open editor's refresh
-  by a fresh read is `an_open_editor_follows_a_fresh_read_and_keeps_its_secret`; the recipe editor's pickers offering
-  only their kind, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`, and keeping a missing choice visible
-  as unavailable until None is chosen, `a_missing_choice_stays_visible_until_another_is_chosen`. Not ported: the recipe
+- "recipe references refresh deletion guards and preserve unavailable picker choices": An open editor's refresh by a
+  fresh read is `an_open_editor_follows_a_fresh_read_and_keeps_its_secret`; the recipe editor's pickers offering only
+  their kind, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`, and keeping a missing choice visible as
+  unavailable until None is chosen, `a_missing_choice_stays_visible_until_another_is_chosen`. Not ported: the recipe
   editor's pickers following a credential added or deleted while it stays open (see "Recipes" under Deviations).
 - "saved credentials report delivery failures without retaining the secret draft":
   `a_replacement_sends_only_the_secret_and_shows_the_hosts_it_did_not_reach`.
-- "connected credential warnings remain readable in ${palette}": partly. A sandbox's or container's details say
-  "Credentials not delivered:" and the helm's reason, and its row and rail dot turn amber whatever its phase,
+- "connected credential warnings remain readable in ${palette}": A sandbox's or container's details say "Credentials not
+  delivered:" and the helm's reason, and its row and rail dot turn amber whatever its phase,
   `hosts/identity/phase/tests.rs` `credentials_not_delivered_are_said_and_turn_the_host_amber`; the rail's name adds
   "credentials not delivered", `session_list/host_rail/tests.rs`
-  `failing_credentials_and_forwards_join_the_avatars_words_after_its_phase`. Not ported: its palettes, which need a
-  sandbox or container host no drive can stage.
+  `failing_credentials_and_forwards_join_the_avatars_words_after_its_phase`. Its pictures in both palettes: the golden
+  `hosts-panel-credentials-not-delivered`, a connected sandbox's amber row and its details over the fake helm. No app
+  scene can show one, since the end-to-end harness seeds no sandbox or container (decided by the migration's
+  orchestrator on 2026-11-15; see [Sidebar and session view](sidebar-and-session-view.md)).
 
-## `tests/tensorlake-settings.spec.ts` and `tests/tensorlake-tunnels.spec.ts`, partly
+## `tests/tensorlake-settings.spec.ts` and `tests/tensorlake-tunnels.spec.ts`, replaced
 
 Settings → Tensorlake draws the EXPERIMENTAL warning, the intro, its own copy of the Tensorlake API key form (labelled
 "API key", with its own "Not encrypted on disk" warning) and "Creating sandboxes" with the create-without-asking switch
@@ -394,8 +464,8 @@ not on this helm** with Refresh, Checking…, "None found · checked", its rows 
 up…, and the read's and Delete's failures. Replacing tests, in `crates/gui/farhelm-gui/src/settings/tensorlake_tests.rs`
 or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.rs`:
 
-- "Tensorlake settings save a write-only key, test the saved key and clear it": partly. Save, Test and Clear with the
-  write-only placeholders, the request bodies and Test using the saved key are the shared form's, tested in Credentials
+- "Tensorlake settings save a write-only key, test the saved key and clear it": Save, Test and Clear with the write-only
+  placeholders, the request bodies and Test using the saved key are the shared form's, tested in Credentials
   (`the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata` in
   `crates/gui/farhelm-gui/src/settings/credential_tests.rs`); the Tensorlake copy's label, warning and help, and a save
   in one form showing in the other, are `a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key`. The
@@ -411,9 +481,11 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
   route's own, covered by its tests.
 - "sandbox refresh shows pending, empty, failure and recovery feedback":
   `a_saved_key_reads_the_list_which_says_when_it_found_none` (Checking… with Refresh unavailable, then None found) and
-  `a_failed_read_keeps_the_rows_and_a_refresh_recovers`. Its pictures in both palettes have no app scene: the list shows
-  only with a saved key, which would make the batch's app call the real Tensorlake API, and there is no stand-in for it
-  (the orchestrator's question of 2026-11-15; until it is answered, drives stop at the section with no key).
+  `a_failed_read_keeps_the_rows_and_a_refresh_recovers`. Its pictures in both palettes: the golden
+  `settings-tensorlake-sandboxes`, the list as read with a key saved, its rows in each state a row draws, over the fake
+  helm. No app scene shows it: the list shows only with a saved key, which would make the batch's app call the real
+  Tensorlake API, and the migration's orchestrator decided on 2026-11-15 that debug builds get no Tensorlake stand-in,
+  so the in-app drive stops at the section with no key saved.
 - "sandbox discovery ignores replies superseded by key replacement or clear": the UI channel answers in order, so a read
   sent before a key change is answered before it, and only the newest read's answer is shown:
   `a_clear_hides_the_list_and_its_rows`, `a_saved_key_reads_the_list_which_says_when_it_found_none` (a replaced key
@@ -430,7 +502,7 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
   again when a Tensorlake host comes or goes and on nothing else in the fleet,
   `only_a_tensorlake_host_coming_or_going_reads_the_list_again`. Which sandboxes the helm lists and what a cleanup
   terminates and deletes are the helm's, covered by its tests. The spec's other test, the tunnel health of a host row,
-  comes with the Tensorlake hosts in the Hosts panel.
+  is the bullet above.
 - "Tensorlake's create-without-asking switch shows only the stored choice":
   `the_create_without_asking_switch_shows_only_the_stored_choice`, which also checks that the save names only its own
   field, and, for a done save whose answer does not decode,
@@ -441,7 +513,7 @@ or, for the list, `crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.
   Tensorlake before Containers, as SPEC.md orders them; the reference screens, taken from the old app, list Containers
   first.
 
-## `tests/tensorlake-hosts.spec.ts`, partly
+## `tests/tensorlake-hosts.spec.ts`, replaced
 
 Add host opens on SSH and offers the Tensorlake sandbox kind beside it. Choosing it reads the Tensorlake account (each
 time, as the old dialog's remount did) and draws "Loading Tensorlake settings…", a failed read's words with Retry, the
@@ -452,7 +524,7 @@ and the plan closes Add host and opens the creation question on the prompt, as a
 "Create Tensorlake sandbox · <name>", the size, the steps with Copy plan, the billing callout, and Cancel, Back and
 Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensorlake_tests.rs`:
 
-- "Add host pins inline recipe answers and focuses Name in ${palette}": partly.
+- "Add host pins inline recipe answers and focuses Name in ${palette}":
   `new_recipe_opens_the_editor_with_focus_in_name_and_pins_its_answers` checks the editor's Name holding focus, no Back,
   the kind choice hidden, the editor taller than the body (the premise), its Cancel and Save in the footer below the
   scrolling body, and Tab from the editor's fields reaching Cancel, then Save; a done Save choosing the recipe is
@@ -462,8 +534,11 @@ Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensor
   `settings/recipe_leave_tests.rs` `a_refused_save_takes_an_open_question_away`); Keep editing keeping the draft is
   `every_way_out_asks_first_and_keep_editing_stays` there; the footer staying put while the body scrolls, and the whole
   card scrolling in a short window, are the dialog frame's (`components/tests/dialog.rs`
-  `a_long_dialog_body_scrolls_and_the_answers_stay_visible`, `a_frame_too_tall_for_the_window_scrolls_as_a_whole`). Not
-  ported: the body starting at its top, and the palettes, which have no app scene since the form needs a saved key.
+  `a_long_dialog_body_scrolls_and_the_answers_stay_visible`, `a_frame_too_tall_for_the_window_scrolls_as_a_whole`). The
+  body starting at its top, the old case's premise: `the_inline_editor_opens_at_its_top`. Its pictures in both palettes:
+  the golden `host-add-tensorlake-recipe-editor`, the editor inside Add host as Recipe's "New recipe…" opens it, with
+  its answers in Add host's footer; Add host's form with a key saved, which "New recipe…" leaves from, is
+  `host-add-tensorlake-form`.
 - "the Tensorlake form links Settings and protects an inline recipe draft":
   `without_a_key_the_body_opens_settings_and_reads_the_account_again_when_it_closes`, and the draft's protection,
   `leaving_with_unsaved_changes_asks_and_discard_goes_where_it_was_asked` (the editor's Cancel and Add host's Escape
@@ -483,8 +558,10 @@ Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensor
   `continue_refuses_a_missing_field_or_a_launch_with_the_fields_kept` and
   `a_refused_probe_or_a_reply_that_is_no_sandbox_plan_says_why`. Copy plan is the plan body the SSH setup question
   shares, tested there (`hosts/setup/tests.rs` `copy_plan_copies_the_helms_plan_text`). Its look with no key saved is
-  the screenshot batch's app scene `app-host-add-tensorlake-no-key`; the form with a key and the question have no app
-  scene, since a drive stops at the no-key refusal.
+  the screenshot batch's app scene `app-host-add-tensorlake-no-key`. The form with a key saved and the creation
+  question, in both palettes: the goldens `host-add-tensorlake-form` (Name and Recipe with its summary) and
+  `host-add-tensorlake-creation` (the title and size, the plan with Copy plan, the billing callout and the three
+  answers), over the fake helm; no app scene can reach either, for the reason given in the previous case.
 - "adding a Tensorlake host confirms billing and keeps setup progress": its confirmation and submission under Add host's
   key, `create_sandbox_submits_the_plan_under_add_hosts_key`; the run's progress on the new row is the Hosts panel's,
   shared with an SSH host's setup.
@@ -504,7 +581,7 @@ Create sandbox. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tensor
   `a_sandboxs_rerun_asks_its_creation_question_without_back`; with Tensorlake's own skip on it creates without asking,
   and a failed read of that skip asks, `the_tensorlake_skip_creates_without_asking_and_a_failed_read_asks`.
 
-## `tests/tensorlake-lifecycle.spec.ts`, partly
+## `tests/tensorlake-lifecycle.spec.ts`, this area's cases
 
 Of its 21 cases, 8 are this area's: the host's lifecycle in the Hosts panel. The other 13 are the launcher's
 (wake-to-create, quick launch, Replace with, resume-before-create), in [Launcher](launcher.md). Of the 8, the sandbox
@@ -535,15 +612,17 @@ and Suspend, in `crates/gui/farhelm-gui/src/hosts/environment_tests.rs` unless n
   `a_launch_elsewhere_does_not_hold_suspend`.
 - "a suspended session banner resumes its host": the session pane's, `session_pane/environment_tests.rs`
   `the_suspended_card_says_so_and_resumes`.
-- "Suspend asks when an agent is working or its status is unknown" (working, unknown, a stale idle session) and "an
-  unreachable host still offers Suspend": `suspend_asks_when_an_agent_works_or_its_activity_is_unknown`, which also
-  answers with a truncated listing and a failed read, and asks on a host already unreachable at the click.
+- "suspending an agent with ${activity.name} status asks before sending the request" (working, unknown, a stale idle
+  session) and "an unreachable supervisor still offers Suspend for its running sandbox":
+  `suspend_asks_when_an_agent_works_or_its_activity_is_unknown`, which also answers with a truncated listing and a
+  failed read, and asks on a host already unreachable at the click.
 - "an empty cached listing asks when the host disconnects during the read / before the click": the host pushed
   connecting while the read is out, then an empty listing, asks,
   `suspend_asks_when_the_host_disconnects_during_its_read`; the click-time case is the unreachable one above.
 - The question and the host changing under it: `the_suspend_question_follows_its_host`; the read answering after the
   user moved on, `a_suspend_read_after_the_user_moved_on_says_so`.
-- "Suspend acts at once when every agent is idle or waiting": `suspend_goes_at_once_when_every_session_there_is_idle`.
+- "suspending a current ${state} agent acts immediately" (idle and waiting):
+  `suspend_goes_at_once_when_every_session_there_is_idle`.
 - "suspend confirmation and sandbox details use the standard frame in ${palette}", its confirmation half: the question
   is the prompt's, whose frame and palettes the prompt's own tests cover; its title, line, answers in order and focus on
   Cancel are checked by `suspend_asks_when_an_agent_works_or_its_activity_is_unknown`.
@@ -618,9 +697,11 @@ A dialog the user closed shows nothing, and a refusal has no row to show on, sin
 ## `tests/ssh-help.spec.ts`
 
 SSH help is `hosts::ssh_help`. Its entry points are `hosts::ssh_help::open`, for the ? menu's "SSH needs 2FA?", which
-the area that owns the ? menu draws later, passing the ? button as the control closing returns focus to (the old app
-returned it to its Help toggle; the menu item goes with its popover), and which the tests stand in for with a button of
-their own; and Add host's "Start its connections yourself first." link, which opens it for the destination as typed.
+passes the ? button as the control closing returns focus to (the old app returned it to its Help toggle; the menu item
+goes with its popover), and which this area's tests stand in for with a button of their own; and Add host's "Start its
+connections yourself first." link, which opens it for the destination as typed. The ? menu's entry and the focus back on
+the ? button are the menu's own test, crates/gui/farhelm-gui/src/help_menu/tests.rs
+`ssh_help_opens_from_the_menu_and_returns_focus_to_the_button`.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs` unless named otherwise:
 
@@ -665,7 +746,8 @@ menu offers Re-run once a setup failed (`hosts::setup::rerun`). Replacing tests,
   goldens below; the status sits on its own line under the name, as the old one did.
 - "accepted ADD registers before execution and releases the page lock while running", its row half: the running row's
   status and steps above; Settings unavailable and no Update or Re-run while it runs are `offers`'
-  `a_running_run_holds_the_host_until_it_ends`. Its rail half (the avatar's progress mark) is the sidebar's.
+  `a_running_run_holds_the_host_until_it_ends`. Its rail half (the avatar's progress mark) belongs to
+  [Sidebar and session view](sidebar-and-session-view.md) (routed there by the migration's orchestrator on 2026-11-16).
 - The failed run's step and reason (the drive of part 2 found the helm's "disk full" shown nowhere), as the old specs'
   `.provisioning-run-message` checks read them: `a_failed_setup_opens_its_row_with_the_step_and_the_reason`, also when
   the user folded the run first; end to end, step 43.
@@ -703,9 +785,36 @@ Not ported, and why:
 - "a failed local ADD keeps its rerun action in the local setup state" and the local row's automatic setup: the helm
   never sets up its own machine (its local probe answers that the Farhelm app starts that machine's supervisor when it
   opens, SPEC.md "Topology": "What the panel does NOT do on the helm's own machine is install one"), so the local host
-  has no setup run to show or rerun.
+  has no setup run to show or rerun. The same holds for the local probe's cases, whose probe and `farhelm helm setup`
+  handoff are not ported (Deviations, "The Hosts panel"): "a transient local probe error can be retried into the
+  run-setup answer", "local automatic discovery does not start before the authoritative idle view", "manual-only local
+  setup leaves the manual command primary", "an unvalidated automatic local probe reveals its feedback", "a held local
+  plan opens its confirmation while details stay folded" and "a local setup phase transition republishes provisioning
+  commands".
+- "delayed host dialogs wait for Settings" (a held uninstall plan, a held Update refusal, two plans): opening Settings
+  is moving on, so a plan or refusal that arrives after it opens nothing and shows under its row (Deviations, "Update",
+  "No refusal queue", and "Uninstall", "A plan that arrives after the user moved on opens nothing"):
+  `hosts/update/tests.rs` `a_refused_plan_after_the_user_moved_on_opens_nothing` and `hosts/uninstall/tests.rs`
+  `results_after_the_user_moved_on_open_nothing_and_show_under_the_row`.
 - The reference scenes `host-setup-running` and `host-setup-failed` show the attention list and the rail's avatar, which
-  are the sidebar's (host status on the rail is its M3), not this area's.
+  are the sidebar's, not this area's; its file says why they have no app scene yet (the `tests/host-updates.spec.ts`
+  entry in [Sidebar and session view](sidebar-and-session-view.md)).
+- "offer retirement releases only its owner" (visible, and waiting behind another host): it guarded the old page's
+  host-keyed modal slots, where an uninstall offer waited for its turn and retiring a stale one had to release only the
+  isolation it owned. Here every question is a layer of its own with nothing queued (Deviations, "Update", "No refusal
+  queue"), so closing one releases nothing of another's. And a destination change no longer retires an open uninstall
+  question: SPEC.md, "Topology" (confirmed 2026-10-10), has confirmed operations, a confirmed uninstall named among
+  them, follow the host entry onto its new machine, with no identity check added. The question closes only when its host
+  leaves the list (`hosts/uninstall.rs`, the question's subject).
+- "unstructured ${operation} plan keeps a named keyboard entry" (setup and uninstall): the old page rendered a plan
+  reply that carried only its text, from an older helm, as plain text in a body that was itself a named keyboard stop.
+  This app's helm is the one built with it and always sends the steps, which the reply types require, so no plan without
+  them reaches a confirmation; the structured plan's body is reached by keyboard through Copy plan, as the old
+  structured one was (Deviations, "The plan is not a named keyboard scroll region of its own", under the setup
+  confirmation and Uninstall). Such a reply opens no confirmation and says it could not be read: `hosts/add/tests.rs`
+  `manual_setup_refusals_and_the_timeout_show_in_the_dialog_with_the_destination_kept` (in Add host's error line) and
+  `hosts/uninstall/tests.rs` `a_plan_without_its_steps_opens_nothing_and_says_it_could_not_be_read` (under the host's
+  row).
 
 ## `tests/provisioning.spec.ts`, Remove host
 
@@ -719,14 +828,22 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
 - "rail removal returns to its avatar on cancel and Hosts on success", its row half:
   `cancel_sends_nothing_and_returns_focus_to_the_rows_toggle` (under macOS's click rule) and
   `remove_sends_the_delete_under_the_hosts_key` (the question stays up until the helm forgets the host; focus after the
-  removal recovers, see Deviations). The avatar half follows from that and
+  removal recovers, see Deviations). The avatar opening the menu as its opener is
   `crates/gui/farhelm-gui/src/session_list/host_rail/avatar_menu_tests.rs`
-  `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`, which pins the avatar as the menu's opener.
+  `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`. Not yet ported: the avatar half, Cancel on a removal
+  question asked from the avatar's menu returning focus to the avatar; no test opens the question there. Its success
+  half differs on purpose: focus after a removal is a recorded deviation (Deviations, "Remove host").
 - "host retirement releases before removal and preserves approval focus: Remove success", the removal's half:
   `remove_asks_naming_the_host_its_destination_and_what_removal_keeps` (focus on Remove) and
   `remove_sends_the_delete_under_the_hosts_key` (Remove sends the removal); the question closing when its host goes,
-  `the_question_closes_when_its_host_is_gone`. Its approval-card half is not this area's: the question keeps focus on
-  its busy answer while the removal runs, and the result moves no focus outside it.
+  `the_question_closes_when_its_host_is_gone`. Its approval-card half belongs to
+  [Approvals and agent-spawned sessions](approvals-and-agent-spawned-sessions.md), which records it as replaced by
+  `layers_tests.rs` `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`: the question keeps
+  focus on its busy answer while the removal runs, and the result moves no focus outside it.
+- "host retirement releases before removal and preserves approval focus: authoritative Settings disappearance", the
+  dialog's half: crates/gui/farhelm-gui/src/hosts/settings/tests.rs
+  `the_dialog_closes_when_the_registry_no_longer_lists_its_host` (the host settings dialog closes when the helm stops
+  listing its host). Its approval-card half is the same as the Remove success variant's, above.
 - `settings.spec.ts`, "settings reverses a permanent removal answer without reloading", its removal half:
   `the_permanent_answer_also_stops_asking` and `with_the_preference_on_remove_goes_without_asking`.
 - A refused removal, which the old dialog showed inside itself:
@@ -764,17 +881,18 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
   permanent answer, and a removal without asking).
 - The look: the goldens `host-remove-confirmation` and `host-menu` (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
 
-Not ported here: "a retarget and a removal before the claim each submit nothing" and "removal before plan completion
-submits nothing", which test an Update's plan against a removal and come with Update; the refusal dialog's "Remove
-instead" answer ("uninstall and Update planning refusals open framed dialogs"), which comes with that dialog.
+Elsewhere in this file: "a retarget and a removal before the claim each submit nothing" and "removal before plan
+completion submits nothing", which test an Update's plan against a removal, are superseded in the Update section; the
+refusal dialog's "Remove instead" answer ("uninstall and Update planning refusals open framed dialogs") is
+`hosts/update/tests.rs` `a_refusal_marked_remove_instead_offers_remove_host`, in the same section.
 
 ## `tests/provisioning.spec.ts`, Update
 
 A remote host's Update goes out from its menu, from its row's inline `↑ Update`, from the menu's Re-run of a failed one,
 and for every host whose Update is available from the Hosts heading's Update all, all as the same plan request and its
 confirmation (`crates/gui/farhelm-gui/src/hosts/update.rs`); a refused plan opens the host refusal dialog
-(`hosts/refusal.rs`). The attention list's Update rows will call the same `hosts::update::start` and `start_all`.
-Replacing tests, in `crates/gui/farhelm-gui/src/hosts/update/tests.rs` unless named otherwise:
+(`hosts/refusal.rs`). The attention list's Update rows call the same `hosts::update::start` and `start_all`. Replacing
+tests, in `crates/gui/farhelm-gui/src/hosts/update/tests.rs` unless named otherwise:
 
 - "single Update shows inline progress without opening its row" and "an update shows pending status from acceptance":
   `the_menus_update_plans_then_confirms_under_the_hosts_key` (the plan request without a body, the confirmation naming
@@ -806,8 +924,10 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/update/tests.rs` unless na
   `update_all_lets_each_host_keep_its_own_result`; "update all skips a host already busy with setup":
   `update_all_updates_every_available_remote_host_and_skips_the_rest` (a setup running, a save in flight, a newer host
   and the local host skipped).
-- The inline `↑ Update` (no old spec drove it): `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update`
-  and `the_hover_names_both_builds_the_urgency_and_the_action`.
+- The inline `↑ Update` (`terminal-multihost.spec.ts`, "host-inline-update: ${activation} starts progress and keeps the
+  header on one line", whose other halves are in that spec's section below):
+  `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update` and
+  `the_hover_names_both_builds_the_urgency_and_the_action`.
 - A launch in flight (no old spec covered it): `a_launch_in_flight_refuses_the_update_before_sending`.
 - The look: the goldens `hosts-panel-updates`, `host-update-running-hosts-panel` and `host-update-refusal`, which have
   no reference scene (none shows an outdated host or an Update; the refusal dialog's old look is
@@ -826,11 +946,14 @@ earlier update uncertainty while ..."), "incarnation churn keeps a followed run 
 progress read racing submission commits nothing ...", "a held acceptance across a target change retires the old run
 ...", "a progress read across a held acceptance and target change cannot adopt the old run", and "a competing run during
 retry planning preserves the sticky update warning". The helm still refuses a plan for a host that changed (its one-use
-plan names the host it was made for). Not ported here: "held rail Update refusal keeps its avatar ..." (the rail's entry
-points are the sidebar's). "An open Update card follows the new current step in a short viewport" is ported: the card
-keeps its current step whole however short the window (crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs
-`a_short_window_previews_only_diagnostics_that_cannot_fit`), and the running status opens it from the Hosts row
-(`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
+plan names the host it was made for). Superseded too: "held rail Update refusal keeps its avatar after ${alternate}
+panel menu opens" (same host and another host), since opening another menu is moving on, so the held refusal opens no
+dialog and shows under its row (`a_refused_plan_after_the_user_moved_on_opens_nothing`; "No refusal queue" under
+Deviations); the avatar as the menu's opener is `session_list/host_rail/avatar_menu_tests.rs`
+`a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`. "An open Update card follows the new current step in a
+short viewport" is ported: the card keeps its current step whole however short the window
+(crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs `a_short_window_previews_only_diagnostics_that_cannot_fit`),
+and the running status opens it from the Hosts row (`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
 
 ## `tests/provisioning.spec.ts` and `tests/terminal-multihost.spec.ts`, Uninstall
 
@@ -887,16 +1010,17 @@ Retry" is this Retry. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/reme
   `hosts/identity/phase/tests.rs`; the Adopt naming the reported one,
   `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog`.
 - "identity-unverified-offers-no-adopt: the remedies are named instead": `hosts/offers/tests.rs`
-  `retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch` and the unverified remedy line in
-  `hosts/identity/phase/tests.rs`.
+  `retry_is_offered_in_every_phase_but_a_deletion_under_way_and_adopt_only_for_a_mismatch` and the unverified remedy
+  line in `hosts/identity/phase/tests.rs`.
 - "adopt-requires-current-identity: the displayed identity is sent, and a 409 is shown":
   `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog` and
   `adopt_sends_the_identity_the_menu_showed_not_one_read_at_the_press`.
-- Retry, which no old case drove alone (the old menu's first item): `retry_sends_one_attempt_under_the_hosts_key`, and a
-  refusal after the user moved on, `a_refusal_after_the_user_moved_on_shows_under_the_row`. It is offered on every kind
-  of host, the local one and one this build does not know included, as the old menu offered it on every row ("the local
-  row menu contains Retry"), and in every phase but an environment's deletion (`hosts/offers/tests.rs`,
-  `each_kind_decides_its_own_offers` and `retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch`).
+- Retry (`terminal-multihost.spec.ts`, "host-retry-click: the control posts the retry verb for its own host"; its
+  refused case is in that spec's section below): `retry_sends_one_attempt_under_the_hosts_key`, and a refusal after the
+  user moved on, `a_refusal_after_the_user_moved_on_shows_under_the_row`. It is offered on every kind of host, the local
+  one and one this build does not know included, as the old menu offered it on every row ("the local row menu contains
+  Retry"), and in every phase but an environment's deletion (`hosts/offers/tests.rs`, `each_kind_decides_its_own_offers`
+  and `retry_is_offered_in_every_phase_but_a_deletion_under_way_and_adopt_only_for_a_mismatch`).
 - Fixing the destination instead (no old case): `fixing_the_destination_instead_is_the_host_settings_dialog`, and the
   destination field's own tests in `hosts/settings/tests.rs`.
 - A launch in flight (no old case; the old page lock held both):
@@ -906,7 +1030,7 @@ Retry" is this Retry. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/reme
 No end-to-end step: a fake host never connects, so the scripted backend cannot stage an identity mismatch or a
 duplicate, and Retry on a fake host only restarts an attempt that fails again, which the in-process tests already pin.
 
-## `tests/appearance.spec.ts`, partly
+## `tests/appearance.spec.ts`, replaced
 
 The old spec tested a choice kept in the web view's own storage. Appearance is a helm preference in this app (the
 maintainer's decision of 2026-11-13), so its cases map onto the preference row's save and push, and onto the main view,
@@ -938,7 +1062,7 @@ Superseded: the four "... before application mount" cases. They held the browser
 script in the page's head colored the canvas before the app existed. This app has no page, head or renderer module to
 hold; what the window draws before the first snapshot is a deviation, below.
 
-## `tests/host-checkout-folder.spec.ts`, partly
+## `tests/host-checkout-folder.spec.ts`, replaced
 
 The host settings dialog draws the shared folder field (`settings::CheckoutField::folder` with
 `settings::FolderScope::Host`) in its Checkouts section. Replacing tests, in
@@ -961,19 +1085,23 @@ The field's own tests in `crates/gui/farhelm-gui/src/settings/tests.rs` cover th
 override is the same code as the default folder's, tested in the `tests/settings.spec.ts` section above. The goldens
 `host-settings-dialog` and `host-settings-dialog-end` show the section.
 
-Not ported here, and why: the launch preview reaching the host's folder (the spec's launcher half, and its later default
-change reaching the preview) belongs to the launcher's preview. The old case checked that nothing in the field overflows
-at 1280 and 390 pixels wide; here the shared frame is never wider than the window and the field takes the section's
-width, and the one part that did overflow, a long refusal, is pinned by the save test above at the dialog's own width.
-The fix is in the shared field, so a long refusal or read failure in Settings → Checkouts, which was cut off the same
-way, wraps too. No test drives a narrow window.
+The launch preview reaching the host's folder (the spec's launcher half, and its later default change reaching the
+preview): the launcher shows the path the helm's checkout preview answers, the launcher's
+`crates/gui/farhelm-gui/src/launcher/checkout_tests.rs` `a_chosen_repository_is_previewed_before_it_launches`, and the
+folder the helm resolves for a host, its own or inherited from the all-hosts default, is the helm's,
+`checkout_host_overrides_win_per_field_while_null_inherits` and
+`checkout_clearing_host_overrides_returns_to_inheritance` in `crates/farhelm-helm/src/checkout_config.rs`. The old case
+checked that nothing in the field overflows at 1280 and 390 pixels wide; here the shared frame is never wider than the
+window and the field takes the section's width, and the one part that did overflow, a long refusal, is pinned by the
+save test above at the dialog's own width. The fix is in the shared field, so a long refusal or read failure in Settings
+→ Checkouts, which was cut off the same way, wraps too. No test drives a narrow window.
 
-## `tests/workspace-trust.spec.ts`, partly
+## `tests/workspace-trust.spec.ts`, this area's case
 
 Its Settings case ("managed-checkout trust switches persist independently of Claude's legacy route") is ported, with the
-Settings half of `tests/claude-trust.spec.ts` (whose row is in `launcher.md`: the hint band is the session view's): the
-switch the band's "Settings and caveats" opens, and the hint switch that reverses its Don't show again. Replacing tests,
-in `crates/gui/farhelm-gui/src/settings/tests.rs`:
+Settings half of `tests/claude-trust.spec.ts` (whose entry is in `launcher.md`; the hint band is
+[Sidebar and session view](sidebar-and-session-view.md)'s): the switch the band's "Settings and caveats" opens, and the
+hint switch that reverses its Don't show again. Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
 
 - The read when the section opens, and no toggle over a choice not known:
   `agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer`,
@@ -991,17 +1119,25 @@ in `crates/gui/farhelm-gui/src/settings/tests.rs`:
 - The look: the golden `settings-agent-trust`.
 
 Not ported here: the two hint-band cases ("... trust hint stays scoped to its managed agent terminal and own dismissal",
-"Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to the
-bands, which the session view draws. Claude's band is built, with its cases in the sidebar's parity file under
-`tests/claude-trust.spec.ts`; the Codex and Muse band, which these two cases are about, is not built yet.
+"Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to
+[Sidebar and session view](sidebar-and-session-view.md), since the session view draws the hint bands (decided by the
+migration's orchestrator on 2026-11-14, as `launcher.md`'s `tests/claude-trust.spec.ts` entry records). Claude's band is
+built, with its cases in the sidebar's parity file under `tests/claude-trust.spec.ts`; the Codex and Muse band, which
+these two cases are about, is not built yet.
 
-## `tests/podman-environments.spec.ts`, partly
+## `tests/podman-environments.spec.ts`, this area's cases
 
 Settings → Containers is ported (`crates/gui/farhelm-gui/src/settings/containers.rs`). Of the spec's ten tests, two are
 Settings': "Containers Settings keeps failed cleanup explicit", and the `recipes` surface of "refreshes recipe places
-after a delayed probe without a fleet notice", which is Settings → Recipes' and waits for it. The other eight, and the
-`launcher` surface of the delayed-probe test, are the launcher's (new container placement, recents, quick launch) or the
-session view's (a connected container's Delete), and are listed in those areas' parity files as they are ported.
+after a delayed probe without a fleet notice", which is Settings → Recipes' and is ported there: the check asked once on
+showing, its outcome reaching the place's line through the helm's push with nothing read and no second check,
+`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`
+`container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome` (the rest of the per-place lines are in the
+`tests/tensorlake-recipes.spec.ts` section below). The other eight, and the `launcher` surface of the delayed-probe
+test, are other areas': the launcher's (new container placement and recents) in [Launcher](launcher.md), its
+`tests/podman-environments.spec.ts` entry; "a connected container's Delete asks its Farhelm and reports the container
+that stays" in [Sidebar and session view](sidebar-and-session-view.md); and "container template quick launch retains its
+saved place" in [Templates and quick launch](templates-and-quick-launch.md).
 
 Replacing tests, in `crates/gui/farhelm-gui/src/settings/containers_tests.rs`:
 
@@ -1045,12 +1181,13 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
   for a check and sends the helm nothing). What it offers is `offers::menu_offers`, whose tests are listed in the
   `tests/provisioning.spec.ts` row, with `in_the_desktop_app_the_local_hosts_update_checks_for_a_release` in
   `hosts/offers/tests.rs`.
-- Opening and closing ("rail ${action} modal ... returns to its avatar", its row half):
+- Opening and closing (`terminal-multihost.spec.ts`, "host-settings-dialog-lifecycle", in that spec's section below):
   `focus_starts_on_the_first_edit`, `escape_and_both_close_controls_return_focus_to_the_toggle`,
   `the_dialog_closes_when_the_registry_no_longer_lists_its_host`,
   `a_click_on_edit_focuses_its_field_under_the_macos_click_rule`.
-- Saving (no old spec covered alias, appearance or permissions): `each_permission_saves_its_own_route_and_field`,
-  `a_refused_permission_shows_the_stored_value_and_the_helms_words`,
+- Saving (`terminal-multihost.spec.ts`'s host-appearance and host-settings cases and `ui-plan-regressions.spec.ts`'s
+  "refused host permission switches restore their stored values", each mapped in its spec's section below):
+  `each_permission_saves_its_own_route_and_field`, `a_refused_permission_shows_the_stored_value_and_the_helms_words`,
   `the_destination_saves_as_typed_and_a_refusal_stays_in_place` (a refusal, and the helm's answer that the change waits
   for a setup or Update on the host, kept in place), `the_alias_saves_and_clears_and_escape_closes_only_its_field`,
   `escape_while_a_save_is_in_flight_keeps_the_field_open`, `an_appearance_choice_saves_icon_and_color_together`,
@@ -1063,18 +1200,20 @@ Not ported here: `modal-layout.spec.ts`'s host settings cases, whose margins and
 frame's (its own tests and goldens), and whose busy-body Tab stop has no counterpart, since no control here goes
 unavailable while a save runs.
 
-## `tests/tensorlake-recipes.spec.ts`, partly
+## `tests/tensorlake-recipes.spec.ts`, replaced
 
 Settings → Recipes lists the shared catalog with each recipe's summary, its per-place container lines with a Rebuild per
 place, its built-snapshot status and its prepared-snapshot line, and builds snapshots. New recipe and each row's Edit
 open the recipe editor in place of the list, with Name, Size, the Software cards and each base's fields, Ubuntu packages
-and Tunnels, and Save; the editor's GitHub and Agents blocks with their credential pickers; Delete and the question
-before leaving with unsaved changes come in later changes. Replacing tests, in
-`crates/gui/farhelm-gui/src/settings/recipe_tests.rs`, `crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`,
+and Tunnels, the GitHub and Agents blocks with their credential pickers, Save, Delete, and the question before leaving
+with unsaved changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs`,
+`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`,
 `crates/gui/farhelm-gui/src/settings/recipe_editor_tests.rs` and, for the editor's draft without a window,
 `crates/gui/farhelm-gui/src/settings/recipes/draft_tests.rs`:
 
-- "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe": partly. The row's status
+- "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe": the build's and the
+  preparation's status regions, named for their recipe ("Snapshot of <name>", "Preparation of <name>"), which the old
+  case found its words by, `each_rows_build_and_preparation_are_status_regions_named_for_the_recipe`; the row's status
   in every build state, with the one action each offers (Build snapshot, Rebuild snapshot, Retry, or none while a build
   runs or for a base Tensorlake cannot run), `snapshot_status_follows_the_build_state`,
   `base_changes_keep_the_snapshot_and_build_actions` and
@@ -1093,7 +1232,8 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   `an_unreadable_catalog_keeps_the_rows_and_retry_loading_asks_again`, with the failure and the recovery pushed by the
   helm (see "Recipes" under Deviations for what Retry loading sends); a failed read with no rows,
   `an_empty_catalog_says_so_and_an_unreadable_one_shows_only_its_reason`.
-- "recipe preparation reports lazy progress, failure and readiness": partly. The line in every preparation state, with
+- "recipe preparation reports lazy progress, failure and readiness": the line in every preparation state, in its own
+  status region named for the recipe (`each_rows_build_and_preparation_are_status_regions_named_for_the_recipe`), with
   no action of its own, `prepared_status_reports_all_phases_and_lazy_recovery` and
   `prepared_status_keeps_readiness_last_checked_and_ages_display_only`; its age moving on the clock with nothing read,
   `a_ready_snapshots_age_moves_on_the_clock_which_goes_when_hidden`, and its pulse,
@@ -1103,30 +1243,38 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   and, for the interrupted state, `prepared_status_reports_all_phases_and_lazy_recovery`; the stale look is the golden
   `settings-recipes-places`.
 - The per-place lines and their Rebuild, which no case of this spec drove (`tests/podman-environments.spec.ts`'s
-  "recipes refreshes recipe places after a delayed probe without a fleet notice" is the launcher area's row, and its
-  Recipes half is ported here): `the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name`,
-  `places_not_pushed_yet_read_as_reading`, `unreadable_places_show_their_reason_in_the_row`,
+  "recipes refreshes recipe places after a delayed probe without a fleet notice", whose `launcher` surface is the
+  launcher's, has its Recipes half ported here; see that spec's section above):
+  `the_pushed_places_draw_a_line_per_container_place_with_its_hosts_name`, `places_not_pushed_yet_read_as_reading`,
+  `unreadable_places_show_their_reason_in_the_row`,
   `a_places_rebuild_is_accepted_under_the_recipes_key_and_the_push_shows_it_building`,
   `a_refused_rebuild_shows_under_the_row_until_a_push_shows_it_building`,
   `a_refusal_stays_while_another_place_of_its_recipe_already_builds`, `a_place_without_a_line_building_keeps_a_refusal`,
   and the check asked on opening, its outcome brought by the helm's push of the places,
   `container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome`; the look, the golden
   `settings-recipes-places`.
-- "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}": partly. New recipe opens the editor
-  in place with focus on Back, Cancel and Save pinned with the dialog's footer above the Close row, and Back returning
-  to the list, `new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list`; switching sections hides the answers
-  and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's and the
-  helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
+- "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}": New recipe opens the editor in place
+  with focus on Back, Cancel and Save pinned with the dialog's footer above the Close row, and Back returning to the
+  list, `new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list`; Tab from the editor's fields reaching the
+  pinned Cancel, then Save, `tab_from_the_editors_fields_reaches_its_pinned_cancel_then_save`; switching sections hides
+  the answers and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's
+  and the helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
   from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out, the
   credential choices included, `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden
   `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). The leave and delete questions in the
   answers' place, `every_way_out_asks_first_and_keep_editing_stays` and
-  `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them: the reference screens have none.
-- "a managed recipe is created, edited and deleted without exposing its token": partly. Creation under the recipe's key
-  with its row from the pushed catalog, `a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows`; Edit with the
-  name fixed, `a_saved_recipes_name_is_fixed`; Edit then Save sending the recipe's endpoint, login and GitHub token
-  names back unchanged, `edit_then_save_sends_the_recipes_credential_choices_back_unchanged` and, without a window,
+  `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them: the reference screens have none, and the old
+  case only attached its pictures of them for review, asserting nothing of their look. A refused save from the leave
+  question takes the question away here, where the old one stayed up (Deviations, "Recipes", "The leave question goes
+  when it is answered").
+- "a managed recipe is created, edited and deleted without exposing its token": the help saying where tokens are added
+  and that the recipe keeps their names, not their values, `recipe_credential_tests.rs`
+  `the_editor_says_where_credentials_are_added_and_that_it_keeps_names`; that no secret reaches the window is the
+  catalog's write-only rule, which Credentials' tests pin (its section above); creation under the recipe's key with its
+  row from the pushed catalog, `a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows`; Edit with the name
+  fixed, `a_saved_recipes_name_is_fixed`; Edit then Save sending the recipe's endpoint, login and GitHub token names
+  back unchanged, `edit_then_save_sends_the_recipes_credential_choices_back_unchanged` and, without a window,
   `an_unchanged_reopened_recipe_saves_back_unchanged` and
   `named_endpoint_selection_survives_origin_changes_and_can_be_removed`; choosing the GitHub token and the Claude Code
   endpoint in the form, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`; Delete with its confirmation in
@@ -1134,7 +1282,7 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   `delete_asks_then_deletes_under_the_recipes_key`, a refusal the helm gives at once kept in the editor,
   `a_refused_delete_stays_in_the_editor`, and a cleanup still running at the helm's bound (see "Recipes" under
   Deviations), `a_delete_that_carries_on_closes_the_editor_and_the_row_says_so`.
-- "the recipe editor refuses bad names, asks before leaving, and saves a custom base": partly. The local name refusal,
+- "the recipe editor refuses bad names, asks before leaving, and saves a custom base": the local name refusal,
   `a_bad_name_or_size_is_refused_locally_until_the_next_edit`; the helm's refusal kept with the draft,
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the cards, each base's fields, the requirements
   note and build help, and every base's text and the packages kept across cards,
@@ -1163,11 +1311,204 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   at once, `a_close_while_the_delete_is_out_closes_at_once` (see "Recipes" under Deviations for both); a newer question
   winning over an earlier answered Save, `keep_editing_after_an_earlier_save_answer_stays_in_settings`; and a refused
   save taking an open question away, `a_refused_save_takes_an_open_question_away`.
-- "a recipe opening preserves a newer field focus before header close": partly. The editor's opening moves focus to Back
-  only if the user has not moved on since the press that opened it (`Recipes::open_editor`, through the focus
-  coordinator's mark), and the header close's question takes focus to its Save,
-  `every_way_out_asks_first_and_keep_editing_stays`. Not ported: a test that focuses a field between the opening and its
-  first frame.
+- "a recipe opening preserves a newer field focus before header close": the old editor focused its title in a frame
+  after it mounted, and the spec held that frame to focus Name first. Here the opening's move to Back is the focus
+  coordinator's waiting move (`Recipes::open_editor` calls `focus::focus_in_layer` with the press's mark), which waits
+  for the frame that draws Back. Name cannot take focus before that frame, since it is not drawn yet; what the user can
+  do in between is press a key, or make another focus move, and either drops the waiting move, as the coordinator's own
+  tests pin (`focus_tests.rs` `a_waiting_focus_in_layer_is_dropped_once_the_user_moved_on` and
+  `a_newer_focus_move_replaces_a_waiting_one`). The header close then asks about the draft, with focus on the question's
+  Save, `every_way_out_asks_first_and_keep_editing_stays`.
+
+## `tests/terminal-multihost.spec.ts`, host cases
+
+The spec's entry sits in [Terminal](terminal.md), which tracks none of its host cases ("the spec is about hosts"). Its
+identity cases are under "Retry and Adopt" above, its uninstall cases under "Uninstall", and its three stale-session
+cases in [Sidebar and session view](sidebar-and-session-view.md)'s `tests/terminal-multihost.spec.ts` (stale) entry. The
+host list, menu and settings cases are this area's, each listed by its title at reference commit `24bc0580`, in
+`crates/gui/farhelm-gui/src/hosts/` unless named otherwise.
+
+partly: the cases below marked "Not yet ported" wait for their tests; every other case is replaced, superseded or
+dropped, as its entry says.
+
+- "host-list-states: both harness hosts render connected statuses with identities": the rows' names, marks and phase
+  words, `tests.rs` `every_row_shows_its_name_mark_and_phase_words`; the local host named as itself, `identity/tests.rs`
+  `only_the_local_hosts_own_name_reads_local`; a connected host's identity in its details, `identity/phase/tests.rs`
+  `a_connected_hosts_detail_reports_its_version_identity_and_sessions`; no Remove on the local row, `menu/tests.rs`
+  `the_local_hosts_greyed_update_says_why_and_sends_nothing`, and its offers, `offers/tests.rs`
+  `each_kind_decides_its_own_offers`; Settings on the local row with no destination to edit, `settings/tests.rs`
+  `focus_starts_on_the_first_edit`.
+- "host-remove-escapes-the-sidebar-clip: the menu panel is not merely present, it is reachable": a host's menu is a
+  layer-manager popover drawn above the page, never inside the sidebar's clip, opened beside its row's toggle,
+  `menu/tests.rs` `a_remote_hosts_toggle_opens_a_menu_starting_on_retry`, and its Remove pressed through the harness's
+  click, `remove/tests.rs` `remove_sends_the_delete_under_the_hosts_key`.
+- "host-remove-dialog-fits: long headings and short windows keep answers reachable": the question's body scrolls with
+  its answers kept visible and the whole card scrolls in a short window, the dialog frame's
+  (`components/tests/dialog.rs` `a_long_dialog_body_scrolls_and_the_answers_stay_visible` and
+  `a_frame_too_tall_for_the_window_scrolls_as_a_whole`), and the body is a stop Tab reaches, `remove/tests.rs`
+  `the_removal_questions_body_has_a_stop_that_tab_reaches`. Not yet ported: a long destination in the question's title
+  keeping the title from taking the card's height.
+- "a failed removal stays visible with details collapsed": `remove/tests.rs`
+  `a_refused_removal_keeps_the_question_up_with_the_reason`. Not yet ported: that the Details switch stays as it was
+  across the refusal, which no removal test reads.
+- "host-menu-survives-the-longest-phase-word: the header never wraps its toggle off-screen": the name gives way before
+  the phase words in the sidebar's column, `tests.rs` `a_long_name_gives_way_before_the_phase_words`. Not yet ported:
+  the row's menu toggle staying on the header's line inside the sidebar with "Unreachable, retrying" as the phase words.
+- "add-host-form-closes-a-stray-host-menu: the add form's own layout shift is covered" and
+  "add-host-form-closes-a-stray-session-menu": a menu here is anchored to its element, so no layout shift strands it
+  (the setup progress section's "Not ported", the menu geometry cases), and a press outside an open menu closes it and
+  reaches the control pressed, `menu/tests.rs`
+  `the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch`; Add host opening and giving focus back to
+  its opener when it closes, `tests.rs` `the_headings_add_button_opens_add_host_and_gets_focus_back` and the rail's
+  `session_list/host_rail/tests.rs` `add_host_opens_the_dialog_and_escape_returns_focus_to_it`. Not yet ported: a test
+  that opens Add host while a host's or a session's menu is open.
+- "host-menu-keyboard-contract: role=menu, every item reachable, wraps, Escape/Tab restore focus": the items' menu-item
+  role and the first item's focus, `menu/tests.rs` `a_remote_hosts_toggle_opens_a_menu_starting_on_retry`; the arrows
+  walking every item and wrapping, `layers_tests.rs`
+  `arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight`; Escape back to the toggle,
+  `menu/tests.rs` `escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule`. Tab differs: it stays
+  inside an open menu here (`layers_tests.rs` `tab_stays_inside_an_open_menu`). Not yet ported: opening the menu from
+  its closed toggle with the arrow keys onto the first or last item.
+- "automatic-setup-menu-order: keyboard navigation includes the conditional setup command" and "automatic setup refuses
+  forced activation while another host operation is busy": dropped, along with the local row's "Set up automatically"
+  (decided by the migration's orchestrator on 2026-11-16; Deviations, "The Hosts panel").
+- "host-appearance: choices persist and redraw rows in two open clients": the choice saved through the host's route,
+  `settings/tests.rs` `an_appearance_choice_saves_icon_and_color_together` and
+  `the_picker_is_reached_and_used_by_keyboard`; the rows drawing the chosen mark and color, `identity/tests.rs`
+  `every_host_shape_has_its_own_bundled_drawing` and `each_host_color_tints_with_its_palette_entry`. A second open
+  client has no counterpart: a helm serves one window (SPEC_impl.md, "The seat: one UI per helm"), and the rows follow
+  the pushed hosts.
+- "host-appearance: a second choice preserves the first while refresh is held": every choice saves the icon and the
+  color together, `an_appearance_choice_saves_icon_and_color_together`, and one save per host at a time (Deviations,
+  "The host menu and host settings", "One save per host at a time"), `settings/tests.rs`
+  `a_press_during_another_save_on_the_host_says_why_it_sent_nothing`; there is no hosts read to hold, since the hosts
+  are pushed.
+- "host-settings-yolo-without-asking: the toggle is stored by the helm", "host-settings-commands-without-asking: the
+  toggle is stored by the helm" and "host-settings-own-sessions-without-asking: the toggle stays independent of
+  fleet-wide commands": each switch saves only its own field on its own route, `settings/tests.rs`
+  `each_permission_saves_its_own_route_and_field`; Space on a switch, `components/tests/checkbox.rs`
+  `a_checkbox_toggles_on_a_click_or_space_and_not_on_enter`; the local host's dialog with no destination,
+  `focus_starts_on_the_first_edit`. Not yet ported: the switches' help changing with their state (the YOLO switch's last
+  sentence, and the own-sessions switch's note on whether the fleet-wide switch already covers it), which no test reads.
+- "host-settings-dialog-lifecycle: opens modal, edits in place, closes back to the toggle": `settings/tests.rs`
+  `focus_starts_on_the_first_edit` and `escape_and_both_close_controls_return_focus_to_the_toggle`; the page behind
+  taking no input is the layer manager's invariant, checked after every step; the header and the whole destination, the
+  golden `host-settings-dialog`.
+- "host-settings-pinned-controls: ${longDestination ? "unbounded destination" : "ordinary heading"} keeps controls
+  exposed": the dialog frame's pinned header and footer over a scrolling body (`components/tests/dialog.rs`
+  `a_long_dialog_body_scrolls_and_the_answers_stay_visible` and `a_frame_too_tall_for_the_window_scrolls_as_a_whole`),
+  and Shift+Tab revealing a control below the fold, `focus_tests.rs`
+  `tab_to_a_field_below_the_fold_scrolls_it_into_view_and_shift_tab_scrolls_back`. Not yet ported: a long destination in
+  the dialog's title keeping the header from taking the body's height.
+- "host-settings-refused-save: keeps the draft and shows the refusal under its field": `settings/tests.rs`
+  `the_destination_saves_as_typed_and_a_refusal_stays_in_place`; the refusal also shows under the host's row here
+  (Deviations, "The host menu and host settings", "A refused save also shows under the host's row"); Escape in the open
+  field closing only the field, `the_alias_saves_and_clears_and_escape_closes_only_its_field`.
+- "host-settings-backdrop-escape: Escape after a backdrop click cancels the edit, not the dialog": a press on the veil
+  leaves the dialog open, `layers_tests.rs` `a_press_outside_an_ordinary_dialog_leaves_it_open`, and Escape in an open
+  field closes only the field, `the_alias_saves_and_clears_and_escape_closes_only_its_field`. Not yet ported: the two
+  together, a veil press with a field open followed by Escape.
+- "host-menu-busy-guards: aria-disabled items refuse activation but stay reachable": `menu/tests.rs`
+  `settings_waits_for_the_hosts_own_work_in_flight` and `offers/tests.rs`
+  `work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_remove`; another host's work holds none of
+  a host's commands here, where the old page's one token held every row (Deviations, "The host menu and host settings",
+  "Focus starts on the first command that can act", for the greyed items the arrows still reach).
+- "local-host-always-listed: the local row renders its manual-start hint": `tests.rs`
+  `the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do`, `identity/phase/tests.rs`
+  `the_local_hosts_missing_supervisor_says_to_reopen_the_app` and
+  `the_local_remedy_is_the_apps_sentence_alone_and_the_helms_detail_stays_evidence`; its remedy is the app's sentence
+  (Deviations, "The Hosts panel").
+- "add-host-discovers: a form-registered ssh host progresses to connected": `add/tests.rs`
+  `a_discovered_host_closes_the_dialog`; the row and its connection come from the pushed hosts, and the discovered
+  install paths are the helm's.
+- "remove-and-re-add-host: removal forgets, re-adding rediscovers": `remove/tests.rs`
+  `remove_sends_the_delete_under_the_hosts_key` and `add/tests.rs` `a_discovered_host_closes_the_dialog`; the host's
+  sessions leaving with it, and rediscovery, are the helm's, which the pushed lists follow.
+- "host-list-phase-table: every phase renders status and details": `identity/phase/tests.rs`
+  `every_phase_has_its_words_and_tone` and the details tests beside it; a kind this build does not know,
+  `offers/tests.rs` `each_kind_decides_its_own_offers`; the age cases' Update, `status/tests.rs`
+  `the_badge_needs_an_available_update_and_an_older_build_or_protocol` and `update/tests.rs`
+  `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update`; a running setup in the status slot,
+  `progress/tests.rs` `the_inline_status_counts_steps_names_the_current_one_and_times_the_run`. The rail's phase is
+  [Sidebar and session view](sidebar-and-session-view.md)'s.
+- "host-inline-update: ${activation} starts progress and keeps the header on one line": `update/tests.rs`
+  `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update` (the pointer press, "Updating…" in its place
+  and focus on the row's toggle) and `the_hover_names_both_builds_the_urgency_and_the_action`; Enter on the button is
+  the shared button's. Not yet ported: the header staying on one line with the button, and then with the progress.
+- "host-retry-click: the control posts the retry verb for its own host": `remedies/tests.rs`
+  `retry_sends_one_attempt_under_the_hosts_key`; Retry on the local host, `offers/tests.rs`
+  `each_kind_decides_its_own_offers`.
+- Not yet ported: "a refused Retry opens a host dialog", which checks that the helm's refusal of a Retry opens the host
+  refusal dialog with its reason and Close focused, the Details switch unchanged and nothing under the row. The code
+  shares Adopt's path (`hosts/remedies.rs`), whose refusal
+  `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog` tests; no test refuses a Retry.
+- "remove-cancel: backing out of the prompt forgets nothing": `remove/tests.rs`
+  `remove_asks_naming_the_host_its_destination_and_what_removal_keeps` (focus on Remove) and
+  `cancel_sends_nothing_and_returns_focus_to_the_rows_toggle`; there is no header close (Deviations, "Remove host").
+- "Remove keeps its dialog open through a refused request: ${dismissal}": `remove/tests.rs`
+  `a_refused_removal_keeps_the_question_up_with_the_reason`. Not yet ported: Cancel, Escape or the header close pressed
+  while the removal's request is out, which the old dialog ignored.
+- "a refused Remove without confirmation opens a host dialog": the refusal shows under the host's row instead,
+  `remove/tests.rs` `without_asking_a_refused_removal_shows_under_the_hosts_row` (Deviations, "Remove host").
+- "remove-skip-confirmation: a saved answer removes directly": `remove/tests.rs`
+  `the_permanent_answer_also_stops_asking` and `with_the_preference_on_remove_goes_without_asking`.
+- "add-host-sends-no-install-paths: the dialog's probe omits both paths rather than sending them empty": `add/tests.rs`
+  `add_sends_the_probe_with_its_new_entry_under_the_dialogs_key`; what the row records is the helm's.
+
+Other areas' cases of this spec, routed to those areas by the migration's orchestrator on 2026-11-16:
+
+- [Launcher](launcher.md)'s, creating and cloning across hosts: "create-dialog-host-selector: a session is created on
+  the chosen host", "clone-cross-host: a remote row's clone carries its own host and command across the handoff",
+  "clone-cross-host-explicit-edit: a command edited while hosts are pending survives bind",
+  "create-dialog-selector-disappearance: a vanished choice is announced, not substituted",
+  "create-dialog-selector-disabled-in-flight: the target cannot move under a create", "create-on-unreachable-refused:
+  disabled locally, and no session", "create-intent-key-rebinds-on-host-change: a new target is a new intent" and
+  "create-intent-key-rebinds-on-retarget: a moved host is a new intent".
+- [Sidebar and session view](sidebar-and-session-view.md)'s, the session rows and session view on an unreachable or
+  rebooted host: "unreachable-host-goes-stale: the status re-probes and its sessions are marked",
+  "op-refused-on-unreachable: the helm's own 409 words, and nothing queued", "a refused Stop leaves the remote agent
+  live after reconnect", "reboot-while-open: an attached session settles on the interrupted surface",
+  "reboot-already-interrupted: opening mounts no terminal, and leaving changes nothing" and "reboot-restart: restart
+  from the interrupted surface attaches the new terminal".
+
+## `tests/ui-plan-regressions.spec.ts`, host cases
+
+The spec's entry sits in [Sidebar and session view](sidebar-and-session-view.md), which leaves its host-menu and
+host-permission cases to other areas. They are this area's.
+
+partly: the first case's toggle half waits for its test; the second is replaced.
+
+- "an unreachable host keeps its menu inside the minimum sidebar": the name gives way before the phase words in the
+  sidebar's column, `crates/gui/farhelm-gui/src/hosts/tests.rs` `a_long_name_gives_way_before_the_phase_words`. Not yet
+  ported: the row's menu toggle staying inside the sidebar at its minimum width with "Unreachable, retrying", and its
+  menu opening there.
+- "refused host permission switches restore their stored values": `crates/gui/farhelm-gui/src/hosts/settings/tests.rs`
+  `a_refused_permission_shows_the_stored_value_and_the_helms_words` (the YOLO switch; the commands switch saves and
+  refuses through the same code, `each_permission_saves_its_own_route_and_field` for its save).
+
+## Settings and hosts cases of specs listed in other areas' files
+
+These specs' entries sit in other areas' files; the cases below are this area's. Each is listed by its title at
+reference commit `24bc0580`.
+
+### `tests/tooltip.spec.ts` (foundations)
+
+Case: a card follows only its marked step list after every clone.
+
+Not yet ported. In the GPUI app this is the host progress card keeping its current step whole as the run moves on
+([Foundations (M1)](foundations.md) gives it to this area). It needs a test in
+crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs that pushes a run whose current step moves, in a window too
+short for the whole list, and checks that each new current step is drawn whole.
+
+### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
+
+Case: Hosts refuses a host's Resume and Settings while a launch is waking that host.
+
+not yet ported, deferred until resume-before-create (decided by the migration's orchestrator on 2026-11-16): the refusal
+needs the launch's wake of a suspended host, which comes with resume-before-create, the environments work's (the
+launcher's entry for this spec). Until then a launch on a suspended host is refused, and the Hosts panel refuses no
+Resume or Suspend for a launch on the same host (Deviations, "The Hosts panel", "No refusal of Suspend or Resume during
+a launch on the same host yet").
 
 ## Deviations
 
@@ -1544,6 +1885,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   Tensorlake sandbox kind with the name and recipe kept and focus in Name, from the account as it was read, and Continue
   asks for a new plan. A plan that arrives after the user moved on opens nothing, as an SSH plan's does, and Add host
   says to press Continue again.
+- **The billing callout's Usage Credits sentence starts a line of its own.** The old callout was one paragraph, the
+  pricing link inline after "This sandbox bills while running." and the Usage Credits sentence flowing on after it. GPUI
+  has no inline flow for a control inside a paragraph, so the first sentence and the link share a row (the link wrapping
+  under the sentence where it does not fit), and the Usage Credits sentence is a paragraph under them that wraps inside
+  the callout (`the_usage_credits_sentence_wraps_inside_the_billing_callout`). A sandbox's rerun asks the same question
+  and draws the same callout.
 - **Create sandbox goes out as Set up does.** It closes the question at the press, where the old dialog went back to its
   locked fields, and the creation runs under Add host's key. During a session launch it sends nothing and reopens Add
   host with the fields and the launch's reason, as Set up does (the old button was disabled while the page-wide token
@@ -1561,8 +1908,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Add host stays drawn under SSH help.** The old Add host form hid itself while SSH help was open over it (its veil
   stayed). Here it stays on screen under SSH help's veil, dimmed twice: the layer manager has no hidden layer, and
   closing SSH help returns focus to the link only while the link is drawn.
-- **No ? menu entry yet.** "SSH needs 2FA?" in the ? menu waits for the area that owns that menu, which calls
-  `hosts::ssh_help::open`.
 - **No golden.** The reference screens have no SSH help scene.
 - **A refusal shows the helm's words alone**, in the app's shared refusal wording; the old line started with the method,
   URL and status. An unusable typed destination shows the helm's 400 body as it sent it, a JSON object with its `error`
@@ -1630,15 +1975,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   helm answers Retry at once, and the connection drops only after that answer.
 - **A host that reports no build reads "Farhelm not connected"** in the header. The old header showed the host's
   recorded install path (`remote_farhelm`) in the build's place.
-- **The menu offers Retry, Adopt, Re-run, Update, Settings, Uninstall and Remove so far,** with the local host's Update
-  greyed with its reason, or, in the installed desktop app, live as the app's check for a newer release ("Check for a
-  newer Farhelm and install it"), whose progress and outcome show beside the version readout, as in the old app. Re-run
-  is drawn for a failed Update, and for a failed setup on an SSH host only: a Tensorlake sandbox's setup rerun probes
-  through the Tensorlake route and comes with those pieces, and a container's setup belongs to its environment's launch.
-  Remove: see "Remove host" below; Uninstall: see "Uninstall" below; Retry and Adopt: see "Retry and Adopt" above. The
-  toggle keeps the old hover help. The live Update's hover help is new ("Update: install this helm's Farhelm version on
-  this host", and the desktop app's local check's "Update: check for a newer Farhelm release and install it"): the old
-  menu items had none, and every menu item here has one.
+- **The menu offers Retry, Suspend or Resume, Adopt, Re-run, Update, Settings, Uninstall, and Remove or Delete sandbox
+  or Delete container,** with the local host's Update greyed with its reason, or, in the installed desktop app, live as
+  the app's check for a newer release ("Check for a newer Farhelm and install it"), whose progress and outcome show
+  beside the version readout, as in the old app. Re-run is drawn for a failed Update, and for a failed setup on an SSH
+  host or a Tensorlake sandbox (`HostKind::setup_rerun`; a sandbox's rerun asks its creation question, see
+  `tests/tensorlake-hosts.spec.ts` above); a container has none, since its setup belongs to its environment's launch, as
+  the old app told the user. Remove: see "Remove host" below; Uninstall: see "Uninstall" below; Retry and Adopt: see
+  "Retry and Adopt" above. The toggle keeps the old hover help. The live Update's hover help is new ("Update: install
+  this helm's Farhelm version on this host", and the desktop app's local check's "Update: check for a newer Farhelm
+  release and install it"): the old menu items had none, and every menu item here has one.
 - **One save per host at a time, and nothing goes unavailable while one runs.** Every setting saves under the host's one
   operation key, so a click on another setting of the same host while a save is in flight sends nothing (the switch or
   choice goes on showing what it showed) and "Not saved: another operation was in progress. Try again." shows where that
@@ -1817,13 +2163,15 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **The elapsed time counts from when this window first saw the run running**, as the old page counted from when it
   first saw it: the helm's progress has no timestamps. A reset starts it over, as a reload did. The goldens read "0:00",
   since their clock does not move; the reference caught "0:06".
-- **A step's explanation is not drawn under it in the row's step list.** The old panel drew only the Tensorlake snapshot
-  preparation's, which comes with the Tensorlake pieces. The progress card draws every step's, as the old card did.
+- **A step's explanation is not drawn under it in the row's step list.** The old panel drew one, the Tensorlake snapshot
+  preparation step's. The row's step list draws each step's message only (`hosts/progress.rs`, `Surface::Panel`), so a
+  sandbox's preparation step shows no explanation in the row; the progress card draws every step's, as the old card did.
 - **A rerun's refusals show under the row.** A refused probe, a "manual" answer, a reply that cannot be read and a
   refused submission show under the host's row, like any refused work on the host, where the old app opened its
-  host-keyed refusal dialog for a refused or manual probe; that dialog comes with Update. A plan that arrives after the
-  user moved on opens nothing and says so under the row: "Farhelm is not running on this host. Choose Re-run again to
-  see what setting it up changes." (new words, after Add host's for the same case).
+  host-keyed refusal dialog for a refused or manual probe. The refusal dialog that Update and Adopt open
+  (`hosts::refusal`) is not opened for a rerun. A plan that arrives after the user moved on opens nothing and says so
+  under the row: "Farhelm is not running on this host. Choose Re-run again to see what setting it up changes." (new
+  words, after Add host's for the same case).
 - **Collapse is the shared compact button** (2 by 8 pixels of padding at 12 pixels), where the old one was 1 by 6 at 11
   pixels.
 - The inline status is upright like the pending phase words (the reference's is italic, inheriting the connecting

@@ -42,6 +42,12 @@ linux/host-add-dialog-agent--dark.png a93fb1059a0295108c15f0b83d7381b96e55aa2a
 linux/host-add-dialog-agent--light.png d8229930bb06f7ff0722bbb26da7aee6cd4fb5b9
 linux/host-add-setup-plan--dark.png 64261b4eb80333b94d2a3aced55f31ecf3ed7fd1
 linux/host-add-setup-plan--light.png 7a7f9d6081a5a31ad4bfd0f14aced429bc19ff18
+linux/host-add-tensorlake-creation--dark.png 6335f72bd17ef73604f3245b1f3d7ffe30597203
+linux/host-add-tensorlake-creation--light.png f34c755601ab9cd945e0ec51698bad7e81dcebb9
+linux/host-add-tensorlake-form--dark.png 0de780a7492aef43abf7bf2dc446cc324a032d63
+linux/host-add-tensorlake-form--light.png d258a767dc531ad8d2e7d4b4f2c3a18268a416ea
+linux/host-add-tensorlake-recipe-editor--dark.png 9b50bf93e739782d4b972abe43d998576a85dd8e
+linux/host-add-tensorlake-recipe-editor--light.png d09301439f1198731a762fde65d71b6df925a38f
 linux/host-filter-empty--dark.png 46c0f6ccf634fcdafd6145bdc593e45265513429
 linux/host-filter-empty--light.png 8b2d2628a125e771593ff61ee46261cb4dbced07
 linux/host-menu--dark.png becf11d2cce42bec942d49662a5aa77cd6f76ade
@@ -76,6 +82,8 @@ linux/host-update-running-hosts-panel--dark.png e5bfe7dc0b9f6744b0fb85c7180652ad
 linux/host-update-running-hosts-panel--light.png 9ac022c3cf4f152242535b44aefd4b9479e1cc43
 linux/hosts-panel--dark.png 792eee39adbc868229e526baae0e85f1142ea1f7
 linux/hosts-panel--light.png 5eb857c5d740054551a96fa181f6056d22e717fc
+linux/hosts-panel-credentials-not-delivered--dark.png 8c5145b697c22dcaacb50ccc3fc391b33fef1fc4
+linux/hosts-panel-credentials-not-delivered--light.png 28b5d1a468f26d1e6e1724ef37864b5cf333f4b4
 linux/hosts-panel-details--dark.png b9ddb7b3b78939aaeb0eeef900701efb648c50f8
 linux/hosts-panel-details--light.png 9b61631024c6424a1d4be528e51ca7cf83e1186e
 linux/hosts-panel-host-unreachable--dark.png b42cd45e4aadfec76d65063b6d1a2fd94ae6065f
@@ -190,6 +198,8 @@ linux/settings-sessions--dark.png 1c4b800673bdbf596a8472b688bacf857ee67383
 linux/settings-sessions--light.png 12e0e96c350886a36536c62b62318bc4a3d62991
 linux/settings-tensorlake--dark.png 2b3959b86a6b0d965c3d73e8e947345620c638cf
 linux/settings-tensorlake--light.png 2f3506e5fc26799aca8e56a8ed62ccdb19448097
+linux/settings-tensorlake-sandboxes--dark.png b235ef4c1c466dd4e7f050c3114ce8fdf7968123
+linux/settings-tensorlake-sandboxes--light.png fa4596f4d1d54b6271a241b916d4b3bdce9c2cea
 linux/settings-terminal--dark.png b5b2c9db6e3e1752e165994e34ee1028ff6b7a58
 linux/settings-terminal--light.png c5618077def9f64057bd48b7131281520839e32b
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54

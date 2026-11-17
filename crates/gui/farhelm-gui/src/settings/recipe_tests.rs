@@ -651,6 +651,53 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
     assert_eq!(sent(&mut helm), [], "the account is read once per opening");
 }
 
+/// Why this matters: a row's build status and its preparation are two status regions, each named for its recipe, so
+/// assistive technology reads which recipe a status is about and reads the build apart from the preparation; the old
+/// spec `tensorlake-recipes.spec.ts`, "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with
+/// the recipe", found them by those names ("Snapshot of <name>", "Preparation of <name>"). Specified: over a recipe
+/// never built, `py-data`, its snapshot region is a status whose name starts "Snapshot of py-data: No snapshot yet",
+/// and its preparation region a status whose name starts "Preparation of py-data: Not prepared yet; the first new
+/// host or session prepares it".
+#[gpui::test]
+fn each_rows_build_and_preparation_are_status_regions_named_for_the_recipe(
+    cx: &mut TestAppContext,
+) {
+    let (_helm, cx) = open_with(cx, vec![entry("py-data", idle(), Value::Null)]);
+    open_settings(cx);
+    click(cx, section_button(Section::Recipes));
+    let region = |cx: &mut VisualTestContext, id: &str| {
+        crate::test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| {
+                (
+                    node.role,
+                    node.label
+                        .map(|label| label.to_string())
+                        .unwrap_or_default(),
+                )
+            })
+    };
+    let Some((role, name)) = region(cx, "recipe-py-data-snapshot") else {
+        panic!("the snapshot region is drawn");
+    };
+    assert_eq!(role, Some(gpui::Role::Status));
+    assert!(
+        name.starts_with("Snapshot of py-data: No snapshot yet"),
+        "{name}"
+    );
+    let Some((role, name)) = region(cx, "recipe-py-data-prepared") else {
+        panic!("the preparation region is drawn");
+    };
+    assert_eq!(role, Some(gpui::Role::Status));
+    assert!(
+        name.starts_with(
+            "Preparation of py-data: Not prepared yet; the first new host or session prepares it"
+        ),
+        "{name}"
+    );
+}
+
 /// Whether a key is saved is the opening's one Tensorlake account, the one the API key forms save through, so a key
 /// saved in Credentials must make Build available in Recipes without another read; the old section read the account
 /// again each time it was shown for the same effect. Specified: with Recipes shown and no key saved, Build is

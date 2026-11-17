@@ -6,6 +6,8 @@
 //! The panel runs over the helm client's fake with the reference screens' three hosts (the local host as 1,
 //! `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of the
 //! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//!
+//! One test runs the real main view instead, since it needs the host rail's Settings gear beside an open menu.
 
 use farhelm_helm_client::{ApiPath, Method};
 use gpui::{DriverNode, Role, TestAppContext, VisualTestContext, px, size};
@@ -339,4 +341,65 @@ fn a_sandbox_hosts_menu_offers_delete_sandbox_and_no_remove(cx: &mut TestAppCont
         node(&nodes, "host-menu-uninstall").is_none(),
         "SPEC.md: the panel \"offers no Uninstall for these hosts\""
     );
+}
+
+/// Why this matters: the host menu is a popover with no veil, so the page around it stays live, and the gear on the
+/// host rail's foot must still open Settings in one press while a row's menu is open; a menu left up under Settings, or
+/// keeping focus from it, would leave the user with two layers to dismiss and focus outside the dialog they opened. The
+/// old spec `settings.spec.ts`, "settings dismisses a row menu, isolates the page and returns focus on Escape", opened
+/// Settings over an open Hosts row menu and pinned that the menu went, focus started on Settings' first switch, and
+/// Escape returned it to the gear. This runs the real main view, since only it draws both the Hosts panel and the gear.
+/// Specified: with Hosts shown and `build-box`'s row menu open from its toggle, focus on Retry, a click on the gear
+/// closes the menu and opens Settings with focus on Skip session confirmations; Escape closes Settings with focus on
+/// the gear and nothing open.
+#[gpui::test]
+fn the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch(
+    cx: &mut TestAppContext,
+) {
+    use crate::session_list::host_rail::tests::answer_everything;
+    use crate::session_list::tests::{listing, open_main, preferences_state, session};
+
+    let snapshot = vec![
+        listing(&["a"], &[session("a")]),
+        preferences_state(farhelm_proto::ui_channel::Preferences {
+            visit_history: vec!["a".to_owned()],
+            welcome_seen: Some(true),
+            ..Default::default()
+        }),
+        hosts(&[host(1, "local", connected()), host(2, "ssh", connected())]),
+    ];
+    let (mut fake, cx) = open_main(cx, snapshot);
+    cx.simulate_resize(size(px(1200.), px(700.)));
+    answer_everything(&mut fake);
+    test_support::settle(cx);
+    click(cx, "hosts-panel-toggle");
+    click(cx, "host-menu-toggle-2");
+    assert!(
+        node(&frame(cx), "host-menu").is_some(),
+        "the premise: the row's menu is open"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-menu-retry"),
+        "the premise: focus is in the menu"
+    );
+
+    click(cx, "app-settings-toggle");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu").is_none(), "the menu went");
+    assert!(
+        node(&nodes, "settings-sections").is_some(),
+        "the gear opened Settings"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("settings-skip-session-confirmations"),
+        "focus starts on Settings' first switch"
+    );
+    keys(cx, "escape");
+    assert!(
+        !any_open(cx),
+        "Escape closed Settings and nothing is left open"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("app-settings-toggle"));
 }

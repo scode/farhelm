@@ -13,17 +13,19 @@
 //! opens, and with a remembered contact), the select closed and open, the YOLO confirmation drawn inline in a
 //! launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at Appearance, at Hosts, at
 //! Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with a new recipe's editor
-//! open), at Tensorlake, at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
-//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
-//! host's Update running), a host's progress card (whole, and previewed in a short window), the Add host dialog and the
-//! setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end,
-//! the host refusal dialog for a refused Update, the version readout while an updater runs (the check button at rest,
-//! lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the
-//! reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), the Open-Source Notices
-//! window over a short fixture, and the Trash button empty, full and freeing space, and the Trash dialog, alone and
-//! asking to delete everything or one host's archives, in both appearances, compared pixel for pixel. (The terminal
-//! stays dark in both appearances, so it draws identically in both pictures; only the scene's ground around it
-//! differs.)
+//! open), at Tensorlake (with no key saved, and with a key saved and its list of sandboxes not on this helm), at
+//! Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to connect,
+//! with a sandbox whose credentials were not delivered, with a host's setup running and failed, with outdated hosts'
+//! inline Update, and with a host's Update running), a host's progress card (whole, and previewed in a short window),
+//! the Add host dialog (on SSH, and on the Tensorlake sandbox kind with a key saved, also with a new recipe's editor
+//! open in it) and the setup confirmation and the sandbox's creation question it leads to, a host's actions menu, the
+//! host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
+//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
+//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
+//! itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty,
+//! full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
+//! appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both
+//! pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -870,6 +872,12 @@ static SCENES: &[Scene] = &[
         setup: settings_tensorlake_setup,
     },
     Scene {
+        name: "settings-tensorlake-sandboxes",
+        size: (800., 830.),
+        draw: settings_tensorlake_sandboxes,
+        setup: settings_tensorlake_sandboxes_setup,
+    },
+    Scene {
         name: "settings-credentials",
         size: (800., 830.),
         draw: empty,
@@ -930,6 +938,12 @@ static SCENES: &[Scene] = &[
         setup: hosts_panel_host_unreachable_setup,
     },
     Scene {
+        name: "hosts-panel-credentials-not-delivered",
+        size: (364., 924.),
+        draw: tall_hosts_panels,
+        setup: hosts_panel_credentials_not_delivered_setup,
+    },
+    Scene {
         name: "host-menu",
         size: (640., 418.),
         draw: host_menu_scene,
@@ -964,6 +978,24 @@ static SCENES: &[Scene] = &[
         size: (600., 600.),
         draw: empty,
         setup: host_add_dialog_setup,
+    },
+    Scene {
+        name: "host-add-tensorlake-form",
+        size: (600., 700.),
+        draw: empty,
+        setup: host_add_tensorlake_form_setup,
+    },
+    Scene {
+        name: "host-add-tensorlake-recipe-editor",
+        size: (600., 900.),
+        draw: empty,
+        setup: host_add_tensorlake_recipe_editor_setup,
+    },
+    Scene {
+        name: "host-add-tensorlake-creation",
+        size: (600., 900.),
+        draw: empty,
+        setup: host_add_tensorlake_creation_setup,
     },
     Scene {
         name: "host-add-dialog-agent",

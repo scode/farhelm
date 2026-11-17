@@ -392,6 +392,26 @@ fn open_with(
     Some(layer)
 }
 
+/// Open the recipe editor in the open Add host dialog's Tensorlake sandbox form, as Recipe's "New recipe…" does, for
+/// the golden that pictures the editor inside Add host, as `settings::open_new_recipe_for_opened` does for Settings. A
+/// golden's job is the picture: pressing Recipe and then "New recipe…" from the scene made it depend on where an
+/// earlier frame drew each control, while the form's own tests already pin that click path. Panics when no dialog is
+/// open or it shows the SSH kind, which would leave the golden picturing the form instead.
+#[cfg(test)]
+pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
+    let form =
+        layers::last_opened::<AddHostDialog>(cx).and_then(|dialog| match &dialog.read(cx).body {
+            Body::Tensorlake(form) => Some(form.clone()),
+            Body::Ssh => None,
+        });
+    match form {
+        Some(form) => form.update(cx, |form, cx| form.open_editor(window, cx)),
+        None => panic!(
+            "no Add host dialog shows a Tensorlake sandbox form to open the recipe editor in"
+        ),
+    }
+}
+
 /// `POST /api/hosts/probe` for `destination` as a new host entry under `alias`: the destination exactly as typed, and
 /// the alias as typed, or `null` when it is blank, which the helm reads as no alias (it trims an alias itself). No
 /// install paths: the probe looks where setup installs, as it did for the old dialog, which stopped asking for them.

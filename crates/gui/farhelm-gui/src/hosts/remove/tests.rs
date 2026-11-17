@@ -1,8 +1,8 @@
 //! Tests of removing a host from its menu over the helm client's fake: the confirmation (what it shows, its answers'
 //! order, where focus starts and returns, its body's keyboard stop), what each answer sends and under which key, the
-//! question staying up through its request, removal without asking, where a refused removal shows (inside the question,
-//! or under the row without one), and the two refusals before anything is sent (a session launch in flight, the host
-//! busy).
+//! question staying up through its request, Enter on the question itself, removal without asking, where a refused
+//! removal shows (inside the question, or under the row without one), and the two refusals before anything is sent (a
+//! session launch in flight, the host busy).
 //!
 //! The Hosts panel runs over the reference screens' three hosts (the local host as 1, `build-box` as 2 at
 //! `dev@build-box`, `gpu-1` as 3), in a sidebar-wide column so a menu opens beside its row, and Remove is reached by
@@ -694,6 +694,64 @@ fn asked_while_the_host_is_busy_only_cancel_acts(cx: &mut TestAppContext) {
     click(cx, "prompt-cancel");
     assert!(!any_open(cx));
     assert_eq!(sent(&mut helm), []);
+}
+
+/// Move focus onto the open question itself, its container rather than one of its answers, and check that it holds
+/// focus: where the old spec's container Enter started from. The Remove question keeps focus on the answer in use when
+/// its empty space is clicked (`Question::keeps_focus_on_empty_click`), so no click gets there; focus lands there when
+/// the focused answer goes, which this stands in for.
+fn focus_the_question(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        let question = crate::layers::top_container(window, cx).expect("the question is open");
+        let mark = Mark::take(cx);
+        crate::focus::focus_in_layer(&question, &mark, window, cx);
+    });
+    settle(cx);
+    let on_question = cx.update(|window, cx| {
+        crate::layers::top_container(window, cx).is_some_and(|question| question.is_focused(window))
+    });
+    assert!(on_question, "the premise: the question itself has focus");
+}
+
+/// Why this matters: Enter while a question itself holds focus presses its confirming answer (SPEC.md, "Opening and
+/// closing"), and on the removal question that answer forgets a host, so Enter there must never remove a host the
+/// question shows Remove as unavailable for, and must remove it once, not twice, when Remove is available. The old spec
+/// `settings.spec.ts`, "host removal container Enter confirms once and respects the disabled button", pinned both.
+/// Specified: asked while a save is in flight on `build-box`'s key, with focus on the question itself, Enter sends
+/// nothing and leaves the question open, and Escape closes it; with the save answered and the question asked again from
+/// the menu, Enter with focus on the question itself sends one `DELETE /api/hosts/2`.
+#[gpui::test]
+fn enter_on_the_question_itself_removes_only_while_remove_is_available(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    let save = start_work(&mut helm, cx, OpKey::host("2"), Work::Save);
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        assert!(
+            super::ask(2, &mark, window, cx).is_some(),
+            "the question opened"
+        );
+    });
+    settle(cx);
+    focus_the_question(cx);
+    keys(cx, "enter");
+    assert!(any_open(cx), "Enter left the question open");
+    assert_eq!(sent(&mut helm), [], "and sent nothing");
+    keys(cx, "escape");
+    assert!(!any_open(cx), "Escape closed it");
+
+    helm.reply(save, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(host_work(cx), None, "the premise: the host is idle again");
+    press_remove(cx);
+    assert!(any_open(cx), "the premise: the question opened again");
+    focus_the_question(cx);
+    keys(cx, "enter");
+    let commands = helm.commands();
+    assert_eq!(commands.len(), 1, "Enter sent one command: {commands:?}");
+    assert_eq!(
+        (commands[0].method, commands[0].path.as_str()),
+        (Method::Delete, "/api/hosts/2")
+    );
 }
 
 /// "Remove, don't ask again" answers one removal; when that removal is refused before anything is sent, the user's
