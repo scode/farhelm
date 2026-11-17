@@ -607,11 +607,11 @@ fn a_refusal_keeps_the_draft_and_shows_the_helms_words_escaped(cx: &mut TestAppC
 // ---- The session going away ----------------------------------------------------------------------------------------
 
 /// SPEC.md: "A complete, authoritative listing that no longer contains the source disables submission without
-/// discarding the draft". The open session's terminal goes with it, and focus must stay in the field rather than
-/// follow it out (the old `modal-focus.spec.ts` case). Specified: after a typed letter, a complete listing without `a`
-/// moves the selection on to `b` and shows the unavailable line; the field keeps its text and focus, and typing still
-/// reaches it; Enter in the field, a click on Save, and Enter on the dialog itself (where that click leaves focus, as
-/// on any empty space) send nothing.
+/// discarding the draft". The open session's terminal goes with the session, and focus must stay in the field rather
+/// than follow it out. Specified: after a typed letter, a complete listing without `a` moves the selection on to `b`
+/// and shows the unavailable line; the field keeps its text and focus, and typing still reaches it; Enter in the
+/// field, a click on Save, and Enter on the dialog itself (where that click leaves focus, as on any empty space) send
+/// nothing.
 #[gpui::test]
 fn a_complete_listing_without_the_session_disables_save_and_keeps_the_draft(
     cx: &mut TestAppContext,

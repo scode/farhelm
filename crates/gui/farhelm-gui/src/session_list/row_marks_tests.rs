@@ -357,10 +357,10 @@ fn the_agent_mark_draws_its_glyphs_picture(cx: &mut TestAppContext) {
 // ---- The permission shield ------------------------------------------------------------------------------------------
 
 /// SPEC.md: "Every session row carries one permission mark", whose meaning is the launch's: an agent launch's effective
-/// permission (custom or YOLO is YOLO; none is the agent's own setting), a command's assertion, or nothing for a
-/// session from before launch kinds. Specified, case by case: the shield and its ink (`--warn` for YOLO and the
-/// question mark, `--ok` for a shield, `--fg-1` for the agent's own setting, `--on-fill` on the selected row), and each
-/// shield's picture.
+/// permission (custom or YOLO is YOLO; none is the agent's own setting, except for an agent whose older launches meant
+/// YOLO by storing none, such as Pi and OMP), a command's assertion, or nothing for a session from before launch kinds.
+/// Specified, case by case: the shield and its ink (`--warn` for YOLO and the question mark, `--ok` for a shield,
+/// `--fg-1` for the agent's own setting, `--on-fill` on the selected row), and each shield's picture.
 #[test]
 fn the_shield_follows_the_launch_and_draws_its_mark() {
     let palette: &Palette = &theme::DARK;
@@ -376,6 +376,10 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
         ),
         (agent("codex", Value::Null, &["codex"]), Shield::OwnSetting),
         (agent("omp", json!("approve"), &["omp"]), Shield::Shielded),
+        // An older OMP launch stored no permission, which for OMP meant YOLO, though a new OMP launch defaults to
+        // guarded: the row keeps the meaning it was stored with (old `omp-composer.spec.ts`, "an OMP session row shows
+        // the OMP glyph and its actual permission").
+        (agent("omp", Value::Null, &["omp"]), Shield::Yolo),
         (
             agent("goose", json!("smart_approve"), &["goose"]),
             Shield::Shielded,

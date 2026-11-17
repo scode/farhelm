@@ -21,7 +21,8 @@
 //!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
 //!   header's close control and the footer's Close all close it, and focus goes back to the gear. Closing discards what
 //!   the dialog holds; a save already sent goes on, since it is the operation store's work, not the dialog's (the
-//!   helm's reply then settles nothing on screen, and the store already shows the result).
+//!   helm's reply then settles nothing on screen, and the store already shows the result). Every close sets
+//!   [`Closings`], for the trust hint band, which reads trust again then.
 //! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
 //!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]; Agent trust's trust
 //!   switches and Checkouts' spare switch save the same way through their own routes ([`configured`]). While the save
@@ -124,7 +125,7 @@ use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, svg,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
 };
 
 use crate::assets::Icon;
@@ -280,6 +281,15 @@ fn open_dialog(
     Some((layer, dialog))
 }
 
+/// Set each time a Settings dialog is released, however it closed (Escape, a close control, a reset's `close_all`), so
+/// observing it is how a view learns that Settings closed: the trust hint band reads Claude's trust again then, since
+/// the helm does not push trust and the user may have changed it in Settings, whichever entry point opened it
+/// (`crate::session_pane::trust_band`). A dialog whose opening was refused is released too, which costs the band one
+/// more read.
+pub(crate) struct Closings;
+
+impl gpui::Global for Closings {}
+
 /// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint's "Settings and caveats" (SPEC.md: "Trust
 /// hints instead open agent trust at the relevant switch and scroll its block into view"). `opener` and `mark` are as
 /// [`open`]'s: the hint's button and the mark taken in its click handler.
@@ -300,9 +310,8 @@ fn open_dialog(
 /// requested (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
 ///
 /// NOTE: Trust is not pushed. A hint band that shows only while its agent's trust is off (SPEC.md) does not learn from
-/// this function that the user turned trust on in Settings: it returns only the layer, and the dialog has no dismissal
-/// hook. The old band read trust again when Settings closed; the session view's band needs its own re-read when the
-/// dialog it opened closes (for example, a dismissal hook offered here when the band is built).
+/// this function that the user turned trust on in Settings: it returns only the layer. As the old band did, the
+/// session view's band reads trust again when Settings closes, by observing [`Closings`].
 pub fn open_at_agent_trust(
     agent: TrustAgent,
     opener: &FocusHandle,
@@ -319,6 +328,22 @@ pub fn open_at_agent_trust(
     };
     dialog.update(cx, |dialog, _| dialog.focus_on = Some(handover));
     Some(layer)
+}
+
+/// `PUT /api/preferences` turning "Show the hint when Claude asks about a managed checkout" off, exactly as its switch
+/// here saves it: for the trust hint band's Don't show again, which stores the same shared dismissal.
+pub(crate) fn hide_claude_trust_hint_command()
+-> Result<crate::operations::Command, farhelm_helm_client::PathError> {
+    Choice::ShowClaudeTrustHint.command(false)
+}
+
+/// Whether the pushed preference row lets Claude's trust hint show, by the rule its switch here reads (shown unless the
+/// dismissal is stored `true`): for the trust hint band, so the two never disagree on an unset field.
+pub(crate) fn claude_trust_hint_shown(cx: &App) -> bool {
+    let store = session::current_store(cx);
+    let collections = store.as_ref().map(|store| store.read(cx).collections());
+    let preferences = collections.and_then(|all| all.get::<Preferences>(PREFERENCES_KEY));
+    Choice::ShowClaudeTrustHint.stored(preferences)
 }
 
 /// `PUT /api/preferences` turning "Set up new hosts without asking" on, exactly as its switch here saves it: for the
@@ -570,6 +595,8 @@ pub(crate) struct SettingsDialog {
     focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
+    /// Sets [`Closings`] when this dialog is released.
+    _closing: Subscription,
     /// The control here whose press sent nothing last because another save held the preference row's key: the
     /// switches, Appearance, Terminal's link choice and tunnel switch, the spare switch and the trust switches
     /// ([`refused`]). Checkouts' fields and the ntfy form, views of their own, keep their own.
@@ -647,6 +674,7 @@ impl SettingsDialog {
             recipes: None,
             focus_on: None,
             layer: None,
+            _closing: cx.on_release(|_: &mut SettingsDialog, cx| cx.set_global(Closings)),
             refused: Refused::default(),
             platform: crate::actions::THIS_PLATFORM,
         }
