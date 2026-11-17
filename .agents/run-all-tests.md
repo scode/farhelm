@@ -132,6 +132,10 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-rust-shard.sh` (the Tensorlake harness's own
   checks, including the snapshot listing and archive configuration preserving the scoped Podman payload setup while
   removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
+- `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
+  `shellcheck scripts/boat/sandbox/*.sh` (the boat harness's own checks, including the shard configuration preserving
+  the scoped Podman payload setup while removing the local fixture build). Run the harness only on the maintainer's
+  request, per `.agents/boat.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
   `python3 -B scripts/test-install-pinned-cargo-about.py`
