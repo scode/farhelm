@@ -108,27 +108,6 @@ struct SessionLaunch {
     result: tokio::sync::oneshot::Sender<anyhow::Result<farhelm_proto::SessionInfo>>,
 }
 
-/// Reuse setup progress while naming the session-specific work honestly.
-fn session_steps(mut steps: PlanSteps, recipe: &str, session: bool) -> PlanSteps {
-    if session {
-        for step in &mut steps.steps {
-            step.name = match step.id.as_str() {
-                "prepare-snapshot" => format!("Preparing {recipe} for sessions…"),
-                "create-sandbox" => format!("Creating a {recipe} sandbox…"),
-                "attach-supervisor" => "Starting Farhelm in the sandbox…".into(),
-                _ => continue,
-            };
-        }
-        steps.steps.push(PlanStep {
-            id: "create-session".into(),
-            name: format!("Launching the session on {recipe} sandbox…"),
-            paths: vec![],
-            explanation: None,
-        });
-    }
-    steps
-}
-
 #[cfg(test)]
 #[path = "tensorlake_add_tests.rs"]
 mod tests;
@@ -878,7 +857,6 @@ impl ProvisioningService {
                 recorded_sandbox,
             )
         };
-        let steps = session_steps(steps, &recipe_name, session);
         let confirmation = format!(
             "{}\n{}\nThis sandbox bills while running. See https://www.tensorlake.ai/pricing. On Usage Credits, Tensorlake suspends it after 24 hours without a connection. Farhelm never resumes it on its own.",
             steps.lead,
@@ -1466,17 +1444,13 @@ impl ProvisioningService {
                 .is_none();
         self.replace_tensorlake_steps(
             host,
-            &session_steps(
-                prepared_host_steps(
-                    &plan.sandbox,
-                    &plan.recipe_name,
-                    &plan.recipe,
-                    built,
-                    plan.host.is_some(),
-                    prepare_visible,
-                ),
+            &prepared_host_steps(
+                &plan.sandbox,
                 &plan.recipe_name,
-                plan.session.is_some(),
+                &plan.recipe,
+                built,
+                plan.host.is_some(),
+                prepare_visible,
             ),
         )
         .await;
@@ -1535,17 +1509,13 @@ impl ProvisioningService {
                         prepare_visible = true;
                         self.replace_tensorlake_steps(
                             host,
-                            &session_steps(
-                                prepared_host_steps(
-                                    &plan.sandbox,
-                                    &plan.recipe_name,
-                                    &plan.recipe,
-                                    true,
-                                    plan.host.is_some(),
-                                    true,
-                                ),
+                            &prepared_host_steps(
+                                &plan.sandbox,
                                 &plan.recipe_name,
-                                plan.session.is_some(),
+                                &plan.recipe,
+                                true,
+                                plan.host.is_some(),
+                                true,
                             ),
                         )
                         .await;
