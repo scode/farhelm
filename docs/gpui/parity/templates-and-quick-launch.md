@@ -573,11 +573,12 @@ destination and name), "restart with refuses a template's held ${field} atomical
 prompt), "restart with refuses held shortcut batches and bolt templates" and "restart with applies matching bolt and
 shortcut templates without restarting". The launcher's entry lists the spec's other cases.
 
-partly: the two held-field cases are replaced by the template rules' unit tests, with no port through the open dialog
-(decided 2026-11-16 by the GPUI migration's coordinator), each whole, and the two partial-template cases by tests that
-apply the template to Restart with's draft, also without a window, and check the restart its main action would send.
-Restart with's refusal is one check in the template application (`restart_refusal` in `templates/apply.rs`) that names
-the first held field a template would change, and these tests run it without a window.
+replaced: the two held-field cases by the template rules' unit tests, with no port through the open dialog (decided
+2026-11-16 by the GPUI migration's coordinator), each whole; the two partial-template cases by tests that apply the
+template to Restart with's draft, also without a window, and check the restart its main action would send; and the two
+shortcut cases through an open Restart with, its search box, number keys and the ⚡ chord. Restart with's refusal is one
+check in the template application (`restart_refusal` in `templates/apply.rs`) that names the first held field a template
+would change, and the unit tests run it without a window.
 
 - `templates::apply_tests::restart_with_applies_equal_held_values_as_nothing` ("applies a template's matching held
   ${field}": a template repeating the launch kind, agent type, host, folder, with a trailing slash, and name applies as
@@ -595,10 +596,17 @@ the first held field a template would change, and these tests run it without a w
   an allowed partial agent template")
 - `templates::apply_tests::restart_with_applies_a_partial_command_template_and_sends_it` ("restart with applies an
   allowed partial command template")
-
-Not yet ported: the two shortcut cases ("restart with refuses held shortcut batches and bolt templates" and "restart
-with applies matching bolt and shortcut templates without restarting"): no test applies ⚡, a number key or a sequence
-to an open Restart with.
+- `templates::launcher_modes_tests::restart_with_refuses_a_held_change_from_a_sequence_or_the_chord_whole` ("restart
+  with refuses held shortcut batches and bolt templates": a sequence of an allowed and a held-name template refused
+  whole naming the session name, effort kept, and the ⚡ chord's launch-kind change refused naming the launch kind;
+  nothing created or restarted. Not checked here: the sequence pill's "apply" wording, which the sequence tests cover,
+  and the held context shown beside the draft)
+- `templates::launcher_modes_tests::restart_with_applies_matching_shortcuts_without_restarting` ("restart with applies
+  matching bolt and shortcut templates without restarting": a template repeating the held host, folder and name, taken
+  as a `tl:` row in the search box, changes nothing and leaves the restart unavailable; the ⚡ chord, and later a
+  sequence that also takes that template by its number key, each set effort low without restarting, with no refusal
+  note; a final press sends exactly one restart, which shows the test would see one. Not checked here: the action
+  available right after the chord, the sequence pill's wording and the held context, which other tests cover)
 
 ### `tests/interface-fonts.spec.ts`
 
