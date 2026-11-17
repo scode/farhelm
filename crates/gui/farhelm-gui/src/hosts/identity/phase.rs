@@ -389,9 +389,9 @@ fn tunnel_lines<'a>(
 
 /// [`evidence`] for `host`: a machine's change ("Asked Tensorlake to resume at …") and its deletion ("Farhelm is
 /// deleting this sandbox, its files and its snapshots", or the failure and Retry, then the helm's reason) are worded
-/// for the host's provider, as the old row worded them; every other phase, and a host with no provider, reads as
-/// [`evidence`] says.
-fn host_evidence(
+/// for the host's provider. The unavailable session card uses this line for a change so it names the same party as
+/// Hosts. Every other phase, and a host with no provider, reads as [`evidence`] says.
+pub(crate) fn host_evidence(
     line: HostSentence,
     host: &HostView,
     twin: &impl Fn(i64) -> Option<HostText>,

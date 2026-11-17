@@ -57,6 +57,8 @@ summary says "Managed Ubuntu" rather than "Tensorlake Ubuntu".
 A new sandbox or container session's launch progress names its steps for its kind, such as "Creating a web container
 on build-box…", instead of the generic step names.
 
+When a session's host is suspending or resuming, the session card names the provider Farhelm asked.
+
 On Linux, when the desktop does not draw window title bars (GNOME, for example), the app draws its own, with the title
 and the minimize, maximize and close buttons. (Curator: KDE, which draws its own title bars, has not been tried yet.)
 
