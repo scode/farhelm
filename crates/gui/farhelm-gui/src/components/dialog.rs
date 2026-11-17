@@ -349,6 +349,9 @@ impl RenderOnce for DialogFrame {
             Some(drawn) => heading.child(drawn),
             None => heading.child(
                 div()
+                    // The id lets a capture name a spot to park the pointer on. Not `-title`: a question's
+                    // host-value title already draws under `prompt-title`, and `settings-heading` is taken.
+                    .id(ElementId::Name(format!("{}-frame-title", self.id).into()))
                     .text_size(metrics::TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(palette.fg_0))

@@ -359,6 +359,18 @@ def png_size(path: Path) -> tuple[int, int] | None:
     return struct.unpack(">II", head[16:24])
 
 
+def crop_png(path: Path, rect: tuple[int, int, int, int], out: Path) -> None:
+    """Write the pixel rectangle `(left, top, right, bottom)` from a bridge PNG to `out`, leaving the source intact.
+
+    Callers supply a rectangle already clamped to the image; region selection and logical-to-pixel scaling belong to
+    the capture flow, so this helper preserves exactly the selected pixels.
+    """
+    width, _, pixels = read_rgba(path)
+    left, top, right, bottom = rect
+    kept = b"".join(pixels[(y * width + left) * 4:(y * width + right) * 4] for y in range(top, bottom))
+    write_rgba(out, right - left, bottom - top, kept)
+
+
 def crop_frame(path: Path, margin: int, border: int, top: int = 0) -> str | None:
     """Crop Kit's Linux window frame (`margin` black pixels, then `border`) off every side of a capture, in place, and
     `top` more rows inside it at the top (the window's own title bar).

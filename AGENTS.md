@@ -282,7 +282,8 @@ Before creating, editing or deleting anything under these paths, read the file n
 - `crates/terminal-host/`: `crates/terminal-host/SPEC.md` (running hosts outlive every release; its "Change policy").
 - `packaging/farhelm-desktop/`, `website/src/assets/intro/`, `docs/readme-hero/`, `docs/readme-video/`,
   `docs/docs-shots/`, `scripts/readme-screenshot.sh`, `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`,
-  `scripts/docs-screenshots.sh`, `scripts/publish-docs-shots.sh`: `.agents/docs-media.md`.
+  `scripts/docs-screenshots.sh`, `scripts/docs_shots.py`, `scripts/docs-shots/`, `scripts/publish-docs-shots.sh`:
+  `.agents/docs-media.md`.
 - `.github/workflows/`, `scripts/`, any test: `.agents/validation.md`.
 - `vendor/`: `vendor/README.md` (never edit the upstream trees there without their patch files).
 
