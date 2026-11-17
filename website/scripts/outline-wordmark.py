@@ -14,8 +14,13 @@ URI would work but costs a font copy in every file that uses the wordmark.
 Paths are the normal shape for a logo anyway: the icon is already geometry,
 and this makes the wordmark the same kind of thing.
 
-Needs `fonttools[woff]` (the woff2 decoder pulls in brotli); nothing in the
-ordinary build does, which is why this is a separate step from the renderer.
+Needs `fonttools`; nothing in the ordinary build does, which is why this is a
+separate step from the renderer. The font is the TTF the desktop app's GUI
+crate vendors, which `TTFont` reads as it is. The checked-in JSON was made
+from the old web UI's WOFF2 copy of the same font release: the two have the
+same family, weight and version, and "farhelm" renders pixel-identical from
+both (checked 2026-11-16). Whether a rerun reproduces the JSON byte for byte
+has not been tried.
 Run from anywhere: paths are resolved relative to this file.
 
 The output space is font units (upem, 1000 for this font) with y pointing
@@ -32,7 +37,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
 HERE = Path(__file__).resolve().parent
-FONT = HERE / ".." / ".." / "crates" / "farhelm-ui" / "assets" / "fonts" / "JetBrainsMonoNerdFont-Bold.woff2"
+FONT = HERE / ".." / ".." / "crates" / "gui" / "farhelm-gui" / "assets" / "fonts" / "JetBrainsMonoNerdFont-Bold.ttf"
 OUT = HERE / "wordmark-outline.json"
 WORD = "farhelm"
 

@@ -1012,6 +1012,20 @@ systemd or SSH substrate ran.
   incomplete, or since-modified captures are refused, that the manifest records the capture's main commit, and that a
   snapshot stays until six weeks after it was replaced (the one main pins, always). Run it, with `shellcheck`, when the
   script changes; seconds, no network, needs ImageMagick's `convert`.
+- `scripts/publish-readme-hero.sh --self-test` — the README hero publisher's whole validation: against a bare repository
+  standing in for GitHub, it checks that a text file, an undersized PNG, a website page without its markers, and a
+  scenario the loader cannot read or whose viewport is not a size are each refused before anything is pushed, that only
+  `refs/heads/readme-assets` is ever created and always holds a single root commit, that both pages' image URLs are
+  rewritten to the pushed commit together or not at all, that a dry run touches nothing, and that reading the scenario
+  through the loader leaves no bytecode in `scripts/`. Run it, with `shellcheck`, when the script or
+  `scripts/scenario_json5.py` changes; seconds, no network, needs ImageMagick's `convert` and `identify`.
+- `python3 -I scripts/test-scenario-json5.py` — the docs-media scenario loader (`scripts/scenario_json5.py`), which
+  reads the subset of JSON5 the three `scenario.json5` files under `docs/` use: each of them parses into its viewport,
+  hosts and sessions; line comments, unquoted keys and trailing commas are translated without touching strings holding
+  `//`, `,]` or `a:`; single-quoted strings, block comments, bare words, hex numbers, JSON5-only escapes and line
+  continuations, a lone comma in empty brackets, a comment between a key and its colon, `NaN` and `Infinity`, and
+  duplicate keys are refused, with the file and its own line where the decoder gives one. Run it when the loader or a
+  scenario file changes; seconds, no network.
 - `bash scripts/test-plans-watch.sh` — drives the plans monitor's watcher (`scripts/plans-watch.sh`) against a strict
   stub `gh` that runs the watcher's own `jq` filter over GitHub-shaped tree listings: change detection, baselines read
   from a commit, the wake check that keeps claims from waking idle executors and the role it is passed (`executor`,

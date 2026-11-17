@@ -35,11 +35,16 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// The dark palette is the web UI's own (crates/farhelm-ui/assets/app.css:
-// --bg-0/--bg-1, --accent, --ok, --warn, --danger-strong) plus the icon's
-// cursor green, so the README reads as the same product as the screenshot
-// under it. The light palette maps each role onto GitHub's light theme colors,
-// since that is the ground the light file is shown on.
+// The dark palette was taken from the old web UI's stylesheet (the deleted
+// crates/farhelm-ui/assets/app.css: --bg-0/--bg-1, --accent, --ok, --warn,
+// --danger-strong) plus the icon's cursor green, so the README read as the
+// same product as the screenshot under it. None of these values matched that
+// stylesheet by the time it was deleted: its recolour in #2730 never reached
+// this file. The desktop app's palette now lives in
+// crates/gui/farhelm-gui/src/theme.rs (`DARK`). Re-syncing would change the
+// Overview's intro SVGs and the marks, so it is left to the maintainer. The
+// light palette maps each role onto GitHub's light theme colors, since that is
+// the ground the light file is shown on.
 const palettes = {
   dark: {
     raised: "#141920",
