@@ -20,7 +20,9 @@ use serde_json::{Value, json};
 
 use super::{FOLDER_NOTE, Field, HostSettingsDialog};
 use crate::focus;
-use crate::hosts::tests::{hosts, nothing_in_flight, open_panel, reference_hosts, start_work};
+use crate::hosts::tests::{
+    details, hosts, nothing_in_flight, open_panel, reference_hosts, start_work,
+};
 use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
@@ -159,8 +161,19 @@ fn push_build_box(
     change: impl FnOnce(&mut HostView),
     cx: &mut VisualTestContext,
 ) {
+    push_reference_host(helm, 1, change, cx);
+}
+
+/// Push the reference hosts with the one at `index` (0 is the local host) changed by `change`, as the helm pushes a
+/// host after a save, and settle.
+fn push_reference_host(
+    helm: &mut FakeHelm,
+    index: usize,
+    change: impl FnOnce(&mut HostView),
+    cx: &mut VisualTestContext,
+) {
     let mut listed = reference_hosts();
-    change(&mut listed[1]);
+    change(&mut listed[index]);
     let state = hosts(&listed);
     helm.push(CollectionChanges {
         collection: state.collection,
@@ -516,8 +529,12 @@ fn the_destination_waits_for_a_launch_and_the_alias_does_not(cx: &mut TestAppCon
 
 /// Why this matters: the alias is the name a host is shown under, and clearing it must be possible (the helm then names
 /// the host by its destination); Escape in an open field must close the field, not the whole dialog, as the old
-/// dialog's did. Specified: Escape in the alias field closes it with nothing sent, the dialog open and focus on Edit
-/// alias; a new alias goes as `{"alias": "box"}`; an emptied field goes as `{"alias": null}`.
+/// dialog's did, also after a stray press on the veil beside the dialog (the old "host-settings-backdrop-escape").
+/// Specified: a press on the veil over the local host's menu toggle, outside the dialog, only takes the press: no menu
+/// opens, and the dialog, the field and focus in the field stay (the old backdrop took focus out of the dialog; here
+/// the veil leaves it where it was, and the Escape closes the field all the same). Escape in the alias field closes it
+/// with nothing sent, the dialog open and focus on Edit alias; a new alias goes as `{"alias": "box"}`; an emptied field
+/// goes as `{"alias": null}`.
 #[gpui::test]
 fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);
@@ -526,6 +543,25 @@ fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppC
         field_focused(cx, Field::Alias),
         "the premise: focus went into the field"
     );
+    // A live control under the veil: without the veil, this press would open the local host's menu.
+    let veil = crate::test_support::center(cx, "host-menu-toggle-1");
+    let shown = node(&frame(cx), "host-settings").expect("the premise: the dialog is drawn");
+    assert!(
+        !shown.bounds.contains(&veil),
+        "the premise: the press lands beside the dialog"
+    );
+    cx.simulate_click(veil, gpui::Modifiers::none());
+    settle(cx);
+    assert!(
+        node(&frame(cx), "host-menu").is_none(),
+        "the veil took the press: no menu opened"
+    );
+    assert_eq!(
+        editing(cx),
+        Some(Field::Alias),
+        "the veil left the field open"
+    );
+    assert!(field_focused(cx, Field::Alias), "and focus in it");
     keys(cx, "x escape");
     assert!(helm.commands().is_empty(), "Escape sent nothing");
     assert!(any_open(cx), "the dialog stayed open");
@@ -545,6 +581,31 @@ fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppC
     keys(cx, &format!("{SELECT_ALL} backspace enter"));
     let (_, _, body) = one_command(&mut helm);
     assert_eq!(body, json!({ "alias": null }));
+}
+
+/// Why this matters: the local host takes an alias too (SPEC.md, "Topology": "the local host can carry one too"), and
+/// the row must then name it by that alias rather than "Local (this machine)"; it has no destination, so its details
+/// show no destination line, aliased or not (`sidebar.spec.ts`, "aliasing the local host shows it in the host panel").
+/// Its settings offer the alias, Edit alias first (`focus_starts_on_the_first_edit`), and the alias field's save is
+/// `the_alias_saves_and_clears_and_escape_closes_only_its_field`'s, so this starts from the helm's push of the saved
+/// alias. Specified: once the helm pushes the local host aliased "laptop", its row reads "laptop", and with Details on
+/// none of its detail lines is a destination.
+#[gpui::test]
+fn a_local_host_pushed_with_an_alias_is_named_by_it(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    let alias = |host: &mut HostView| {
+        host.alias = Some("laptop".into());
+        host.name = "laptop".into();
+    };
+    push_reference_host(&mut helm, 0, alias, cx);
+    assert_eq!(label(cx, "host-row-1").as_deref(), Some("laptop"));
+    click(cx, "host-details-toggle");
+    let lines = details(&frame(cx), 1);
+    assert!(!lines.is_empty(), "the premise: its details show");
+    assert!(
+        !lines.iter().any(|line| line.starts_with("Destination")),
+        "{lines:?}"
+    );
 }
 
 /// Why this matters: a save in flight must not be abandoned by Escape, or the field would close while the helm may
@@ -1075,4 +1136,114 @@ fn saves_on_the_host_wait_for_each_other_without_locking_the_folder(cx: &mut Tes
         label(cx, "checkout-folder-saved").as_deref(),
         Some("Checkout folder saved")
     );
+}
+
+// ---- Cases of the old `terminal-multihost.spec.ts` ----------------------------------------------------------------
+
+/// Why this matters: each permission's help says what its current choice does, so a help that kept the words of the
+/// other choice would tell the user the opposite of what the host now allows, and the own-sessions switch must say
+/// whether the fleet-wide switch already covers it, since both can be on (the old "host-settings-yolo-without-asking"
+/// and "host-settings-own-sessions-without-asking"). Specified: with every permission off, the help reads that Farhelm
+/// asks before each YOLO launch, that the own-sessions setting lets agents do nothing without asking, and that Run
+/// farhelm commands without asking also includes these actions; with YOLO and commands pushed on, it reads that YOLO
+/// sessions start without asking, no longer that Farhelm asks, and that the fleet-wide switch already covers the
+/// own-sessions actions, the switch keeping its own value; with own sessions pushed on too, that agents act on this
+/// same host without asking.
+#[gpui::test]
+fn each_permissions_help_follows_its_switch(cx: &mut TestAppContext) {
+    const ASKS: &str = "Farhelm asks you to confirm each of these launches on this host.";
+    let (mut helm, cx) = open_build_box(cx);
+    // Words only that state's help reads, short of each help's whole text.
+    let states: [(Stores, &[&str]); 3] = [
+        (
+            |_| {},
+            &[
+                ASKS,
+                "does not let agents",
+                "also includes these session actions",
+            ],
+        ),
+        (
+            |host| {
+                host.yolo_without_asking = true;
+                host.commands_without_asking = true;
+            },
+            &[
+                "start on this host without asking you to confirm",
+                "already covers these session actions",
+                "this switch keeps its own saved value",
+            ],
+        ),
+        (
+            |host| {
+                host.yolo_without_asking = true;
+                host.commands_without_asking = true;
+                host.own_sessions_without_asking = true;
+            },
+            &["rename, clone and delete sessions on this same host without asking you"],
+        ),
+    ];
+    for (n, (stores, words)) in states.into_iter().enumerate() {
+        push_build_box(&mut helm, stores, cx);
+        let shown = painted(cx);
+        for words in words {
+            assert!(shown.contains(words), "state {n}: {words:?}");
+        }
+        assert_eq!(
+            shown.contains(ASKS),
+            n == 0,
+            "state {n}: whether Farhelm asks before YOLO launches"
+        );
+    }
+}
+
+/// Why this matters: an SSH alias has no length cap, and the dialog's header names the host, so a long name must give
+/// way rather than take the height the settings scroll in, and the body must still show where the host is (the old
+/// "host-settings-pinned-controls: unbounded destination"; SPEC.md: "A shortened heading retains the full destination
+/// in the body"). Specified: with `build-box` under an alias of about 140 characters at a long destination, in a 900
+/// by 600 window, the dialog's own heading paints the name cut short with "…", the body keeps at least 200 pixels and
+/// paints the destination whole, and both close controls lie wholly inside the window.
+#[gpui::test]
+fn a_long_name_leaves_the_settings_body_its_room(cx: &mut TestAppContext) {
+    use crate::hosts::tests::aliased;
+    let alias = "a build machine with a deliberately long alias ".repeat(3);
+    let destination = "dev@a-very-long-host-name-that-goes-on-and-on-for-the-whole-test.invalid";
+    let mut listed = reference_hosts();
+    listed[1] = aliased(listed[1].clone(), alias.trim(), destination);
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&listed)]);
+    cx.simulate_resize(size(px(900.), px(600.)));
+    settle(cx);
+    open_from_menu(&mut helm, cx, "host-menu-toggle-2");
+    let dialog = node(&frame(cx), "host-settings")
+        .expect("the dialog is drawn")
+        .bounds;
+    let body = crate::test_support::bounds(cx, "host-settings-body");
+    // Only the dialog's own texts: the Hosts row under the veil paints the same name, cut short too.
+    let texts: Vec<_> = frame(cx)
+        .into_iter()
+        .flat_map(|node| node.texts)
+        .filter(|text| dialog.contains(&text.bounds.origin))
+        .collect();
+    let heading = texts
+        .iter()
+        .find(|text| text.bounds.bottom() <= body.top() && text.text.contains("a build machine"))
+        .expect("the dialog's heading names the host");
+    assert!(heading.text.ends_with('…'), "cut short: {:?}", heading.text);
+    assert!(
+        body.size.height >= px(200.),
+        "the body keeps its room: {body:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| body.contains(&text.bounds.origin) && text.text.contains(destination)),
+        "the body paints the destination whole"
+    );
+    for id in ["host-settings-close", "host-settings-footer-close"] {
+        let shown = crate::test_support::bounds(cx, id);
+        assert!(
+            shown.top() >= px(0.) && shown.bottom() <= px(600.) && shown.right() <= px(900.),
+            "{id} lies inside the window: {shown:?}"
+        );
+    }
 }

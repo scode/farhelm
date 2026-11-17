@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use crate::components::Role;
 use crate::focus::Mark;
 use crate::host_text::tests::painted_words;
-use crate::hosts::tests::{hosts, open_panel_in_column, reference_hosts};
+use crate::hosts::tests::{details_switch, hosts, open_panel_in_column, reference_hosts};
 use crate::operations::{Command, NotStarted, OpKey, Work};
 use crate::session;
 use crate::settings::Refused;
@@ -302,16 +302,44 @@ fn remove_sends_the_delete_under_the_hosts_key(cx: &mut TestAppContext) {
 /// The old dialog stayed up through its request and showed the helm's refusal inside it, then sent focus to Cancel so
 /// that Enter or Escape dismisses the refusal rather than sending the refused removal again. A question that closed
 /// instead would leave the user reading the refusal somewhere else, and one that showed it under the row as well would
-/// report it twice. Specified: the helm's 409 to Remove leaves the question open with "Farhelm refused this action: "
-/// and the helm's words inside it, focus on Cancel, and nothing under `build-box`'s row; Remove pressed again sends a
-/// second `DELETE /api/hosts/2`, which clears the reason, and once the helm forgets the host the question closes.
+/// report it twice. While the request is out the answer is already sent, so a dismissal must not close the question
+/// either: a refusal would have nowhere to show, and a closed question would read as a cancelled removal that may
+/// still happen (the old "Remove keeps its dialog open through a refused request: ${dismissal}", which also pressed the
+/// header close, which this question does not have, a recorded deviation). Specified: with the `DELETE /api/hosts/2`
+/// out and focus in the question, Escape and a click on Cancel each leave the question open, send nothing and leave
+/// the removal in flight; the helm's 409 to it then leaves the question open with "Farhelm refused this action: "
+/// and the helm's words inside it, focus on Cancel, and nothing under `build-box`'s row, whose Details switch stays off
+/// and whose row stays closed (the old "a failed removal stays visible with details collapsed"); Remove pressed again
+/// sends a second `DELETE /api/hosts/2`, which clears the reason, and once the helm forgets the host the question
+/// closes.
 #[gpui::test]
 fn a_refused_removal_keeps_the_question_up_with_the_reason(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    assert!(
+        !details_switch(&frame(cx)) && node(&frame(cx), "host-detail-2-0").is_none(),
+        "the premise: Details is off and build-box's row is closed"
+    );
     press_remove(cx);
     click(cx, "prompt-confirm");
     let commands = helm.commands();
     assert_eq!(commands.len(), 1, "the premise: the removal went out");
+    assert_eq!(host_work(cx), Some(Work::RemoveHost));
+    let focused = focused_id(cx);
+    assert!(
+        matches!(focused.as_deref(), Some("prompt-confirm" | "prompt-cancel")),
+        "the premise: focus is in the question, where Escape goes: {focused:?}"
+    );
+    keys(cx, "escape");
+    assert!(any_open(cx), "Escape left the question open");
+    click(cx, "prompt-cancel");
+    assert!(any_open(cx), "Cancel left the question open");
+    assert_eq!(sent(&mut helm), [], "nothing more was sent");
+    assert_eq!(
+        host_work(cx),
+        Some(Work::RemoveHost),
+        "the removal is still out"
+    );
+
     helm.reply(commands[0].id, 409, Some(json!(BUSY)));
     settle(cx);
     assert!(any_open(cx), "the question stayed up");
@@ -319,11 +347,21 @@ fn a_refused_removal_keeps_the_question_up_with_the_reason(cx: &mut TestAppConte
         label(cx, "host-remove-refused"),
         Some(format!("Farhelm refused this action: {BUSY}"))
     );
+    // Focus is on Cancel because this test clicked it while the removal was out (a click focuses a control under the
+    // Linux click rule), so the refusal leaves it there; the refusal's own move to Cancel is pinned by
+    // `cancel_after_a_refusal_returns_focus_to_the_rows_toggle` and the prompt's refusal-focus tests.
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
     assert_eq!(
         label(cx, "host-error-2"),
         None,
         "the row does not report it a second time"
+    );
+    // The old "a failed removal stays visible with details collapsed": the refusal changes no one's Details choice
+    // and opens no row behind the question.
+    assert!(!details_switch(&frame(cx)), "Details is still off");
+    assert!(
+        node(&frame(cx), "host-detail-2-0").is_none(),
+        "build-box's row is still closed"
     );
 
     click(cx, "prompt-confirm");
@@ -821,5 +859,39 @@ fn a_busy_host_refuses_remove_with_a_reason(cx: &mut TestAppContext) {
             "Remove build-box: Not started: {}",
             NotStarted::BUSY_REASON
         ))
+    );
+}
+
+/// Why this matters: an SSH alias has no length cap, and the removal question's title names the host, so a long name
+/// must not take the answers off screen or hide where the host is: the body keeps the destination whole (SPEC.md: "A
+/// shortened heading retains the full destination in the body"), and the old "host-remove-dialog-fits" kept the
+/// answers reachable in a short window. Specified: with `build-box` under an alias of about 140 characters at a long
+/// destination, in a 900 by 600 window, Remove asks with Cancel and Remove wholly inside the window and the destination
+/// painted whole in the question.
+#[gpui::test]
+fn a_long_name_leaves_the_removal_questions_answers_on_screen(cx: &mut TestAppContext) {
+    use crate::hosts::tests::{aliased, connected, host};
+    let alias = "a build machine with a deliberately long alias ".repeat(3);
+    let destination = "dev@a-very-long-host-name-that-goes-on-and-on-for-the-whole-test.invalid";
+    let mut listed = reference_hosts();
+    listed[1] = aliased(host(2, "ssh", connected()), alias.trim(), destination);
+    let (_helm, _, cx) = open_panel_in_column(cx, vec![hosts(&listed), preferences(false)]);
+    cx.simulate_resize(size(px(900.), px(600.)));
+    settle(cx);
+    press_remove(cx);
+    assert!(any_open(cx), "the premise: the question opened");
+    for id in ["prompt-cancel", "prompt-confirm"] {
+        let shown = crate::test_support::bounds(cx, id);
+        assert!(
+            shown.left() >= px(0.)
+                && shown.top() >= px(0.)
+                && shown.right() <= px(900.)
+                && shown.bottom() <= px(600.),
+            "{id} lies inside the window: {shown:?}"
+        );
+    }
+    assert!(
+        painted(cx).contains(destination),
+        "the destination is painted whole"
     );
 }

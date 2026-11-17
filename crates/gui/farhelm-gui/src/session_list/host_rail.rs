@@ -99,7 +99,9 @@ use gpui::{
 use super::SessionList;
 use super::row::short_name;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, RAIL_ICON_BOX, Role, StatusMark, Tier, rail_entry};
+use crate::components::{
+    Button, HoverHelp, MenuStart, RAIL_ICON_BOX, Role, StatusMark, Tier, rail_entry,
+};
 use crate::focus::{self, Mark};
 use crate::help_menu::HelpButton;
 use crate::host_text::{self, HostSentence, HostText};
@@ -274,9 +276,18 @@ impl SessionList {
         // Taken in the handler, after the coordinator counted this press or key, so the menu opens for this gesture and
         // not for one the user has since moved on from.
         let mark = Mark::take(cx);
-        self.rail.menu =
-            crate::hosts::open_menu(host, parts.anchor, &parts.focus, &mark, window, cx)
-                .map(|layer| (host, layer));
+        // The avatar is no menu toggle (a secondary click or Shift+F10 opens it), so the menu always starts
+        // on its first command.
+        self.rail.menu = crate::hosts::open_menu(
+            host,
+            MenuStart::First,
+            parts.anchor,
+            &parts.focus,
+            &mark,
+            window,
+            cx,
+        )
+        .map(|layer| (host, layer));
         cx.notify();
     }
 }
