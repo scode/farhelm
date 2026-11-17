@@ -21,7 +21,9 @@
 //!   its own, "Feedback sent", so the keyboard can scroll it), focus moves to the footer's Close (the fields it may
 //!   have held are gone), and the dialog closes itself after
 //!   [`THANKS_SHOWN`]. On any refusal the dialog says sending failed in plain words ([`failure_words`]), keeps
-//!   everything typed, and lets the user retry or copy it. Nothing is queued or retried.
+//!   everything typed, and lets the user retry or copy it. Nothing is queued or retried. Focus that a click on Send left
+//!   on the dialog itself (macOS) goes back to the message, so the user can type on, unless the user moved on; focus
+//!   on a control stays.
 //! - **Remembering the contact is a separate write.** Only after a successful send, a best-effort keyless
 //!   `PUT /api/preferences` writes exactly the contact sent, or clears it when Re-use was unchecked or the field was
 //!   blank ([`contact_after_success`]). It writes even when the value looks unchanged here, since the helm's copy may
@@ -182,7 +184,7 @@ pub fn open_returning(
     let layer = layers::open_dialog(
         Dialog {
             view: dialog.clone().into(),
-            container: cx.focus_handle(),
+            container: dialog.read(cx).container.clone(),
             // The message field, as the old dialog started there.
             start,
             // None: the dialog is about nothing the helm pushes, so only the user (or a reset) closes it.
@@ -351,6 +353,10 @@ pub(crate) struct FeedbackDialog {
     phase: Phase,
     /// The footer's Cancel, which reads Close once the send succeeded: where focus goes then.
     cancel: FocusHandle,
+    /// The dialog's layer container. Focus rests here, on no control, after a press no control takes (a click on Send
+    /// under macOS's rule, a click on empty space), which is how [`settle`] tells that a refusal may hand focus back to
+    /// the message.
+    container: FocusHandle,
     /// Set right after the layer opens.
     layer: Option<LayerId>,
     /// The thanks' timer, once the send succeeded. Dropped with the dialog, which cancels it.
@@ -385,6 +391,7 @@ impl FeedbackDialog {
             os: fit_machine_field(os_name(), FEEDBACK_OS_MAX_CHARS),
             phase: Phase::Editing,
             cancel: cx.focus_handle().tab_stop(true),
+            container: cx.focus_handle(),
             layer: None,
             closing: None,
             _edits: edits,
@@ -457,23 +464,16 @@ impl FeedbackDialog {
         }
     }
 
-    /// The send settled with `outcome`: record what the dialog now shows. Returns whether it succeeded.
-    fn settled(&mut self, outcome: &Outcome, cx: &mut Context<Self>) -> bool {
+    /// The send settled with `outcome`: record what the dialog now shows.
+    fn settled(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
         self.message.set_read_only(false, cx);
         self.contact.set_read_only(false, cx);
-        let sent = match outcome {
-            Outcome::Refused(refusal) => {
-                self.phase = Phase::Failed(failure_words(refusal));
-                false
-            }
+        self.phase = match outcome {
+            Outcome::Refused(refusal) => Phase::Failed(failure_words(refusal)),
             // The route answers 204; any success counts, since nothing here waits for long work.
-            Outcome::Done(_) | Outcome::Accepted(_) => {
-                self.phase = Phase::Sent;
-                true
-            }
+            Outcome::Done(_) | Outcome::Accepted(_) => Phase::Sent,
         };
         cx.notify();
-        sent
     }
 
     /// The local problem to show under the fields: a message or contact the helm would refuse for its size, said only
@@ -489,7 +489,9 @@ impl FeedbackDialog {
 
 /// The completion of the send `dialog` started with `outgoing`: show the outcome in the dialog if it is still open,
 /// and after a success remember or clear the contact, move focus to the footer's Close and start the thanks' timer.
-/// It runs outside every entity's update, so it may update the window.
+/// After a refusal, focus on the dialog itself goes to the message (the old app's `refocus`), unless the user moved on
+/// since `mark`; focus on any control (Send, or a field the user clicked meanwhile) stays where it is. It runs outside
+/// every entity's update, so it may update the window.
 fn settle(
     dialog: &WeakEntity<FeedbackDialog>,
     outcome: Outcome,
@@ -504,17 +506,27 @@ fn settle(
         // Whether or not the dialog is still there: the send succeeded, so the choice the user made with it stands.
         remember(contact_after_success(outgoing.contact, reuse), cx);
     }
-    let Ok(Some((cancel, layer))) = dialog.update(cx, |dialog, cx| {
-        dialog
-            .settled(&outcome, cx)
-            .then(|| (dialog.cancel.clone(), dialog.layer))
+    let Ok((target, container, layer)) = dialog.update(cx, |dialog, cx| {
+        dialog.settled(&outcome, cx);
+        let target = if sent {
+            dialog.cancel.clone()
+        } else {
+            dialog.message.focus_handle(cx)
+        };
+        (target, dialog.container.clone(), dialog.layer)
     }) else {
         return;
     };
-    // The fields, and Send, are gone from the body now; the old dialog put focus on its Close for the same reason.
+    // After a success the fields, and Send, are gone from the body; the old dialog put focus on its Close for the same
+    // reason.
     let _ = handle.update(cx, |_, window, cx| {
-        focus::focus_in_layer(&cancel, &mark, window, cx)
+        if sent || container.is_focused(window) {
+            focus::focus_in_layer(&target, &mark, window, cx);
+        }
     });
+    if !sent {
+        return;
+    }
     let Some(layer) = layer else {
         return;
     };
