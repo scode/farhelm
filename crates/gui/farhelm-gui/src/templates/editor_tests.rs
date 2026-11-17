@@ -999,11 +999,13 @@ fn an_edit_while_saving_changes_nothing(cx: &mut TestAppContext) {
 /// so the dialog itself had to become a stop that the keys scroll, or a keyboard user could not get back to the top of
 /// a tall editor. Here the controls stay focusable while busy (the deviation "While a save is in flight") and the
 /// dialog's body scrolls whatever focus moves to into view, which is how SPEC.md's "Every scrollable region ... can be
-/// reached and scrolled with the keyboard alone" holds for a region of controls; Home is not bound there (the deviation
-/// "Home and the page keys do not scroll the Templates editor"). Specified: in the shortest window, with `codex-deep`
-/// edited, reaching Save by Tab scrolls the name field out of the body, and Enter on it sends the save; Shift+Tab,
-/// walked back to the name field while the save is still out, scrolls the body until the whole field shows, and nothing
-/// more is sent.
+/// reached and scrolled with the keyboard alone" holds for a region of controls. The body also takes Home from a control
+/// inside it with no use for the key, which is the old case's own step: Home brought the busy editor back to its top.
+/// Specified: in the shortest window, with `codex-deep` edited, reaching Save by Tab scrolls the name field out of the
+/// body, and Enter on it sends the save; Shift+Tab, walked back to the name field while the save is still out, scrolls
+/// the body until the whole field shows; Tab walked on to Save again scrolls the name field away, and Home there (Save is
+/// a button, so the key is the body's, where a text field would keep it for its caret) scrolls the body back until the
+/// whole name field shows, focus staying on Save; nothing more is sent.
 #[gpui::test]
 fn the_busy_editor_scrolls_back_to_its_name_by_keyboard(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
@@ -1051,6 +1053,30 @@ fn the_busy_editor_scrolls_back_to_its_name_by_keyboard(cx: &mut TestAppContext)
     assert!(name_focused(cx), "Shift+Tab reached the name field");
     let (shown, at) = name_shown(cx);
     assert!(shown, "and it was scrolled into view: {at}");
+    for _ in 0..40 {
+        if test_support::focused_id(cx).as_deref() == Some("templates-save") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-save"),
+        "the premise: focus is on Save, a button, again"
+    );
+    let (shown, at) = name_shown(cx);
+    assert!(
+        !shown,
+        "the premise: the name field is scrolled away again: {at}"
+    );
+    keys(cx, "home");
+    let (shown, at) = name_shown(cx);
+    assert!(shown, "Home scrolled the body back to its top: {at}");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-save"),
+        "focus stayed on Save"
+    );
     assert!(helm.commands().is_empty(), "nothing more was sent");
 }
 
