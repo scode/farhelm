@@ -26,9 +26,9 @@
 //! - **New sandbox and the account.** The launcher reads the Tensorlake account once as it opens ([`read_account`]);
 //!   New sandbox's segment, recipe options and registration note take their rules from [`ProviderUi`]'s
 //!   `launch_place`, `recipe_pickable`, `recipe_listing`, `recipe_refusal` and `registration_note`.
-//! - **Not here yet:** the "Create a sandbox for this session?" question. Until it comes, a press sends the create
-//!   unconfirmed, and the helm refuses it unless the account's "Create Tensorlake sandboxes without asking" is on; that
-//!   refusal comes back as any refused launch does.
+//! - **The question before a billed create**, "Create a sandbox for this session?", is the sibling `sandbox_question`
+//!   module's: a press on New sandbox asks it there, unless the account's "Create Tensorlake sandboxes without asking"
+//!   is on.
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::recipes::RecipeView;
@@ -42,7 +42,7 @@ use gpui::{
 
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, after_reads, row};
 use crate::components::{
-    HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, copy_button,
+    CommandWell, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
 };
 use crate::environment_ui::{ProviderUi, RUNS_ON};
 use crate::host_text::{HostSentence, HostText};
@@ -444,20 +444,24 @@ impl Launcher {
     }
 
     /// The note under Folder while a new environment is chosen whose provider has an account to register Farhelm's SSH
-    /// key with, once that key exists ([`ProviderUi::registration_note`]): the old launcher's two sentences, the
-    /// command as the helm wrote it (host text, in the monospace face, as Settings → Tensorlake shows it) and a button
-    /// that copies it byte for byte. The sentences are a labelled node, since plain text is not in the accessibility
-    /// tree. The button is an ordinary one, so it keeps the focus rules of every button (SPEC.md, "Keyboard focus"),
-    /// and a copy moves no focus.
+    /// key with, once that key exists ([`ProviderUi::registration_note`]): the old launcher's two sentences, then the
+    /// command as the helm wrote it in the shared [`CommandWell`], as Settings → Tensorlake shows it: host text shown
+    /// escaped, with a Copy (`launcher-registration-command-copy`) that copies it byte for byte. The sentences are a
+    /// labelled node, since plain text is not in the accessibility tree. Copy is an ordinary button, so it keeps the
+    /// focus rules of every button (SPEC.md, "Keyboard focus"), and a copy moves no focus.
+    ///
+    /// It shows with no recipe chosen too (the catalog lists none New sandbox can start from, say), as SPEC.md
+    /// says ("whether or not a recipe is chosen") and as the old launcher did: it drew it for any new environment,
+    /// its `recipe().is_some()` being true for the empty name its switch entered with (`create_form.rs` at the
+    /// reference commit), and the command does not depend on the recipe.
     pub(super) fn registration_note(&self, palette: &theme::Palette) -> Option<AnyElement> {
         let target = self.draft.target.as_ref()?;
         let note = ProviderUi(target.provider()).registration_note(self.account.settings().ok())?;
-        let command = HostText::from_host(note.command);
-        let copy = copy_button(
-            "launcher-registration-copy",
+        let well = CommandWell::new(
+            "launcher-registration-command",
+            HostText::from_host(note.command),
             note.copy_label,
             HoverHelp::tooltip(note.copy_help),
-            note.command.to_owned(),
         );
         Some(
             div()
@@ -475,17 +479,7 @@ impl Launcher {
                         .aria_label(note.words)
                         .child(note.words),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(div().min_w_0().child(
-                            HostSentence::new("launcher-registration-command").mono(&command),
-                        ))
-                        .child(copy),
-                )
+                .child(well)
                 .into_any_element(),
         )
     }
