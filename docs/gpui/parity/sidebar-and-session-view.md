@@ -831,12 +831,13 @@ Space on a caret and switching from one caret's open menu to the other's by a cl
 compact cases, a pill's content changing in place across the boundary, a pill hidden while mounted or closed (only the
 pane's widening brings the ordinary look back in a test), a strip replaced after an interruption (the fit measures the
 strip it is drawn with, every frame) and the condensed row's open menus and questions, which keep their size (they are
-drawn by the layer manager, apart from the row). Waiting on the terminal area's named change: the condensed text size
-buttons (the old `.btn` rule gave them 2 pixels of padding too; the terminal area, which owns them, agreed on 2026-11-16
-to give the group's drawing a `compact: bool` that the header will pass into its condensed look). The terminal area's:
-the text size buttons, the tab strip and the tunnel pill themselves, with the pill's ports, the tab strip's floor beside
-a pill and the selected tab's reveal (the terminal area's); the bar's 32-pixel height, its position at the window's
-bottom and the macOS title-band inset, which no test pins yet (the goldens and screenshots show them)
+drawn by the layer manager, apart from the row). The condensed text size buttons (the old `.btn` rule gave them 2 pixels
+of padding too): the header passes its look into the terminal area's group, which stays exactly as tall as the lifecycle
+buttons in either look (crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+`the_text_size_group_is_as_tall_as_the_header_buttons_in_both_looks`). The terminal area's: the text size buttons, the
+tab strip and the tunnel pill themselves, with the pill's ports, the tab strip's floor beside a pill and the selected
+tab's reveal (the terminal area's); the bar's 32-pixel height, its position at the window's bottom and the macOS
+title-band inset, which no test pins yet (the goldens and screenshots show them)
 
 ### `tests/stop-tabs.spec.ts`
 
@@ -1064,13 +1065,15 @@ crates/gui/farhelm-gui/src/session_pane/tests.rs `a_delete_question_keeps_the_ke
 
 ## Sidebar and session view cases of specs listed in other areas' files
 
-These specs' entries sit in [Launcher](launcher.md) (`tests/tensorlake-sandbox-sessions.spec.ts`, wholesale) and
+These specs' entries sit in [Launcher](launcher.md) (`tests/tensorlake-sandbox-sessions.spec.ts`, wholesale, and
+`tests/claude-trust.spec.ts`, `tests/omp-composer.spec.ts` and `tests/guarded-permissions.spec.ts`) and
 [Settings and hosts](settings-and-hosts.md) (`tests/podman-environments.spec.ts`); their session list and session view
-cases are this area's. Each case is listed by its title at reference commit `24bc0580`. The tests are in-process over
-the fake helm: no running-app check of an environment session is possible, since the end-to-end harness seeds no sandbox
-or container (decided by the migration's orchestrator on 2026-11-15; one real container run happens at milestone M3's
-stop). The quick switcher keeps drawing a session's host mark, not its environment's, as the old switcher did; the row
-and the details bar draw the environment's.
+cases are this area's. Each case is listed by its title at reference commit `24bc0580`. The environment specs' tests
+(`tensorlake-sandbox-sessions.spec.ts` and `podman-environments.spec.ts`) are in-process over the fake helm: no
+running-app check of an environment session is possible, since the end-to-end harness seeds no sandbox or container
+(decided by the migration's orchestrator on 2026-11-15; one real container run happens at milestone M3's stop). The
+quick switcher keeps drawing a session's host mark, not its environment's, as the old switcher did; the row and the
+details bar draw the environment's.
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
@@ -1230,6 +1233,81 @@ ported: the container's consequence ("the container goes too", no snapshots) and
 
 - crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
   `a_containers_count_retires_when_it_is_deleted_and_its_notice_stays`
+
+### `tests/omp-composer.spec.ts` (launcher)
+
+Case: an OMP session row shows the OMP glyph and its actual permission.
+
+ported:
+
+- crates/gui/farhelm-gui/src/session_list/row_marks_tests.rs `every_agent_type_draws_the_mark_named_for_it` (the OMP
+  mark), `the_shield_follows_the_launch_and_draws_its_mark` (Approve draws the guarded shield, and an older OMP launch
+  that stored no permission keeps the YOLO shield it meant), and
+  `an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command` (the Approve description, exactly)
+
+### `tests/guarded-permissions.spec.ts` (launcher)
+
+Case: guarded and older own-setting shields show their actual launch provenance.
+
+ported:
+
+- crates/gui/farhelm-gui/src/session_list/row_marks_tests.rs `the_shield_follows_the_launch_and_draws_its_mark` (a
+  guarded Codex launch's shield and an older one's own-setting shield) and
+  `an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command` (each one's mode, its meaning and the
+  stored command under Launched with, never the session's recorded invocation)
+
+### `tests/claude-trust.spec.ts` (launcher)
+
+Case: Claude trust hint preserves the terminal and opens the opt-in caveats.
+
+partly: the band's half; the Settings half is in [Settings and hosts](settings-and-hosts.md), under
+`tests/workspace-trust.spec.ts`. Not ported: the 390-pixel pass (one-pane Settings is not built) and the second page
+(one window; the shared dismissal is the pushed preference row).
+
+The band follows a trust change made elsewhere within one tick: it reads trust again on the ticker's 30-second clock
+while it shows (the migration's orchestrator's decision of 2026-11-16), as well as when the session reaches the
+question, when Settings closes and on Don't show again.
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `every_condition_withdraws_the_band_on_its_own`,
+  `the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus`,
+  `only_a_managed_checkouts_agent_terminal_shows_the_band`, `closing_settings_reads_trust_again`,
+  `a_tick_reads_trust_again_while_the_band_shows`, `a_tick_sends_nothing_while_a_read_is_out`,
+  `hide_lasts_until_the_question_leaves`, `dont_show_again_stores_the_shared_dismissal`
+- the entry point's focus on Claude's switch: crates/gui/farhelm-gui/src/settings/tests.rs
+  `the_trust_hint_entry_point_focuses_its_agents_switch_once_known`
+
+### `tests/claude-trust.spec.ts` (launcher)
+
+Case: Claude trust band discards a newer Settings overlay after its origin closes.
+
+ported, as the GPUI app's rules have it: the band shows only the stored dismissal (Deviations), so a Settings choice the
+helm refuses never shows on it. A switch press while the band's save is out is refused by the operation store.
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `the_band_follows_only_the_stored_dismissal`
+
+### `tests/claude-trust.spec.ts` (launcher)
+
+Case: Claude trust band repairs an idle read crossing a Settings dismissal save.
+
+ported, as the GPUI app's rules have it: the band reads the dismissal from the pushed preference row, not from its trust
+read, so a read crossing a dismissal save has nothing to repair there. What remains is an older trust read answering
+while a newer one is still out: its answer is dropped, so a stale off never shows in that gap. (The helm answers in the
+order it was asked, so an older read never answers after a newer one.)
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `only_the_newest_trust_read_counts`
+
+### `tests/claude-trust.spec.ts` (launcher)
+
+Case: Claude trust hint reports refused dismissal only while its session is shown.
+
+ported: the band's recovery read is sent when Settings closes, where the old case nudged the helm's session read.
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs
+  `a_refused_dont_show_again_says_so_only_while_its_session_is_open` and, for a press refused because another preference
+  save is out (Deviations), `a_dont_show_again_while_another_preference_save_is_out_says_why`
+
+The band cannot be staged for a screenshot: the end-to-end harness's fake agent is not Claude, and its sessions are in
+no managed checkout, so no `app_scenes` entry pictures it.
 
 ## Deviations from the old app
 
@@ -1634,3 +1712,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   `session_list/tests.rs` `opening_an_ended_or_stale_session_marks_it_seen` and
   `new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks`, and the retired half by
   `session_list/retired_tests.rs` `opening_a_retired_session_stamps_nothing_and_rename_opens_nothing`.
+- Claude's trust hint band does not show under the unavailable card, where the question is not visible (SPEC.md: "While
+  Claude's trust question is visible in the agent terminal"); the old view drew it there (orchestrator, 2026-11-16).
+- The band shows only the stored dismissal, never a Settings switch's pending one as the old band did (decided by the
+  sidebar-and-session-view area on 2026-11-16).
+- A Don't show again pressed while another preference save holds the row's key sends nothing and says so with the shared
+  busy line ("Not saved: another operation was in progress. Try again."). The old app queued the press; here it is
+  refused visibly, per the migration's orchestrator's decision of 2026-11-14 on presses the operation store refuses.
