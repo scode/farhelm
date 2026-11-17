@@ -544,7 +544,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             let state = OptionState {
                 chosen: chosen == Some(index),
                 enabled: enabled[index],
-                ring: focus::shows_ring(&handles[index], window),
+                ring: focus::shows_ring(&handles[index], window, cx),
                 stacked,
                 fitted: self.fit_words && self.look == Look::SmallSegments,
             };

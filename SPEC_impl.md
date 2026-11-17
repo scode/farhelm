@@ -670,6 +670,16 @@ the key, so a layer the key capture closes (its handler runs inside the keystrok
 that press. GPUI shows no key release before bindings run, and needs none here: a held repeat is marked as one, and only
 a fresh press follows a release.
 
+The focus ring, and the hover help focus shows, follow the old `:focus-visible`: they show while the user's latest press
+in the window was a key rather than a mouse button (`focus::last_input_was_keyboard`). A key press sets that and a press
+of any mouse button clears it; pointer movement, the wheel and a modifier pressed alone leave it, as the old ring stayed
+through pointer movement. GPUI's own `last_input_was_keyboard` does not decide this, because GPUI clears it on any
+pointer movement, which took the ring from a keyboard user who nudged the mouse while the help their Tab had shown
+stayed up; GPUI's own uses of it (hover styles held back while the keyboard is in use) are unchanged. The migration's
+orchestrator decided this on 2026-11-16. A menu item the pointer highlights after keyboard use keeps the ring, as the
+old scripted focus matched `:focus-visible` then, but its help stays the pointer's (`focus::focus_came_by_keyboard`), as
+the old `tooltip.js` told that focus apart (`menu-focus.js` at `24bc0580`).
+
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
 innermost first, by the least distance that shows the whole control, as a browser's `scrollIntoView({block: 'nearest'})`
@@ -858,8 +868,8 @@ card shown later is built for what the latest render described; it never makes t
 waiting or showing.
 
 Hover help also shows on keyboard focus, for every control that can hold focus, as the old app's did for every
-focus-visible control and as SPEC.md asks of the summary card: focus the keyboard moves onto a control (the user's last
-input was the keyboard, as for the focus ring) shows its help after the same 300 ms, or at once in the grace after
+focus-visible control and as SPEC.md asks of the summary card: focus the keyboard moves onto a control (the user's
+latest press was a key, as for the focus ring) shows its help after the same 300 ms, or at once in the grace after
 another, and focus leaving takes it down; a click that focuses a control does not, nor does a later key press on it,
 since only the move counts. Escape with no layer open, or a press, puts it away until focus next lands on a control, the
 same one included; with a layer open, Escape closes the layer. The pointer and focus share the one tooltip, and the

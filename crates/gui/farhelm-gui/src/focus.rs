@@ -74,6 +74,9 @@
 //!   can flip it from the keyboard (Control-F7 by default) without leaving the app. The migration's orchestrator
 //!   decided this on 2026-11-13, under the rule that the GPUI app ports the old one rather than redesigning it: the Mac
 //!   keeps the old app's behavior, and Linux follows the GTK and Qt convention.
+//! - **Whether focus shows as the keyboard's** ([`last_input_was_keyboard`]): the old `:focus-visible`, which the
+//!   focus ring and the hover help focus shows follow. A key press sets it and a mouse press clears it; pointer
+//!   movement, which clears GPUI's own flag, leaves it alone.
 //! - **Scrolling the focused control into view.** When the keyboard (Tab, Shift+Tab, a menu's arrows) or the app (a
 //!   layer returning focus, [`focus_control`], [`focus_in_layer`], the recovery when a focused control vanishes) moves
 //!   focus onto a control inside a scrolling container, the container scrolls the least distance that shows the whole
@@ -315,16 +318,18 @@ pub fn has_moved_on(mark: &Mark, cx: &App) -> bool {
     Mark::take(cx) != *mark
 }
 
-/// Record a key-down for "the user moved on" and say whether it is swallowed: a repeat of a key press that closed a
-/// layer ([`Closing`]), which must reach nothing and is not counted. Otherwise a press is counted unless it repeats the
-/// last one on the same control, and a held repeat is not. A modifier pressed alone arrives without a key-down and is
-/// not a press.
+/// Record a key-down for "the user moved on" and as the keyboard in use ([`last_input_was_keyboard`]), and say whether
+/// it is swallowed: a repeat of a key press that closed a layer ([`Closing`]), which must reach nothing and is not
+/// counted. Every key-down, a held or swallowed one included, marks the keyboard in use. Otherwise a press is counted
+/// unless it repeats the last one on the same control, and a held repeat is not. A modifier pressed alone arrives
+/// without a key-down and is neither.
 ///
 /// The actions module's keystroke interceptor, which sees every key before GPUI matches a binding, calls this before
 /// it does anything else with the key (hands it to the key capture, queues a physical-key row's action), and stops a
 /// swallowed key itself once the key capture has had it. Recording first is what lets a layer the key capture's
 /// handler closes, which it does inside the interceptor, be taken as closed by this press.
-pub(crate) fn note_press(down: &KeyDownEvent, window: &Window, cx: &mut App) -> bool {
+pub(crate) fn note_press(down: &KeyDownEvent, window: &mut Window, cx: &mut App) -> bool {
+    note_input(true, window, cx);
     let now = cx.background_executor().now();
     let focused = window.focused(cx);
     let Some(moved) = installed_mut::<MovedOn>(cx) else {
@@ -406,6 +411,12 @@ pub struct WindowFocus {
     /// count (a double click's second press) still matches it, and [`press_was_taken`] then falls through to its rule
     /// about a press on the focused control, which decides as it would have without the note.
     returned: Option<(Mark, WeakFocusHandle)>,
+    /// Whether the user's latest press in this window was a key rather than a mouse button, which is what
+    /// [`last_input_was_keyboard`] answers. Starts false, as GPUI's own flag does.
+    keyboard: bool,
+    /// The menu item the pointer last moved focus onto ([`highlight`]), until any other move through [`apply`]: while
+    /// focus is still there, its landing was the pointer's ([`focus_came_by_keyboard`]).
+    pointer_landing: Option<WeakFocusHandle>,
     /// The move [`focus_in_layer`] is waiting to make once a frame draws its target ([`Pending`]). One per window: a
     /// newer move replaces it, [`apply`] drops it with every focus move but recovery, and [`return_to`] when a layer
     /// that took focus closes and focus is returned. A dialog closed before its first frame (a reset before the next
@@ -486,6 +497,8 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         returned: None,
         regions_open: Vec::new(),
         recorded: 0,
+        keyboard: false,
+        pointer_landing: None,
         pending: None,
     });
     let id = window.window_handle().window_id();
@@ -779,8 +792,9 @@ fn settle_home(window: &mut Window, cx: &mut App) {
 // ---- The root's wiring -----------------------------------------------------------------------------------------------
 
 /// Wire a root view's outermost element: Farhelm's key context, the root's focus handle, the focus actions, and the
-/// clicks the moved-on counter watches (key presses it sees through its keystroke interceptor). Clicks are seen through
-/// a window-wide listener, because a dialog's veil occludes the root from the pointer.
+/// clicks the moved-on counter and [`last_input_was_keyboard`] watch (key presses they see through the keystroke
+/// interceptor). Clicks are seen through a window-wide listener, because a dialog's veil occludes the root from the
+/// pointer.
 pub fn root(element: Div, attachment: &Attachment) -> Div {
     track_raw(element.key_context(actions::CONTEXT), &attachment.root)
         // A press that no control took (the page's empty space) leaves nothing focused, as a click on a web page's
@@ -816,8 +830,10 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
                 // Prepared on every frame, since the root view is never replayed from a cache.
                 |_, window, cx| window.defer(cx, settle_home),
                 |_, _, window, _| {
-                    window.on_mouse_event(|event: &MouseDownEvent, phase, _, cx| {
+                    window.on_mouse_event(|event: &MouseDownEvent, phase, window, cx| {
                         if phase == gpui::DispatchPhase::Capture {
+                            // Every press, a double click's second one too: the ring goes with any click.
+                            note_input(false, window, cx);
                             note_click(event, cx);
                         }
                     })
@@ -1309,7 +1325,10 @@ fn apply(target: Move, window: &mut Window, cx: &mut App) {
     if !matches!(target, Move::Recover(_))
         && let Some(state) = state(window, cx)
     {
-        state.update(cx, |state, _| state.pending = None);
+        state.update(cx, |state, _| {
+            state.pending = None;
+            state.pointer_landing = None;
+        });
     }
     match target {
         Move::To(handle) | Move::Recover(handle) => window.focus(handle, cx),
@@ -1556,13 +1575,20 @@ fn press_was_taken(
 /// in [`track`] is about presses, not this).
 ///
 /// Only inside the topmost layer: a pointer crossing a menu that is covered, or the page behind an open menu, never
-/// takes focus out of the layer on top. Pointer movement is not a press, so it does not count as the user moving on.
+/// takes focus out of the layer on top. Pointer movement is not a press, so it does not count as the user moving on,
+/// and it leaves [`last_input_was_keyboard`] alone; the move is recorded as the pointer's, so the item's help stays the
+/// pointer's ([`focus_came_by_keyboard`]).
 pub fn highlight(item: &FocusHandle, window: &mut Window, cx: &mut App) {
     let Some(top) = layers::top_container(window, cx) else {
         return;
     };
     if top.contains(item, window) && !item.is_focused(window) {
         apply(Move::To(item), window, cx);
+        if let Some(state) = state(window, cx) {
+            state.update(cx, |state, _| {
+                state.pointer_landing = Some(item.downgrade())
+            });
+        }
     }
 }
 
@@ -1728,10 +1754,58 @@ pub fn control_handle(key: impl Into<ElementId>, window: &mut Window, cx: &mut A
 /// A control's focus handle, kept in its element state.
 struct ControlFocus(FocusHandle);
 
-/// Whether `handle` shows the keyboard focus ring: it holds focus and the user's last input was the keyboard, as the
-/// old `:focus-visible` (a ring for the keyboard user who cannot see where they are, not on every click).
-pub fn shows_ring(handle: &FocusHandle, window: &Window) -> bool {
-    handle.is_focused(window) && window.last_input_was_keyboard()
+/// Whether `handle` shows the keyboard focus ring: it holds focus and the user's last press was a key
+/// ([`last_input_was_keyboard`]), as the old `:focus-visible` (a ring for the keyboard user who cannot see where they
+/// are, not on every click).
+pub fn shows_ring(handle: &FocusHandle, window: &Window, cx: &App) -> bool {
+    handle.is_focused(window) && last_input_was_keyboard(window, cx)
+}
+
+/// Whether the user's latest press in `window` was a key rather than a mouse button: the old app's `:focus-visible`
+/// rule, which says whether focus shows its ring ([`shows_ring`]) and, with [`focus_came_by_keyboard`], whether focus
+/// landing on a control shows that control's hover help. Farhelm code asks this, never GPUI's
+/// `Window::last_input_was_keyboard`.
+///
+/// GPUI's flag answers another question. It turns false on any pointer movement, so a keyboard user who nudged the
+/// mouse lost the ring at once, while the help their Tab had shown stayed up. The old app's ring went away on a press,
+/// never on pointer movement, and so does this: a key-down sets it ([`note_press`]), a press of any mouse button clears
+/// it ([`root`]), and pointer movement, the wheel and a modifier pressed alone leave it as it was. It starts false, as
+/// GPUI's does, so nothing shows a ring before the first key. GPUI's own uses of its flag (hiding hover styles while
+/// the keyboard is in use, its `focus_visible` styles) are left to it; the migration's orchestrator chose this over a
+/// GPUI patch on 2026-11-16.
+pub fn last_input_was_keyboard(window: &Window, cx: &App) -> bool {
+    state(window, cx).is_some_and(|state| state.read(cx).keyboard)
+}
+
+/// Whether focus in `window` counts as the keyboard's for hover help ([`layers::focus_drawn`]): the user's latest press
+/// was a key, and the pointer did not put focus where it is. A menu item the pointer highlights after keyboard use
+/// still shows its ring, as the old scripted focus matched `:focus-visible` then, but its help stays the pointer's, as
+/// the old `tooltip.js` told that focus apart from the keyboard's (`menu-focus.js` at `24bc0580`).
+pub fn focus_came_by_keyboard(window: &Window, cx: &App) -> bool {
+    let Some(state) = state(window, cx) else {
+        return false;
+    };
+    let state = state.read(cx);
+    let by_pointer = state
+        .pointer_landing
+        .as_ref()
+        .and_then(WeakFocusHandle::upgrade);
+    state.keyboard && by_pointer != window.focused(cx)
+}
+
+/// Record whether the user's latest press in `window` was a key, for [`last_input_was_keyboard`]. A change redraws the
+/// window: rings and focus help read the flag as the frame is drawn, and GPUI redraws only when its own flag changes,
+/// which a mouse press after a pointer move does not do.
+fn note_input(keyboard: bool, window: &mut Window, cx: &mut App) {
+    let Some(state) = state(window, cx) else {
+        return;
+    };
+    let was = state.update(cx, |state, _| {
+        std::mem::replace(&mut state.keyboard, keyboard)
+    });
+    if was != keyboard {
+        window.refresh();
+    }
 }
 
 /// What breaks SPEC.md's focus rules in `window` right now, if anything: exactly one element holds focus (GPUI holds at

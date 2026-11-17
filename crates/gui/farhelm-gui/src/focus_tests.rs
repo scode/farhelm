@@ -1573,7 +1573,7 @@ fn enter_and_space_activate_a_focused_button_and_a_held_key_does_not(cx: &mut Te
     keys(cx, "tab");
     assert!(focused(cx, &act), "the premise: the button has focus");
     assert!(
-        cx.update(|window, _| focus::shows_ring(&act, window)),
+        cx.update(|window, cx| focus::shows_ring(&act, window, cx)),
         "keyboard focus shows the ring"
     );
 
