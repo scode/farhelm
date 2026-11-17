@@ -355,9 +355,10 @@ pub enum Placement {
     /// NOTE: The clamp is the one every popover shares, which keeps the popover flush inside the content area. The old
     /// flyout's own clamp differed, a deviation recorded when this was ported: it kept 8 pixels from the edges, it held
     /// a fixed 528 pixels of room below the menu's top rather than the menu's own height (so a short menu on a low row
-    /// moved up further than it does here), and it capped the menu's height and scrolled it, where this one would run
-    /// past the bottom of a content area shorter than the menu (the full row menu fits in the minimum window, whose
-    /// content area keeps the app's minimum size: `linux_title_bar::minimum_allowance`).
+    /// moved up further than it does here), and it capped the menu's height and scrolled it. This clamp caps no height:
+    /// a popover taller than the content area would run past its bottom. The row menu caps its own height to the
+    /// content area instead and scrolls inside it (`session_list/menu.rs`, through `notices_bell::window_cap`), so a long
+    /// refusal in it stays in reach.
     Beside,
     /// Wherever the anchor's owner says ([`Anchor::placed_by`]), asked as each frame is laid out ([`PlaceBy`] has the
     /// rule's inputs and what it may do). For an overlay whose rule needs its own measured size and facts only its
