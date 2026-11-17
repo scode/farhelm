@@ -1,6 +1,6 @@
 //! Tests of the host settings dialog over the helm client's fake: where focus starts and returns, what each permission
 //! switch, the destination and alias editors, the appearance picker and the checkout folder send, what a refusal leaves
-//! on screen, and the destination's wait for a session launch.
+//! on screen, the destination's wait for a session launch, and where the keyboard can go while a save is out.
 //!
 //! The dialog is opened the way the user opens it: a click on a Hosts panel row's toggle, then on the menu's Settings.
 //! The hosts are the reference screens' three (the local host as 1, `build-box` at `dev@build-box` as 2, `gpu-1` as
@@ -25,7 +25,7 @@ use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::settings::Refused;
-use crate::test_support::{any_open, click, focused_id, frame, keys, settle};
+use crate::test_support::{any_open, bounds, click, focused_id, frame, keys, settle};
 
 /// Kit's select-all in a text field on this platform.
 const SELECT_ALL: &str = if cfg!(target_os = "macos") {
@@ -719,6 +719,137 @@ fn the_picker_is_reached_and_used_by_keyboard(cx: &mut TestAppContext) {
     assert_eq!(focused_id(cx).as_deref(), Some("host-color-lavender"));
     let (_, _, body) = one_command(&mut helm);
     assert_eq!(body, json!({ "icon": "cloud", "color": "lavender" }));
+}
+
+// ---- Focus while a save is out -------------------------------------------------------------------------------------
+
+/// Why this matters: while a save ran, the old dialog disabled every control and gave its body a stop of its own, so
+/// the keyboard could still scroll it (`keyboard-scroll.spec.ts`, "host settings remain keyboard-scrollable while every
+/// setting is saving", and `modal-layout.spec.ts`, "host-settings scrollports stay reachable while saving", at
+/// reference commit `24bc0580`). Here no control locks during a save (the module's NOTE), so the keyboard reaches the
+/// body through its controls, and each must scroll into view as Tab lands on it. Specified: in a window of the app's
+/// least size, where the body scrolls with its last switch below the fold, a typed destination is saved with Enter and
+/// left unanswered; Tab from the field then walks down the body to "Open local-network links without asking", each
+/// control it lands on drawn whole inside the body, and the save is still out at the end.
+#[gpui::test]
+fn tab_walks_down_the_body_while_a_destination_save_is_held(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = open_panel(cx, vec![hosts(&reference_hosts())]);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    open_from_menu(&mut helm, cx, "host-menu-toggle-2");
+    let (last, body) = (
+        "host-local-links-without-asking",
+        bounds(cx, "host-settings-body"),
+    );
+    let below = node(&frame(cx), last).is_some_and(|node| node.bounds.top() >= body.bottom());
+    assert!(below, "the premise: the last switch is below the fold");
+    click(cx, "host-settings-edit-destination");
+    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    let (_, path, _) = one_command(&mut helm);
+    assert_eq!(
+        path, "/api/hosts/2/destination",
+        "the premise: the save is out"
+    );
+
+    let mut landed = Vec::new();
+    while landed.last().map(String::as_str) != Some(last) && landed.len() < 40 {
+        keys(cx, "tab");
+        // The focused node itself, not a lookup by its id: GPUI Kit's text inputs all share one id (`input-state`), so
+        // the first node under it can be the destination field while the checkout folder's holds focus.
+        let focused = frame(cx)
+            .into_iter()
+            .find(|node| node.flags.focused && node.element_id.is_some());
+        let focused = focused.expect("Tab landed on a control");
+        let (id, at) = (
+            focused
+                .element_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            focused.bounds,
+        );
+        let body = bounds(cx, "host-settings-body");
+        let whole = at.top() >= body.top() && at.bottom() <= body.bottom();
+        assert!(
+            whole,
+            "{id} is drawn whole inside the body: {at:?} in {body:?}"
+        );
+        landed.push(id);
+    }
+    assert_eq!(landed.last().map(String::as_str), Some(last), "{landed:?}");
+    assert_eq!(host_work(cx), Some(Work::Save), "the save is still out");
+}
+
+/// Why this matters: a switch saves as it is toggled, and the old dialog's lock took the switch away while it saved, so
+/// it had to put focus back on that very switch afterwards (`keyboard-scroll.spec.ts`, "host settings keep usable focus
+/// after a successful checkbox save" and "host settings automatic busy recovery remembers the commands checkbox", at
+/// reference commit `24bc0580`). Here the switch stays live through its save, so focus must simply never leave it. Keys
+/// alone drive it, so the click rule plays no part. Specified: for the YOLO switch, then the commands switch, each
+/// reached by Tab, Space sends its own save and focus stays on it; once the helm pushes the new value and answers, the
+/// switch shows on with focus still on it, and Tab moves to the next switch (own sessions, and links).
+#[gpui::test]
+fn a_space_toggled_switch_keeps_focus_through_its_save(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_build_box(cx);
+    let cases: [(&str, &str, Stores); 2] = [
+        (
+            "yolo-without-asking",
+            "host-own-sessions-without-asking",
+            |host| host.yolo_without_asking = true,
+        ),
+        (
+            "commands-without-asking",
+            "host-links-without-asking",
+            |host| host.commands_without_asking = true,
+        ),
+    ];
+    let mut stored: Vec<Stores> = Vec::new();
+    for (route, next, change) in cases {
+        let switch = format!("host-{route}");
+        for _ in 0..40 {
+            if focused_id(cx) == Some(switch.clone()) {
+                break;
+            }
+            keys(cx, "tab");
+        }
+        assert_eq!(
+            focused_id(cx),
+            Some(switch.clone()),
+            "the premise: Tab reached {route}"
+        );
+        keys(cx, "space");
+        let (id, path, _) = one_command(&mut helm);
+        assert_eq!(
+            path,
+            format!("/api/hosts/2/{route}"),
+            "the premise: its save is out"
+        );
+        assert_eq!(
+            focused_id(cx),
+            Some(switch.clone()),
+            "{route}: focus stays while it saves"
+        );
+
+        stored.push(change);
+        let all = stored.clone();
+        push_build_box(
+            &mut helm,
+            move |host| all.iter().for_each(|change| change(host)),
+            cx,
+        );
+        helm.reply(id, 200, None);
+        settle(cx);
+        assert_eq!(on(cx, &switch), Some(true), "{route}: stored");
+        assert_eq!(
+            focused_id(cx),
+            Some(switch.clone()),
+            "{route}: focus stayed"
+        );
+        keys(cx, "tab");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(next),
+            "{route}: Tab goes on"
+        );
+    }
 }
 
 // ---- Checkouts -------------------------------------------------------------------------------------------------------
