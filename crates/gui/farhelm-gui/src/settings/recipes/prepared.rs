@@ -15,7 +15,7 @@
 
 use farhelm_proto::recipes::{PrepareStep, PrepareView, PreparedStaleReason, RecipeView};
 
-use super::{Line, Tone, Words};
+use super::{Line, Tone, Words, snapshot_place_runs};
 use crate::local_time::{self, Zone};
 
 /// "1 min", "41 s", "2 h": how long ago `at` was at `now`, both in seconds since the epoch. Display only, so it
@@ -44,11 +44,23 @@ fn step_of(step: PrepareStep) -> String {
 /// A running, failed or interrupted preparation takes precedence over the prepared snapshot it may replace. Only the
 /// helm's stale reason makes the line a warning: a client's clock decides nothing about reuse. A running preparation's
 /// line is the one that pulses ([`Line::running`]).
+///
+/// A recipe whose base the snapshot's place cannot run promises nothing there, since no new host or session there can
+/// start from it: an idle one, never prepared or prepared before a base change, says only "Not prepared", and a failed
+/// or stopped preparation leaves out "The next new host or session tries again". The built-snapshot status beside it
+/// already says the base cannot run there, so the line does not say why again. The old app drew the promises for every
+/// recipe.
 pub(in crate::settings) fn prepared_status(
     view: &RecipeView,
     now: Option<i64>,
     zone: Zone,
 ) -> Line {
+    let runs = snapshot_place_runs(view);
+    let tries_again = if runs {
+        " The next new host or session tries again."
+    } else {
+        ""
+    };
     match &view.preparation {
         PrepareView::Preparing { step, started_at } => {
             let elapsed = now
@@ -76,14 +88,15 @@ pub(in crate::settings) fn prepared_status(
                 )),
                 // The preparer's own words, from the sandbox.
                 Words::Host(crate::host_text::HostText::from_host(message.clone())),
-                Words::App(". The next new host or session tries again.".into()),
+                Words::App(format!(".{tries_again}")),
             ],
             running: false,
         },
         PrepareView::Interrupted { .. } => Line::app(
             Tone::Warning,
-            "Preparation stopped when the helm stopped. The next new host or session tries again.",
+            format!("Preparation stopped when the helm stopped.{tries_again}"),
         ),
+        PrepareView::Idle if !runs => Line::app(Tone::Muted, "Not prepared"),
         PrepareView::Idle => match &view.prepared {
             None => Line::app(
                 Tone::Muted,
@@ -127,9 +140,13 @@ pub(in crate::settings) fn shows_age(view: &RecipeView) -> bool {
     match &view.preparation {
         PrepareView::Preparing { .. } => true,
         PrepareView::Failed { .. } | PrepareView::Interrupted { .. } => false,
-        PrepareView::Idle => view
-            .prepared
-            .as_ref()
-            .is_some_and(|prepared| prepared.stale_reason.is_none()),
+        // A place that cannot run the base draws "Not prepared" for any idle state, which shows no age.
+        PrepareView::Idle => {
+            snapshot_place_runs(view)
+                && view
+                    .prepared
+                    .as_ref()
+                    .is_some_and(|prepared| prepared.stale_reason.is_none())
+        }
     }
 }

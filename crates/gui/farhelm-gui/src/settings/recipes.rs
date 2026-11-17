@@ -137,6 +137,12 @@ const NO_KEY: &str = "Save an API key in Settings → Credentials to build snaps
 /// wording module, rather than naming a provider itself (AGENTS.md, "Code rules").
 const SNAPSHOT_PLACE: Place = Place::TensorlakeAccount;
 
+/// Whether [`SNAPSHOT_PLACE`]'s provider can run `view`'s base: the one test behind the row's "cannot run" warning and
+/// the prepared line's refusal to promise a preparation there ([`prepared::prepared_status`]).
+fn snapshot_place_runs(view: &RecipeView) -> bool {
+    view.base.supports(SNAPSHOT_PLACE.provider())
+}
+
 /// `POST /api/tensorlake/recipes/<name>/build`: start the recipe's snapshot build or join the one running, what Build,
 /// Rebuild and Retry all send. Named in a wordless refusal by its method and route: a recipe's name is the user's own,
 /// not an internal id, so it is shown.
@@ -455,11 +461,10 @@ pub(super) fn snapshot_status(view: &RecipeView, zone: Zone) -> SnapshotStatus {
              build or preparation, whichever left it, and when the recipe is deleted",
         ));
     }
-    let provider = SNAPSHOT_PLACE.provider();
-    if !view.base.supports(provider) {
+    if !snapshot_place_runs(view) {
         lines.push(Line::app(
             Tone::Warning,
-            ProviderUi(provider).recipe_base_unsupported(),
+            ProviderUi(SNAPSHOT_PLACE.provider()).recipe_base_unsupported(),
         ));
         action = None;
     }

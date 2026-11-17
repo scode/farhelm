@@ -1738,6 +1738,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   "Tensorlake · Not prepared yet; …", as a container place's line starts with its host's name. The old row drew them
   unnamed, so on a recipe used only for containers they read as the whole recipe's state. Build snapshot stays offered.
   Covered by `the_snapshot_lines_are_named_by_their_place` (`settings/recipe_tests.rs`).
+- **A recipe Tensorlake cannot run is not promised a preparation.** Its prepared line reads "Tensorlake · Not prepared"
+  when idle (never prepared, or prepared before its base changed), beside the row's warning that says why, and a failed
+  or stopped preparation leaves out "The next new host or session tries again", where the old row, like every other,
+  promised that the first new host or session prepares it or tries again. Covered by
+  `a_recipe_the_place_cannot_run_is_never_promised_a_preparation` (`settings/recipe_place_tests.rs`).
 - **The running dot sits on the build's own line.** The old row drew it before the snapshot status's last line, which a
   pending cleanup or an unsupported-base warning can follow; the dot then marked a line that is not running. Here it
   marks the "Building snapshot" line wherever it falls.
@@ -1880,7 +1885,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   `a_refused_create_reads_the_account_now_and_on_the_next_showing`). The re-reads stop once the key shows, after the
   last one (`the_re_reads_after_a_carried_on_create_end_after_half_a_minute`), and when Settings closes
   (`closing_settings_stops_the_re_reads`); they go on while another section is shown. A re-read that fails shows Retry
-  loading in the API key forms, as any failed account read does. A refusal's line goes once a read shows the key.
+  loading in the API key forms, as any failed account read does. A refusal's line goes once a read shows the key. Once
+  the re-reads are over and the account still shows no key, a line under the refusal says "No key has appeared since.
+  Press Create SSH key to try again.", since the refusal's promise no longer holds when the generation failed after the
+  reply; the old section had no such line (`re_reads_that_find_no_key_say_to_try_again`). It shows from the moment the
+  last re-read is sent, a round trip before its answer, and is hidden while the account's last read failed, which
+  learned nothing about the key (`a_failed_last_re_read_says_nothing_about_the_key`); a new press cancels the earlier
+  refusal's re-reads (`a_second_press_cancels_the_first_refusals_re_reads`).
 - **Sandboxes not on this helm reads only when its answer can change.** The old list read on every fleet notice while
   healthy, and again after a successful Test while failed. Here it reads when the section first knows a key is saved, on
   Refresh, after a key's Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list

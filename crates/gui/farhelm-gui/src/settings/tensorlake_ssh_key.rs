@@ -30,6 +30,15 @@
 //!   nothing. A refusal's line shows only while the key is still not created; once a read finds the key, the line and
 //!   the read on the next showing are dropped, and no further re-read goes out. Closing Settings drops the group, and
 //!   its re-reads with it.
+//! - **When the re-reads find nothing, say so.** The 504's words promise that Settings shows the key once it exists,
+//!   which stops being true when the generation failed after the reply (the helm only logs that). So once a refusal's
+//!   re-reads are over and the account still shows no key, a line under the refusal says to try again ([`TRY_AGAIN`]),
+//!   until the next press or a key. It is derived as the group draws, from the refusal, the schedule and the account,
+//!   so it shows from the moment the last re-read is sent, one round trip to the helm before its answer: waiting for
+//!   that answer itself would take a read numbering for a line that only moves by that round trip. While the account's
+//!   last read failed it is hidden, since that read learned nothing about the key. A new press starts afresh: it
+//!   cancels the earlier refusal's re-reads, which would otherwise read on, and end, under the new press.
+//!   The old app had no such line: its Create waited for the generation, so it never answered before the key existed.
 //! - **The key appearing moves focus to Copy.** Whichever answer first shows the key after a press of Create SSH key
 //!   (the done answer, or a read after a refusal) replaces the button that held focus with the command, so focus goes to
 //!   Copy, the control that takes its place, unless the user has moved on since the press. Left to the
@@ -58,12 +67,15 @@ use crate::theme;
 use crate::ticker::{self, Deadline};
 
 /// The group's element id; its controls and lines are `-create`, `-command` (the command, whose Copy is
-/// `-command-copy`), `-copied`, `-unavailable` and `-error` after it.
+/// `-command-copy`), `-copied`, `-unavailable`, `-error` and `-try-again` after it.
 pub(super) const ID: &str = "tensorlake-ssh-key";
 
 /// The lines saying why the group has no key to show, and why Create SSH key failed.
 const UNAVAILABLE_ID: &str = "tensorlake-ssh-key-unavailable";
 const ERROR_ID: &str = "tensorlake-ssh-key-error";
+/// The line under a refusal once the re-reads after it found no key, and its words.
+const TRY_AGAIN_ID: &str = "tensorlake-ssh-key-try-again";
+const TRY_AGAIN: &str = "No key has appeared since. Press Create SSH key to try again.";
 
 /// The waits between the account's re-reads after a refused Create SSH key, one after another: re-reads 5, 15 and 30
 /// seconds after the refusal. The helm's 504 comes at its 20-second host reply bound, which starts with the Create
@@ -205,6 +217,8 @@ impl SshKey {
         if sent {
             self.creating = true;
             self.failure = None;
+            // The earlier refusal's re-reads belong to it, not to this press (the module docs).
+            self.next_recheck = None;
             self.pressed = Some(mark);
             cx.notify();
         }
@@ -282,6 +296,7 @@ impl Render for SshKey {
         let palette = theme::palette(cx);
         let status = self.status(cx);
         let ready = matches!(status, Some(SshKeyStatus::Ready { .. }));
+        let not_created = status == Some(SshKeyStatus::NotCreated);
         let state: Option<Div> = match status {
             None => None,
             Some(SshKeyStatus::NotCreated) => {
@@ -327,6 +342,13 @@ impl Render for SshKey {
         let failure = self.failure.as_ref().map(|reason| {
             choices::host_failure_line(ERROR_ID, HostSentence::new(ERROR_ID).host(reason), cx)
         });
+        // Drawn as the refusal is, under it: it corrects what the refusal promised, once that refusal's re-reads are
+        // over and the account, not failing, still shows no key (the module docs).
+        let gave_up = self.failure.is_some()
+            && self.next_recheck.is_none()
+            && not_created
+            && self.account.read(cx).unreadable().is_none();
+        let try_again = gave_up.then(|| choices::failure_line(TRY_AGAIN_ID.into(), TRY_AGAIN, cx));
         // Under the command, in the group's own gap, as the old line was the section's next paragraph.
         let copied = (ready && self.copied.read(cx).confirming()).then(|| {
             choices::outcome_line(
@@ -363,6 +385,7 @@ impl Render for SshKey {
             .children(state)
             .children(copied)
             .children(failure)
+            .children(try_again)
             .child(choices::help(UNCHECKED, cx))
     }
 }
