@@ -19,7 +19,7 @@
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
-//! - **The main action.** Launch (Replace, Restart for those modes) is drawn retired while [`LaunchDraft::refusal`]
+//! - **The main action.** Launch (Replace, Restart for those modes) is drawn retired while `LaunchDraft::launch_refusal`
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
 //!   with). A press of a complete New, Clone, Replace with or Restart with launches it ([`super::launch`]): the
@@ -70,7 +70,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
-use super::request::{Account, Recipes, SELECT_REPOSITORY, Target, capitalized};
+use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target, capitalized};
 use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
@@ -1151,22 +1151,23 @@ impl Launcher {
     /// Restart with also refuses while the model field holds a model not yet applied (typed into its open list, or
     /// said under it as not applicable), after the host's own reasons and before the draft's others, as the old
     /// launcher did: restarting then would quietly keep the session's old model while the field shows another.
-    fn refusal(&self, cx: &App) -> Option<String> {
+    fn refusal(&self, cx: &App) -> Option<Refusal> {
         if crate::hosts::host_change_in_flight(cx) {
-            return Some(launch::HOST_CHANGE_IN_FLIGHT.to_owned());
+            return Some(Refusal::Plain(launch::HOST_CHANGE_IN_FLIGHT.to_owned()));
         }
         if self.source_busy(cx) {
-            return Some(SOURCE_BUSY.to_owned());
+            return Some(Refusal::Plain(SOURCE_BUSY.to_owned()));
         }
         if self.save_panel.is_some() {
-            return Some(TEMPLATE_PANEL_OPEN.to_owned());
+            return Some(Refusal::Plain(TEMPLATE_PANEL_OPEN.to_owned()));
         }
         let hosts = self.hosts(cx);
         if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
-            return self
-                .draft
-                .host_refusal(&hosts)
-                .or_else(|| Some("Choose a model before restarting".to_owned()));
+            return self.draft.host_refusal(&hosts).or_else(|| {
+                Some(Refusal::Plain(
+                    "Choose a model before restarting".to_owned(),
+                ))
+            });
         }
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
@@ -1181,9 +1182,10 @@ impl Launcher {
             return self
                 .draft
                 .place_refusal(target)
-                .or_else(|| Some(SELECT_REPOSITORY.to_owned()));
+                .or_else(|| Some(Refusal::Plain(SELECT_REPOSITORY.to_owned())));
         }
-        self.draft.refusal(target, self.live_launch(cx).as_ref())
+        self.draft
+            .launch_refusal(target, self.live_launch(cx).as_ref())
     }
 
     /// Whether the source of a Replace with or Restart with has a request in flight under its own key (a Stop, a
@@ -2416,29 +2418,30 @@ impl Render for Launcher {
         } else {
             "Not launched."
         };
-        let alert = match (&refusal, &self.refusal_words(cx)) {
-            (Some(reason), _) if self.pressed => {
-                Some(HostSentence::new("launcher-refusal-words").text(format!("{lead} {reason}")))
-            }
-            // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
-            // Words complete as they stand are shown without the lead too: an environment create's failed run, which
-            // the helm already words "Not launched. …", and the launcher's own words for an unknown outcome.
-            (_, Some(words))
-                if self
-                    .refused
-                    .as_ref()
-                    .is_some_and(|refused| refused.may_still_start || refused.complete) =>
-            {
-                Some(HostSentence::new("launcher-refusal-words").host(words))
-            }
-            (_, Some(words)) => Some(
-                HostSentence::new("launcher-refusal-words")
-                    .text(format!("{lead} "))
-                    .host(words)
-                    .text(self.refusal_suffix()),
-            ),
-            _ => None,
-        };
+        let alert =
+            match (&refusal, &self.refusal_words(cx)) {
+                (Some(reason), _) if self.pressed => Some(reason.append_to(
+                    HostSentence::new("launcher-refusal-words").text(format!("{lead} ")),
+                )),
+                // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
+                // Words complete as they stand are shown without the lead too: an environment create's failed run, which
+                // the helm already words "Not launched. …", and the launcher's own words for an unknown outcome.
+                (_, Some(words))
+                    if self
+                        .refused
+                        .as_ref()
+                        .is_some_and(|refused| refused.may_still_start || refused.complete) =>
+                {
+                    Some(HostSentence::new("launcher-refusal-words").host(words))
+                }
+                (_, Some(words)) => Some(
+                    HostSentence::new("launcher-refusal-words")
+                        .text(format!("{lead} "))
+                        .host(words)
+                        .text(self.refusal_suffix()),
+                ),
+                _ => None,
+            };
         let alert = alert.map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
         // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
         // first (Replace with's, or Restart with's while the agent works), then the YOLO question or the sandbox
@@ -2514,22 +2517,28 @@ impl Render for Launcher {
         // Save as template, after Reset choices and before the main action (`save`).
         answers.extend(self.save_template_button(holding, cx));
         let verb = self.verb(cx);
-        let help = refusal.clone().unwrap_or_else(|| match self.draft.mode {
-            // The old stop-first wording while the agent works, so the help never contradicts "Stop and restart".
-            Mode::RestartWith(_) if self.source_working(cx) => {
-                "Stop and restart: stop the working agent, then relaunch this session with these settings".to_owned()
+        let help = match &refusal {
+            Some(Refusal::Plain(words)) => HoverHelp::tooltip(words.clone()),
+            Some(reason @ Refusal::ResumeHost { .. }) => {
+                HoverHelp::sentence(reason.append_to(HostSentence::new("launcher-launch-help")))
             }
-            Mode::RestartWith(_) => "Restart: relaunch this session with these settings".to_owned(),
-            Mode::ReplaceWith { .. } => {
-                "Replace: start this session, then delete the old one and its state".to_owned()
-            }
-            Mode::New | Mode::Clone => "Launch: start the session".to_owned(),
-        });
+            None => HoverHelp::tooltip(match self.draft.mode {
+                // The old stop-first wording while the agent works, so the help never contradicts "Stop and restart".
+                Mode::RestartWith(_) if self.source_working(cx) => {
+                    "Stop and restart: stop the working agent, then relaunch this session with these settings"
+                }
+                Mode::RestartWith(_) => "Restart: relaunch this session with these settings",
+                Mode::ReplaceWith { .. } => {
+                    "Replace: start this session, then delete the old one and its state"
+                }
+                Mode::New | Mode::Clone => "Launch: start the session",
+            }),
+        };
         answers.push(
             Button::new(
                 "launcher-launch",
                 self.action_name(&target, cx),
-                HoverHelp::tooltip(help),
+                help,
                 Role::Button,
             )
             .content(verb)

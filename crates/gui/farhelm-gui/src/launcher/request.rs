@@ -1,7 +1,7 @@
 //! From a draft to a launch: whether it can launch, why not, and the request body it sends.
 //!
 //! SPEC.md, "Creation": "an incomplete attempt says why beside Launch, as does a refused Launch press, and the
-//! greyed-out button's hover names what is missing". [`LaunchDraft::refusal`] is that one reason, the first that
+//! greyed-out button's hover names what is missing". [`LaunchDraft::launch_refusal`] is that one reason, the first that
 //! applies in the old app's order (`LaunchPrerequisites::refusal` and the submit-time checks in `create_form.rs` at
 //! reference commit `24bc0580`), worded as it was. The launcher shows it as Launch's hover text while the draft cannot
 //! launch, and beside Launch after a press. The helm validates the request again; what is checked here is what the
@@ -16,7 +16,7 @@
 //! comes with the launcher's resume-before-create work.
 //!
 //! The bodies are `farhelm_proto::session_requests`' types, built only from a draft that passes
-//! [`LaunchDraft::refusal`]. What the old app's bodies carried for its retry keys is gone: the GUI sends none
+//! [`LaunchDraft::launch_refusal`]. What the old app's bodies carried for its retry keys is gone: the GUI sends none
 //! (SPEC.md, "Creation").
 //!
 //! A launch into a new environment (New container, New sandbox) has no host yet: in place of the host's reasons it is
@@ -55,7 +55,9 @@ use super::draft::{
     RestartBaseline, Tab, repo_identifier,
 };
 use crate::environment_ui::ProviderUi;
-use crate::hosts::offers::HostKind;
+use crate::host_text::{HostSentence, HostText};
+use crate::hosts::identity::display_name;
+use crate::hosts::offers::{HostKind, resumable};
 
 /// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog and the
 /// Tensorlake account as the launcher read them, and a managed checkout's preview.
@@ -213,13 +215,33 @@ pub const FOLDER_DEFAULT_WAITING: &str = "Wait for this host's last folder befor
 pub const UNVERIFIED_HOST: &str =
     "The host installation is not verified; a checkout cannot be created";
 
+/// A reason the launcher cannot send a request. Keep the chosen host's name separate from the app's advice so the
+/// alert and its hover can both escape it and isolate its direction.
+pub(super) enum Refusal {
+    Plain(String),
+    ResumeHost {
+        name: HostText,
+        advice: &'static str,
+    },
+}
+
+impl Refusal {
+    /// Append the reason after any lead the surface needs, such as "Not launched. ".
+    pub(super) fn append_to(&self, line: HostSentence) -> HostSentence {
+        match self {
+            Self::Plain(words) => line.text(words.clone()),
+            Self::ResumeHost { name, advice } => line.host(name).text(*advice),
+        }
+    }
+}
+
 impl LaunchDraft {
     /// Why the draft's place cannot take a launch now: a new environment's reasons, which take the host's place since it
-    /// has no host yet, or else the chosen host's. The first of [`Self::refusal`]'s reasons, and the one the launcher
+    /// has no host yet, or else the chosen host's. The first of [`Self::launch_refusal`]'s reasons, and the one the launcher
     /// puts before its own waits (a `gh:` query not yet picked).
-    pub(super) fn place_refusal(&self, target: Target<'_>) -> Option<String> {
+    pub(super) fn place_refusal(&self, target: Target<'_>) -> Option<Refusal> {
         match &self.target {
-            Some(environment) => environment_refusal(environment, target),
+            Some(environment) => environment_refusal(environment, target).map(Refusal::Plain),
             None => self.host_refusal(target.hosts),
         }
     }
@@ -230,10 +252,17 @@ impl LaunchDraft {
     /// `live` is the source session's stored launch as the store holds it now, for Restart with: a launch that changed
     /// since the launcher opened is refused rather than restarted with edits made against what it was (the old app's
     /// "This session's launch settings changed" check).
-    pub fn refusal(&self, target: Target<'_>, live: Option<&SessionLaunch>) -> Option<String> {
-        if let Some(reason) = self.place_refusal(target) {
-            return Some(reason);
-        }
+    pub(super) fn launch_refusal(
+        &self,
+        target: Target<'_>,
+        live: Option<&SessionLaunch>,
+    ) -> Option<Refusal> {
+        self.place_refusal(target)
+            .or_else(|| self.draft_refusal(target, live).map(Refusal::Plain))
+    }
+
+    /// The draft's own reasons, after the place has been found usable. None of these name host values.
+    fn draft_refusal(&self, target: Target<'_>, live: Option<&SessionLaunch>) -> Option<String> {
         // The old order: the destination's reasons come right after the host's, before the launch kind's.
         if let Some(reason) = self.checkout_refusal(target) {
             return Some(reason.to_owned());
@@ -274,6 +303,21 @@ impl LaunchDraft {
             return Some(capitalized(&error));
         }
         None
+    }
+
+    /// The request tests inspect the same wording assistive technology reads.
+    #[cfg(test)]
+    pub(super) fn refusal(
+        &self,
+        target: Target<'_>,
+        live: Option<&SessionLaunch>,
+    ) -> Option<String> {
+        self.launch_refusal(target, live).map(|reason| {
+            reason
+                .append_to(HostSentence::new("test-launch-refusal"))
+                .accessible_name()
+                .to_string()
+        })
     }
 
     /// The Agent tab's reasons: an agent type, flags and a wrapper that parse, choices the catalog still offers, and
@@ -369,14 +413,25 @@ impl LaunchDraft {
 
     /// The target host's reason, if it has one: it must be in the store and connected (SPEC.md: the host picker lists
     /// unavailable hosts with their phase, and a create against one cannot go anywhere). Restart with holds the
-    /// source's host, so its wording names that host rather than asking for another (the old app's words).
-    pub(super) fn host_refusal(&self, hosts: &[HostView]) -> Option<String> {
+    /// source's host, so its wording names that host rather than asking for another (the old app's words). A suspended
+    /// or stopped environment instead names the explicit Resume the desktop app needs before any launch.
+    pub(super) fn host_refusal(&self, hosts: &[HostView]) -> Option<Refusal> {
         let view = self
             .host
             .and_then(|id| hosts.iter().find(|host| host.id == id));
         let connected =
             view.is_some_and(|host| matches!(host.state, HostStateView::Connected { .. }));
-        match (&self.mode, view) {
+        if let Some(host) = view
+            && resumable(&host.state)
+            && let Some(provider) = HostKind::of(host).provider()
+        {
+            return Some(Refusal::ResumeHost {
+                name: display_name(host),
+                advice: ProviderUi(provider)
+                    .suspended_launch_advice(matches!(host.state, HostStateView::Stopped { .. })),
+            });
+        }
+        let words = match (&self.mode, view) {
             (_, Some(_)) if connected => None,
             (Mode::RestartWith(_), None) => Some(
                 "The source host installation cannot be confirmed; close and reopen restart with"
@@ -389,11 +444,12 @@ impl LaunchDraft {
             (Mode::New | Mode::Clone | Mode::ReplaceWith { .. }, _) => {
                 Some("Choose a connected host before launching".to_owned())
             }
-        }
+        };
+        words.map(Refusal::Plain)
     }
 
     /// The Agent tab as the launch it would send: `None` without an agent type. The flags and the wrapper are taken
-    /// only when they parse ([`Self::refusal`] has already refused text that does not), and a permission the agent
+    /// only when they parse ([`Self::launch_refusal`] has already refused text that does not), and a permission the agent
     /// does not offer becomes its default, except in Restart with, which keeps the stored permission as it was built.
     pub fn agent_selection(&self) -> Option<LaunchSelection> {
         let agent = &self.agent;
@@ -487,12 +543,12 @@ impl LaunchDraft {
     // Request bodies
     // -----------------------------------------------------------------------------------------------------------------
 
-    /// The create this draft sends (`POST /api/sessions`), for New and Clone; `None` while [`Self::refusal`] names a
+    /// The create this draft sends (`POST /api/sessions`), for New and Clone; `None` while [`Self::launch_refusal`] names a
     /// reason. The YOLO confirmation is the caller's to set, after the user answers the host's question. Replace with
     /// sends this create inside [`Self::replace_body`]; sending it alone would create without deleting the source.
     pub fn create_body(&self, target: Target<'_>) -> Option<CreateSessionBody> {
         // A new environment's launch goes to its own route ([`Self::environment_body`]), never the ordinary create.
-        if self.target.is_some() || self.refusal(target, None).is_some() {
+        if self.target.is_some() || self.launch_refusal(target, None).is_some() {
             return None;
         }
         let host = self.host?;
@@ -557,12 +613,12 @@ impl LaunchDraft {
     }
 
     /// The create in a new environment this draft sends (`POST /api/environment-sessions`), for New and Clone with a
-    /// recipe chosen; `None` without one, or while [`Self::refusal`] names a reason. The recipe and place go beside
+    /// recipe chosen; `None` without one, or while [`Self::launch_refusal`] names a reason. The recipe and place go beside
     /// the create, which names no host or connection (the environment does not exist yet) and starts in the
     /// environment's home. `confirmed`, the answer to "Create a sandbox for this session?", is the caller's to set.
     pub fn environment_body(&self, target: Target<'_>) -> Option<EnvironmentCreateBody> {
         let LaunchTarget::Environment { recipe, place } = self.target.clone()?;
-        if self.refusal(target, None).is_some() {
+        if self.launch_refusal(target, None).is_some() {
             return None;
         }
         let repo = self
@@ -600,7 +656,7 @@ impl LaunchDraft {
     }
 
     /// A managed checkout's repository and current preview, for the create: `None` for a folder destination.
-    /// [`Self::refusal`] has already refused a checkout without both.
+    /// [`Self::launch_refusal`] has already refused a checkout without both.
     fn checkout_launch<'a>(
         &self,
         target: Target<'a>,
@@ -638,7 +694,7 @@ impl LaunchDraft {
         live: Option<&SessionLaunch>,
         stop_if_running: bool,
     ) -> Option<RestartSessionBody> {
-        if self.refusal(target, live).is_some() {
+        if self.launch_refusal(target, live).is_some() {
             return None;
         }
         let (with, with_command) = match self.restart_edit()? {

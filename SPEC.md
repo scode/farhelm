@@ -344,12 +344,15 @@ an agent on that host is working, its status is unknown or stale, or activity ca
 Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses.
 An offline or unknown host asks even when its cached listing is empty. Suspension preserves running processes and
 sessions. A session on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and
-offers **Resume host**. Launching on a suspended host resumes it first and waits for a fresh connection. While another
+offers **Resume host**. Farhelm does not suspend automatically. For now the desktop app refuses a launch on a suspended
+host and asks you to resume it in Hosts first. Resuming before the create is planned.
+
+Once implemented, a launch on a suspended host resumes it first and waits for a fresh connection. While another
 operation on that host (a Suspend or Resume from elsewhere, setup, an update) holds it, the launch keeps asking within
 the same minute it allows for the connection, and a Resume that finishes elsewhere meanwhile is enough. If the host is
 suspended again while the launch waits, the launch fails at once and says so. Any other refusal fails it at once. For a
 fresh GitHub checkout, the folder is allocated once the host is ready and the session starts without a second press.
-Only a fresh preview on the new connection can authorize that create. Farhelm does not suspend automatically.
+Only a fresh preview on the new connection can authorize that create.
 
 An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
 confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A request that
@@ -365,10 +368,10 @@ The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanati
 **Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
 resources use the normal subdued details styling in Hosts.
 
-The session launcher shows its own **Resuming** preparation through both the Tensorlake call and reconnection, including
-quick launch. Both existing-directory and fresh-checkout launches say the session starts when the host is ready. A
-failed preparation says the session was not launched. A host another surface is suspending or resuming remains
-unavailable to this launcher.
+Once launches resume a suspended host (above), the session launcher shows its own **Resuming** preparation through both
+the Tensorlake call and reconnection, including quick launch. Both existing-directory and fresh-checkout launches say
+the session starts when the host is ready. A failed preparation says the session was not launched. A host another
+surface is suspending or resuming remains unavailable to this launcher.
 
 Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
 seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection
@@ -1372,12 +1375,12 @@ follow-up question restores the same launcher with its draft if the user has not
 a notice offers it, and the launcher returns when the user opens that notice (see [Keyboard focus](#keyboard-focus)).
 Whether such a notice keeps New and other launches refused until it is opened is not settled yet. Switching to a session
 on another host does not change the submitted launch's destination. The acted-on session's progress, actions, terminal
-attachment and row outcome settle as soon as the reply arrives; only the launcher's return depends on the user.
-Successfully waking a suspended sandbox continues to create without revealing the launcher, restoring its page isolation
-or waiting for another dialog. A fresh GitHub checkout then waits for this window to see the woken host connect, for at
-most 60 seconds. When that runs out, nothing is created: the launcher returns with its draft and says the window did not
-see the host connect, and a connection that shows up later creates nothing. The wait for the checkout's preview that
-follows is not part of that limit.
+attachment and row outcome settle as soon as the reply arrives; only the launcher's return depends on the user. Once
+launches resume a suspended host ("Topology"), successfully waking a suspended sandbox continues to create without
+revealing the launcher, restoring its page isolation or waiting for another dialog. A fresh GitHub checkout then waits
+for this window to see the woken host connect, for at most 60 seconds. When that runs out, nothing is created: the
+launcher returns with its draft and says the window did not see the host connect, and a connection that shows up later
+creates nothing. The wait for the checkout's preview that follows is not part of that limit.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -1697,32 +1700,32 @@ and archive promises in this section assume no other account can create, replace
 
 Before Launch becomes available, the composer shows the exact host and path. Fresh GitHub checkouts on a suspended host
 are an exception: the composer shows no path and says the folder is picked automatically when the host is ready (or
-named after the session when a name is supplied). One press resumes, obtains a fresh preview and creates the session.
-Direct template launching is the other exception: marking a template with ⚡ or giving it a number key is consent to its
-managed-checkout destination, including when combined in a quick-launch sequence, so it obtains the same exact preview
-and launches without showing the path first. A recipe-target environment launch is another exception. The user accepts
-its recipe, place, repository and naming policy before the environment exists. After connecting, the helm obtains the
-ordinary exact preview on that new installation and uses the existing admission rules without a second confirmation. It
-never borrows another host's preview or relaxes accepted-preview admission for ordinary installed-host launches. For a
-recipe target, a destination conflict before session acceptance is a failed launch. It cleans up the new environment and
-shows **Not launched.** with the conflict, rather than offering a preview for the destroyed host. On an existing host, a
-lost race still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory
-and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
-title. Naming the session after quick launch changes only its title: the checkout keeps its original `repo-N` directory
-name. An explicit title at creation keeps its printable display spelling while the path uses `repo-` followed by its
-lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not
-repeat that prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to
-archive later (the archive location adds up to 65 bytes to it, and the whole must stay within the system's path limit:
-4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins
-the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or silently
-chooses another directory. A typed name or a template's fixed name remains a conflict rather than gaining a suffix. A
-template base name uses its first free candidate, from the base itself through `-2` to `-50`; the cap leaves the
-conflict visible. A lost-race base-name launch obtains a new preview and may advance, but requires another Launch click.
-For Clone into the source's repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the
-lowest free `<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it
-alike. Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables
-automatic suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on
-Launch for the newly shown path.
+named after the session when a name is supplied). Once launches resume a suspended host ("Topology"; until then the
+launch is refused), one press resumes, obtains a fresh preview and creates the session. Direct template launching is the
+other exception: marking a template with ⚡ or giving it a number key is consent to its managed-checkout destination,
+including when combined in a quick-launch sequence, so it obtains the same exact preview and launches without showing
+the path first. A recipe-target environment launch is another exception. The user accepts its recipe, place, repository
+and naming policy before the environment exists. After connecting, the helm obtains the ordinary exact preview on that
+new installation and uses the existing admission rules without a second confirmation. It never borrows another host's
+preview or relaxes accepted-preview admission for ordinary installed-host launches. For a recipe target, a destination
+conflict before session acceptance is a failed launch. It cleans up the new environment and shows **Not launched.** with
+the conflict, rather than offering a preview for the destroyed host. On an existing host, a lost race still reveals New
+with the conflict and new preview rather than submitting again. Preview creates no directory and reserves nothing. An
+unnamed checkout uses the lowest available positive `repo-N` and that basename as its session title. Naming the session
+after quick launch changes only its title: the checkout keeps its original `repo-N` directory name. An explicit title at
+creation keeps its printable display spelling while the path uses `repo-` followed by its lowercase ASCII slug; runs
+outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that prefix. An empty
+slug or a component over 200 bytes is refused, and so is a checkout path too long to archive later (the archive location
+adds up to 65 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on macOS).
+Existing files, directories and symlinks all occupy a name. If another create wins the displayed path, Launch reports
+the conflict and obtains a new preview; it never submits automatically or silently chooses another directory. A typed
+name or a template's fixed name remains a conflict rather than gaining a suffix. A template base name uses its first
+free candidate, from the base itself through `-2` to `-50`; the cap leaves the conflict visible. A lost-race base-name
+launch obtains a new preview and may advance, but requires another Launch click. For Clone into the source's repository,
+an untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for
+N ≥ 2. The name field shows the effective name, and preview and launch use it alike. Changing hosts or repositories
+restarts the suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch
+re-previews and may advance the default name, but still needs another click on Launch for the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
@@ -4876,12 +4879,14 @@ whole container. Suspend and Resume affect any leftover sessions too.
 
 A container host reboot stops the container while retaining its files. Whenever the helm finds a container Stopped while
 connected to its container host, it attempts one automatic start. This also covers an external `podman stop` or
-out-of-memory kill. Stopped has its own state and is never labelled Suspended. While starting, the ordinary unavailable
-card explains that Farhelm is starting the container again. A failed start shows the reason and offers Resume.
-Successful start brings back its supervisor with ordinary session classification. A host reboot interrupts sessions last
-known live, while known exits keep their outcome. A container stopped and started on the same host boot returns ended
-sessions through ordinary exit classification. Captured resumable conversations offer Restart, and agents never restart
-automatically. A helm restart reconnects running containers and leaves paused containers paused.
+out-of-memory kill. Stopped has its own state and is never labelled Suspended. Until launches can resume an environment,
+a launch on a stopped container that offers Resume is refused the way a suspended one is, naming the container stopped
+and asking to resume it in Hosts. While starting, the ordinary unavailable card explains that Farhelm is starting the
+container again. A failed start shows the reason and offers Resume. Successful start brings back its supervisor with
+ordinary session classification. A host reboot interrupts sessions last known live, while known exits keep their
+outcome. A container stopped and started on the same host boot returns ended sessions through ordinary exit
+classification. Captured resumable conversations offer Restart, and agents never restart automatically. A helm restart
+reconnects running containers and leaves paused containers paused.
 
 Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
 cube. The footer names the new container and its host. Its session-owned host appears in Hosts, update eligibility and
