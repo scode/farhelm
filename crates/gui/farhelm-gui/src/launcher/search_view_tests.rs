@@ -191,21 +191,31 @@ fn a_scoped_miss_says_why_and_enter_changes_nothing(cx: &mut TestAppContext) {
     assert_eq!(search_text(cx), "host:nowhere", "and the query stays");
 }
 
-/// `host:` rows choose the host as the host picker does, and `folder:` a path as typing it would. Why: these are the
-/// destination's hand edits, reached from the keyboard.
+/// `host:` rows choose the host as the host picker does. Taking a typed path in search edits only the folder,
+/// so the user can choose a destination without losing the Command tab or the command being written.
 #[gpui::test]
 fn host_and_folder_rows_set_the_destination(cx: &mut TestAppContext) {
-    let (_helm, cx) = launcher_with_hosts(
-        cx,
-        LaunchDraft::new(Some(1), "~".into(), None),
-        fixture_hosts(&[0, 1]),
-    );
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    start.choose_tab(Tab::Command);
+    start.edit_command("make watch".into());
+    let (_helm, cx) = launcher_with_hosts(cx, start, fixture_hosts(&[0, 1]));
     type_in(cx, "host:host2");
     keys(cx, "enter");
     assert_eq!(draft(cx).host, Some(2));
-    type_in(cx, "folder:/src/app");
-    keys(cx, "enter");
-    assert_eq!(draft(cx).folder.value(), "/src/app");
+    let before = draft(cx);
+    assert_eq!(before.tab, Tab::Command);
+    assert_eq!(before.command.command, "make watch");
+    type_in(cx, "/src/app");
+    let rows = read(cx, |launcher, _, cx| launcher.search_results(cx).rows);
+    assert_eq!(
+        rows.first(),
+        Some(&super::search::Row::UsePath("/src/app".into()))
+    );
+    test_support::click(cx, "launcher-search-option-0");
+    let after = draft(cx);
+    assert_eq!(after.folder.value(), "/src/app");
+    assert_eq!(after.tab, Tab::Command);
+    assert_eq!(after.command.command, "make watch");
     assert_eq!(
         read(cx, |launcher, _, cx| launcher.folder.text(cx).to_string()),
         "/src/app",
