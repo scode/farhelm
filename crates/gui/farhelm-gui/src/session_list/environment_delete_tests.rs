@@ -380,6 +380,37 @@ fn a_paused_containers_row_asks_the_whole_container_delete(cx: &mut TestAppConte
     one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
 }
 
+/// A real container run read "Stopping agent…" over a paused container while its whole-container Delete ran, where
+/// nothing can be stopped; the old app said the same (it chose a pending Delete's words from the status the row drew,
+/// an environment Delete included), so these are the ported words, pinned here so a change to them is a decision.
+/// Specified, on a paused container with a running, stale and open: the suspended card shows first ("Session
+/// suspended"); once the whole-container Delete is confirmed and while it is unanswered, the row's progress, the
+/// header's progress in place of its actions and the scrim over the card are each named "Stopping agent…".
+#[gpui::test]
+fn a_whole_container_delete_says_what_the_row_showed_running(cx: &mut TestAppContext) {
+    use crate::session_pane::unavailable::HEADING_ID;
+    let host = environment_host(Provider::Container, suspended_at(0));
+    let (mut fake, cx) = open(cx, &[(session("a").stale(), 0)], false, &host);
+    deletes(&mut fake);
+    assert_eq!(
+        label_of(cx, HEADING_ID).as_deref(),
+        Some("Session suspended"),
+        "the premise: the suspended card shows"
+    );
+    test_support::click(cx, "session-header-delete");
+    test_support::click(cx, "prompt-confirm");
+    one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
+    test_support::settle(cx);
+    assert_eq!(in_flight(cx, "a"), Some(Work::EnvironmentDelete));
+    for id in [
+        "session-delete-progress-a",
+        "session-header-delete-progress-a",
+        "terminal-delete-scrim",
+    ] {
+        assert_eq!(label_of(cx, id).as_deref(), Some("Stopping agent…"), "{id}");
+    }
+}
+
 /// SPEC.md's header Delete "asks first in the same anchored way", and the Delete shortcut is that Delete; for an
 /// environment session neither may take the skipped path, whose help ("Delete: remove this session and its state
 /// (…)") would promise a Delete without a question. Specified, skip on, a ended with no tabs on a connected sandbox:

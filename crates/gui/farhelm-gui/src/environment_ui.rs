@@ -534,13 +534,21 @@ impl ProviderUi {
 
     /// What starting a stopped environment does, for the card while it starts and for Resume's help on a stopped one:
     /// it cannot promise that the old processes survived.
+    ///
+    /// A container's words follow SPEC.md ("Container sessions"), which has two cases the card cannot tell apart: "A
+    /// host reboot interrupts sessions last known live", and "A container stopped and started on the same host boot
+    /// returns ended sessions through ordinary exit classification", with Restart for a captured conversation either
+    /// way. Sessions that had already exited keep their outcome, so only the running ones are promised a change. The old
+    /// app said its sessions "return as interrupted, with Restart available", true only after a reboot; the GPUI
+    /// migration's orchestrator decided on 2026-11-16 to word it to SPEC.md instead.
     pub(crate) fn starting_help(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
                 "Starting the sandbox; this view reconnects when it is ready."
             }
             ProviderKind::Podman => {
-                "Starting the container again; its sessions return as interrupted, with Restart available."
+                "Starting the container again; sessions that were running come back ended, or interrupted if its \
+                 host restarted, with Restart where a conversation was captured."
             }
         }
     }

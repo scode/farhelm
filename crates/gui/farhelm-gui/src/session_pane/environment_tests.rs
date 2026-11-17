@@ -347,8 +347,9 @@ fn the_suspended_card_says_so_and_resumes(cx: &mut TestAppContext) {
 /// ordinary host's card offers Resume host. Specified: an ordinary suspended host keeps "Session unavailable — host
 /// suspended" and offers a Resume of host 2 with no provider; a stopped container reads "Session unavailable —
 /// environment stopped" and offers its own Resume; one that is starting again reads "Session unavailable — starting
-/// environment" with "Starting the container again; its sessions return as interrupted, with Restart available." and
-/// offers none; a suspended sandbox's Tensorlake failure leads its diagnostics.
+/// environment" with "Starting the container again; sessions that were running come back ended, or interrupted if its
+/// host restarted, with Restart where a conversation was captured." (SPEC.md's two cases, not the old card's "return as
+/// interrupted") and offers none; a suspended sandbox's Tensorlake failure leads its diagnostics.
 #[test]
 fn the_cards_words_and_resume_follow_the_host() {
     let words = |host| {
@@ -392,7 +393,8 @@ fn the_cards_words_and_resume_follow_the_host() {
     assert_eq!(heading, "Session unavailable — starting environment");
     assert_eq!(
         explanation,
-        "Starting the container again; its sessions return as interrupted, with Restart available."
+        "Starting the container again; sessions that were running come back ended, or interrupted if its host \
+         restarted, with Restart where a conversation was captured."
     );
     assert_eq!(resume, None);
 
