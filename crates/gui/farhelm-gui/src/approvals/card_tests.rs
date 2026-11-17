@@ -1,6 +1,7 @@
 //! Tests of the expanded approval card's drawing: what it paints and names, that its answer buttons answer only their
 //! own request and only while not busy, that Copy copies the raw reference, that a refused answer's reason is
-//! announced, and that a narrow card stacks its labels.
+//! announced, that a narrow card stacks its labels, and that it cuts the requester's title to one line with the whole
+//! title on hover.
 //!
 //! These matter because the card is all the user sees of an agent's request: a value painted as the app's words, a
 //! button named for the wrong host, a busy button that still answered, or a copy of the escaped spelling instead of
@@ -15,12 +16,16 @@ use farhelm_proto::approvals::{
     ApprovalAction, ApprovalAnswer, ApprovalSession, LaunchVerb, PendingApproval,
 };
 use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch, SessionRef};
-use gpui::{DriverNode, DriverText, IntoElement as _, Role, TestAppContext, VisualTestContext, px};
+use gpui::{
+    DriverNode, DriverText, IntoElement as _, Modifiers, Role, TestAppContext, VisualTestContext,
+    px,
+};
 
 use super::card::{CardState, NARROW_WIDTH, card};
 use super::model::{Card, TunnelOffer};
 use crate::host_text::HostText;
 use crate::host_text::tests::paints_isolated;
+use crate::layers;
 use crate::test_support::{self, frame};
 
 // ---- Fixtures -------------------------------------------------------------------------------------------------------
@@ -103,8 +108,9 @@ fn open(cx: &mut TestAppContext, drawn: Rc<RefCell<Drawn>>) -> &mut VisualTestCo
     })
 }
 
-/// The strings painted inside the element with id `id`, in paint order.
-fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+/// The strings painted inside the element with id `id`, in paint order. The region's tests read a card's buttons
+/// through it too.
+pub(super) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
     let Some(top) = nodes
         .iter()
         .position(|node| node.element_id.as_deref() == Some(id))
@@ -357,7 +363,10 @@ fn a_host_removal_paints_its_notes_and_only_allow_and_deny(cx: &mut TestAppConte
 // ---- Answers --------------------------------------------------------------------------------------------------------
 
 /// Each answer button answers its own choice, and a busy card (the answer bar paused, or an answer in flight) answers
-/// nothing: the press must not reach the request even though the button is still drawn where the user aimed.
+/// nothing: the press must not reach the request even though the button is still drawn where the user aimed. A button
+/// sending another choice's answer would grant more or less than the user chose: the fleet-wide Always allow must send
+/// Always allow, which the old spawn test pressed ("a fake agent spawns children that appear without refreshing the
+/// observer"); the answer's body on the wire is `answers_tests`'.
 #[gpui::test]
 fn answer_buttons_answer_their_choice_and_nothing_while_busy(cx: &mut TestAppContext) {
     let pressed = Rc::new(RefCell::new(Vec::new()));
@@ -375,9 +384,14 @@ fn answer_buttons_answer_their_choice_and_nothing_while_busy(cx: &mut TestAppCon
     test_support::redraw(cx);
     test_support::click(cx, "approval-req-1-answer-deny");
     test_support::click(cx, "approval-req-1-answer-always-allow-own-host");
+    test_support::click(cx, "approval-req-1-answer-always-allow");
     assert_eq!(
         *pressed.borrow(),
-        [ApprovalAnswer::Deny, ApprovalAnswer::AlwaysAllowOwnHost]
+        [
+            ApprovalAnswer::Deny,
+            ApprovalAnswer::AlwaysAllowOwnHost,
+            ApprovalAnswer::AlwaysAllow
+        ]
     );
 }
 
@@ -474,5 +488,95 @@ fn a_narrow_card_stacks_labels_above_values(cx: &mut TestAppContext) {
     assert!(
         value.y > label.y && (value.x - label.x).abs() < px(4.),
         "narrow: value under its label"
+    );
+}
+
+/// SPEC.md: the compact From line shows "a quoted, ellipsized session title with its full text on hover". The old app
+/// checked an ordinary title at the usual card width and in a narrow card ("a requester session title stays on one line
+/// with its full hover text"): a narrow card must cut the title short rather than spend the answers' room on wrapped
+/// requester words, and the whole title must stay reachable on hover. Specified: a card from devbox's session "migrate
+/// authentication tokens", 660 pixels wide, paints the whole title on one line; 296 pixels wide (a 320-pixel pane's
+/// card) it paints it on one line still, cut short with "…" and inside the card; and the pointer resting on it then
+/// shows the whole title.
+#[gpui::test]
+fn a_requester_title_is_cut_to_one_line_in_a_narrow_card_with_the_whole_title_on_hover(
+    cx: &mut TestAppContext,
+) {
+    const TITLE: &str = "migrate authentication tokens";
+    let mut approval = launch("devbox");
+    approval.session.title = Some(TITLE.to_owned());
+    let drawn = Rc::new(RefCell::new(Drawn {
+        approval,
+        width: 660.,
+        busy: false,
+        refusal: None,
+        pressed: Rc::default(),
+    }));
+    let cx = open(cx, drawn.clone());
+    // One line is the height the From line's own "From" paints at, the title sharing its line height; the title is one
+    // painted text, whose height counts its lines.
+    let title = |cx: &mut VisualTestContext| {
+        let nodes = frame(cx);
+        let painted = texts_within(&nodes, "approval-req-1-from-title");
+        assert_eq!(
+            painted.len(),
+            1,
+            "the title is one painted text: {painted:?}"
+        );
+        let line = texts_within(&nodes, "approval-req-1-card")
+            .into_iter()
+            .find(|text| text.text.as_ref() == "From")
+            .expect("the From line paints From")
+            .bounds
+            .size
+            .height;
+        let card = node(&nodes, "approval-req-1-card").bounds;
+        (painted[0].clone(), line, card)
+    };
+    let (wide, line, _) = title(cx);
+    assert_eq!(
+        wide.text.as_ref(),
+        TITLE,
+        "the usual width shows the whole title"
+    );
+    assert!(
+        wide.bounds.size.height <= line + px(0.5),
+        "on one line: {:?} against a line of {line:?}",
+        wide.bounds
+    );
+
+    drawn.borrow_mut().width = 296.;
+    test_support::redraw(cx);
+    let (narrow, line, card) = title(cx);
+    let kept = narrow
+        .text
+        .strip_suffix('…')
+        .unwrap_or_else(|| panic!("cut short with an ellipsis: {:?}", narrow.text));
+    assert!(
+        !kept.is_empty() && kept.len() < TITLE.len() && TITLE.starts_with(kept),
+        "the cut keeps the title's start: {:?}",
+        narrow.text
+    );
+    assert!(
+        narrow.bounds.size.height <= line + px(0.5),
+        "still on one line: {:?} against a line of {line:?}",
+        narrow.bounds
+    );
+    assert!(
+        narrow.bounds.right() <= card.right(),
+        "the cut title stays inside the card: {:?} in {card:?}",
+        narrow.bounds
+    );
+
+    let at = test_support::center(cx, "approval-req-1-from-title");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    test_support::settle(cx);
+    test_support::advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string())
+            .as_deref(),
+        Some(TITLE),
+        "the hover help is the whole title"
     );
 }

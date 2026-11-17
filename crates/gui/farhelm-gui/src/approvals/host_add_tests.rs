@@ -211,6 +211,19 @@ impl Fixture<'_> {
         });
     }
 
+    /// Whether the store still lists the request as waiting.
+    fn still_waiting(&mut self) -> bool {
+        self.cx.update(|_, cx| {
+            crate::session::current_store(cx).is_some_and(|store| {
+                let collections = store.read(cx).collections();
+                collections
+                    .ordered::<PendingApproval>()
+                    .iter()
+                    .any(|approval| approval.id == ID)
+            })
+        })
+    }
+
     /// Accept the dialog's Allow (the request gone first, as the helm pushes), and return the probe that follows.
     fn allow_accepted(&mut self) -> u64 {
         click(self.cx, "add-host-submit");
@@ -377,10 +390,13 @@ fn each_refused_open_says_why_in_its_own_words() {
     assert_eq!(NotOpened::Nothing.reason(), None);
 }
 
-/// SPEC.md: "an existing draft or another modal is kept". The old app queued the open behind the open dialog; this
-/// port refuses it with a reason (a recorded deviation), and a press during the answer bar's pause opens nothing, as
-/// it answers nothing. Specified: with another dialog open, the open reports [`NotOpened::AnotherDialog`] and that
-/// dialog stays the only one; with the bar paused, it reports [`NotOpened::Nothing`] and opens nothing.
+/// SPEC.md: "an existing draft or another modal is kept". The old app queued the open behind the open dialog; this port
+/// refuses it with a reason (a recorded deviation), and a press during the answer bar's pause opens nothing, as it
+/// answers nothing. The old case typed a draft into the ordinary dialog first ("host add preserves a manual draft and
+/// defers only an explicit open"), since a refused open that reset the ordinary dialog's fields would leave an empty
+/// field that looks kept too. Specified: with the ordinary Add host open and a destination typed into it, the open
+/// reports [`NotOpened::AnotherDialog`] and that dialog stays, its typed destination intact; with the bar paused, it
+/// reports [`NotOpened::Nothing`] and opens nothing.
 #[gpui::test]
 fn another_dialog_or_the_pause_keeps_the_dialog_from_opening(cx: &mut TestAppContext) {
     let mut f = fixture(cx, Vec::new());
@@ -391,10 +407,16 @@ fn another_dialog_or_the_pause_keeps_the_dialog_from_opening(cx: &mut TestAppCon
     });
     settle(f.cx);
     assert!(other.is_some(), "premise: the ordinary Add host opened");
+    type_text(f.cx, "user@manualdraft.invalid");
+    assert_eq!(
+        destination(f.cx),
+        "user@manualdraft.invalid",
+        "premise: a draft is typed into the ordinary dialog"
+    );
     assert_eq!(f.open(), Err(NotOpened::AnotherDialog));
     assert_eq!(
         destination(f.cx),
-        "",
+        "user@manualdraft.invalid",
         "the ordinary dialog and its draft are kept"
     );
     keys(f.cx, "escape");
@@ -524,10 +546,12 @@ fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppCon
 
 /// SPEC.md: a late or refused answer starts nothing, no discovery probe included, and a refused form stays editable.
 /// Only the helm's empty 204 says the waiting add took the destination, so any other success starts nothing either,
-/// as the old app refused it. A late Allow closes the dialog, as the old one closed once its request was gone, and the
-/// cards' late-answer notice says why. Specified: a 409 refusal of the Allow shows the helm's words and probes nothing,
-/// and a second Add sends the Allow again; a 200 with a body says acceptance was not confirmed and probes nothing; a
-/// 410 probes nothing, closes the dialog and posts the plain late-answer notice.
+/// as the old app refused it. A late Allow closes the dialog at once, where the old form said "no longer waiting" in
+/// itself until its request left the list (a recorded deviation), and the cards' late-answer notice says why. The 410
+/// arrives while the request is still listed, so the close is the reply's, not the list's. Specified: a 409 refusal of
+/// the Allow shows the helm's words and probes nothing, and a second Add sends the Allow again; a 200 with a body says
+/// acceptance was not confirmed and probes nothing; a 410 with the request still waiting probes nothing, closes the
+/// dialog and posts the plain late-answer notice.
 #[gpui::test]
 fn a_refused_unconfirmed_or_late_allow_probes_nothing(cx: &mut TestAppContext) {
     let mut f = fixture(cx, Vec::new());
@@ -559,7 +583,10 @@ fn a_refused_unconfirmed_or_late_allow_probes_nothing(cx: &mut TestAppContext) {
 
     click(f.cx, "add-host-submit");
     let (id, _) = f.one_answer();
-    f.request_ends();
+    assert!(
+        f.still_waiting(),
+        "premise: the request is still listed as the 410 arrives"
+    );
     f.helm.reply(
         id,
         410,
