@@ -2127,6 +2127,272 @@
           "500"
         ]
       ]
+    },
+    {
+      "id": "app-settings-sessions",
+      "title": "Settings as the rail's gear opens it over the open Fixture 1, at Sessions: its three switches (first in an app run of its own with the scripted backend's fake SSH hosts, which the Hosts scenes after the Settings ones use)",
+      "reference": "settings-sessions",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "text:Fixture 1"],
+        ["terminal-text", "--wait", "\n>"],
+        ["click", "id:app-settings-toggle"],
+        ["wait", "--text", "For every host on this helm"],
+        ["wait", "--text", "Skip session confirmations"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-appearance",
+      "title": "Settings at Appearance: the color theme's segments with the helm's stored choice, System",
+      "reference": "settings-appearance",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-appearance"],
+        ["wait", "--text", "Color theme"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-hosts",
+      "title": "Settings at Hosts: automatic remote-host updates, setup and removal without asking",
+      "reference": "settings-hosts",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-hosts"],
+        ["wait", "--text", "Update remote hosts automatically"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-recipes",
+      "title": "Settings at Recipes on a helm with no recipes: the empty list and New recipe",
+      "reference": "settings-recipes",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-recipes"],
+        ["wait", "--text", "No recipes yet."],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-containers",
+      "title": "Settings at Containers once its reads answered: the container hosts as this run's helm sees them (its Podman check cannot reach a user manager in a run without `--user-session`) and the containers not on this helm",
+      "reference": "settings-containers",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-containers"],
+        ["wait", "--text", "Containers not on this helm"],
+        ["wait", "--gone", "Reading container hosts…"],
+        ["wait", "--gone", "Reading container leftovers…"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-credentials",
+      "title": "Settings at Credentials on a helm with nothing saved: the Not encrypted on disk warning, the Tensorlake API key form and the first two empty lists (the third below the fold, as in the reference)",
+      "reference": "settings-credentials",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-credentials"],
+        ["wait", "--text", "GitHub tokens"],
+        ["wait", "--gone", "Loading credentials…"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-terminal",
+      "title": "Settings at Terminal: the terminal web links choice at its default, and what follows it on this platform",
+      "reference": "settings-terminal",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-terminal"],
+        ["wait", "--text", "Clicking a web link in a terminal"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-checkouts",
+      "title": "Settings at Checkouts on a fresh helm: no default folder or post-clone command, and the prepared checkout switch",
+      "reference": "settings-checkouts",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-checkouts"],
+        ["wait", "--text", "Keep a checkout ready for faster launches"],
+        ["wait", "500"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-agent-trust",
+      "title": "Settings at Agent trust on a fresh helm: every agent's trust switch off and every hint shown",
+      "reference": "settings-agent-trust",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-agent-trust"],
+        ["wait", "--text", "Answer Claude's"],
+        ["wait", "500"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-settings-notifications",
+      "title": "Settings at Notifications: the Sounds switches at their defaults above the ntfy alerts form over the helm's defaults",
+      "reference": "settings-notifications",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:settings-section-notifications"],
+        ["wait", "--text", "Send ntfy alerts"],
+        ["wait", "500"],
+        ["hover", "id:settings-heading"]
+      ]
+    },
+    {
+      "id": "app-hosts-panel",
+      "title": "Hosts at the rail's foot (after Escape on Settings): the Hosts panel in the session list's place over the local host alone, Details off, with Fixture 1 still open beside it",
+      "reference": "hosts-panel",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["press", "escape"],
+        ["wait", "--gone", "For every host on this helm"],
+        ["click", "id:hosts-panel-toggle"],
+        ["wait", "id:hosts-panel"],
+        ["wait", "--gone", "Loading hosts…"],
+        ["wait", "--text", "Local (this machine)"],
+        ["hover", "id:host-list"]
+      ]
+    },
+    {
+      "id": "app-hosts-panel-details",
+      "title": "The Hosts panel with Details on: the local host's version, identity and session count",
+      "reference": "hosts-panel-details",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:host-details-toggle"],
+        ["wait", "--text", "1 session"],
+        ["hover", "id:host-list"]
+      ]
+    },
+    {
+      "id": "app-host-add-setup-plan",
+      "title": "Add host from the Hosts heading's + for dev@build-box.example, aliased build-box: the setup confirmation the scripted backend's probe leads to, with the helm's numbered plan, Copy plan and the three answers",
+      "reference": "host-add-setup-plan",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:hosts-add"],
+        ["wait", "--text", "An SSH destination this helm can reach"],
+        ["fill", "id:add-host-destination", "dev@build-box.example"],
+        ["fill", "id:add-host-alias", "build-box"],
+        ["click", "id:add-host-submit"],
+        ["wait", "--text", "Set up host ·"],
+        ["wait", "--text", "Copy plan"],
+        ["hover", "id:setup-title"]
+      ]
+    },
+    {
+      "id": "app-hosts-panel-host-unreachable",
+      "title": "Set up answered: the scripted setup of build-box completes, and the helm then dials it over real ssh, which cannot resolve a .example name, so with Details on its row shows the attempt and the SSH error under its phase, and under them the Setup provisioning step list of the setup it just completed, which the reference's host had no retained run of",
+      "reference": "hosts-panel-host-unreachable",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:prompt-confirm"],
+        ["wait", "--gone", "Set up host ·"],
+        ["wait", "--text", "SSH could not connect or log in to the host", "--timeout", "60000"],
+        ["wait", "--gone", "Setting up"],
+        ["hover", "id:host-list"]
+      ]
+    },
+    {
+      "id": "app-host-menu",
+      "title": "build-box's actions menu, opened from its row's toggle: the header with its name and destination, then the commands an unreachable SSH host offers, starting on Retry, with Uninstall and Remove behind a separator",
+      "reference": "host-menu",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "text:Host actions for build-box"],
+        ["wait", "--text", "Edit this host's connection"]
+      ]
+    },
+    {
+      "id": "app-host-settings-dialog",
+      "title": "Settings chosen from build-box's menu with the keyboard (Escape on the open menu returns focus to its toggle, then Enter, Down twice past Retry and Update, and Enter), so the first Edit shows the keyboard focus ring, as in the reference: the host settings dialog from its top, the header with the host's mark, name and phase, then its first sections from Connection down. A keyboard landing shows the focused control's help after 300 ms too, where the old dialog landed quietly (SPEC_impl.md's recorded deviation), so the scene waits for that help's text. No step moves the pointer after the landing: any pointer move makes the mouse the window's last input, which takes the ring down while the help stays",
+      "reference": "host-settings-dialog",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["press", "escape"],
+        ["wait", "--gone", "Edit this host's connection"],
+        ["press", "enter"],
+        ["wait", "--text", "Edit this host's connection"],
+        ["press", "down"],
+        ["press", "down"],
+        ["press", "enter"],
+        ["wait", "id:host-settings-connection"],
+        ["wait", "--text", "Edit: change the SSH destination Farhelm"]
+      ]
+    },
+    {
+      "id": "app-host-settings-dialog-end",
+      "title": "The host settings dialog's body wheeled to its end (the bridge has no scroll-to-end, and the last help line has no element of its own to scroll into view): the Permissions switches with their help, the last one's ending above the footer",
+      "reference": "host-settings-dialog-end",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["scroll", "down", "3000", "--on", "id:host-settings-body"],
+        ["wait", "--text", "Agents on this host may make your browser load addresses"],
+        ["hover", "id:host-settings-status"],
+        ["wait", "500"]
+      ]
+    },
+    {
+      "id": "app-host-remove-confirmation",
+      "title": "Remove chosen from build-box's menu with the keyboard (Escape on its settings returns focus to the row's toggle, then Enter, Down four times to Remove, and Enter), so Remove shows the keyboard focus ring, as in the reference: the removal confirmation with the host's mark, name and phase, its destination, what removal keeps, and the three answers. Remove's help shows too, as for any keyboard landing, and the scene waits for it; it covers the end of the footer note, where the reference shows no help. As in the host settings scene, nothing moves the pointer after the landing, which would take the ring down",
+      "reference": "host-remove-confirmation",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["press", "escape"],
+        ["wait", "--gone", "Agents on this host may make your browser load addresses"],
+        ["press", "enter"],
+        ["wait", "--text", "Edit this host's connection"],
+        ["press", "down"],
+        ["press", "down"],
+        ["press", "down"],
+        ["press", "down"],
+        ["press", "enter"],
+        ["wait", "--text", "Farhelm will forget this host."],
+        ["wait", "--text", "Remove: forget this host"]
+      ]
+    },
+    {
+      "id": "app-host-uninstall-refusal",
+      "title": "Uninstall chosen from build-box's menu (after Cancel on the removal question): the host refusal dialog with the helm's not-connected refusal, since a fake host's supervisor is never reached (the old picture's refusal was for a session still on the host)",
+      "reference": "host-uninstall-refusal",
+      "mockup": false,
+      "start": ["--sessions", "1", "--scripted-hosts"],
+      "steps": [
+        ["click", "id:prompt-cancel"],
+        ["wait", "--gone", "Farhelm will forget this host."],
+        ["click", "text:Host actions for build-box"],
+        ["wait", "--text", "Edit this host's connection"],
+        ["click", "id:host-menu-uninstall"],
+        ["wait", "--text", "Farhelm refused this action"],
+        ["hover", "id:host-refusal-title"]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -2815,11 +3081,11 @@
     },
     {
       "id": "hosts-panel",
-      "ported": false
+      "ported": true
     },
     {
       "id": "hosts-panel-details",
-      "ported": false
+      "ported": true
     },
     {
       "id": "launcher-agent",
@@ -2843,23 +3109,23 @@
     },
     {
       "id": "settings-sessions",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-appearance",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-hosts",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-recipes",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-containers",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-tensorlake",
@@ -2867,19 +3133,19 @@
     },
     {
       "id": "settings-credentials",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-terminal",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-checkouts",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-agent-trust",
-      "ported": false
+      "ported": true
     },
     {
       "id": "settings-notifications",
@@ -2971,7 +3237,7 @@
     },
     {
       "id": "host-menu",
-      "ported": false
+      "ported": true
     },
     {
       "id": "rail-host-context-menu",
@@ -2979,15 +3245,15 @@
     },
     {
       "id": "host-settings-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-settings-dialog-end",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-remove-confirmation",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-add-dialog",
@@ -2995,7 +3261,7 @@
     },
     {
       "id": "host-add-setup-plan",
-      "ported": false
+      "ported": true
     },
     {
       "id": "host-uninstall-refusal",
@@ -3035,7 +3301,7 @@
     },
     {
       "id": "hosts-panel-host-unreachable",
-      "ported": false
+      "ported": true
     },
     {
       "id": "terminal-detached-banner",
