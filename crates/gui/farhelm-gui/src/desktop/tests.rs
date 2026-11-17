@@ -1244,6 +1244,41 @@ mod mac {
         assert_eq!(press_at(cx, at), Some((Row::EmptyPane, PressAction::Drag)));
     }
 
+    /// The terminal text size group sits in the session top row, and its point-size number is text in the band
+    /// (SPEC.md, "Desktop window chrome": text keeps its own interactions). The number is no control, so nothing
+    /// claimed its presses until it opted in, and a press and move on it dragged the window. Specified: a press on the
+    /// number, on Smaller and on Larger reaches the top row, which leaves it alone, and a press on the row's empty
+    /// background just beside the group still drags.
+    #[gpui::test]
+    fn the_text_size_number_and_buttons_keep_their_presses_and_the_band_beside_them_drags(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::terminal::text_size::{GROUP_ID, LARGER_ID, READOUT_ID, SMALLER_ID};
+        let (_fake, cx) = open(cx, &["s1"]);
+        test_support::settle(cx);
+        let kept = Some((Row::SessionTop, PressAction::None));
+        for (name, id) in [
+            ("the number", READOUT_ID),
+            ("Smaller", SMALLER_ID),
+            ("Larger", LARGER_ID),
+        ] {
+            let at = test_support::center(cx, id);
+            assert_eq!(press_at(cx, at), kept, "{name}");
+        }
+        let group = test_support::bounds(cx, GROUP_ID);
+        let row = test_support::bounds(cx, "session-header");
+        let beside = gpui::point(group.left() - px(2.), group.center().y);
+        assert!(
+            row.contains(&beside) && !group.contains(&beside),
+            "the premise: the point is in the top row, outside the group: {beside:?} {group:?} {row:?}"
+        );
+        assert_eq!(
+            press_at(cx, beside),
+            Some((Row::SessionTop, PressAction::Drag)),
+            "the band beside the group"
+        );
+    }
+
     /// SPEC.md: startup screens keep their content clear of the native controls, and with the app owning the title
     /// bar's drag the window must still be movable there: while the window is not connected (here it never connects),
     /// a strip of the band runs across its top, 48 points tall, and a press on it drags.
