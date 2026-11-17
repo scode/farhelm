@@ -2,9 +2,9 @@
 //!
 //! Shared session launches dispatch through the provider registry. Tensorlake's
 //! ordinary Add path also lives here because it retains confirmation and legacy
-//! install recovery. Both use the same result/rollback helper; a Replace source
-//! never enters fresh-environment cleanup. Frozen recipe choices retain named
-//! credentials, whose current values resolve only at delivery.
+//! install recovery. A Replace source never enters fresh-environment cleanup.
+//! Frozen recipe choices retain named credentials, whose current values resolve
+//! only at delivery.
 
 use super::super::{
     http::{ProgressViews as _, StepView},
@@ -33,7 +33,6 @@ pub(super) struct TensorlakeAddPlan {
     recipe: StoredRecipe,
     steps: PlanSteps,
     tensorlake: Tensorlake,
-    session: Option<SessionLaunch>,
 }
 
 /// Adapt the existing operation view to provider creation without giving the
@@ -325,12 +324,8 @@ impl ProvisioningService {
         tensorlake: Tensorlake,
     ) -> anyhow::Result<ProbeResponse> {
         let service = Arc::clone(self);
-        crate::run_owned(async move {
-            service
-                .probe_tensorlake_owned(request, tensorlake, false)
-                .await
-        })
-        .await
+        crate::run_owned(async move { service.probe_tensorlake_owned(request, tensorlake).await })
+            .await
     }
 
     /// One owned provisioning task creates a fresh environment and its first
@@ -711,7 +706,6 @@ impl ProvisioningService {
         &self,
         request: ProbeRequest,
         tensorlake: Tensorlake,
-        session: bool,
     ) -> anyhow::Result<ProbeResponse> {
         let _slot = self
             .plan_slots
@@ -739,15 +733,7 @@ impl ProvisioningService {
                         None,
                         name.clone(),
                         recipe,
-                        sandbox_name(
-                            if session {
-                                crate::tensorlake::orphans::SESSION_PREFIX
-                            } else {
-                                crate::tensorlake::orphans::HOST_PREFIX
-                            },
-                            &tag,
-                            &name,
-                        ),
+                        sandbox_name(crate::tensorlake::orphans::HOST_PREFIX, &tag, &name),
                         None,
                         false,
                         true,
@@ -817,21 +803,6 @@ impl ProvisioningService {
         if let Some(size) = size {
             recipe.size = size;
         }
-        if session {
-            if state.snapshot.is_none() {
-                return Err(refused(
-                    "this recipe has no built snapshot; build it in Settings → Tensorlake first",
-                ));
-            }
-            if !matches!(
-                tensorlake.settings().await?.ssh_key,
-                farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
-            ) {
-                return Err(refused(
-                    "create and register Farhelm's SSH key in Settings → Tensorlake first",
-                ));
-            }
-        }
         tensorlake.ensure_host_key().await.map_err(refused)?;
         let steps = if new_install {
             prepared_host_steps(
@@ -889,7 +860,6 @@ impl ProvisioningService {
             recipe,
             steps,
             tensorlake,
-            session: None,
         };
         let mut memory = self.memory.lock().await;
         while memory.plan_order.len() >= MAX_PENDING_PLANS {
@@ -939,11 +909,7 @@ impl ProvisioningService {
                     recipe: plan.recipe_name.clone(),
                     resources: plan.recipe.size,
                 };
-                let host = if plan.session.is_some() {
-                    self.store.register_session_sandbox(new_host).await?
-                } else {
-                    self.store.register_tensorlake_host(new_host).await?
-                };
+                let host = self.store.register_tensorlake_host(new_host).await?;
                 let reconciled = async {
                     // Deletion may have won while confirmation was open.
                     // Check after insertion: from this point the recipe's
@@ -1057,54 +1023,24 @@ impl ProvisioningService {
         self.manager.events().bump();
     }
 
-    /// Keep setup and an optional session launch under one resource admission.
-    ///
-    /// Ordinary host failures retain progress for a setup retry. A fresh
-    /// session launch instead attempts whole-sandbox cleanup on failure,
-    /// including when a create reply was lost.
+    /// Set up a Tensorlake host, retaining failed progress for a setup retry.
     ///
     /// `host_write`, the host's provisioning lock, goes to whichever step
     /// publishes the run's end, which gives it up in the same critical
-    /// section (see `end_run`). For a plain add (Add host, or setup run
+    /// section (see `end_run`). For an add (Add host, or setup run
     /// again) that is the setup's own last step: the prepared clone's
-    /// attachment, or the inner install plan's end. For a session launch it
-    /// is [`Self::finish_session_launch`], once the session exists, so the
-    /// setup steps get no lock to give up.
+    /// attachment, or the inner install plan's end.
     async fn execute_tensorlake_add(
         &self,
         host: HostId,
-        mut plan: TensorlakeAddPlan,
+        plan: TensorlakeAddPlan,
         host_write: crate::manager::ProvisionLockGuard,
     ) {
-        // Capture setup's held state before it can publish a real connection
-        // result. Remembering that later result instead would make the wait
-        // depend on another state change after the connection already settled.
-        let setup_state = self.manager.state(host);
         let mut index = 0;
-        let (mut setup_lock, launch_lock) = if plan.session.is_some() {
-            (None, Some(host_write))
-        } else {
-            (Some(host_write), None)
-        };
+        let mut setup_lock = Some(host_write);
         let result = self
             .tensorlake_steps(host, &plan, &mut index, &mut setup_lock)
             .await;
-        if let Some(launch) = plan.session.take() {
-            let host_write =
-                launch_lock.expect("a session launch keeps the host's lock for its launch's end");
-            self.finish_session_launch(
-                host,
-                &plan.sandbox,
-                launch,
-                result,
-                index,
-                setup_state,
-                host_write,
-            )
-            .await;
-            return;
-        }
-
         if let Err(error) = result {
             // Initial failures keep the admission hold. Missing install
             // coordinates also gate dialing after a manager restart; only
@@ -1252,10 +1188,10 @@ impl ProvisioningService {
     /// ownership and admission facts. The free probe cannot establish which
     /// sandbox an outstanding request will eventually reveal.
     ///
-    /// `host_write` is the host's provisioning lock for a plain add, which
+    /// `host_write` is the host's provisioning lock, which
     /// the step that publishes the run's end takes and gives up as it
-    /// publishes; `None` for a session launch, whose launch ends the run
-    /// (see [`Self::execute_tensorlake_add`]). An error returns it untaken.
+    /// publishes (see [`Self::execute_tensorlake_add`]). An error returns it
+    /// untaken.
     async fn tensorlake_steps(
         &self,
         host: HostId,
@@ -1457,21 +1393,14 @@ impl ProvisioningService {
         *index = 0;
         if needs_snapshot {
             self.set_step(host, *index, StepStatus::Running, None).await;
-            if plan.session.is_some() {
-                anyhow::ensure!(
-                    built,
-                    "this recipe has no built snapshot; build it in Settings → Tensorlake first"
-                );
-            } else {
-                builds
-                    .ensure_snapshot(
-                        &plan.recipe_name,
-                        &plan.recipe,
-                        Arc::clone(self.manager.events()),
-                        |line| self.set_step(host, 0, StepStatus::Running, Some(line)),
-                    )
-                    .await?;
-            }
+            builds
+                .ensure_snapshot(
+                    &plan.recipe_name,
+                    &plan.recipe,
+                    Arc::clone(self.manager.events()),
+                    |line| self.set_step(host, 0, StepStatus::Running, Some(line)),
+                )
+                .await?;
             self.set_step(
                 host,
                 0,
@@ -1522,25 +1451,14 @@ impl ProvisioningService {
                     }
                     *index = 1;
                     self.set_step(host, *index, StepStatus::Running, None).await;
-                    if plan.session.is_some() {
-                        builds
-                            .ensure_prepared_snapshot_from_built(
-                                &plan.recipe_name,
-                                &plan.recipe,
-                                Arc::clone(self.manager.events()),
-                                |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
-                            )
-                            .await?;
-                    } else {
-                        builds
-                            .ensure_prepared_snapshot(
-                                &plan.recipe_name,
-                                &plan.recipe,
-                                Arc::clone(self.manager.events()),
-                                |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
-                            )
-                            .await?;
-                    }
+                    builds
+                        .ensure_prepared_snapshot(
+                            &plan.recipe_name,
+                            &plan.recipe,
+                            Arc::clone(self.manager.events()),
+                            |line| self.set_step(host, 1, StepStatus::Running, Some(line)),
+                        )
+                        .await?;
                 }
                 let guard = builds.lock_snapshot_use(&plan.recipe_name).await?;
                 if let Some(prepared) = builds.fresh_prepared_snapshot(&plan.recipe_name).await? {
@@ -1672,19 +1590,15 @@ impl ProvisioningService {
             "prepared sandbox connected"
         );
         self.set_step(host, *index, status, message).await;
-        if plan.session.is_none() {
-            // A plain add ends here: publish that and let go of the host in
-            // one step, so a removal the moment the host reads as set up is
-            // not refused as busy.
-            self.end_run(host, host_write.take(), |memory| {
-                if let Some(run) = memory.runs.get_mut(&host) {
-                    run.status = RunStatus::Completed;
-                }
-            })
-            .await;
-        } else {
-            self.manager.events().bump();
-        }
+        // A plain add ends here: publish that and let go of the host in
+        // one step, so a removal the moment the host reads as set up is
+        // not refused as busy.
+        self.end_run(host, host_write.take(), |memory| {
+            if let Some(run) = memory.runs.get_mut(&host) {
+                run.status = RunStatus::Completed;
+            }
+        })
+        .await;
         Ok(())
     }
 
@@ -1774,9 +1688,7 @@ impl ProvisioningService {
         self.manager.events().bump();
         self.manager.release_hold(host, true);
         // The plan's end (completed, or failed at one of its steps) is a plain
-        // add's end, so the lock goes with it. A session launch has none to
-        // hand over; its launch keeps the lock until the session exists, and
-        // the plan still publishes "completed" before that (see `end_run`).
+        // add's end, so the lock goes with it (see `end_run`).
         self.execute_actions(host, inner, *index, host_write.take())
             .await;
         Ok(())
