@@ -184,8 +184,8 @@ manifest_commit() {
 # The published release shots, one per line, sorted: every shot a release's
 # screenshot list names that the checkout's manifest lists under `shots`,
 # meaning the snapshot it pins holds it. Nothing before the first publish.
-# The same definition e2e/docs-shots/release-shots.ts and
-# scripts/docs-screenshots.sh apply.
+# The same definition scripts/docs-screenshots.sh applies to
+# --recapture-release-shot.
 published_release_shots() {
   python3 - "$1/$MANIFEST" "$1/$RELEASE_NOTES_DIR" <<'EOF' || die "cannot read which release shots are published"
 import json, pathlib, sys
@@ -240,7 +240,7 @@ for name in names:
             "published release shots stay as published unless scripts/docs-screenshots.sh --recapture-release-shot names them"
         )
     if name not in shots:
-        raise SystemExit(f"a page references the shot {name}, which the capture did not produce; add it to e2e/docs-shots/ and capture again")
+        raise SystemExit(f"a page references the shot {name}, which the capture did not produce; add it to the docs capture and capture again")
     try:
         data = open(f"{local}/{name}.png", "rb").read()
     except OSError:

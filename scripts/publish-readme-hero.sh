@@ -48,18 +48,32 @@ die() {
   exit 1
 }
 
-# Expected pixel size, from the scenario the capture ran against. Parsed by
-# the same json5 package the capture uses, so the two cannot disagree about
-# what the file says.
+# Expected pixel size, from the scenario the capture ran against in `repo`.
+# Parsed by scripts/scenario_json5.py, the scenario loader the capture flows
+# will use too, so the capture and this check cannot disagree about what the
+# file says. The loader is always this script's own copy, also when `repo` is
+# the self-test's temporary checkout. Under `-I` Python puts no script
+# directory on sys.path, hence the explicit entry, appended so that the
+# standard library still comes first; the bytecode switch keeps the import
+# from leaving a __pycache__ in scripts/ (`-I` ignores PYTHONDONTWRITEBYTECODE).
 expected_size() {
   local repo="$1"
-  # shellcheck disable=SC2016 # the ${} is JavaScript, evaluated by node
-  node -e '
-    const JSON5 = require(process.argv[1]);
-    const scenario = JSON5.parse(require("fs").readFileSync(process.argv[2], "utf8"));
-    const v = scenario.viewport;
-    process.stdout.write(`${v.width * v.scale}x${v.height * v.scale}`);
-  ' "$repo/e2e/node_modules/json5" "$repo/docs/readme-hero/scenario.json5"
+  python3 -I - "$script_repo/scripts" "$repo/docs/readme-hero/scenario.json5" <<'EOF'
+import sys
+sys.dont_write_bytecode = True
+sys.path.append(sys.argv[1])
+import scenario_json5
+try:
+    viewport = scenario_json5.load(sys.argv[2])["viewport"]
+    width, height, scale = (viewport[field] for field in ("width", "height", "scale"))
+# ValueError covers the loader's own error and a file that is not UTF-8.
+except (OSError, ValueError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot read the viewport from {sys.argv[2]}: {error}")
+# bool is an int in Python; `scale: true` is not a size.
+if not all(type(v) is int and v > 0 for v in (width, height, scale)):
+    raise SystemExit(f"{sys.argv[2]}: viewport width, height and scale must be positive integers")
+print(f"{width * scale}x{height * scale}", end="")
+EOF
 }
 
 # Refuse anything that is not a full-size PNG capture. A blank or truncated
@@ -192,19 +206,20 @@ publish() {
 }
 
 # End-to-end check against a bare repository standing in for github. What it
-# proves: a wrong-shaped file is refused before any push, only
+# proves: a wrong-shaped file is refused before any push, so is any PNG
+# when the scenario cannot be read or declares no usable size, only
 # refs/heads/readme-assets exists on the remote after a publish, a second
 # publish replaces the branch rather than extending it, the README and
 # website spans are both rewritten to exactly the pushed commit's URL, a page
 # with broken markers is refused before anything is pushed, a rewrite that
-# fails on one file leaves the others untouched, and a dry run touches
-# nothing. The checkout's origin is a github-shaped URL so that the URL
+# fails on one file leaves the others untouched, a dry run touches nothing,
+# and reading the scenario leaves no bytecode in scripts/. The checkout's origin is a github-shaped URL so that the URL
 # derivation is the real one; a git `insteadOf` rewrite, installed through
 # GIT_CONFIG_GLOBAL in each git child's environment, sends that URL's pushes
 # to the bare repository instead. The subshell keeps the git wrapper local
 # without changing the environment of the process running the test.
 self_test() (
-  local work bare checkout png expected first second dry fail=0
+  local work bare checkout png expected first second dry scenario fail=0
   local origin="git@github.com:example/repo.git"
   command -v convert >/dev/null || die "self-test needs ImageMagick's convert"
   work="$(mktemp -d)" || die "mktemp failed"
@@ -216,11 +231,10 @@ self_test() (
   # to the GitHub-shaped origin without the fixture's local redirect.
   git() { command env GIT_CONFIG_GLOBAL="$work/gitconfig" git "$@"; }
   # A checkout that looks enough like this repo for publish(): the scenario,
-  # the json5 package, a README and a website page with markers, and an
-  # origin.
-  mkdir -p "$checkout/docs/readme-hero" "$checkout/e2e" "$checkout/$(dirname "$SITE_PAGE")" || die "mkdir failed"
+  # a README and a website page with markers, and an origin. The scenario
+  # loader is not copied: expected_size() always uses this script's own.
+  mkdir -p "$checkout/docs/readme-hero" "$checkout/$(dirname "$SITE_PAGE")" || die "mkdir failed"
   cp "$script_repo/docs/readme-hero/scenario.json5" "$checkout/docs/readme-hero/" || die "cannot copy the scenario"
-  ln -s "$script_repo/e2e/node_modules" "$checkout/e2e/node_modules" || die "cannot link node_modules"
   printf '# t\n\n%s\n![hero](OLD)\n%s\n' "$MARKER_OPEN" "$MARKER_CLOSE" >"$checkout/README.md"
   printf -- '---\ntitle: t\n---\n\n%s\n\n![hero](OLD)\n\n%s\n' "$SITE_MARKER_OPEN" "$SITE_MARKER_CLOSE" >"$checkout/$SITE_PAGE"
   git -C "$checkout" init -q || die "checkout init failed"
@@ -250,6 +264,19 @@ self_test() (
   (publish "$checkout" "$png" false >/dev/null 2>&1) && { echo "FAIL published with a markerless site page"; fail=1; }
   grep -q "OLD" "$checkout/README.md" || { echo "FAIL a refused publish edited the README"; fail=1; }
   mv "$work/site-page.mdx" "$checkout/$SITE_PAGE" || die "cannot restore the site page"
+  # A scenario the loader cannot read, or one that declares no usable size,
+  # refuses a PNG that would otherwise pass.
+  scenario="$checkout/docs/readme-hero/scenario.json5"
+  cp "$scenario" "$work/scenario.json5" || die "cannot set the scenario aside"
+  # Each refusal must come from the scenario check itself, not from some
+  # other failure on the way, so its message is checked too.
+  printf "{ viewport: { width: 1280, height: 800, scale: 'two' } }\n" >"$scenario"
+  (publish "$checkout" "$png" false >/dev/null 2>"$work/err") && { echo "FAIL published against an unreadable scenario"; fail=1; }
+  grep -q "scenario.json5:1: " "$work/err" || { echo "FAIL unreadable scenario: $(cat "$work/err")"; fail=1; }
+  printf '{ viewport: { width: 1280, height: 800, scale: true } }\n' >"$scenario"
+  (publish "$checkout" "$png" false >/dev/null 2>"$work/err") && { echo "FAIL published against a scenario without a numeric scale"; fail=1; }
+  grep -q "must be positive integers" "$work/err" || { echo "FAIL non-numeric scale: $(cat "$work/err")"; fail=1; }
+  cp "$work/scenario.json5" "$scenario" || die "cannot restore the scenario"
   test "$(git -C "$bare" for-each-ref | wc -l)" -eq 0 || { echo "FAIL a refusal still pushed"; fail=1; }
 
   # A dry run builds the commit and touches neither the remote nor the README.
@@ -291,6 +318,11 @@ self_test() (
   (rewrite_spans write x "$checkout/good.md" "$MARKER_OPEN" "$MARKER_CLOSE" "$checkout/dup.md" "$MARKER_OPEN" "$MARKER_CLOSE" 2>/dev/null) &&
     { echo "FAIL a partial rewrite reported success"; fail=1; }
   grep -q "OLD" "$checkout/good.md" || { echo "FAIL a failed rewrite still edited an earlier file"; fail=1; }
+
+  # By now expected_size() has imported this script's own loader about ten
+  # times, so a lost bytecode switch would have left a .pyc beside it. A stale
+  # one from an import elsewhere fails this too; delete it and run again.
+  find "$script_repo/scripts" -name 'scenario_json5*.pyc' | grep -q . && { echo "FAIL the scenario loader's import left bytecode in scripts/"; fail=1; }
 
   rm -rf "$work"
   if [ "$fail" -ne 0 ]; then
