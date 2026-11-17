@@ -5,15 +5,9 @@ sidebar:
   order: 1
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
-<Screenshot
-  name="start-a-session/new-button"
-  alt="The + (New session) button above the session list, which opens the session launcher."
-/>
-
-In the Farhelm app on your Mac, Cmd+N opens the launcher too, even while you are typing in a terminal. See
-[Keyboard shortcuts](/docs/using/keyboard-shortcuts/) for all the keys your client uses.
+**+** (New session) above the session list opens the session launcher. On a Mac, Cmd+N opens it too, even while you are
+typing in a terminal; the Linux app has no shortcut for it. See [Keyboard shortcuts](/docs/using/keyboard-shortcuts/)
+for the app's other keys.
 
 When you launch, the launcher closes and the new session appears in the [session list](/docs/using/session-list/).
 Its terminal opens, where you can type your first prompt, or supply it in the launcher. If you have clicked or typed
@@ -26,58 +20,43 @@ or needs an answer from you, the launcher comes back with your choices.
 
 ## The launcher at a glance
 
-<Screenshot
-  name="start-a-session/launch-button"
-  alt="The launcher's footer: what Launch will start (Codex, Local (this machine), and the directory), the summary of choices, and the Launch button."
-/>
+The search box comes first, then where the session runs, then the **Agent** and **Command** tabs with their choices. The
+footer sums up what **Launch** will start, such as the agent, the host and the directory, beside the launcher's buttons.
 
-**Cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **Reset choices** clears the
-agent, model, and effort, and puts permissions and the wrapper prefix back to what the launcher remembers;
-it keeps the host, directory, and name.
+**Cancel**, Escape, or the × (Close) at the top of the launcher closes it and forgets your choices. **Reset choices**
+clears the agent, model, and effort, and puts permissions and the wrapper prefix back to what the launcher remembers; it
+keeps the host, directory, and name.
 
 ## Choose where it runs
 
-<Screenshot
-  name="start-a-session/destination"
-  alt="The launcher's destination part: the folder or managed checkout choice, the host menu, the directory field, and directory history dropdown."
-/>
-
-**Runs on** chooses **Existing host**, **New container** or **New sandbox** when those destinations are available.
-[Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host.
-[Sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your
-Tensorlake account. Both can clone a managed checkout inside or start in the new environment's home. The host and
+**Where** chooses between an existing directory (**Folder**) and a new [managed
+checkout](#start-from-a-managed-checkout). When you have a host that can run containers, **Runs on** also chooses
+between **Existing host** and **New container**. [Container sessions](/docs/agents/containerized-sessions/) use a recipe
+and a Linux container host, and can clone a managed checkout inside or start in the new container's home. The host and
 directory controls below apply to **Existing host**.
 
-With no session open, the host menu starts on the machine you are using, listed as **Local (this machine)**. A host that
-is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch on
-it until it is back. A **Suspended** [Tensorlake host](/docs/using/tensorlake-sandboxes/) is the exception: launching
-resumes it first and starts the session when it is ready. For a fresh GitHub checkout, the directory is picked after
-the host wakes. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
+With no session open, the **Host** menu starts on the machine you are using, listed as **Local (this machine)**. A host
+that is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch
+on it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
-you have not launched an agent there yet; a launch into a new managed checkout does not count. With a session open on
-the same host, it starts at that session's directory instead. Changing the host switches to that host's directory,
-unless you typed or picked one yourself. With **Folder** chosen, the launcher also checks the directory on a connected
-host: if it does not exist there, or is not a directory, a warning under the field names the host. You can still launch;
-the host checks the directory again when you do.
+you have not launched an agent there yet; a launch into a new managed checkout or a new container does not count. With
+a session open on the same host, it starts at that session's directory instead. Changing the host switches to that
+host's directory, unless you typed or picked one yourself. With **Folder** chosen, the launcher also checks the
+directory on a connected host: if it does not exist there, or is not a directory, a warning under the field names the
+host. You can still launch; the host checks the directory again when you do.
 
-**Browse**, beside the host, lists the directories under the path in the directory field one level at a time, for when you would rather find a directory
-than type it. Clicking the directory field, or pressing ↓ in it, lists recent directories and the two home choices;
-typing filters them, and choosing one fills the field without launching. **Local home** also switches the host to
-**Local (this machine)**. With the list open, Escape closes the list first. **Name (optional)** names the session in the
-session list; leave it empty and Farhelm picks a name.
+**Browse**, under the host, lists the directories under the path in the directory field one level at a time, for when
+you would rather find a directory than type it. Clicking the directory field, or pressing ↓ in it, lists recent
+directories and the two home choices; typing filters them, and choosing one fills the field without launching. **Local
+home** also switches the host to **Local (this machine)**. With the list open, Escape closes the list first. **Name
+(optional)** names the session in the session list; leave it empty and Farhelm picks a name.
 
 ## Choose the agent and how it runs
 
-<Screenshot
-  name="start-a-session/harness-and-model"
-  alt="The harness buttons with Codex chosen, and the model choice under them, both explained."
-/>
-
-<Screenshot
-  name="start-a-session/effort-and-permissions"
-  alt="The effort and permissions choices, each explained."
-/>
+On the **Agent** tab, **Harness** picks the agent. **Model** and **Effort** are optional; leave **Model** empty and
+**Effort** on **Default**, and the agent uses its own defaults. **Permissions** says how freely the agent may act: **Guarded** keeps the agent's own safety
+checks, and **YOLO** lets it act without asking.
 
 Not every agent has every choice, and some offer other permission modes; [Permission modes](/docs/agents/#permission-modes)
 explains each, including **Custom** for supplying your own permission flags. Switching to another agent
@@ -94,7 +73,7 @@ before the command it builds for that agent; [Agent wrappers](/docs/agents/agent
 must pass through and when to use a custom command instead.
 
 NOTE: The launcher remembers the permissions of your last launch from its **Agent** tab and the last wrapper prefix
-used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **YOLO** too;
+used with each agent. After one YOLO launch, the next launcher opens on **YOLO** too;
 **Custom** flags are never remembered this way. Launches
 your agents start, custom commands, and plain **Replace** do not change what it remembers.
 
@@ -124,10 +103,9 @@ Before a YOLO launch, Farhelm asks you to confirm unless that host has **Start Y
 New [Tensorlake hosts](/docs/using/tensorlake-sandboxes/#add-a-sandbox-host) start with this on; other hosts ask until
 you tell them not to. This setting skips the confirmation, not the launcher's permission choice.
 
-<Screenshot
-  name="start-a-session/yolo-confirmation"
-  alt="The YOLO confirmation, with answers to start guarded instead, start YOLO once, stop asking on this host, or cancel."
-/>
+The question appears under the launcher's buttons. **Start YOLO session anyway** starts this one session in YOLO mode, and
+**Start, and don't ask again on this host** also turns the host's setting on. **Cancel** goes back to the launcher with
+nothing started.
 
 If you chose **YOLO** and the agent also offers **Guarded**, **Start guarded session instead** starts it with the agent's
 own safety checks. This choice is available in the session launcher and **Restart with**.
@@ -142,33 +120,15 @@ host that asks, an agent cannot start a YOLO session or a custom command at all 
 do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 To change your mind about a host later, open **Hosts** at the foot of the navigation rail and choose **Settings** from
-that host's menu. [Manage hosts](/docs/using/manage-hosts/) covers the rest of
-them.
-
-<Screenshot
-  name="start-a-session/host-menu"
-  alt="A host's menu in the host list, with its settings item marked."
-/>
-
-<Screenshot
-  name="start-a-session/host-yolo-setting"
-  alt="The permissions part of a host's settings, with the Start YOLO sessions without asking switch explained."
-/>
+that host's `⋯` menu; the switch is in its **Permissions** section. [Manage hosts](/docs/using/manage-hosts/) covers the
+rest of them.
 
 ## Launch a setup you used before
 
-<Screenshot
-  name="start-a-session/recent-setups"
-  alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
-/>
-
 A setup keeps the agent, model, effort, permissions, wrapper prefix and destination of a launch you made on the
-launcher's **Agent** tab, however you filled it in. Farhelm keeps ordinary setups separately for each host and shows up
-to three. Type `recent:` in the search box to find older ones.
-
-For a new container or sandbox, a setup keeps the recipe, where it runs, and the repository-or-home choice after the old
-environment is deleted. Applying it creates a fresh environment from the recipe. A missing recipe or container host
-stays unavailable until you change that choice.
+launcher's **Agent** tab, however you filled it in. Farhelm keeps setups separately for each host. Under the search box,
+the launcher shows up to three of the chosen host's setups that match what you have chosen so far. Clicking one fills
+in the launcher without launching; Enter on it launches. Type `recent:` in the search box to find older ones.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -176,14 +136,10 @@ covers it, along with **Replace with…**.
 
 ## Search instead of clicking
 
-<Screenshot
-  name="start-a-session/search"
-  alt="The launcher's search box with claude typed, listing matching agents, models, and setups."
-/>
-
-The search box has the keyboard focus when the launcher opens, so you can set up a whole launch without the mouse.
-Typing a path offers to use it as the directory or to browse it. When nothing matches ordinary text, the list offers
-**Set session name**. For example, type `asdf` and press Enter to name the session; a separate Enter in the emptied box
+The search box has the keyboard focus when the launcher opens, so you can set up a whole launch without the mouse. Type
+part of what you want, such as `claude`, and the list offers matching agents, models and recent setups; Enter takes the
+highlighted one and empties the box for the next choice. Typing a path offers to use it as the directory or to browse
+it. When nothing matches ordinary text, the list offers **Set session name**. For example, type `asdf` and press Enter to name the session; a separate Enter in the emptied box
 launches it. A prefix with no matching choices shows why, while you type. Escape hides the list or its message without
 clearing your text; Enter reopens it before another Enter can choose a row. Away from the search box, Enter on one of the
 launcher's choices, such as a harness, an effort, or a recent setup, picks it and launches with everything as it then
@@ -192,13 +148,9 @@ stands.
 In the directory dropdown, Enter chooses a suggestion only after an arrow key has highlighted it, without launching.
 With nothing highlighted, Enter in the directory field launches the path you typed.
 
-<Screenshot
-  name="start-a-session/search-name"
-  alt="The search box with name: claude typed, offering that session name instead of choosing the Claude agent."
-/>
-
-A few other prefixes do something no plain search does: `gh:` starts a [managed
-checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
+To name a session with a word the search would otherwise match, type `name:` before it: `name: claude` offers that
+session name instead of choosing the Claude agent. A few other prefixes do something no plain search does: `gh:`
+starts a [managed checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices,
 and `perms:` picks a [permission mode](/docs/agents/#permission-modes),
 including **Agent's own setting** where available. You can also type
@@ -209,24 +161,25 @@ reasoning effort. The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
 
-For a setup you use often, mark a [quick-launch template](/docs/using/launch-templates/#quick-launch). Cmd+P on a Mac, or
-Ctrl+Shift+P elsewhere, starts it directly. A YOLO question or failed launch opens the session launcher with the setup
+For a setup you use often, mark a [quick-launch template](/docs/using/launch-templates/#quick-launch). Cmd+P on a Mac,
+or Ctrl+Shift+P on Linux, starts it directly. A YOLO question or failed launch opens the session launcher with the setup
 ready to finish.
 
-For a saved setup you know by name, Cmd+J on a Mac or Ctrl+Shift+J elsewhere opens a
+For a saved setup you know by name, Cmd+J on a Mac or Ctrl+Shift+J on Linux opens a
 [template-only list](/docs/using/launch-templates/#quick-launch). Type its name and press Enter to start it; if it
 needs more choices, the session launcher opens with its saved choices applied.
 
 For several favorite setups, give templates [number shortcuts](/docs/using/launch-templates/#number-shortcuts): Cmd+0–9
-in the Mac app, or Ctrl+Shift+0–9 elsewhere, including a browser on a Mac.
+on a Mac, or Ctrl+Shift+0–9 on Linux.
 
 You can also [combine templates from the keyboard](/docs/using/launch-templates/#combine-templates-from-the-keyboard):
-Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, then their number keys and Enter. Later templates override earlier
+Cmd+X on a Mac, or Ctrl+Shift+X on Linux, then their number keys and Enter. Later templates override earlier
 choices, so a project setup can be combined with a different agent.
 
 While New, Clone, Replace with or Restart with is open, those same shortcuts apply templates to the current draft instead of starting
 a session. You can stack several presses, then review the choices before pressing **Launch**. The sequence prefix works
-in the launcher's text fields when no text is selected; selected text keeps Cut or the browser's usual action.
+in the launcher's text fields when no text is selected; with text selected, the keys keep their usual meaning, such as
+Cut on a Mac.
 
 ## Start from a managed checkout
 
@@ -234,18 +187,17 @@ A session can also start in a new clone of a GitHub repository instead of an exi
 managed checkout. It makes the directory for the session. On an ordinary host, deleting its last session moves it into
 the trash (see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)). The
 [trash](/docs/using/session-list/#managed-checkout-trash) at the top of the session list shows where those directories are and lets you
-clean them up. In a new [container](/docs/agents/containerized-sessions/) or
-[sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), the clone lives inside and Delete
-removes it permanently, without trash, unless another session still uses it; deleting the last session there removes the whole environment too.
+clean them up. In a [container session](/docs/agents/containerized-sessions/) or
+[sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), the clone lives inside and
+Delete removes it permanently, without trash, unless another session still uses it; deleting the last session there
+removes the whole environment too.
 
-Choose **Managed checkout** under destination, enter the repository as `owner/repo`, and select its
-suggestion. You can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm
-suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
+Choose **Managed checkout** in the **Where** row, enter the repository as `owner/repo`, and select its suggestion. You
+can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm suggests
+repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 On an existing connected host, the launcher shows the directory the clone will go into before launch, and the launch
-button waits until it does. A new container or sandbox picks its directory inside after the environment is ready.
-On a suspended Tensorlake host there is no directory to show yet: one press resumes the host, picks the directory
-once it is ready and launches.
+button waits until it does. A new container picks its directory inside after the container is ready.
 [Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
 you have chosen to start it without seeing the path first. Giving it a number key makes the same choice.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
@@ -254,9 +206,8 @@ back to an ordinary directory.
 
 **Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
 in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
-taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. On an
-ordinary host, **Folder** restores the source's directory and name. For a fresh environment, it uses the new
-environment's home. **Replace with** and **Replace** keep the existing directory.
+taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **Folder**
+restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
 
 When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
@@ -281,13 +232,9 @@ the terminal and stops the clone.
 An agent on an ordinary host can also start a session in a new managed checkout when you ask it to, with your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)).
 
-On ordinary hosts, first tell Farhelm which directory new checkouts go into.
-Until you have, choosing **Managed checkout** asks for it.
-
-<Screenshot
-  name="start-a-session/checkout-setup"
-  alt="The launcher in managed checkout mode asking for the checkout folder, with the field and its save button explained."
-/>
+On ordinary hosts, first tell Farhelm which directory new checkouts go into. Until you have, choosing **Managed
+checkout** shows a **Default checkout folder** field above the repository field; enter a directory, such as `~/src`, and
+press **Save**. `~` means each host's home directory.
 
 This sets the default for hosts without a directory of their own. To change it later, or save an empty field to clear it,
 use **Default checkout folder** under **Checkouts** in **Settings**,
@@ -339,14 +286,9 @@ checkout. Plain **Restart** and **Replace** reuse the trust carried by the saved
 [Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
-When Codex or Muse asks about trust in a managed checkout while its switch is off, a hint above the terminal has a
-**Settings** button that opens **Agent trust** at that agent's switch. **Don't show again** hides that agent's hint across
-windows, and the same section can restore it. × hides the hint for the current question.
-
 For Claude, **Agent trust** can also **Answer Claude's "trust this folder?" for new checkouts**. This is off by default and
 applies to future managed checkouts on every host, including ones an agent requests or that start with another agent.
-Directories you choose yourself still get Claude's question. The hint's **Settings and caveats** button opens **Agent
-trust** at Claude's setting and its caveats; **Don't show again** hides the hint across clients, and the same section can restore it.
+Directories you choose yourself still get Claude's question.
 
 There is no supported Claude switch for this. Farhelm edits Claude's own settings file on the session's host, normally
 `~/.claude.json`, and removes that directory's trust key when the checkout moves to the trash. The edit is best effort:
@@ -362,9 +304,9 @@ Changing the default affects each host without its own directory at its next lau
 Existing checkouts stay where they are.
 
 The post-clone command applies to every host. To give one host a command of its own, run
-`farhelm helm checkout-config` on the machine that runs the helm (the program that serves the Farhelm app; see
-[The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options. A host given its
-own command there keeps it whatever **Settings** says.
+`farhelm helm checkout-config` on the machine where you run the Farhelm app, whose built-in helm keeps your checkout
+settings (see [The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options.
+A host given its own command there keeps it whatever **Settings** says.
 
 Farhelm owns the managed checkouts it makes, the directory they go into, their prepared checkouts and their trash. Work in a checkout as usual,
 but do not restore a backup or filesystem snapshot over them, and keep them on an ordinary filesystem rather than one
@@ -374,13 +316,14 @@ like FAT: Farhelm does not detect such changes.
 
 What you see depends on how far the launch got. When Farhelm can tell before starting anything that the launch will not
 work, for example because the directory does not exist on that host or the host just went offline, it shows the reason
-in a **Not launched.** alert beside the launch button and keeps your choices, so you can fix it and launch again. No session is created. When
+in a **Not launched.** alert under the launcher's buttons and keeps your choices, so you can fix it and launch again.
+No session is created. When
 the agent itself fails to start, for example because it is not installed on that host, the session is created and its
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
 
-If Farhelm gives up waiting after a minute, the launcher says **Still waiting** instead: the session may still start
-and appear in the session list. Your choices stay in the launcher.
+If the host does not answer within 20 seconds, the launcher comes back without **Not launched.** and says the request is
+still being carried out: the session may still start and appear in the session list. Your choices stay in the launcher.
 
 ## Next
 
