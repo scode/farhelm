@@ -1229,12 +1229,22 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 /// anchored there still goes with it, since its anchor is no longer drawn; a centered dialog opened that way stays.
 ///
 /// Every close but [`close_all`] comes here, whatever its cause: the opener's own call, a subject or anchor going
-/// ([`Subject`]), Escape and a dialog's Close ([`dismiss`]), and a press outside a popover.
+/// ([`Subject`]), Escape and a dialog's Close ([`dismiss`]), Tab out of a caret menu ([`close_on_tab`]), and a press
+/// outside a popover.
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     close_as(id, CloseCause::Closed, window, cx);
 }
 
-/// Why a layer is closing, which decides where focus goes after it.
+/// Close the menu `id` because Tab or Shift+Tab left it, for a menu whose own rule sends Tab back to its toggle rather
+/// than keeping it inside (SPEC.md for the session header's caret menus: "Escape or Tab closes the menu and returns
+/// focus to its caret"). As [`close`], except that the focus coordinator then swallows only the key's held repeats: a
+/// plain close would also swallow a second Tab pressed within the repeat interval, which the caret rule means to go on
+/// from the toggle to the next control.
+pub fn close_on_tab(id: LayerId, window: &mut Window, cx: &mut App) {
+    close_as(id, CloseCause::TabbedOut, window, cx);
+}
+
+/// Why a layer is closing, which decides where focus goes after it and which repeats of the closing key are swallowed.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CloseCause {
     /// Its opener closed it, its subject or anchor went, a reset, or a press outside a popover that traps Tab: focus
@@ -1243,6 +1253,9 @@ enum CloseCause {
     /// The user dismissed it (Escape, a dialog's Close): as `Closed`, except that a layer returning focus home on
     /// Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it home.
     Dismissed,
+    /// Tab or Shift+Tab left a menu whose rule returns focus to its toggle ([`close_on_tab`]): as `Closed`, except that
+    /// the key is navigation that happens to close the menu, so only its held repeats are swallowed.
+    TabbedOut,
     /// Focus left a popover that lets Tab through, or a press landed outside it ([`Popover::traps_tab`]): no focus is
     /// returned. Focus is already where the user put it, or, after a press that focused nothing (a macOS button, the
     /// page's empty space), it is on a control the next frame no longer draws, and the focus coordinator's recovery
@@ -1251,10 +1264,10 @@ enum CloseCause {
 }
 
 /// [`close`], saying why the layer closes ([`CloseCause`]). When focus is returned, the cause also decides which repeats
-/// of the key press that closed it the focus coordinator swallows (see [`focus::return_to`]): for `Closed`, the press's
-/// held repeats and its fresh ones within the repeat interval, unless a layer that holds focus is left open or one opens
-/// next (then the held ones only); for `Dismissed`, its held repeats only. A close that returns no focus swallows
-/// nothing, which is always so for `Left`.
+/// of the key press that closed it the focus coordinator swallows (see [`focus::return_to`]): for `Closed` and
+/// `Dismissed`, the press's held repeats and its fresh ones within the repeat interval, unless a layer that holds focus
+/// is left open or one opens next (then the held ones only); for `TabbedOut`, its held repeats only. A close that
+/// returns no focus swallows nothing, which is always so for `Left`.
 fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
     close_taking(why, window, cx, |layers| {
         let index = layers.iter().position(|layer| layer.id == id)?;
@@ -1300,7 +1313,7 @@ fn close_taking(
     };
     // A dismissal from a popover's place (Escape on the tunnel pill while its list is open, [`Popover::traps_tab`])
     // counts as from inside it: focus "returns" to the place it is already on, and the coordinator notes the Escape
-    // as a dismissal, so its held repeats are swallowed rather than dismissing each layer below in turn. Only for a
+    // as the closing press, so its repeats are swallowed rather than dismissing each layer below in turn. Only for a
     // dismissal: the toggle closing its own list (Enter or Space on the pill) must not swallow a quick second press
     // that reopens it.
     let focus_was_inside = closed.iter().any(|layer| {
@@ -1329,7 +1342,7 @@ fn close_taking(
             focus::return_to(
                 focus::ReturnTo::Opener,
                 None,
-                why == CloseCause::Dismissed,
+                why == CloseCause::TabbedOut,
                 window,
                 cx,
             );
@@ -1343,7 +1356,7 @@ fn close_taking(
         focus::return_to(
             returns_to,
             bottom.opener.as_ref(),
-            why == CloseCause::Dismissed,
+            why == CloseCause::TabbedOut,
             window,
             cx,
         );

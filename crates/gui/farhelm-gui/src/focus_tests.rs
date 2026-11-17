@@ -1899,13 +1899,13 @@ fn a_different_key_after_the_enter_that_closed_a_layer_is_delivered_and_ends_its
 
 /// Why this matters: the rule covers every layer a key closes, and Escape closes the most. A held Escape must close one
 /// layer, not every layer below it and then reach the terminal's program as Escapes (SPEC.md: Escape closes the
-/// topmost layer). But Escape pressed twice in quick succession is how a user backs out of two layers, so a dismissal
-/// keeps its fresh presses.
+/// topmost layer). But Escape pressed twice in quick succession is how a user backs out of two layers, so while a layer
+/// holding focus is left open, a dismissal keeps its fresh presses for it. Once the last one has closed, a quick second
+/// Escape is a repeat like a repeated Enter, and reaches nothing.
 ///
 /// Specified: with a dialog open over another over the terminal, Escape closes the top one, and a held repeat of it
-/// leaves the lower one open; a fresh Escape at once closes that one, returning focus to the terminal, and a held
-/// repeat of it does not reach the terminal, while a fresh Escape at once does (a dismissal keeps only its held
-/// repeats, even when it closes the last layer).
+/// leaves the lower one open; a fresh Escape at once closes that one, returning focus to the terminal, and neither a
+/// held repeat of it nor a fresh Escape at once reaches the terminal.
 #[gpui::test]
 fn a_held_escape_closes_one_layer_and_a_second_press_the_next(cx: &mut TestAppContext) {
     let (cx, terminal, typed) = open_recording_terminal(cx);
@@ -1941,11 +1941,65 @@ fn a_held_escape_closes_one_layer_and_a_second_press_the_next(cx: &mut TestAppCo
         typed.borrow()
     );
     keys(cx, "escape");
+    assert!(
+        typed.borrow().is_empty(),
+        "a fresh Escape within 500 ms of the last dismissal did not reach the terminal: {:?}",
+        typed.borrow()
+    );
+}
+
+/// Why this matters: Escape is the key that interrupts an agent's turn in its terminal, and a user backing out of a
+/// dialog often taps it twice. When the dialog was the last layer, focus is back on the terminal by the second tap, so
+/// without this the second Escape would interrupt the agent the user never meant to touch. So a dismissal's quick
+/// second press is swallowed the way a repeated Enter is, while an Escape pressed deliberately later still reaches the
+/// program.
+///
+/// Specified: Escape closes the one dialog over the terminal and focus is back on it; a held repeat of that Escape, a
+/// fresh Escape at once, a fresh Escape exactly 500 ms after it, and a held repeat after that are neither counted (a
+/// mark taken after the dismissal still holds) nor delivered to the terminal. A fresh Escape 501 ms after the closing
+/// one reaches the terminal and counts as usual, and so does its own held repeat.
+#[gpui::test]
+fn a_second_escape_after_the_last_layer_closed_reaches_nothing_within_the_interval(
+    cx: &mut TestAppContext,
+) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let only = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, dialog) && focused(cx, &terminal),
+        "the premise: Escape closed the dialog and focus went back to the terminal"
+    );
+    assert!(
+        typed.borrow().is_empty(),
+        "the premise: the closing Escape itself reached only the dialog"
+    );
+    let dismissed = cx.update(|_, cx| Mark::take(cx));
+
+    held(cx, "escape");
+    keys(cx, "escape");
+    advance(cx, Duration::from_millis(500));
+    keys(cx, "escape");
+    held(cx, "escape");
+    assert!(
+        !moved_on(cx, &dismissed),
+        "no repeat of the closing Escape counted as moving on"
+    );
+    assert!(
+        typed.borrow().is_empty(),
+        "no repeat of the closing Escape reached the terminal: {:?}",
+        typed.borrow()
+    );
+
+    advance(cx, Duration::from_millis(1));
+    keys(cx, "escape");
+    held(cx, "escape");
     assert_eq!(
         *typed.borrow(),
-        ["escape"],
-        "a fresh Escape after a dismissal reached the terminal, although within 500 ms"
+        ["escape", "escape held"],
+        "a fresh Escape after the interval, and its own repeat, reached the terminal"
     );
+    assert!(moved_on(cx, &dismissed), "and that Escape counted");
 }
 
 /// Why this matters: a key that closes one layer often opens the next, as a row's menu item opens its question, and
