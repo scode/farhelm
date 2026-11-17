@@ -44,6 +44,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
+  managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
+  repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
+  source's actual directory, while Clone starts on a managed checkout) and the current release does the same, but it
+  confuses users. Look into how to make it not confusing. Unrelated to the GPUI migration.
+
 - **Managed checkout says no checkout folder is configured.** In the GPUI desktop app (a devbuild with fresh state),
   choosing Managed checkout of a repository on a remote host showed "no checkout folder is configured; set one in this
   host's settings or a default in Settings → Checkouts", and the Folder field read "Checkout preview unavailable". This
