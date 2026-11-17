@@ -1,5 +1,5 @@
 ---
-kind: breaking
+kind: removed
 ---
 
 `farhelm helm setup`, which installed systemd user services running a helm and a supervisor on a Linux machine, is
@@ -22,3 +22,6 @@ installer's `~/.local/bin/farhelm` is, now for that reason rather than for setup
 `farhelm-helm.service`, which setup also installed there; the cleanup above applies to it on that host. Setup also left
 a harmless `.farhelm-setup.lock` file in the unit directory, which can be deleted with the services. The removal of
 `farhelm helm run` has its own entry, `remove-helm-run.md`.)
+
+(Curator: the maintainer ruled on 2026-11-16 that this is not a breaking change, because `farhelm helm run` and
+`farhelm helm setup` were never a user-supported surface; list it as a removal in a normal release.)
