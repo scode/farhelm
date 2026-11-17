@@ -49,9 +49,10 @@ number keys over them (see "Seeded templates"). `--scripted-hosts` gives the app
 directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/devbuild-mac.sh` stages them) to install
 from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no release to download
 payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this option is the way to
-pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run. It
-builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
-whatever `start` had already taken, the lock included.
+pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run.
+`--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs"). It builds
+with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases whatever
+`start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
@@ -136,6 +137,59 @@ the names are the labels in `e2e.rs`), `action_delay_ms` (a pause before each st
 removing it: an uninstall then plans without a connection, which is the only way a fake host, never connected, can be
 uninstalled; without it, uninstall refuses a fake host as not connected). The backend appends one line per probe and
 step to `events.jsonl` beside it (`{"event": ..., "target": ...}`), which tells a step what the helm actually did.
+
+## Staged runs
+
+NOTE: A staged remote host is this machine, reached over ssh. Nothing a staged run does may reach the machine's own
+Farhelm installation, its real agents or its real account; the arrangement below exists to make sure of that.
+
+A staged run is one with `--remote-host` (and, once it exists, the scenario front end's option, which `staged_start` in
+`scripts/gui-agent.py` is where to add it; a scenario with only the local host is staged too). A plain `start` with
+neither is not staged and keeps the caller's HOME and PATH, until the private environment below has been tried on a Mac.
+
+`start --remote-host DEST` (repeatable) stages a fleet of several hosts, which the README hero, the demo video and the
+docs screenshots need. For each destination `start` starts one more supervisor from the run's `farhelm`, in the run's
+own `r0`, `r1`, ... state directories (logs in `logs/r<N>.log`), and writes `ensure-hosts.json5` in the helm's
+`--ensure-hosts` format, naming each destination with that build's `farhelm` and that state directory. The app's agent
+build hands the file to its embedded helm (`FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, defined in
+`crates/farhelm-desktop/src/agent.rs` and read by the app's startup in `lib.rs`), which registers the hosts before it
+serves, so the window shows them from the start. Each destination must be a different spelling of this machine
+(`localhost`, `you@localhost`), since the helm keys hosts on the destination string, and must take passwordless ssh:
+`start` checks that first and refuses naming the one that failed. Nothing checks that DEST really is this machine; a
+real remote would be dialed at this checkout's `farhelm` and a run directory under `/tmp`, neither of which exists
+there. `stop` ends those supervisors and their terminal hosts, signalling each only while its pid, start time and state
+directory still match the record. Only the agent build reads the variable; no other build of the app registers a host at
+startup.
+
+A staged run's sessions are launched by an agent harness's bare name (`claude`, `codex`, and every other program the
+helm composes an agent launch with: `STAGED_AGENTS`, which the tests check against
+`crates/farhelm-helm/src/launches.rs`), so that their rows read the way a real launch does, and those names must never
+reach the vendors' real programs. So a staged run always runs the app, its supervisor, the remote supervisors and every
+session with a private HOME and PATH inside the run directory (`staging/home` and `staging/bin`), with `/bin/bash` as
+the login shell. The variables that point at the caller's configuration (`XDG_CONFIG_HOME`, `ZDOTDIR` and a few more)
+are removed, and so are credentials and vendor settings, by name pattern: anything starting with a vendor's prefix
+(`ANTHROPIC_`, `CLAUDE_`, `OPENAI_`, `CODEX_`, `AWS_`, which covers the cloud credentials Claude Code's Bedrock mode
+uses, and a few more) or ending in `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD`. There is no option to turn any of that
+off. `staging/bin` holds a wrapper for every harness name that runs the fake agent: the script `.staged-agent` in the
+session's working directory with `sh` when there is one (that is how a scenario gives each session its own replay), and
+the basic script otherwise, with every argument passed on. The private HOME's login profile puts the wrappers first on
+PATH again after the system's profile, because the supervisor starts sessions through a login shell and a system profile
+may rebuild PATH (macOS's `path_helper` does). `start` refuses a build directory that holds a program of a harness's
+name, because the launch shim puts the directory of the supervisor's `farhelm` ahead of everything else on a session's
+PATH. `scripts/test-gui-agent.py` resolves every name through a staged run's PATH and through the machine's own login
+shell and checks each reaches its wrapper.
+
+A staged run also turns `--scripted-hosts` on, with no way to turn it off, also when `scripts/gui-lifecycle.py`
+relaunches it (every launch through the bridge, `start`'s and a relaunch's, decides from the run's record;
+`gui-lifecycle.py`'s `launch_aside` runs the binary outside the bridge with the caller's own environment, neither staged
+nor faking provisioning, which is fine only because the lifecycle check never stages its run): a real setup, Update or
+uninstall of a staged host would act on this machine's own Farhelm installation, so the helm fakes all of them. The
+connection to each host's supervisor stays real.
+
+Not done yet: the scenario front end (sessions with titles, hosts, statuses and transcripts). The seeded `--sessions`
+and `--fleet` sessions run on the local host as before, their command an absolute path to the fake agent. A staged run
+on a Mac has not been tried; there the vendors' credentials also live in the login Keychain, which a private HOME does
+not hide. On Linux it was checked with two remote hosts.
 
 ## What a run is made of
 

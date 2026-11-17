@@ -655,11 +655,12 @@ systemd or SSH substrate ran.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop app' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-desktop`
   — the desktop app's process (`crates/farhelm-desktop/`): the bootstrap's supervisor discovery, record and replacement
   decisions, the pre-window refusal surface and its native helper commands, the host listing it reads at startup, the
-  app's state files, the window frame's format and restore arithmetic, bundle resolution, the updater against injected
-  dependencies (no network or real bundle), and the update readout's wording. Excluded from the workspace nextest run
-  above, so this is the only development run of these tests. On Linux it needs the packages the clippy entry above
-  names, and no others. The release gate runs this selection on both of its test legs: on x86_64 Linux after the
-  workspace run, and on macOS together with the GUI crates
+  app's state files, the window frame's format and restore arithmetic, the embedded helm's arguments carrying a staged
+  run's ensure-hosts file (its hosts listed, at made-up `.invalid` destinations it never reaches), bundle resolution,
+  the updater against injected dependencies (no network or real bundle), and the update readout's wording. Excluded from
+  the workspace nextest run above, so this is the only development run of these tests. On Linux it needs the packages
+  the clippy entry above names, and no others. The release gate runs this selection on both of its test legs: on x86_64
+  Linux after the workspace run, and on macOS together with the GUI crates
   (`-p farhelm-desktop -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping`), each with a doctest run beside
   it.
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` — proves every ban in
@@ -739,21 +740,25 @@ systemd or SSH substrate ran.
   session.
 - `python3 -B scripts/test-gui-agent.py` — the harness that drives the GPUI app (`scripts/gui-agent.py`,
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
-  shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
-  bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
-  supervisor program, the window size, appearance and payload directory a run asks for, and the start dialogs off unless
-  it asks for them), the payload directory's checks (absolute, and an existing directory), the seeding requests (a
-  `--fleet` kind's replay shape, its transcript fitting a narrow terminal, and only the waiting kind declaring an agent
-  type; the `spawner` kind's spawn script by its bare name, and the local host's YOLO setting it turns on), the wait for
-  a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply without a body read as
-  none, that a recorded pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS,
-  in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the
-  run may still be running, given up by a holder whose `start` was killed while it waited, and a lock path that cannot
-  be opened failing at once. Seconds; starts and builds nothing; runs on Linux and macOS. The harness itself is a tool,
-  not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and
-  lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the script changes, and an
-  end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup
-  changes.
+  shallow enough for the deepest socket's path limit), a staged run's safety (every harness's program resolving to the
+  run's wrapper through its private PATH and the machine's own login bash, whatever the caller's PATH and profile say;
+  no credential or caller configuration left; the scripted backend forced on at every launch, a relaunch included; the
+  wrapped names matching the helm's launch programs), its remote supervisors against a stand-in `farhelm` (started
+  staged, recorded before any wait, stopped with their terminal hosts, a stranger's pid never claimed), the app's
+  environment (nothing of the caller's display, bus, bridge or `FARHELM_*` variables; on Linux the run's own compositor
+  and lavapipe; the run's state directory and supervisor program, the window size, appearance and payload directory a
+  run asks for, and the start dialogs off unless it asks for them), the payload directory's checks (absolute, and an
+  existing directory), the seeding requests (a `--fleet` kind's replay shape, its transcript fitting a narrow terminal,
+  and only the waiting kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local
+  host's YOLO setting it turns on), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text
+  shows, a helm reply without a body read as none, that a recorded pid whose start time no longer matches is never
+  signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder
+  is stopped, kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed
+  while it waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on
+  Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and
+  needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run
+  the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
+  `farhelm-desktop`, or the app's startup changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
