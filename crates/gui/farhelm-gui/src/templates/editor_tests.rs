@@ -10,19 +10,19 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, KeyedEntry, PREFERENCES_KEY,
-    Preferences,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
+    PREFERENCES_KEY, Preferences,
 };
-use farhelm_proto::{LaunchEffort, LaunchHarness};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchTarget, Place};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
-use super::dialog_tests::{open_header, painted, push, template};
+use super::dialog_tests::{open_header, open_header_with, painted, push, template};
 use super::fields::Draft;
 use crate::components::EditCommand;
 use crate::focus;
 use crate::layers;
-use crate::test_support::{self, any_open, click, frame, keys, settle};
+use crate::test_support::{self, any_open, click, frame, keys, meta, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -618,6 +618,265 @@ fn an_unknown_host_identity_is_kept_as_retained(cx: &mut TestAppContext) {
     assert_eq!(draft(cx).fields.host.as_deref(), Some("install-gone"));
 }
 
+// ---- Where its sessions run ------------------------------------------------------------------------------------------
+
+/// A recipe as the helm pushes it, keyed by its name: `name` on `base`, built nowhere.
+fn recipe(name: &str, base: Value) -> KeyedEntry {
+    let value = json!({
+        "name": name, "size": {"cpus": 2, "memory_gb": 4, "disk_gb": 20}, "base": base, "packages": [],
+        "claude": null, "codex": null, "claude_login_credential": null, "codex_login_credential": null,
+        "github_token_credential": null, "tunnels": [], "snapshot": null, "build": {"state": "idle"},
+        "prepared": null, "preparation": {"state": "idle"}, "cleanup_pending": false,
+    });
+    KeyedEntry {
+        key: name.into(),
+        value,
+    }
+}
+
+/// [`open_header`] with the pinned fixture hosts at `hosts` (0: host1, local, Podman usable; 1: host2, SSH, Podman not
+/// installed; 2: host3, SSH with no check at all, read as "this host cannot run containers"; install identities
+/// `identity1` to `identity3`) and the recipe catalog `recipes`, in that order.
+fn open_fleet<'a>(
+    cx: &'a mut TestAppContext,
+    templates: &[LaunchTemplate],
+    hosts: &[usize],
+    recipes: Vec<KeyedEntry>,
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let keys: Vec<String> = recipes.iter().map(|recipe| recipe.key.clone()).collect();
+    let catalog = CollectionState {
+        collection: Collection::Recipes,
+        meta: meta(&keys.iter().map(String::as_str).collect::<Vec<_>>()),
+        entries: recipes,
+    };
+    let hosts = crate::launcher::view_tests::fixture_hosts(hosts);
+    open_header_with(cx, templates, None, vec![hosts, catalog])
+}
+
+/// What the control drawn under `id` reports as its value (a select's closed text), empty when it is not drawn.
+fn value_of(cx: &mut VisualTestContext, id: &str) -> String {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .and_then(|node| node.value.map(|value| value.to_string()))
+        .unwrap_or_default()
+}
+
+/// The open editor's draft's environment, as its `target` field stores it.
+fn target(cx: &mut VisualTestContext) -> Option<LaunchTarget> {
+    draft(cx).fields.target
+}
+
+/// A new environment of `recipe` at `place`.
+fn environment(recipe: &str, place: Place) -> LaunchTarget {
+    LaunchTarget::Environment {
+        recipe: recipe.into(),
+        place,
+    }
+}
+
+/// The old acceptance case "template placement keeps Host editable after leaving an environment"
+/// (`tensorlake-sandbox-sessions.spec.ts`): leaving an environment must leave a Host the user can fill in, and the save
+/// must store a plain host, since the helm refuses a template holding a host and a placement. Specified: a legacy
+/// `{recipe: session-ready}` template opens on New sandbox with Recipe showing `session-ready` and no Host select;
+/// Existing host shows the Host select on "Choose a host"; identity2 chosen there stays through a second press of
+/// Existing host; Save stores `host` with no `target` and no `recipe`; and a Host field added to another template then
+/// starts on Existing host, present and empty.
+#[gpui::test]
+fn leaving_an_environment_keeps_the_host_editable(cx: &mut TestAppContext) {
+    let ordinary = TemplateFields {
+        kind: Some(LauncherKind::Command),
+        command: Some("sleep 300".into()),
+        yolo: Some(false),
+        ..TemplateFields::default()
+    };
+    let legacy = TemplateFields {
+        recipe: Some("session-ready".into()),
+        ..TemplateFields::default()
+    };
+    let stored = vec![
+        template("ordinary", ordinary),
+        template("sandboxed", legacy),
+    ];
+    let catalog = vec![recipe(
+        "session-ready",
+        json!({"kind": "tensorlake_ubuntu"}),
+    )];
+    let (mut helm, cx) = open_fleet(cx, &stored, &[0, 1, 2], catalog);
+    open_editor(&mut helm, "template-open-sandboxed", cx);
+    assert_eq!(pressed(cx, "templates-runs-on-New sandbox"), Some(true));
+    assert_eq!(value_of(cx, "templates-recipe"), "session-ready");
+    assert!(!drawn(cx, "templates-host"), "no Host select there");
+
+    click(cx, "templates-runs-on-Existing host");
+    assert_eq!(value_of(cx, "templates-host"), "Choose a host");
+    click(cx, "templates-host");
+    click(cx, "templates-host-option-identity2");
+    let host = |cx: &mut VisualTestContext| draft(cx).fields.host;
+    assert_eq!(
+        host(cx).as_deref(),
+        Some("identity2"),
+        "the premise: chosen"
+    );
+    click(cx, "templates-runs-on-Existing host");
+    assert_eq!(
+        host(cx).as_deref(),
+        Some("identity2"),
+        "the chosen segment changes nothing"
+    );
+
+    click(cx, "templates-save");
+    let (id, body) = one(&mut helm, Method::Put, "/api/templates/sandboxed");
+    assert_eq!(body["host"], json!("identity2"));
+    assert!(
+        body.get("target").is_none() && body.get("recipe").is_none(),
+        "{body}"
+    );
+    let mut saved = stored.clone();
+    saved[1].fields = serde_json::from_value(body).expect("the fields decode");
+    push(&mut helm, &saved, Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    assert!(
+        !painted(cx).contains("Unsaved changes"),
+        "the premise: saved"
+    );
+
+    click(cx, "template-open-ordinary");
+    settle(cx);
+    assert_eq!(draft(cx).name, "ordinary", "the premise: ordinary opened");
+    click(cx, "templates-add");
+    click(cx, "templates-add-host");
+    assert_eq!(host(cx).as_deref(), Some(""));
+    assert_eq!(pressed(cx, "templates-runs-on-Existing host"), Some(true));
+    assert_eq!(value_of(cx, "templates-host"), "Choose a host");
+}
+
+/// The old `PlacementPicker`'s authoring mode (SPEC.md, "Creation": the template editor does not check readiness):
+/// entering a segment starts the template somewhere it can launch rather than half placed, and a template names a
+/// recipe and place for later launches, so an unusable container host and an unbuilt sandbox recipe stay choosable
+/// while a recipe whose base the provider cannot run does not. Specified, with `tl-image` (a Tensorlake image, which a
+/// container cannot run) listed before `web` (managed Ubuntu): New container enters `web` on host1, the first container
+/// host, dropping the host identity; host2, whose Podman is not installed, is offered with that reason and taken;
+/// `tl-image` is refused there; New sandbox then enters `tl-image` at the Tensorlake account, where `web`, built
+/// nowhere, can be picked; Save stores that as the `target`, with no `host` and no `recipe`.
+#[gpui::test]
+fn entering_an_environment_chooses_its_first_recipe_and_place(cx: &mut TestAppContext) {
+    let on_host = TemplateFields {
+        kind: Some(LauncherKind::Agent),
+        host: Some("identity1".into()),
+        ..TemplateFields::default()
+    };
+    let catalog = vec![
+        recipe("tl-image", json!({"kind": "image", "image": "ubuntu"})),
+        recipe("web", json!({"kind": "tensorlake_ubuntu"})),
+    ];
+    let (mut helm, cx) = open_fleet(cx, &[template("placed", on_host)], &[0, 1, 2], catalog);
+    open_editor(&mut helm, "template-open-placed", cx);
+    click(cx, "templates-runs-on-New container");
+    let fields = draft(cx).fields;
+    let entered = Some(environment("web", Place::PodmanHost(1)));
+    assert_eq!(
+        (fields.target, fields.host, fields.recipe),
+        (entered, None, None)
+    );
+
+    click(cx, "templates-container-host");
+    assert!(painted(cx).contains("Podman is not installed on this host"));
+    click(cx, "templates-container-host-option-2");
+    assert_eq!(target(cx), Some(environment("web", Place::PodmanHost(2))));
+    click(cx, "templates-recipe");
+    click(cx, "templates-recipe-option-tl-image");
+    keys(cx, "escape");
+    assert_eq!(target(cx), Some(environment("web", Place::PodmanHost(2))));
+
+    click(cx, "templates-runs-on-New sandbox");
+    assert_eq!(
+        target(cx),
+        Some(environment("tl-image", Place::TensorlakeAccount))
+    );
+    click(cx, "templates-recipe");
+    click(cx, "templates-recipe-option-web");
+    let sandbox = environment("web", Place::TensorlakeAccount);
+    assert_eq!(target(cx), Some(sandbox.clone()));
+    click(cx, "templates-save");
+    let (_, body) = one(&mut helm, Method::Put, "/api/templates/placed");
+    let saved: TemplateFields = serde_json::from_value(body.clone()).expect("the fields decode");
+    assert_eq!(
+        (saved.target, saved.host, saved.recipe),
+        (Some(sandbox), None, None),
+        "{body}"
+    );
+}
+
+/// A recipe or container host the store stops listing must not be lost (the old "(retained)" labels), and since the
+/// editor does not check readiness (SPEC.md, "Creation"), New container must be offered when its only host is
+/// unusable, which the launcher's rule would hide. Specified, with only `tl-image` (no container base) and host2
+/// (Podman not installed) listed: a container template of `gone` on host 9 shows both retained labels and keeps both; Existing host and
+/// then New container enter host2 with no recipe, the Recipe select on "Choose a recipe".
+#[gpui::test]
+fn retained_choices_and_an_unusable_only_host_stay_in_reach(cx: &mut TestAppContext) {
+    let kept = TemplateFields {
+        kind: Some(LauncherKind::Agent),
+        target: Some(environment("gone", Place::PodmanHost(9))),
+        ..TemplateFields::default()
+    };
+    let tl_image = recipe("tl-image", json!({"kind": "image", "image": "ubuntu"}));
+    let (mut helm, cx) = open_fleet(cx, &[template("kept", kept)], &[1], vec![tl_image]);
+    open_editor(&mut helm, "template-open-kept", cx);
+    assert_eq!(
+        value_of(cx, "templates-recipe"),
+        "Unavailable recipe (retained)"
+    );
+    assert_eq!(
+        value_of(cx, "templates-container-host"),
+        "Unavailable host (retained)"
+    );
+    assert_eq!(target(cx), Some(environment("gone", Place::PodmanHost(9))));
+
+    click(cx, "templates-runs-on-Existing host");
+    click(cx, "templates-runs-on-New container");
+    assert_eq!(target(cx), Some(environment("", Place::PodmanHost(2))));
+    assert_eq!(value_of(cx, "templates-recipe"), "Choose a recipe");
+}
+
+/// The Custom words live only in their input, so two things the old separate copy of the words gave must still hold:
+/// words a stored template keeps beside another choice (one failing today's save rules) come back when Custom is
+/// chosen, as the old editor's seeded words did, and words that do not parse survive an unrelated edit instead of being
+/// put back to the draft's none. Specified: a template storing `--mode` and `ask me` beside the reset shows them once
+/// Custom is chosen; `--mode '` typed there is still the field's text after a session name is added.
+#[gpui::test]
+fn custom_words_come_back_on_custom_and_survive_an_unrelated_edit(cx: &mut TestAppContext) {
+    let words = vec!["--mode".to_owned(), "ask me".to_owned()];
+    let stray = TemplateFields {
+        kind: Some(LauncherKind::Agent),
+        permissions: Some(None),
+        permission_flags: Some(words.clone()),
+        ..TemplateFields::default()
+    };
+    let (mut helm, cx) = open_header(cx, &[template("stray", stray)], None);
+    open_editor(&mut helm, "template-open-stray", cx);
+    assert!(
+        !drawn(cx, "templates-flags"),
+        "the premise: no words beside the reset"
+    );
+    // No agent type: the reset and all six approvals, so a select; Custom is its fourth option.
+    click(cx, "templates-permissions");
+    click(cx, "templates-permissions-option-3");
+    assert_eq!(draft(cx).fields.permission_flags, Some(words));
+    assert_eq!(flags_text(cx), spelled(&["--mode", "ask me"]));
+
+    click(cx, "templates-flags");
+    retype(cx, "--mode '");
+    click(cx, "templates-add");
+    click(cx, "templates-add-name");
+    assert!(
+        draft(cx).fields.name.is_some(),
+        "the premise: the name was added"
+    );
+    assert_eq!(flags_text(cx), "--mode '", "the typed text stays");
+}
+
 // ---- The dialog around the editor ----------------------------------------------------------------------------------
 
 /// Only Escape closes the "+ Add field" menu on its own; the header Close leaves the dialog, as the old dialog's Close
@@ -1030,8 +1289,7 @@ fn flags_text(cx: &mut VisualTestContext) -> String {
             .editor
             .as_ref()
             .expect("an editor is open")
-            .flags_text()
-            .to_owned()
+            .flags_text(cx)
     })
 }
 

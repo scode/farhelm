@@ -968,7 +968,11 @@ agent choice is independent of that destination:
   builds on first launch. New sandbox shows Recipe and retains its built-snapshot and account prerequisites below.
   Recipes unsupported by the selected provider are disabled with a reason. Templates, Clone, quick launch and recent
   setups carry the recipe and place together. Missing recipes or removed place hosts make that placement inapplicable.
-  The template editor offers the same three-way placement choice.
+  The template editor offers the same three-way placement choice. Because a template only names a recipe and place for
+  later launches, which check readiness themselves, the editor does not check readiness: a host with unusable Podman
+  stays choosable with its reason, New sandbox always shows, a recipe without a built snapshot is offered, and only a
+  recipe whose base the provider cannot run is disabled. New container starts there on the first container host, not the
+  last one used.
 - Host: The session launcher's host picker shows each ordinary host's mark and name in the list's existing order,
   including unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End
   browse; Enter or Space chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the

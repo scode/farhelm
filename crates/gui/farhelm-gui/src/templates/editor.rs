@@ -58,12 +58,12 @@
 use std::collections::HashMap;
 
 use farhelm_helm_client::{ApiPath, Method};
-use farhelm_proto::LaunchPermission;
 use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, TemplateDestination, TemplateFields,
     check_new_template_name, check_template_shape, quick_launch_eligible,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
+use farhelm_proto::{LaunchPermission, LaunchTarget};
 use gpui::{
     AnyElement, AnyWindowHandle, App, Context, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Role, SharedString, StatefulInteractiveElement as _,
@@ -76,6 +76,8 @@ use super::shortcuts::{self, Bindings};
 use crate::components::{Button, HoverHelp, TextInputEvent, TextInputState, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::launcher::draft::RunsOn;
+use crate::launcher::request::Recipes;
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::Inline;
 use crate::session;
@@ -232,11 +234,10 @@ pub(super) struct Editor {
     baseline: Draft,
     /// The template being edited.
     draft: Draft,
-    /// The text inputs of the fields the draft sets, and of its name.
+    /// The text inputs of the fields the draft sets, and of its name. The Custom permission words live only in theirs,
+    /// as typed: the draft holds them parsed, or none while they do not parse, and an input is put back to the draft's
+    /// words only when its own text would not parse to them, so a half-typed quote stays as typed.
     inputs: HashMap<Text, Input>,
-    /// The Custom permission words as typed. The draft holds them parsed (or none, while they do not parse); the
-    /// input holds what the user typed, which is what it shows again.
-    flags_text: String,
     /// Whether the "+ Add field" menu is open.
     add_open: bool,
     /// "+ Add field"'s focus handle, where focus returns when Escape closes its menu.
@@ -281,9 +282,9 @@ impl Editor {
         Editor::with(None, Draft::default(), Draft::default(), window, cx)
     }
 
-    /// The one constructor behind the others: `previous`, `baseline` and `draft` as their docs say, the Custom words as
-    /// typed seeded from the draft's stored words (joined so they parse back to the same words), and an input for the
-    /// name and for each text field the draft sets.
+    /// The one constructor behind the others: `previous`, `baseline` and `draft` as their docs say, and an input for the
+    /// name and for each text field the draft sets, the Custom words' input spelling the draft's stored words (joined
+    /// so they parse back to the same words).
     fn with(
         previous: Option<String>,
         baseline: Draft,
@@ -291,18 +292,11 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<TemplatesDialog>,
     ) -> Editor {
-        let flags_text = draft
-            .fields
-            .permission_flags
-            .as_deref()
-            .map(farhelm_proto::join_permission_flags)
-            .unwrap_or_default();
         let mut editor = Editor {
             previous,
             baseline,
             draft,
             inputs: HashMap::new(),
-            flags_text,
             add_open: false,
             add_focus: cx.focus_handle().tab_stop(true),
             save_focus: cx.focus_handle().tab_stop(true),
@@ -376,11 +370,19 @@ impl Editor {
         &self.draft
     }
 
-    /// The Custom words field's text as the editor keeps it, typed or loaded, for tests that check the field shows its
-    /// own template's words and keeps a half-typed quote.
+    /// The Custom words field's text, typed or loaded (empty without the field), for tests that check the field shows
+    /// its own template's words and keeps a half-typed quote.
     #[cfg(test)]
-    pub(super) fn flags_text(&self) -> &str {
-        &self.flags_text
+    pub(super) fn flags_text(&self, cx: &App) -> String {
+        self.typed_text(Text::Flags, cx)
+    }
+
+    /// What the input `which` holds now, or nothing when the draft has no such input.
+    fn typed_text(&self, which: Text, cx: &App) -> String {
+        self.inputs
+            .get(&which)
+            .map(|input| input.state.text(cx).to_string())
+            .unwrap_or_default()
     }
 
     /// Replace the draft's name, as typing it would, for the screenshot golden that shows the leave question.
@@ -437,7 +439,7 @@ impl Editor {
             self.sync_inputs(window, cx);
             return;
         }
-        apply_text(&mut self.draft, &mut self.flags_text, which, text);
+        apply_text(&mut self.draft, which, text);
         cx.notify();
     }
 
@@ -480,36 +482,76 @@ impl Editor {
         });
     }
 
-    /// Remove `field` ([`Field::remove`]), with what belongs to it: the wrapper prefix's unparsed text, the Custom
-    /// words as typed.
+    /// Remove `field` ([`Field::remove`]), with the wrapper prefix's unparsed text; the Custom words' input goes with
+    /// the Approvals that own it.
     fn remove(&mut self, field: Field, window: &mut Window, cx: &mut Context<TemplatesDialog>) {
         self.edit(window, cx, |editor| {
             field.remove(&mut editor.draft.fields);
-            match field {
-                Field::Wrapper => editor.draft.wrapper_input = None,
-                Field::Permissions => editor.flags_text.clear(),
-                _ => {}
+            if field == Field::Wrapper {
+                editor.draft.wrapper_input = None;
             }
         });
     }
 
-    /// Choose the Approvals value. Custom takes the words typed under it; any other choice drops them, as the old
-    /// editor's `permission_words` did, so a template never stores words its choice does not use.
+    /// Choose the Approvals value. Custom takes the words typed under it, or, with no words field yet (Custom was not
+    /// chosen), the words the draft still holds: a stored template that fails today's save rules can keep words beside
+    /// another choice, and the old editor's seeded words brought them back on Custom. Any other choice drops them, as
+    /// the old editor's `permission_words` did, so a template never stores words its choice does not use.
     fn choose_permissions(
         &mut self,
         permission: Option<LaunchPermission>,
         window: &mut Window,
         cx: &mut Context<TemplatesDialog>,
     ) {
+        let typed = match self.inputs.get(&Text::Flags) {
+            Some(input) => input.state.text(cx).to_string(),
+            None => self.shown(Text::Flags),
+        };
         self.edit(window, cx, |editor| {
             editor.draft.fields.permissions = Some(permission);
-            if permission == Some(LaunchPermission::Custom) {
-                editor.draft.fields.permission_flags =
-                    farhelm_proto::split_permission_flags(&editor.flags_text).ok();
-            } else {
-                editor.draft.fields.permission_flags = None;
-                editor.flags_text.clear();
-            }
+            editor.draft.fields.permission_flags = (permission == Some(LaunchPermission::Custom))
+                .then(|| farhelm_proto::split_permission_flags(&typed).ok())
+                .flatten();
+        });
+    }
+
+    /// Choose where the template's sessions run, from the Host field's Runs on switch: `target`'s new environment, or
+    /// with `None` an existing host, which starts unchosen. Either way the legacy recipe-only field goes, so the template
+    /// is stored in the canonical shape. The segment already chosen changes nothing, which keeps a recipe, place or host
+    /// the user chose there. The old editor's `on_target`, with its `PlacementPicker`'s rule for the chosen segment.
+    fn choose_runs_on(
+        &mut self,
+        target: Option<LaunchTarget>,
+        window: &mut Window,
+        cx: &mut Context<TemplatesDialog>,
+    ) {
+        let current = self.draft.fields.launch_target();
+        if RunsOn::of(target.as_ref()) == RunsOn::of(current.as_ref()) {
+            return;
+        }
+        self.edit(window, cx, |editor| {
+            let fields = &mut editor.draft.fields;
+            fields.host = target.is_none().then(String::new);
+            fields.target = target;
+            fields.recipe = None;
+        });
+    }
+
+    /// Change one part of the template's environment, `change` given the environment the template names (its target,
+    /// or a legacy recipe read as one), which is then stored as its target with the legacy recipe gone. Nothing
+    /// happens without an environment.
+    fn edit_target(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<TemplatesDialog>,
+        change: impl FnOnce(LaunchTarget) -> LaunchTarget,
+    ) {
+        let Some(target) = self.draft.fields.launch_target() else {
+            return;
+        };
+        self.edit(window, cx, |editor| {
+            editor.draft.fields.target = Some(change(target));
+            editor.draft.fields.recipe = None;
         });
     }
 
@@ -546,7 +588,13 @@ impl Editor {
         let fields = &self.draft.fields;
         let value = match which {
             Text::TemplateName => self.draft.name.clone(),
-            Text::Flags => return self.flags_text.clone(),
+            Text::Flags => {
+                return fields
+                    .permission_flags
+                    .as_deref()
+                    .map(farhelm_proto::join_permission_flags)
+                    .unwrap_or_default();
+            }
             Text::Field(Field::Command) => fields.command.clone().unwrap_or_default(),
             Text::Field(Field::Model) => fields.model.clone().flatten().unwrap_or_default(),
             Text::Field(Field::Resume) => {
@@ -618,9 +666,8 @@ impl Editor {
                 text == shown
             } else {
                 let mut probe = self.draft.clone();
-                let mut probe_flags = self.flags_text.clone();
-                apply_text(&mut probe, &mut probe_flags, which, text.clone());
-                probe == self.draft && probe_flags == self.flags_text
+                apply_text(&mut probe, which, text.clone());
+                probe == self.draft
             };
             if !in_step {
                 input.state.set_text(shown, window, cx);
@@ -933,11 +980,21 @@ impl Editor {
                     .collect()
             })
             .unwrap_or_default();
+        let recipes =
+            session::current_store(cx).map(|store| Recipes::of(store.read(cx).collections()));
+        let flags = self.typed_text(Text::Flags, cx);
         let rows = rows::Rows {
             editor: self,
             weak,
             palette,
             hosts: &hosts,
+            // A catalog not yet pushed, or unreadable, lists nothing, as in the launcher: a stored recipe then shows
+            // as retained until the catalog arrives.
+            recipes: match &recipes {
+                Some(Recipes::Listed(recipes)) => recipes,
+                Some(Recipes::Loading | Recipes::Unreadable(_)) | None => &[],
+            },
+            flags: &flags,
             catalog,
         };
         let fields = &self.draft.fields;
@@ -1228,17 +1285,14 @@ impl Editor {
     }
 }
 
-/// Mirror `text`, typed into the input `which`, into `draft` (and `flags`, the Custom words as typed), as the old
-/// editor's inputs did: an empty model or resume command is the reset, an empty wrapper prefix is "no prefix", a
-/// wrapper prefix that does not split stays as typed beside the last one that did, and the destination keeps its kind.
-fn apply_text(draft: &mut Draft, flags: &mut String, which: Text, text: String) {
+/// Mirror `text`, typed into the input `which`, into `draft`, as the old editor's inputs did: an empty model or resume
+/// command is the reset, an empty wrapper prefix is "no prefix", a wrapper prefix that does not split stays as typed
+/// beside the last one that did, Custom words that do not parse are none, and the destination keeps its kind.
+fn apply_text(draft: &mut Draft, which: Text, text: String) {
     let fields = &mut draft.fields;
     match which {
         Text::TemplateName => draft.name = text,
-        Text::Flags => {
-            fields.permission_flags = farhelm_proto::split_permission_flags(&text).ok();
-            *flags = text;
-        }
+        Text::Flags => fields.permission_flags = farhelm_proto::split_permission_flags(&text).ok(),
         Text::Field(Field::Command) => fields.command = Some(text),
         Text::Field(Field::Model) => fields.model = Some((!text.is_empty()).then_some(text)),
         Text::Field(Field::Resume) => {
