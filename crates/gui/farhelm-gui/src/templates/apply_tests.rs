@@ -12,6 +12,7 @@ use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields,
     TemplateNameKind,
 };
+use farhelm_proto::session_requests::RestartSessionBody;
 use farhelm_proto::ui_channel::{HostStateView, HostView, SessionRow};
 use farhelm_proto::{
     CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
@@ -21,6 +22,7 @@ use farhelm_proto::{
 use super::apply::{Applied, Context, apply, install_identity, snapshot};
 use crate::hosts::offers::HostKind;
 use crate::launcher::draft::{LaunchDraft, Tab};
+use crate::launcher::request::{Account, Preview, Recipes, Target};
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Fixtures
@@ -133,11 +135,12 @@ fn session(launch: SessionLaunch) -> SessionInfo {
     info
 }
 
-/// A Codex agent session with a stored resume command and a captured conversation, as Restart with opens it.
-fn restart_draft() -> LaunchDraft {
+/// A Codex agent session stored with `model` and Guarded, a resume command and a captured conversation, as Restart with
+/// opens it.
+fn restart_session(model: Option<&str>) -> SessionInfo {
     let selection = LaunchSelection {
         harness: LaunchHarness::Codex,
-        model: Some("gpt-6-luna".into()),
+        model: model.map(str::to_owned),
         effort: None,
         permissions: Some(LaunchPermission::Guarded),
         permission_flags: None,
@@ -155,7 +158,29 @@ fn restart_draft() -> LaunchDraft {
         ]),
     });
     session.restart_offer = RestartOffer::Resume;
-    LaunchDraft::restart_with("s1", &session, Some(1)).unwrap()
+    session
+}
+
+/// [`restart_session`] on `gpt-6-luna`, opened in Restart with.
+fn restart_draft() -> LaunchDraft {
+    LaunchDraft::restart_with("s1", &restart_session(Some("gpt-6-luna")), Some(1)).unwrap()
+}
+
+/// The restart a press of Restart with's main action would send for `draft`, checked against the fixture's hosts and
+/// catalog with `live` as the session's stored launch; `None` while the launcher would refuse the press.
+fn restart_body(
+    fixture: &Fixture,
+    draft: &LaunchDraft,
+    live: &SessionLaunch,
+) -> Option<RestartSessionBody> {
+    let target = Target {
+        hosts: &fixture.hosts,
+        catalog: Some(&fixture.catalog),
+        preview: Preview::Waiting,
+        recipes: &Recipes::Loading,
+        account: &Account::Reading,
+    };
+    draft.restart_body(target, Some(live), false)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -875,39 +900,51 @@ fn restart_with_applies_equal_held_values_as_nothing() {
     assert_eq!(draft.folder.value(), "/src/project");
 }
 
-/// A held field a template would actually change is refused in template order, naming the field, and nothing
-/// applies. Initial prompts are always refused in Restart with.
+/// Restart with keeps the launch kind, agent type, host, folder and session name fixed and never sends an initial
+/// prompt, so a template that would change one of them must be refused whole, naming the field, or a partly applied
+/// batch would restart with edits the user never saw as one unit (the old `restart-with.spec.ts` case "restart with
+/// refuses a template's held ${field} atomically", over the same six fields). Specified: beside a Low effort, which
+/// alone applies, a template changing the launch kind, the agent type, the host (another install, not a placement), the
+/// folder, the session name or the initial prompt is refused in the old words naming that field, and the draft is
+/// unchanged, the effort included.
 #[test]
 fn restart_with_refuses_a_change_to_a_held_field() {
+    // A plain function pointer per field, so the different closures can share one array.
+    type Change = fn(&mut TemplateFields);
     let fixture = Fixture::new();
-    let mut draft = restart_draft();
-    let before = draft.clone();
-    let claude = template(
-        "claude",
-        TemplateFields {
-            agent: Some(LaunchHarness::Claude),
-            ..TemplateFields::default()
-        },
-    );
-    assert_eq!(
-        fixture.apply(&mut draft, &[claude]).unwrap_err(),
-        "Template \"claude\" was not applied: its agent type cannot change here: this dialog keeps agent type fixed \
-         for restart"
-    );
-    let prompt = template(
-        "prompt",
-        TemplateFields {
-            prompt: Some("hello".into()),
-            ..TemplateFields::default()
-        },
-    );
-    assert!(
-        fixture
-            .apply(&mut draft, &[prompt])
-            .unwrap_err()
-            .contains("its initial prompt cannot change here")
-    );
-    assert_eq!(draft, before);
+    let low = TemplateFields {
+        effort: Some(Some(LaunchEffort::Low)),
+        ..TemplateFields::default()
+    };
+    fixture
+        .apply(&mut restart_draft(), &[template("low", low.clone())])
+        .expect("the premise: the effort alone applies");
+    let changes: [(&str, Change); 6] = [
+        ("launch kind", |f| f.kind = Some(LauncherKind::Command)),
+        ("agent type", |f| f.agent = Some(LaunchHarness::Claude)),
+        ("host", |f| f.host = Some("install-two".into())),
+        ("destination", |f| {
+            f.destination = Some(TemplateDestination::Folder("/other-folder".into()))
+        }),
+        ("session name", |f| f.name = Some("source-other".into())),
+        ("initial prompt", |f| f.prompt = Some("hello".into())),
+    ];
+    for (field, change) in changes {
+        let mut fields = low.clone();
+        change(&mut fields);
+        let mut draft = restart_draft();
+        let before = draft.clone();
+        assert_eq!(
+            fixture
+                .apply(&mut draft, &[template("held", fields)])
+                .unwrap_err(),
+            format!(
+                "Template \"held\" was not applied: its {field} cannot change here: this dialog keeps {field} fixed \
+                 for restart"
+            )
+        );
+        assert_eq!(draft, before, "{field}: nothing applied");
+    }
 }
 
 /// In Restart with, a template's explicit permission reset asks for the agent's guarded default rather than the
@@ -926,6 +963,93 @@ fn restart_with_resets_permissions_to_todays_default() {
     );
     fixture.apply(&mut draft, &[reset]).unwrap();
     assert_eq!(draft.agent.permissions, Some(LaunchPermission::Guarded));
+}
+
+/// A partial agent template is how a user keeps resume settings, so in Restart with it must change what a restart may
+/// change and reach the restart it sends; the tests above pin only what is dropped or refused (the old
+/// `restart-with.spec.ts` case "restart with applies an allowed partial agent template"). Specified: on a Codex session
+/// stored with no model and no permission, a template choosing `gpt-6-luna`, Low effort, a permission reset and the
+/// wrapper prefix `env RESUME_MODE=1` keeps Codex, and the restart sends exactly that selection, the reset as Guarded,
+/// and no command edit.
+#[test]
+fn restart_with_applies_a_partial_agent_template_and_sends_its_choices() {
+    let fixture = Fixture::new();
+    let mut session = restart_session(None);
+    // No stored permission, as the old case's session had, so the reset's Guarded is a change the body must carry.
+    if let SessionLaunch::Agent { selection, .. } = &mut session.launch {
+        selection.permissions = None;
+    }
+    let mut draft = LaunchDraft::restart_with("s1", &session, Some(1)).unwrap();
+    let settings = template(
+        "resume-settings",
+        TemplateFields {
+            model: Some(Some("gpt-6-luna".into())),
+            effort: Some(Some(LaunchEffort::Low)),
+            permissions: Some(None),
+            wrapper_prefix: Some(Some(vec!["env".into(), "RESUME_MODE=1".into()])),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[settings]).unwrap();
+    assert_eq!(draft.agent.harness, Some(LaunchHarness::Codex));
+    let body = restart_body(&fixture, &draft, &session.launch).expect("the template made an edit");
+    assert_eq!(
+        body.with,
+        Some(LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-6-luna".into()),
+            effort: Some(LaunchEffort::Low),
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            workspace_trust: None,
+            wrapper_prefix: Some(vec!["env".into(), "RESUME_MODE=1".into()]),
+            container: None,
+        })
+    );
+    assert_eq!(body.with_command, None);
+}
+
+/// A command template edits only a command launch's own fields, so it needs no launch kind or agent type to apply in
+/// Restart with, and the session keeps its declared agent and Resume (the old `restart-with.spec.ts` case "restart with
+/// applies an allowed partial command template"). Specified: on a Claude command session with a resume command, a
+/// template setting only a new command, a new resume command and YOLO keeps the Command tab with Resume on, and the
+/// restart sends that command launch for Claude, and no agent edit.
+#[test]
+fn restart_with_applies_a_partial_command_template_and_sends_it() {
+    let fixture = Fixture::new();
+    let mut session = session(SessionLaunch::Command(CommandLaunch {
+        command: "claude {farhelm_args}".into(),
+        yolo: false,
+        agent: Some(LaunchHarness::Claude),
+        resume: Some("claude --resume {conversation} {farhelm_args}".into()),
+    }));
+    session.restart_offer = RestartOffer::Resume;
+    let mut draft = LaunchDraft::restart_with("s1", &session, Some(1)).unwrap();
+    let command = "claude --model sonnet {farhelm_args}";
+    let resume = "claude --model sonnet --resume {conversation} {farhelm_args}";
+    let edit = template(
+        "resume-command",
+        TemplateFields {
+            command: Some(command.into()),
+            resume_command: Some(Some(resume.into())),
+            yolo: Some(true),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[edit]).unwrap();
+    assert_eq!(draft.tab, Tab::Command);
+    assert!(draft.command.resume_on, "Resume stays on");
+    let body = restart_body(&fixture, &draft, &session.launch).expect("the template made an edit");
+    assert_eq!(
+        body.with_command,
+        Some(CommandLaunch {
+            command: command.into(),
+            yolo: true,
+            agent: Some(LaunchHarness::Claude),
+            resume: Some(resume.into()),
+        })
+    );
+    assert_eq!(body.with, None);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
