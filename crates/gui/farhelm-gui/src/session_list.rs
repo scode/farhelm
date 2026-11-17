@@ -220,7 +220,7 @@ mod pin_drag_tests;
 mod pins_tests;
 
 #[cfg(test)]
-mod row_tests;
+pub(crate) mod row_tests;
 
 #[cfg(test)]
 mod row_marks_tests;

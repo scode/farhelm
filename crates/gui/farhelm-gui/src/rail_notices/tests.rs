@@ -19,7 +19,7 @@ use super::{
 };
 use crate::hosts::tests::hosts;
 use crate::local_time;
-use crate::session_list::tests::{listing, open_main, painted};
+use crate::session_list::tests::{Fixture, listing, open_main, painted, session};
 use crate::test_support::{self, any_open, focused_id, frame, meta};
 use crate::theme;
 use crate::trash::tests::{checkout, local, remote};
@@ -70,10 +70,20 @@ fn notices(notices: &[Value]) -> CollectionState {
 /// The main view over an empty fleet on the local host and `build-box`, with `held` as the helm's notices, its first
 /// trash reads answered: `build-box` (host 2) lists checkout `c1` stuck, and the local host nothing.
 fn open<'a>(cx: &'a mut TestAppContext, held: &[Value]) -> (FakeHelm, &'a mut VisualTestContext) {
+    open_over(cx, &[], held)
+}
+
+/// [`open`] over the sessions `fleet` in that order, none of them open, for a test that marks a row.
+fn open_over<'a>(
+    cx: &'a mut TestAppContext,
+    fleet: &[Fixture],
+    held: &[Value],
+) -> (FakeHelm, &'a mut VisualTestContext) {
+    let order: Vec<&str> = fleet.iter().map(|session| session.key).collect();
     let (mut fake, cx) = open_main(
         cx,
         vec![
-            listing(&[], &[]),
+            listing(&order, fleet),
             hosts(&[local(), remote()]),
             notices(held),
         ],
@@ -558,6 +568,61 @@ fn open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell(cx: &mut TestA
     test_support::keys(cx, "escape");
     assert!(!any_open(cx), "Escape closed the Trash dialog");
     assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
+}
+
+/// The old case's marking half ("rail Retry and Open Trash share the permanent guarded cleanup owner"): a marked
+/// session puts the marked bar in the list heading's place, which hides the Trash button while the panel's actions
+/// stay on screen. Both actions call into the button's owner, so neither may depend on the button being drawn, as the
+/// archive cue does. Specified: with `a` marked and the Trash button not drawn, Open Trash opens the Trash dialog with
+/// focus on its footer Close, and Escape closes it with focus on the bell; Retry now on the reopened panel is available
+/// and sends one trash delete of `["c1"]` on host 2's connection; `a` stays marked.
+#[gpui::test]
+fn open_trash_and_retry_work_while_marks_hide_the_trash_button(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_over(cx, &[session("a")], &[notice(1, 2, "c1", 10, false, false)]);
+    // Under macOS's click rule no click leaves focus behind, so focus on the bell after Escape is the dialog's doing.
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    let row = test_support::center(cx, "session-row-a");
+    // Ctrl and Cmd both toggle a mark on every OS (`Gesture::from_modifiers`), so this Ctrl-click marks on a Mac too.
+    let toggle = Modifiers {
+        control: true,
+        ..Modifiers::default()
+    };
+    cx.simulate_click(row, toggle);
+    test_support::settle(cx);
+    let marked = || Some("1 marked".to_owned());
+    assert_eq!(
+        test_support::label(cx, "session-marked-count"),
+        marked(),
+        "the premise"
+    );
+    assert!(
+        node(&frame(cx), crate::trash::BUTTON_ID).is_none(),
+        "the premise: the bar hides the Trash button"
+    );
+
+    open_panel(cx);
+    test_support::click(cx, "rail-notice-open-trash-1");
+    assert!(node(&frame(cx), "checkout-trash-dialog").is_some());
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-close"));
+    // Answer the dialog's measured reads (c1 still stuck) and the panel's read mark, so only Retry's delete follows.
+    marks(&mut fake, cx, 200);
+    test_support::keys(cx, "escape");
+    assert!(!any_open(cx), "Escape closed the Trash dialog");
+    assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
+
+    open_panel(cx);
+    let retry = "rail-notice-retry-1";
+    assert!(!disabled(cx, retry), "the listing shows c1 stuck");
+    test_support::click(cx, retry);
+    let deletes: Vec<_> = fake
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/checkout-trash/delete")
+        .filter_map(|command| command.body)
+        .collect();
+    let once = json!({ "host": 2, "expected_incarnation": 1, "ids": ["c1"] });
+    assert_eq!(deletes, [once]);
+    assert_eq!(test_support::label(cx, "session-marked-count"), marked());
 }
 
 /// The old case "rail close marks only shown notices and preserves independent focus": a press on another control
