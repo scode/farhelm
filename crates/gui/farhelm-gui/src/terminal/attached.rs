@@ -266,7 +266,7 @@ use gpui::{
 
 use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
 use super::files::{FileLinks, StatusShown};
-use super::tunnels::{self, Tunnels};
+use super::tunnels::{self, TunnelPill, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
@@ -2902,13 +2902,13 @@ impl AttachedTerminal {
         }
     }
 
-    /// The pill for this session's open tunnels, for the session's top row to place in its left region; `None` while
-    /// there are none ([`tunnels::pill`]).
+    /// The pill for this session's open tunnels, with the narrowest it shrinks to, for the session's top row to place in
+    /// its left region; `None` while there are none ([`tunnels::pill`]).
     pub(crate) fn tunnel_pill(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> Option<TunnelPill> {
         tunnels::pill(&self.tunnels, window, cx)
     }
 

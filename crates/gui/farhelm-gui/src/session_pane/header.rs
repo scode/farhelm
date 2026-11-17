@@ -133,7 +133,6 @@ use crate::session_list::{
 use crate::theme::{self, metrics};
 
 mod fit;
-use fit::Floored;
 
 /// The id of the top row's left region, where the terminal area's tab strip and open-tunnels pill go. The pill shows
 /// while the session has tunnels open; the strip always, its Agent tab at least. The row's layout (a region that takes
@@ -519,35 +518,26 @@ impl SessionPane {
         };
         // The terminal area's part of the left region: the strip of the session's terminals, then the open-tunnels pill
         // while the session has tunnels open (the agent terminal's: SPEC.md's tunnels belong to the session). Buttons,
-        // so they keep their presses inside the title band. The strip and the pill are drawn through `Floored`, which
-        // lays each out with the floor the fit decides beside a pill (`fit`'s module docs); drawn without a fit, they
-        // have none.
+        // so they keep their presses inside the title band. Only the fit gives them their floors beside a pill (`fit`'s
+        // module docs); a left region built without a fit has none.
         let set = self
             .mounted
             .current(cx)
             .as_ref()
             .and_then(|mounted| mounted.set.clone());
-        let strip_floor = fit::Floor::default();
-        let strip = set.as_ref().map(|set| {
-            let strip = crate::terminal::set::TerminalSet::strip(set, window, cx);
-            Floored::new(strip, strip_floor.clone())
-        });
-        let has_strip = strip.is_some();
+        let strip = set
+            .as_ref()
+            .map(|set| crate::terminal::set::TerminalSet::strip(set, window, cx));
         let agent = set.map(|set| set.read(cx).agent().clone());
         let pill_of = |window: &mut Window, cx: &mut Context<Self>| {
             agent.as_ref().and_then(|terminal| {
                 terminal.update(cx, |terminal, cx| terminal.tunnel_pill(window, cx))
             })
         };
-        let pill_floor = fit::Floor::default();
-        let pill = pill_of(window, cx).map(|pill| Floored::new(pill, pill_floor.clone()));
-        // `.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`: a pill tightens the row's gaps.
-        let gap = px(if pill.is_some() {
-            PILL_ROW_GAP
-        } else {
-            ROW_GAP
-        });
+        let pill = pill_of(window, cx).map(|pill| pill.element);
         let shows_pill = pill.is_some();
+        // `.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`: a pill tightens the row's gaps.
+        let gap = px(if shows_pill { PILL_ROW_GAP } else { ROW_GAP });
         let row = div()
             .id("session-header")
             .debug_selector(|| "session-header".into())
@@ -561,23 +551,10 @@ impl SessionPane {
             .overflow_hidden()
             .bg(theme::color(palette.bg_1))
             .text_size(metrics::TEXT_MD);
-        // The left region: the terminal area's tabs and tunnel pill go here. It takes the width the actions leave and
-        // gives it up first (`min_w_0`), so the actions never shrink at the 650-pixel floor.
-        let left = div()
-            .id(TABS_SLOT)
-            .debug_selector(|| TABS_SLOT.into())
-            .flex()
-            .flex_row()
-            .items_center()
-            .flex_1()
-            .min_w_0()
-            .gap(gap)
-            .children(strip)
-            .children(pill)
-            .into_any_element();
+        let left = fit::Left { strip, pill, gap };
         let row = title_band::row(row, Row::SessionTop);
         let Some(store) = session::current_store(cx) else {
-            return row.child(left).into_any_element();
+            return row.child(left.build(None)).into_any_element();
         };
         let collections = store.read(cx).collections();
         let row_now = collections.get::<SessionRow>(key).cloned();
@@ -590,7 +567,7 @@ impl SessionPane {
             self.header.anchors.clear();
             self.header.carets.clear();
             return row
-                .child(left)
+                .child(left.build(None))
                 // Text in the title band keeps its presses: it must not move the window (`desktop::title_band`).
                 .child(title_band::claims_presses(
                     div().child(delete_progress(key, guard, step, cx)),
@@ -601,7 +578,7 @@ impl SessionPane {
         let Some(row_now) = row_now else {
             self.header.anchors.clear();
             self.header.carets.clear();
-            return row.child(left).into_any_element();
+            return row.child(left.build(None)).into_any_element();
         };
         let shown = Shown {
             row: &row_now,
@@ -673,24 +650,17 @@ impl SessionPane {
             pane: cx.weak_entity(),
             retired,
         };
-        // The condensed look and a second pill for the fit to measure, only while a pill shows: without one the actions
-        // never condense.
+        // The condensed look only while a pill shows: without one the actions never condense. The fit measures a second
+        // pill, never drawn (`fit`'s module docs).
         let ordinary = drawn.actions(false, cx);
         let condensed = shows_pill.then(|| drawn.actions(true, cx));
         self.header.anchors = anchors;
         self.header.carets = carets;
-        let pill = if shows_pill {
-            pill_of(window, cx).map(|copy| (copy, pill_floor))
-        } else {
-            None
-        };
         row.child(fit::Fit {
             left,
-            strip: has_strip.then_some(strip_floor),
-            pill,
+            pill: shows_pill.then(|| pill_of(window, cx)).flatten(),
             ordinary,
             condensed,
-            gap,
         })
         .into_any_element()
     }
