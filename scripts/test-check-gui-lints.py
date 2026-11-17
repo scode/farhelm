@@ -103,8 +103,8 @@ fn second(v: Option<u8>) -> u8 {
 
 
 class BanExceptionTest(unittest.TestCase):
-    """A ban switched off outside its owners would quietly undo the rule it protects, in a file the ownership check
-    only reports, so the check must find every such attribute and accept only the owners' own."""
+    """A ban switched off outside its owners would quietly undo the rule it protects, in a file nothing else checks,
+    so the check must find every such attribute and accept only the owners' own."""
 
     OWNER = """\
 #[allow(
@@ -198,8 +198,8 @@ fn wide() {}
         self.assertEqual(sum("outside its owners" in problem for problem in problems), 3)
 
     def test_a_manifest_switching_a_ban_off_for_the_whole_crate_is_reported(self):
-        """A crate-level switch acts on every item at once and sits in a manifest the ownership check only reports, so
-        it must fail the check like an item's. Specified: `[lints.clippy]` allowing or expecting a `disallowed_*` ban
+        """A crate-level switch acts on every item at once and sits in a manifest the attribute scan never reads, so it
+        must fail the check like an item's. Specified: `[lints.clippy]` allowing or expecting a `disallowed_*` ban
         (dashed or not, plain or as a table with a level), clippy's `style` or `all` group, or `[lints.rust]` allowing
         `warnings`, is reported; denying them, or allowing an unrelated lint, is not."""
         manifest = tomllib.loads("""\

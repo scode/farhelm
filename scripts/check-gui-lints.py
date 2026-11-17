@@ -16,14 +16,14 @@ It also holds the bans' exceptions to their owners. A `#[allow(clippy::disallowe
 off for one item, and the foundation ownership table (`docs/gpui/foundation-ownership.md`, the lint exceptions column)
 lists the few items that may carry one: the owners of what the bans protect. The check fails on such an attribute
 anywhere else in `crates/gui/` (the demo crate aside), so a new exception is a change to this list, which review sees,
-rather than a line that slips into a file the ownership check only reports.
+rather than a line that slips into a file nobody else checks.
 
 The same goes for the two switches that act on a whole crate rather than an item: a `[lints.clippy]` (or `[lints.rust]`)
 entry in a GUI crate's Cargo.toml that allows or expects a ban, its group or every warning (directly, or through
 `lints.workspace = true` and the root manifest's `[workspace.lints]`), and a `clippy.toml` or `.clippy.toml` anywhere
 under `crates/gui/` other than the shared one, which clippy would read instead of the shared bans for that crate. No
-crate has a reason for either, so both fail outright. The manifests are reported paths in the ownership table, so
-without this a crate-level switch would pass both the path check and the attribute scan above.
+crate has a reason for either, so both fail outright. Without this a crate-level switch would pass the attribute scan
+above.
 
 The crate is a non-default workspace member, so it shares Cargo.lock and the vendored GPUI patches, and its violations
 compile only with the feature; ordinary builds see an empty crate. Run from anywhere. `scripts/test-check-gui-lints.py`
