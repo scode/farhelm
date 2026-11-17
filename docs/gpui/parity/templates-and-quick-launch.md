@@ -263,6 +263,30 @@ not compile. Its words are tested where they say something
 `templates::dialog_tests::the_button_help_names_the_chord_and_the_marked_template`); the Cmd+J rows' and field's in
 `session_list::quick_switcher::template_list_tests::the_chord_opens_the_template_list_from_a_terminal`
 
+### `tests/podman-environments.spec.ts`
+
+Its file: launcher.
+
+Template cases: "container template quick launch retains its saved place". The spec's other cases are the launcher's and
+Settings and hosts' (the launcher's entry lists them).
+
+ported: a number key on a container template launching out of sight through the environment route alone, with the stored
+recipe and place, and the helm's refusal bringing the launcher back on the stored place, shown in its Recipe and
+Container host rows (`templates::dispatch_tests::a_container_template_on_a_number_key_launches_at_its_place`); the
+placement applying as the launcher's own Runs on edits, refused when its recipe or place host is gone, and left by a
+later template's host (`templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`,
+`a_template_for_the_chosen_segment_changes_only_its_recipe_and_host`,
+`a_legacy_recipe_template_becomes_a_sandbox_target`,
+`a_missing_recipe_or_removed_place_host_is_refused_with_nothing_applied`, `a_template_host_leaves_the_environment`,
+`restart_with_refuses_a_placement`, `a_template_folder_is_refused_in_a_new_environment`); Save as template left out for
+a recipe as well as on a host an environment owns, as the old footer left it out (SPEC.md, "Sandbox sessions", keeps
+Save as template from an environment launch deferred; decided 2026-11-16 by the GPUI migration's coordinator, in place
+of capturing the placement), tested by `templates::save_tests::an_environments_host_offers_no_save_as_template` and
+`a_launch_into_a_new_environment_offers_no_save_as_template`. The Podman check the old place read started for a host
+never checked is the launcher's: a quick launch made out of sight asks for every container host's check and comes back
+shown until one answers
+(`launcher::environment_launch_tests::a_quick_launch_asks_for_the_checks_and_comes_back_until_one_answers`).
+
 ## Deviations
 
 Differences from the old app at the reference commit, each with its reason, and each also reported to the migration's
@@ -374,10 +398,13 @@ orchestrator.
   control just into view, so here the name field sits at the body's bottom edge with the checklist below the fold.
   Showing more needs the coordinator to reveal an area around a control, which it does not offer. Tested by
   `templates::save_tests::opening_the_panel_brings_its_name_field_into_view`.
-- **Save as template on an environment.** The old footer left the action out for a sandbox recipe as well as on a host
-  an environment owns. The host case is ported (tested by
-  `templates::save_tests::an_environments_host_offers_no_save_as_template`); the launcher holds no recipe until its
-  environments work lands, so the recipe case waits for it.
+- **A sandbox template's quick launch is refused until New sandbox is ported.** The old app asked "Create a sandbox for
+  this session?" before a sandbox template's launch went out (`tensorlake-sandbox-sessions.spec.ts`, "a recipe template
+  quick launch asks before one recipe request"). The GPUI launcher does not ask yet, so a template that places sessions
+  on the Tensorlake account (a legacy recipe-only one included) applies, and its launch goes out unconfirmed and the
+  helm refuses it, unless "Create Tensorlake sandboxes without asking" is on. The question comes with the launcher's New
+  sandbox. Decided 2026-11-16 by the GPUI migration's coordinator: accept the interim refusal, with no stopgap in
+  templates.
 - **A refused deletion of a renamed template's old name.** As in the old app, the status line then shows only the helm's
   words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
   moved, and the old one is still there. Tested by
