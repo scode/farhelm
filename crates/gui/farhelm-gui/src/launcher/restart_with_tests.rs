@@ -437,3 +437,47 @@ fn restart_with_sends_the_stored_resume_beside_an_edited_command(cx: &mut TestAp
     );
     assert_eq!(body["with_command"]["resume"], json!(RAW_RESUME), "{body}");
 }
+
+// ---- Held keys ---------------------------------------------------------------------------------------------------
+
+/// A held Enter in the model field applies nothing, as the old field's ignored an auto-repeat, so a key still down from
+/// an earlier control cannot choose a model on its own (restart-with.spec's "restart with model Enter refuses an
+/// unselected draft and held keys", its held half). Specified: `other` typed into Restart with's model field, with the
+/// catalog read failed so typed text applies as a custom id; Enter delivered as an auto-repeat leaves the stored model
+/// and the launcher open; a fresh Enter then applies `other`.
+#[gpui::test]
+fn a_held_enter_in_the_model_field_does_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    restarts(&mut helm, cx);
+    test_support::click(cx, "launcher-model-row");
+    cx.simulate_input("other");
+    settle(cx);
+    assert_eq!(
+        super::view_tests::read(cx, |launcher, _, cx| launcher
+            .model_input
+            .text(cx)
+            .to_string()),
+        "other",
+        "the premise: the model field has the typed text"
+    );
+    cx.simulate_event(gpui::KeyDownEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    settle(cx);
+    assert!(any_open(cx));
+    assert_eq!(
+        draft(cx).agent.model.as_deref(),
+        Some("gpt-5"),
+        "a held Enter applied nothing"
+    );
+    test_support::keys(cx, "enter");
+    assert_eq!(
+        draft(cx).agent.model.as_deref(),
+        Some("other"),
+        "a fresh Enter applies the typed id"
+    );
+}

@@ -767,7 +767,10 @@ impl Launcher {
             cx,
             |launcher: &mut Self, event, window, cx| match event {
                 TextInputEvent::Changed => launcher.model_typed(window, cx),
-                TextInputEvent::Submitted { .. } => launcher.model_enter(window, cx),
+                TextInputEvent::Submitted { held: false } => launcher.model_enter(window, cx),
+                // A held Enter applies nothing: the old launcher's model field ignored an auto-repeated Enter, so a key
+                // held down from an earlier control cannot pick a row or a typed id on its own.
+                TextInputEvent::Submitted { held: true } => {}
             },
         );
         // GPUI runs focus listeners inside the frame's focus phase, where a redraw request is dropped (`focus.rs` works
