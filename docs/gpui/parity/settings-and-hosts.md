@@ -754,7 +754,8 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
   `crates/gui/farhelm-gui/src/hosts/environment_tests.rs`: always asked with "Remove hosts without asking" on, naming
   the sandbox and what goes with it, then the request,
   `delete_sandbox_always_asks_naming_the_sandbox_and_what_goes_with_it`; a container's own words,
-  `a_containers_menu_offers_delete_container_in_its_own_words`; the helm's answer at its bound shown in the question,
+  `a_containers_menu_offers_delete_container_in_its_own_words`; focus starting on Cancel for both, see Deviations,
+  `a_machines_deletion_starts_on_cancel_and_enter_keeps_it`; the helm's answer at its bound shown in the question,
   `a_deletion_the_helm_answers_at_its_bound_shows_in_the_question`; refused during a launch,
   `delete_sandbox_refuses_during_a_launch`; a failed deletion's Retry deleting again, its 504 an ordinary refusal,
   `retry_on_a_failed_deletion_deletes_again_and_a_late_answer_is_a_refusal`; which kinds delete their machine,
@@ -1717,6 +1718,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   sandbox's own name, as the old dialog showed; for a container it is the container's name, where the old dialog showed
   the destination. The title names the host as its row does. Its 504 at the helm's reply bound ("the removal carries
   on") shows in the question as any refusal does; the old dialog had no bound.
+- **Delete sandbox's and Delete container's questions start on Cancel.** The old dialog started on its confirming answer
+  for every host, Delete included, so Enter deleted the machine. SPEC.md, "Opening and closing", starts a risky action
+  that cannot be undone on Cancel, and a deletion takes every session and file in the machine with it. An SSH host's
+  Remove, which adding the host again undoes, still starts on Remove, as the old dialog did.
 - **Delete is hidden while a deletion runs.** The old menu always offered its removal item on a sandbox or container,
   and the helm answered it as busy while a destruction ran; here the menu offers neither Delete nor Retry while a
   deletion is under way, and both come back if it fails.
