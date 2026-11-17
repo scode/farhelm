@@ -5,23 +5,14 @@ sidebar:
   order: 2
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
 A launch template is a set of [session launcher](/docs/using/start-a-session/) choices saved under a name. It holds
 only the choices you put in it, so templates combine: one can pick your usual agent and model, another the host and
 directory of a project, and applying both sets up the whole launch.
 
 ## Make a template
 
-<Screenshot
-  name="launch-templates/templates-button"
-  alt="The templates button beside + (New session) above the session list, which opens the templates panel."
-/>
-
-<Screenshot
-  name="launch-templates/panel"
-  alt="The Templates list: choose a template to edit it, or use + New template to start another."
-/>
+Open **Templates** with its button beside **+** (New session) above the session list. The dialog lists your templates
+beside an editor: choose a template to edit it, or **+ New template** to start another.
 
 Choose **+ New template**, give it a unique name without spaces or other whitespace, then choose **Switches launcher to**: **Agent**, **Command**, or
 **Don't switch**. An agent or command template opens that tab when you apply it. **Don't switch** keeps the current tab
@@ -48,13 +39,13 @@ chosen with the same **Folder** and **Managed checkout** control as the launcher
 moves to the trash when its last session is deleted. A model or a destination can stand on its own. Another template can
 supply the agent or host.
 
-The editor's **Host** field can also choose **New container** with a recipe and container host, or **New sandbox**
-with a recipe. The same choices appear under **Runs on** in the launcher. Applying one restores the recipe and where it
-runs. A removed container host or deleted recipe makes it unavailable. For these destinations, **Folder** means the new
-environment's home and a managed checkout is cloned inside. Deleting its session removes the checkout permanently,
-without trash, unless another session still uses it; deleting the environment removes every checkout in it the same
-way. See [Container sessions](/docs/agents/containerized-sessions/) and
-[sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
+The editor's **Host** field offers your hosts. A template can also place sessions in a new container, with a recipe
+and a container host; applying it sets the launcher's **Runs on** the same way, and a removed container host or deleted
+recipe makes it unavailable. The editor cannot show such a placement yet: it says so, and keeps the placement as stored
+unless you choose a host or remove the field. In a new container the folder is its home, and a managed checkout is
+cloned inside. Deleting its session removes the checkout permanently, without trash, unless another session still uses
+it; deleting the container removes every checkout in it the same way. See
+[Container sessions](/docs/agents/containerized-sessions/).
 
 A **Session name** can be a **Base name** or a **Fixed name**. When you apply a base name in the session launcher or a
 quick launch, or an agent starts a session from the template, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
@@ -66,39 +57,34 @@ Workspace trust comes from [agent trust settings](/docs/using/start-a-session/#t
 choice saved in an older template is ignored and is removed when you save that template again.
 
 Templates belong to the helm, the program that shows you every host's sessions
-([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
-a command still needs that command to exist on the host you launch on.
+([The pieces](/docs/how-it-works/the-pieces/)), so you see the same ones whichever host you launch on. A template that sets a command still
+needs that command to exist on the host you launch on.
 
 ## Quick launch
 
 The [keyboard shortcuts overview](/docs/using/keyboard-shortcuts/#launching) puts the launch keys in one place.
 In Farhelm, **? → Keyboard shortcuts** also shows which templates currently hold **⚡** and number keys.
 
-Mark a template with **⚡** to start it with Cmd+P on a Mac, or Ctrl+Shift+P elsewhere. The session starts and is selected
+Mark a template with **⚡** to start it with Cmd+P on a Mac, or Ctrl+Shift+P on Linux. The session starts and is selected
 without opening the session launcher. Only one template is marked, and in the Templates list its bolt is filled amber
 while the others are outlines: selecting another template's bolt moves the mark, and selecting the filled one clears it. An **Agent** template needs an agent to be marked; a **Command** template needs a nonblank command. With **Don't
 switch**, it is judged as an agent launch.
 
 Choices the template leaves out use the defaults of **+** (New session), including the open session's destination and
-the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). For a container or sandbox session,
-that means its recipe and where it runs for a fresh environment, starting in its home. A template can
-start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
-means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
+the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). A template can start a fresh
+[managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
 fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens
 Templates to help you choose one. Renaming keeps the mark; deleting clears it, and **Undo** restores only the template.
 
-The quick switcher's **Quick launch** row does the same thing. In Firefox, Ctrl+Shift+P may open a private window instead;
-use that row there. While the session launcher is open, the shortcut applies the marked template to the draft and leaves
-**Launch** to you. Other dialogs keep their keyboard shortcuts.
+The quick switcher's **Quick launch** row does the same thing. While the session launcher is open, the shortcut
+applies the marked template to the draft and leaves **Launch** to you. Other dialogs keep their keyboard shortcuts.
 
-To start any template by name, press Cmd+J on a Mac or Ctrl+Shift+J elsewhere. This opens a template-only list: type part
+To start any template by name, press Cmd+J on a Mac or Ctrl+Shift+J on Linux. This opens a template-only list: type part
 of a name, use ↑ and ↓ to choose, then press Enter. If you type the exact name, that template is highlighted. Each row
 shows its saved choices and any **⚡** or number shortcut. A template that needs more choices opens the session launcher
 for you to finish, with a banner saying it needs more choices. The same banner appears if your marked template no
-longer has what it needs to launch. Escape closes the list and returns focus to where you were. Cmd+J does nothing while another dialog
-is open, including the session launcher.
-
-The desktop app accepts this shortcut. In a browser, the browser may keep it: [Chrome](https://support.google.com/chrome/answer/157179?hl=en_1), [Edge](https://learn.microsoft.com/en-us/microsoft-edge/devtools/shortcuts/), and [Firefox](https://support.mozilla.org/en-US/kb/keyboard-shortcuts-perform-firefox-tasks-quickly) list Ctrl+Shift+J for a console on Windows and Linux; Firefox lists Cmd+J for Downloads on a Mac. The browser's shortcut lists do not establish whether Farhelm receives the key.
+longer has what it needs to launch. Escape closes the list and returns focus to where you were. The shortcut does
+nothing while another dialog is open, including the session launcher.
 
 After a quick launch, Rename opens with the session's name selected while the agent is already starting. Enter keeps
 the name; typing replaces it, and Enter saves it. Escape or **Cancel** keeps the name too. Closing Rename takes you to
@@ -107,20 +93,17 @@ the name. If the session launcher opened first, it already offered the name fiel
 If you have clicked or typed elsewhere before the session starts, Farhelm leaves you where you are and skips Rename;
 rename the session from its row instead.
 
-In Settings under **Sessions**, **Name sessions on quick launch** turns this off. It is on by
-default, and the choice is shared by every window using your helm. Naming a session this way leaves its managed
-checkout's directory unchanged: a directory created as `repo-N` keeps that name.
+In Settings under **Sessions**, **Name sessions on quick launch** turns this off. It is on by default. Naming a
+session this way leaves its managed checkout's directory unchanged: a directory created as `repo-N` keeps that name.
 
 ## Number shortcuts
 
-Give a template a number key with the key button beside its **⚡**. Cmd+0–9 in the Mac app, or Ctrl+Shift+0–9
-everywhere else (including a browser on a Mac), starts that template directly, with the same defaults and YOLO questions
-as [quick launch](#quick-launch). The key is the number's position on your keyboard; it does not use the numeric keypad.
+Give a template a number key with the key button beside its **⚡**. Cmd+0–9 on a Mac, or Ctrl+Shift+0–9 on Linux,
+starts that template directly, with the same defaults and YOLO questions as [quick launch](#quick-launch). The key is the number's position on your keyboard; it does not use the numeric keypad.
 
 Each key belongs to one template, and a template has one key at most. Picking an occupied key moves it to this template;
-**No shortcut** removes it. Number keys and **⚡** are independent, and every window shares your bindings. Rename keeps
-the key; delete frees it, and **Undo** restores only the template. Pressing an unbound key from the session list opens
-Templates to help you set one. With the session launcher open, a bound key applies its template to your draft; an
+**No shortcut** removes it. Number keys and **⚡** are independent. Rename keeps the key; delete frees it, and
+**Undo** restores only the template. Pressing an unbound key from the session list opens Templates to help you set one. With the session launcher open, a bound key applies its template to your draft; an
 unbound key shows a message there. Other dialogs keep the keyboard.
 
 Any template can hold a number key, even one that only changes a model or directory. Pressed alone, a partial template
@@ -133,7 +116,7 @@ just as marking it with **⚡** does.
 
 ## Combine templates from the keyboard
 
-Press Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, type template names separated by spaces, then press Enter.
+Press Cmd+X on a Mac, or Ctrl+Shift+X on Linux, type template names separated by spaces, then press Enter.
 For example, Cmd+X, `myproject codex`, Enter starts `myproject`'s setup with `codex`'s choices applied on top. You can
 mix names with number keys: Cmd+X, Cmd+1, Cmd+5, Enter still combines keys 1 and 5, and bare number keys work too. The
 usual quick-launch chord adds your **⚡** template. Later templates win where their
@@ -153,28 +136,22 @@ Undo. Tab can queue one of them when the text before its first space identifies 
 A larger amber pill in the middle of the terminal shows your queued templates and the word you are typing, with a brief entrance and a soft glow.
 With no session open it sits in the middle of the main area; while the launcher is open it stays at the bottom so you
 can keep editing. There is no timeout. Escape cancels; clicking,
-switching windows or opening a dialog cancels too. Arrows and other shortcuts cancel and go to their usual target.
-While the sequence is active, typing stays out of the terminal. Enter with no templates queued cancels. Outside the session launcher, text
-fields keep Cmd+X for Cut, or the browser's usual Ctrl+Shift+X behavior. In the launcher's own fields, a selection keeps
-that normal action; without selected text, the prefix starts a sequence.
+leaving the Farhelm window or opening a dialog cancels too. Arrows and other shortcuts cancel and go to their usual target.
+While the sequence is active, typing stays out of the terminal. Enter with no templates queued cancels. Outside the session launcher, text fields keep the chord for themselves: Cmd+X still cuts on a Mac, and Ctrl+Shift+X starts no sequence there on Linux. In the
+launcher's own fields, a selection keeps that normal action; without selected text, the prefix starts a sequence.
 
 The combined setup starts directly, with the same defaults and YOLO questions as [quick launch](#quick-launch). If a
 template does not fit, the session launcher opens and names the template and choice that need attention. If the combined
 choices still do not make a complete setup, a banner says to complete it there. An unbound
 number opens Templates when you press Enter. With New, Clone, Replace with or Restart with open, Enter applies the queued templates
 to that draft instead of starting a session. The pill says **apply** there; an unbound key or template that does not fit
-shows a message beneath search and leaves that press's edits unapplied. Single number shortcuts and **⚡** still start
+shows a message above search and leaves that press's edits unapplied. Single number shortcuts and **⚡** still start
 immediately from the session list without the prefix.
 
 ## Save a setup from the launcher
 
 When you have set up a launch in **New**, **Clone** or **Restart with**, choose **Save as template**, beside **Reset
 choices**.
-
-<Screenshot
-  name="launch-templates/save-as-template"
-  alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and save explained."
-/>
 
 Agent, model and effort choices are checked when set, as are an initial prompt you typed and command choices. Approvals
 and a wrapper prefix are checked when you chose them; a host and directory only when you picked or typed them. A session
@@ -187,20 +164,13 @@ a template keeps that template's choice. Saving a numbered base keeps the origin
 `app-review`, ready to find the next free checkout when you use it again.
 
 The template keeps the current **Agent** or **Command** tab and only the choices you check. Saving closes the launcher.
-**Cancel** or Escape returns to the setup without saving. **Save as template** is unavailable in **Replace with** and
-for a new container or sandbox launch. Use the template editor to save the recipe and where it runs.
+**Cancel** or Escape returns to the setup without saving. **Save as template** is unavailable in **Replace with** and for any session in a container or sandbox.
 
 ## Edit a template
 
-<Screenshot
-  name="launch-templates/edit-form"
-  alt="codex-deep selected for editing, with its agent switch, Codex, model, effort, add and remove controls, and save button."
-/>
-
 Choose a template's row to open its editor. **Duplicate** opens an unsaved copy with a new name. Changes are saved only
-when you choose **Save**, which is greyed out until there is something to save; leaving an edited template asks whether to save, discard, or keep editing. At phone width, **‹
-Templates** returns to the list. Hidden formatting characters in a template's fields show as visible
-codes, and such a field cannot be edited in place: remove it with **✕** and add it again. A template name
+when you choose **Save**, which is greyed out until there is something to save; leaving an edited template asks
+whether to save, discard, or keep editing. Hidden formatting characters in a template's fields show as visible codes, and such a field cannot be edited in place: remove it with **✕** and add it again. A template name
 with hidden characters shows them the same way and stays unchanged until you choose **Replace name**, which clears it
 so you can type a new one. A template whose session name
 or command contains hidden or control characters still launches, but Farhelm refuses to save changes to it until you
@@ -211,7 +181,7 @@ visible with a message: change or remove it before saving. A stored template tha
 but has no saved tab choice opens with that tab chosen and marked as **Unsaved changes**; saving stores that choice,
 while discarding keeps the template applying as before.
 
-**Delete** removes a template immediately. The **Undo** notice lasts about ten seconds while the panel stays open;
+**Delete** removes a template immediately. The **Undo** notice lasts about ten seconds while Templates stays open;
 choose it to restore the template, provided another template has not taken its name. An older template that no longer
 meets today's rules for saving shows **Delete permanently** instead, and cannot be restored.
 
@@ -220,18 +190,9 @@ template never changes a session that already started from it.
 
 ## Apply templates in the launcher
 
-<Screenshot
-  name="launch-templates/apply"
-  alt="The launcher's search box with tl: typed, listing the three templates."
-/>
-
-<Screenshot
-  name="launch-templates/applied"
-  alt="The launcher after applying codex-deep and then api-repo, launching Codex on build-box in ~/src/api."
-/>
-
-Templates apply in the order you choose them, and where two set the same choice, the later one wins. A template only
-fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
+In the session launcher, type `tl:` in the search box to list your templates, or `tl:` and part of a name to narrow
+them, then pick one to apply it. Templates apply in the order you choose them, and where two set the same choice, the
+later one wins. A template only fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
 by hand as usual.
 
 You can also press the **⚡** shortcut, a bound number key, or a completed launch sequence while New, Clone, Replace
