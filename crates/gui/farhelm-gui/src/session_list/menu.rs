@@ -23,10 +23,10 @@
 //! room below that top less 8 (`menu_panel.rs`'s `session_menu_placement_style` at reference commit `24bc0580`); here
 //! the cap does not depend on the menu's top, which the layer manager decides from the menu's measured height, and its
 //! clamp puts the menu flush against the area's edge (its `Placement::Beside` docs), so the 16 pixels lie on one side.
-//! The panel is a [`focus::scroll_region`], so Up, Down, Home, End and Tab bring the command they land on into view.
-//! The one exception is where the menu opens: Up on the closed button starts it on Delete, and nothing scrolls to a
-//! layer's start below the fold (the focus coordinator's module docs), so an environment session's menu, whose two
-//! extra commands make its commands alone taller than the cap in the smallest window, can open on a Delete out of view.
+//! The panel is a [`focus::scroll_region`], so Up, Down, Home, End and Tab bring the command they land on into view,
+//! and so does opening: the command the menu opens on is scrolled into view once the menu is first drawn, which matters
+//! when Up on the closed button opens an environment session's menu on its Delete, since that menu's two extra
+//! commands make its commands alone taller than the cap in the smallest window.
 //!
 //! The menu's header is the shared [`MenuHeader`], which the host menu draws too: it names the session and says, in one
 //! line, which agent it runs and its status. Below it come the commands, in a [`Role::Menu`] of their own, so the
@@ -404,7 +404,7 @@ impl SessionList {
             scroll: ScrollHandle::new(),
         });
         let opened = layers::open_popover(
-            Popover::menu(view, cx.focus_handle(), anchor, start)
+            Popover::menu(view, cx.focus_handle(), anchor, start.clone())
                 // The button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and SPEC.md returns focus to the button when the menu closes.
                 .returns_to(focus::ReturnTo::Control(button)),
@@ -418,6 +418,11 @@ impl SessionList {
                 .rows
                 .borrow_mut()
                 .opened(key, menu, Opened::Menu);
+            // The layer manager focuses the start before the menu is first drawn, when it has no position to scroll
+            // to, and nothing reveals a layer's start (the focus coordinator's module docs). The same move asked of
+            // the coordinator waits for the frame that draws the start, and then scrolls it into view; `start` already
+            // holds focus, so the move changes nothing but the scroll.
+            focus::focus_in_layer(&start, &mark, window, cx);
         }
     }
 
