@@ -20,7 +20,8 @@ import unittest
 import uuid
 from unittest import mock
 
-from brick_test import REPO, UPGRADE_FLOOR, Run, artifact, checks, metadata, plan, priority_entry, smoke, version
+from brick_test import (REPO, UPGRADE_FLOOR, Run, Source, artifact, checks, metadata, plan, priority_entry, smoke,
+                        version)
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -152,6 +153,87 @@ fresh fixture keeps its four checkpoints.
         inputs['install.sh'] = b'different bytes'
         with self.assertRaises(Refused):
             metadata('v0.25.0', fetch)
+
+
+class SourceOverrideTests(unittest.TestCase):
+    """Pin where the real Git reader looks for an old release's update override.
+
+Planning tests use FakeSource, so they cannot catch the reader looking in the
+wrong place. These build a throwaway repository with fictional release tags in
+each source layout and run the actual `Source` against it. Git is told who the
+committer is on its command line, so neither the test process's environment nor
+the user's Git configuration has to supply an identity.
+"""
+
+    NEW = 'crates/farhelm-desktop/src/updater.rs'
+    OLD = 'crates/farhelm-ui/src/desktop/updater.rs'
+    SUPPORTED = 'const LATEST_OVERRIDE: &str = "FARHELM_DESKTOP_UPDATE_LATEST";\n'
+    UNSUPPORTED = 'const ORIGIN: &str = "https://get.farhelm.io";\n'
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        self.git('init', '-q')
+
+    def git(self, *args):
+        """Run Git in the fixture repository with a fixed identity, no signing or hooks, and a bound.
+
+Commit and tag signing are both turned off here because a machine's global configuration may turn them on, and a
+signed tag would need a message and a key agent; the timeout keeps such a surprise from hanging the suite.
+"""
+        return subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Fixture',
+                               '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
+                               '-c', 'tag.gpgSign=false', '-c', 'core.hooksPath=/dev/null', *args],
+                              check=True, capture_output=True, text=True, timeout=30).stdout
+
+    def release(self, tag, files):
+        """Tag a commit whose `crates/` tree holds exactly `files`, like a release cut from that layout."""
+        shutil.rmtree(self.root / 'crates', ignore_errors=True)
+        for path, text in files.items():
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text(text)
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', tag)
+        self.git('tag', tag)
+        # The cases below depend on which files each tag holds, so check that
+        # premise against Git itself rather than trusting the working tree.
+        self.assertEqual(self.git('ls-tree', '-r', '--name-only', tag).splitlines(), sorted(files))
+
+    def test_post_gpui_release_is_read_at_the_desktop_crate_path(self):
+        """A GPUI-era previous stable must be planned from its own updater source.
+
+Releases cut after the GPUI cutover keep the updater in farhelm-desktop. The
+reader answers from that file, and when a tag somehow holds both paths the new
+one wins: its marker-free text means no override even though the stale old
+file carries the variable.
+"""
+        self.release('v0.30.0', {self.NEW: self.SUPPORTED})
+        self.release('v0.31.0', {self.NEW: self.UNSUPPORTED, self.OLD: self.SUPPORTED})
+        self.assertTrue(Source(self.root).override('v0.30.0'))
+        self.assertFalse(Source(self.root).override('v0.31.0'))
+
+    def test_pre_gpui_release_falls_back_to_the_ui_crate_path(self):
+        """Older previous stables, back to the upgrade floor, keep their override decision.
+
+A tag with only the webview-era path is read there, and the answer still
+depends on whether that file names the override variable.
+"""
+        self.release('v0.23.0', {self.OLD: self.UNSUPPORTED})
+        self.release('v0.24.0', {self.OLD: self.SUPPORTED})
+        self.assertFalse(Source(self.root).override('v0.23.0'))
+        self.assertTrue(Source(self.root).override('v0.24.0'))
+
+    def test_release_without_updater_source_is_refused(self):
+        """An unknown layout stops planning instead of quietly choosing the manual branch.
+
+A tag with neither path is refused with a message naming the fix, and a tag the
+checkout lacks keeps the ordinary missing-source refusal.
+"""
+        self.release('v0.25.0', {'crates/farhelm/src/main.rs': 'fn main() {}\n'})
+        with self.assertRaisesRegex(Refused, 'no desktop updater source at a known path'):
+            Source(self.root).override('v0.25.0')
+        with self.assertRaisesRegex(Refused, 'release source lookup failed'):
+            Source(self.root).override('v0.26.0')
 
 
 class FakeTart:

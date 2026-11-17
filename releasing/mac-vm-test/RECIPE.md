@@ -316,8 +316,9 @@ Apply the first matching rule and record it in the report:
    latest-release readout observes that the override is gone. If `/latest` moved to the candidate meanwhile, the results
    no longer distinguish the probes: report that coverage gap, not proof that the override was removed. If support in
    the old release is unknown, establish it from its source before choosing this path; for example,
-   `git grep FARHELM_DESKTOP_UPDATE_LATEST v<previous> -- crates/farhelm-ui/src/desktop/updater.rs` shows whether the
-   source carries the variable. Do not infer support from a successful ordinary check.
+   `git grep FARHELM_DESKTOP_UPDATE_LATEST v<previous> -- crates/farhelm-desktop/src/updater.rs crates/farhelm-ui/src/desktop/updater.rs`
+   shows whether the source carries the variable (releases cut after the GPUI cutover have the first path, older ones
+   the second). Do not infer support from a successful ordinary check.
 3. Otherwise (including every RC or dev candidate and an old app without the override): use the candidate installer by
    hand **while the old app runs**. Inside the Mac guest, download its version-path `install.sh` and `SHA256SUMS` to a
    private run directory. Use the previous release's key ring, signature and trusted-comment verification, and
