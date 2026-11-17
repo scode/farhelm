@@ -796,6 +796,40 @@ fn push_keys(helm: &mut FakeHelm, keys: &[(&str, &str)], cx: &mut VisualTestCont
     );
 }
 
+/// Another writer (an agent, the command line, another window) can change the number keys while Templates is open. The
+/// old "number keys move, follow rename, and stay freed after undo" case checked that the next key write keeps such a
+/// change; a write built from what the dialog last knew would silently undo the other writer's key. The old key buttons
+/// showed the keys as the dialog's own reads and writes had left them, so another writer's change stayed undrawn until
+/// the dialog was reopened, where these draw what the store holds (the parity file's deviation "The key buttons follow
+/// pushed bindings"). Specified: with Templates open and no key bound, a push binding key 1 to `my-codex` redraws that
+/// template's key button with key 1's chord; choosing key 2 for `webbuilder` then writes both keys.
+#[gpui::test]
+fn a_key_pushed_while_open_is_drawn_and_kept_by_the_next_key_write(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    click(cx, "templates-button");
+    let draws = |cx: &mut VisualTestContext, chord: String| {
+        texts_within(&frame(cx), "template-key-my-codex")
+            .iter()
+            .any(|line| line.text.as_ref() == chord.as_str())
+    };
+    assert!(
+        draws(cx, super::shortcuts::key_button_text(None)),
+        "the premise: my-codex's key button shows no key"
+    );
+    push_keys(&mut helm, &[("1", "my-codex")], cx);
+    assert!(
+        draws(cx, super::number_key_name("1")),
+        "the pushed key is drawn"
+    );
+    click(cx, "template-key-webbuilder");
+    click(cx, "templates-key-2-item");
+    let (_, body) = one_write(&mut helm);
+    assert_eq!(
+        body,
+        serde_json::json!({"template_shortcuts": {"1": "my-codex", "2": "webbuilder"}})
+    );
+}
+
 /// The key menu says which template holds each key, and a template's own key must read as its own ("This template"),
 /// not as a key to move to it, or the user would take it from themselves (the old "number keys move, follow rename …"
 /// case read it). Specified: with key 2 on `my-codex`, `my-codex`'s menu says "This template" for key 2 and "No
@@ -935,6 +969,34 @@ fn a_write_in_flight_leaves_focus_and_the_dialog_alone(cx: &mut TestAppContext) 
         test_support::focused_id(cx).as_deref(),
         bolt,
         "focus stays after the reply"
+    );
+}
+
+/// The header Close is held while a ⚡ write is out, as Escape is, so that the write's refusal is still reported in the
+/// dialog; the old "quick launch honors a held local mark against the shared read" pressed that Close, which
+/// [`a_write_in_flight_leaves_focus_and_the_dialog_alone`] does not. Specified: a click on the header Close while the
+/// write is in flight leaves the dialog open, and once the helm has stored the mark and replied, the same click closes
+/// it.
+#[gpui::test]
+fn the_header_close_waits_for_a_write_in_flight(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    click(cx, "templates-button");
+    click(cx, "template-bolt-my-codex");
+    let (id, _) = one_write(&mut helm);
+    click(cx, "templates-close");
+    assert!(
+        cx.debug_bounds("templates").is_some(),
+        "Close held the dialog while the write is out"
+    );
+    let marked = Preferences {
+        quick_launch_template: Some("my-codex".into()),
+        ..Preferences::default()
+    };
+    store_and_reply(&mut helm, id, &marked, cx);
+    click(cx, "templates-close");
+    assert!(
+        cx.debug_bounds("templates").is_none(),
+        "and closes it once the write is answered"
     );
 }
 
@@ -1196,7 +1258,8 @@ fn laid_out_dialog(
 /// Specified, with the real text system: two templates holding the keys 1 and 8, the old case's pair, paint their key
 /// buttons' chords each as many advances of the monospace face, at the button's 10 pixels, as the chord has
 /// characters; and the interface face's 1 and 8 differ in advance at that size by more than a pixel (the premise: in
-/// that face the two chords would differ in width).
+/// that face the two chords would differ in width). The old case also compared the key buttons themselves, which take
+/// their width from their chord, so the two buttons are equally wide too.
 #[test]
 fn the_number_keys_digits_are_drawn_at_equal_widths() {
     let digits = ["1", "8"];
@@ -1235,9 +1298,15 @@ fn the_number_keys_digits_are_drawn_at_equal_widths() {
         eight - one > 1.,
         "premise: the interface face's figures are proportional ({one} vs {eight})"
     );
+    let mut buttons = Vec::new();
     for digit in digits {
         let chord = super::number_key_name(digit);
         let id = format!("template-key-key-{digit}");
+        let button = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id.as_str()))
+            .unwrap_or_else(|| panic!("{id} is drawn"));
+        buttons.push(f32::from(button.bounds.size.width));
         let painted = texts_within(&nodes, &id);
         let line = painted
             .iter()
@@ -1250,4 +1319,8 @@ fn the_number_keys_digits_are_drawn_at_equal_widths() {
             "the {digit} chord is {drawn} wide, not {expected} ({mono} per monospace advance)"
         );
     }
+    assert!(
+        (buttons[0] - buttons[1]).abs() < 0.5,
+        "the key buttons are equally wide: {buttons:?}"
+    );
 }

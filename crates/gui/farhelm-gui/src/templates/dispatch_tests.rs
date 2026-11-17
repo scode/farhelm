@@ -1775,6 +1775,33 @@ fn a_partial_number_key_opens_new_with_the_prefix_banner_for_six_seconds(cx: &mu
     );
 }
 
+/// The rest of the old "model-only number key opens New with a temporary composition explanation". SPEC.md has the
+/// banner go "when the user starts editing": reading it is not an edit, so a click on it must leave it up, while a
+/// choice made with a button is an edit as much as typing is. Specified: with 1 on `model-only`, key 1 opens New with
+/// the number key's banner; a click on the banner leaves it, and a click on the Command tab takes it away, New
+/// staying open.
+#[gpui::test]
+fn a_click_on_the_banner_keeps_it_and_a_tab_choice_takes_it_away(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, None);
+    push(&mut helm, cx, bound(None, &[("1", "model-only")]));
+    number_key(cx, 1);
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
+    assert!(
+        banner(cx).is_some_and(|shown| shown.starts_with("model-only cannot launch on its own")),
+        "the premise: New with the number key's banner"
+    );
+    test_support::click(cx, "launcher-banner");
+    assert!(banner(cx).is_some(), "reading the banner is not an edit");
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).tab,
+        crate::launcher::draft::Tab::Agent,
+        "the premise: the Command tab is a change"
+    );
+    test_support::click(cx, "launcher-tabs-Command");
+    assert_eq!(banner(cx), None, "a button choice is an edit");
+    assert!(any_open(cx), "New stays");
+}
+
 /// SPEC.md: a number key "applies it to an open session launcher draft under the same focus, ordering and refusal rules
 /// as the ⚡ chord", and a partial template there needs no banner, since the user is already completing the draft;
 /// launching from there would discard what they were preparing. Specified: with New open, 1 on `partial` and 2 on
@@ -1943,7 +1970,10 @@ pub(super) fn window_without_preferences(
 /// the helm lost them, and acting on none opens Templates to mark a template that may already be marked. Specified:
 /// with ⚡ and key 1 on `go` and then the preferences unavailable ("database is locked"), the chord and key 1 each
 /// send no create, open no Templates, and open New with "Not launched. Couldn't prepare quick launch: database is
-/// locked".
+/// locked", on the helm's own host. The old "a quick preparation error survives New's first host binding" checked that
+/// binding New's defaults after the error did not clear it. New's host is bound as it opens, but its folder default and
+/// the installation it is bound to settle later, from the host's launch history: so, specified too, New shows the error
+/// before that default settles, and still shows it once a history read has settled it.
 #[gpui::test]
 fn unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx, None);
@@ -1953,15 +1983,24 @@ fn unreadable_bindings_refuse_the_chord_and_number_keys_on_the_page(cx: &mut Tes
     for (what, press) in presses {
         assert!(!any_open(cx), "{what}: the premise: nothing is open");
         press(cx);
+        let error = Some("Not launched. Couldn't prepare quick launch: database is locked");
+        assert_eq!(note(cx).as_deref(), error, "{what}");
+        let shown = crate::launcher::view_tests::shown_draft(cx);
+        assert_eq!(shown.host, Some(1), "{what}: on host1");
         assert!(
-            creates(&mut helm, cx).is_empty(),
-            "{what}: nothing launched"
+            shown.folder_install.is_none(),
+            "{what}: the premise: New's default has not settled yet"
         );
-        assert_eq!(
-            note(cx).as_deref(),
-            Some("Not launched. Couldn't prepare quick launch: database is locked"),
-            "{what}"
+        let (sent, history_reads) = creates_and_history_reads(&mut helm, cx);
+        assert!(sent.is_empty(), "{what}: nothing launched");
+        assert!(history_reads >= 1, "{what}: the premise: a history read");
+        assert!(
+            crate::launcher::view_tests::shown_draft(cx)
+                .folder_install
+                .is_some(),
+            "{what}: the premise: New's default settled"
         );
+        assert_eq!(note(cx).as_deref(), error, "{what}: the error survived it");
         assert!(
             !text(cx).contains("Mark a template with ⚡"),
             "{what}: Templates did not open"

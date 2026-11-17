@@ -597,6 +597,91 @@ fn escape_or_cancel_puts_focus_back_in_the_search_box(cx: &mut TestAppContext) {
     );
 }
 
+/// The rest of the old "save as template handles body Escape before the launcher", which pressed Escape with focus on
+/// the page body, outside the panel. The panel takes the launcher's Escape wherever focus is in the launcher, or an
+/// Escape pressed after stepping out of the panel would discard the whole draft. And leaving the panel puts focus in
+/// the search box at the top of the body, which the panel scrolls away; a focused box out of sight takes keys unseen.
+/// Specified: at 1100 by 560, the body overflows without the panel (Tab to the footer's Cancel leaves the search box
+/// out of view, so a closing panel cannot bring it back just by shrinking the body), and the search box is out of the
+/// launcher's body with the panel open; Shift+Tab moves focus out of the panel to a launcher control above it, and
+/// Escape then closes the panel and not New, which keeps its Codex choice, with focus in the search box shown whole in
+/// the body; opened again, Cancel (pressed by keyboard: it is below the fold) does the same; Escape then closes New.
+#[gpui::test]
+fn escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view(
+    cx: &mut TestAppContext,
+) {
+    let (_helm, cx) = launcher_on(cx, codex_draft(), &[]);
+    cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(560.)));
+    settle(cx);
+    let search_shown = |cx: &mut VisualTestContext| {
+        let search = test_support::bounds(cx, "launcher-search-box");
+        let body = test_support::bounds(cx, "launcher-body");
+        search.top() >= body.top() && search.bottom() <= body.bottom()
+    };
+    // The walks below are bounded by the launcher's few dozen stops, so each reaches its target or fails loudly.
+    for _ in 0..40 {
+        if test_support::focused_id(cx).as_deref() == Some("launcher-cancel") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("launcher-cancel"),
+        "the premise: Tab crossed the whole body"
+    );
+    assert!(
+        !search_shown(cx),
+        "the premise: the body overflows without the panel, its last control's reveal hiding the search box"
+    );
+    for leave in ["escape", "cancel"] {
+        click(cx, "launcher-save-template");
+        assert!(
+            !search_shown(cx),
+            "{leave}: the premise: the search box is out of view with the panel open"
+        );
+        if leave == "escape" {
+            keys(cx, "shift-tab");
+            let panel = test_support::bounds(cx, "save-template-panel");
+            let focused = test_support::frame(cx)
+                .into_iter()
+                .find(|node| node.flags.focused && node.element_id.is_some())
+                .map(|node| node.bounds);
+            assert!(
+                focused.is_some_and(|at| at.bottom() <= panel.top()),
+                "the premise: focus left the panel for a launcher control above it: {focused:?}"
+            );
+            keys(cx, "escape");
+        } else {
+            // Cancel sits below the fold, under the checklist, so it is reached as a keyboard user reaches it.
+            for _ in 0..30 {
+                if test_support::focused_id(cx).as_deref() == Some("save-template-cancel") {
+                    break;
+                }
+                keys(cx, "tab");
+            }
+            assert_eq!(
+                test_support::focused_id(cx).as_deref(),
+                Some("save-template-cancel"),
+                "the premise: Tab reached Cancel"
+            );
+            keys(cx, "enter");
+        }
+        assert!(
+            !drawn(cx, "save-template-panel"),
+            "{leave}: the panel closed"
+        );
+        assert!(
+            drawn(cx, "launcher") && codex_chosen(cx),
+            "{leave}: not New"
+        );
+        assert!(search_focused(cx), "{leave}: focus is in the search box");
+        assert!(search_shown(cx), "{leave}: which is in view");
+    }
+    keys(cx, "escape");
+    assert!(!drawn(cx, "launcher"));
+}
+
 /// SPEC.md, "Who may move focus": a result that arrives after the user moved focus moves none. A save's refusal is such
 /// a result, so it must leave focus where the user is: in the panel's name field if they stayed, in the launcher's
 /// search box if they went there while the save was out (the old spec's "save as template refusal respects … focus").
