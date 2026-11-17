@@ -762,14 +762,23 @@ fn the_headings_title_and_actions_stay_whole_at_the_narrowest_sidebar() {
 
 /// The old stylesheet drew a row's working directory in the monospace face (`.session-cwd` in its technical-value
 /// typography), so paths read as technical values and their characters line up; the host's name kept the interface
-/// face. The test text system gives every face the same widths, so only the real one can tell the faces apart.
-/// Specified, with the real text system: a directory of nine narrow characters (`/iiiiiiii`) and one of nine wide ones
-/// (`/MMMMMMMM`), on rows with no host name, each paint nine advances of the monospace face at 12 pixels; and the rows'
-/// titles, six `i`s and six `M`s in the interface face (short enough to stay whole at this width), differ in width
-/// (the premise: that face is proportional, so the comparison can tell the faces apart).
+/// face (`.session-host`) on that same line, as a name rather than a technical value (both halves of the old
+/// `interface-fonts.spec.ts` case "interface and technical values load their own bundled font roles" for this line).
+/// The test text system gives every face the same widths, so only the real one can tell the faces apart. Specified,
+/// with the real text system: a directory of nine narrow characters (`/iiiiiiii`) and one of nine wide ones
+/// (`/MMMMMMMM`), on rows with no host name, each paint nine advances of the monospace face at 12 pixels; the rows'
+/// titles, six `i`s and six `M`s in the interface face (short enough to stay whole at this width), differ in width (the
+/// premise: that face is proportional, so the comparison can tell the faces apart); and a row on a host named `MMM`
+/// (short enough to stay whole under the host's 40% share of the line), with no directory, paints that name as wide as
+/// the interface face draws it at 12 pixels, where the monospace face would draw it at least a pixel apart (the
+/// premise).
 #[test]
-fn the_directory_is_drawn_in_the_monospace_face() {
+fn the_directory_is_drawn_in_the_monospace_face_and_the_host_in_the_interface_face() {
     let rows = [
+        session("host")
+            .activity(TEST_NOW - 60)
+            .host_name("MMM")
+            .cwd(""),
         session("narrow")
             .title("iiiiii")
             .activity(TEST_NOW - 60)
@@ -808,6 +817,16 @@ fn the_directory_is_drawn_in_the_monospace_face() {
             "{key}'s directory is {drawn} wide, not nine monospace advances ({nine})"
         );
     }
+    let (interface, monospace) = face_widths("MMM", 12.);
+    assert!(
+        (interface - monospace).abs() >= 1.,
+        "premise: the two faces draw the host's name apart ({interface} and {monospace})"
+    );
+    let host = width("host", "MMM");
+    assert!(
+        (host - interface).abs() < 0.5,
+        "the host's name is {host} wide; the interface face draws it {interface}, the monospace face {monospace}"
+    );
 }
 
 /// The old `interface-fonts.spec.ts` case "interface and technical values load their own bundled font roles", for the
