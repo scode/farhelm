@@ -125,6 +125,55 @@ fn refusals_name_the_first_thing_to_fix() {
     assert_eq!(draft.refusal(target(&hosts, None), None), None);
 }
 
+/// A paused environment is an explicit user action away from being usable. Both providers and a stopped environment
+/// name the chosen host and Resume instead of suggesting another host; the draft remains refused before any create.
+/// A stopped one is called stopped, as its Hosts row labels it, never suspended.
+#[test]
+fn a_suspended_environment_names_the_resume_needed_before_launch() {
+    let mut hosts = hosts();
+    let mut draft = draft();
+    draft.host = Some(2);
+    for kind in ["tensorlake", "podman"] {
+        hosts[1].kind = kind.into();
+        hosts[1].name = "work\u{202e}box".into();
+        for (state, expected) in [
+            (
+                HostStateView::Suspended {
+                    observed_at: 1,
+                    suspended_by_farhelm_at: Some(1),
+                    resume_failed: None,
+                },
+                "work<U+202E>box is suspended. Resume it in Hosts, then launch.",
+            ),
+            // A stopped environment is named stopped, as its Hosts row labels it, never suspended.
+            (
+                HostStateView::Stopped {
+                    start_failed: None,
+                    waiting_for_place: false,
+                },
+                "work<U+202E>box is stopped. Resume it in Hosts, then launch.",
+            ),
+        ] {
+            hosts[1].state = state;
+            assert_eq!(
+                draft.refusal(target(&hosts, None), None).as_deref(),
+                Some(expected),
+                "{kind} {:?}",
+                hosts[1].state
+            );
+        }
+    }
+    hosts[1].state = HostStateView::Stopped {
+        start_failed: None,
+        waiting_for_place: true,
+    };
+    assert_eq!(
+        draft.refusal(target(&hosts, None), None).as_deref(),
+        Some("Choose a connected host before launching"),
+        "Resume is unavailable while the container host is disconnected"
+    );
+}
+
 /// A folder that is still New's default for an installation the host row no longer names waits, as a pending default
 /// does, even before the launcher decides it again while drawing; a folder the user took from that installation's
 /// history is refused instead. Why: in the frame between the registry's push and the next draw, a press must not send

@@ -180,6 +180,21 @@ impl ProviderUi {
         }
     }
 
+    /// Why an existing environment cannot take a launch while paused or stopped. The desktop app currently requires
+    /// an explicit Resume in Hosts; this advice must not imply that pressing Launch starts the machine itself.
+    /// The caller draws the host's name as host text before this advice. `stopped` names a stopped environment as
+    /// stopped, the way its Hosts row labels it: Stopped is never labelled Suspended (SPEC.md, "Container sessions").
+    pub(crate) fn suspended_launch_advice(self, stopped: bool) -> &'static str {
+        match (self.0, stopped) {
+            (ProviderKind::Tensorlake | ProviderKind::Podman, false) => {
+                " is suspended. Resume it in Hosts, then launch."
+            }
+            (ProviderKind::Tensorlake | ProviderKind::Podman, true) => {
+                " is stopped. Resume it in Hosts, then launch."
+            }
+        }
+    }
+
     /// What a host whose machine is being deleted says about it under its row; with `failed`, that the deletion failed
     /// and Retry finishes it (the old `deleting_detail`).
     pub(crate) fn deleting_detail(self, failed: bool) -> &'static str {

@@ -740,12 +740,11 @@ quick launch asks before one recipe request" is ported with the templates area's
 Suspend and a launch on another host proceed side by side": New staying available while a Suspend is out in
 `session_list::environment_tests::a_suspend_in_flight_leaves_new_available` and a launch elsewhere not holding a Resume
 in `hosts::environment_tests::a_launch_elsewhere_does_not_hold_resume`; not yet ported: its create sent while another
-host's Suspend is held. Not yet ported: "an existing-host launch stays nonmodal while its Resume is held" and "Hosts
-refuses a host's Resume and Settings while a launch is waking that host", which wait for resume before create, not yet
-built in the launcher (the desktop integration area's). "Template placement keeps Host editable after leaving an
-environment" is the templates and quick launch area's. The registration note shows with no recipe chosen too, as the old
-launcher's did and SPEC.md says ("whether or not a recipe is chosen")
-(`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
+host's Suspend is held. Deferred: resume before create is a near-term TODO item. This covers "an existing-host launch
+stays nonmodal while its Resume is held" and "Hosts refuses a host's Resume and Settings while a launch is waking that
+host". "Template placement keeps Host editable after leaving an environment" is the templates and quick launch area's.
+The registration note shows with no recipe chosen too, as the old launcher's did and SPEC.md says ("whether or not a
+recipe is chosen") (`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -1226,7 +1225,7 @@ chosen host
 Case: its 13 cases of a launch that resumes its suspended host first (lines 216 to 630 and 1131 to 1835 at the pin); its
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
-not yet ported: all 13 wait for resume before create, not yet built in the launcher (the desktop integration area's)
+deferred: resume before create is a near-term TODO item; all 13 cases depend on it.
 
 ## Deviations
 
@@ -1238,7 +1237,11 @@ not yet ported: all 13 wait for resume before create, not yet built in the launc
   in advance as the hover reason rather than only after a press.
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
-- A launch on a suspended host is refused until the environments work brings resume-before-create.
+- A launch on a suspended environment or a stopped one that offers Resume names its host and asks you to resume it in
+  Hosts, then launch. Resume before create is a near-term TODO item, as SPEC.md's interim Topology note records. Both
+  providers' refusals are checked by
+  `launcher::request_tests::a_suspended_environment_names_the_resume_needed_before_launch`; quick launch reveals the
+  advice after "Not launched." in `templates::dispatch_tests::a_suspended_quick_launch_asks_to_resume_its_named_host`.
 - While a new environment's recipe is chosen, the composer search's folder rows and Browse are refused in the old words,
   and so is a `~` path, which the old search took as a choice of the home the folder already was.
 - New sandbox reads the Tensorlake account once as the launcher opens; the old launcher read it again on every fleet

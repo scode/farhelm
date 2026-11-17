@@ -575,6 +575,58 @@ fn a_draft_the_launcher_refuses_is_shown_with_its_reason(cx: &mut TestAppContext
     );
 }
 
+/// Quick launch shares the launcher's suspended-host refusal. A shortcut must reveal the named host's Resume advice
+/// without silently resuming it or sending a create, with the ordinary "Not launched." prefix kept.
+#[gpui::test]
+fn a_suspended_quick_launch_asks_to_resume_its_named_host(cx: &mut TestAppContext) {
+    let (mut helm, connection) = started(cx);
+    let mut hosts = fixture_hosts(&[0, 11]);
+    hosts.entries[1].value["name"] = json!("שלום\u{202e}box");
+    let host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    assert_eq!(host.identity.as_deref(), Some("identity12"));
+    assert!(matches!(
+        host.state,
+        farhelm_proto::ui_channel::HostStateView::Suspended { .. }
+    ));
+    let snapshot = vec![
+        listing(&[], &[]),
+        hosts,
+        marked(Some("paused")),
+        templates_with(template(
+            "paused",
+            TemplateFields {
+                host: Some("identity12".into()),
+                destination: Some(TemplateDestination::Folder("~".into())),
+                ..runs_true()
+            },
+        )),
+    ];
+    helm.connect(snapshot.clone());
+    cx.run_until_parked();
+    test_support::check_store(&connection, &snapshot, cx);
+    let (_, cx) = test_support::open_view(cx, MainView::new);
+    settle(cx);
+    chord(cx);
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/sessions" || command.path.ends_with("/resume")
+    });
+    assert!(sent.is_empty(), "nothing was launched or resumed: {sent:?}");
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. שלום<U+202E>box is suspended. Resume it in Hosts, then launch.")
+    );
+    assert!(
+        crate::session_list::host_rail::tests::texts_within(&frame(cx), "launcher-refusal-words")
+            .iter()
+            .any(|text| crate::host_text::tests::paints_isolated(&text.text, "שלום<U+202E>box")),
+        "the host name cannot reorder the refusal's advice"
+    );
+    assert_eq!(
+        crate::launcher::view_tests::launch_help(cx).as_deref(),
+        Some("שלום<U+202E>box is suspended. Resume it in Hosts, then launch.")
+    );
+}
+
 /// A quick launch being prepared holds the launch slot, and SPEC.md keeps the launcher busy then as during a launch:
 /// New must not open over it, another shortcut or the sequence prefix must not start a second one (the old app refused
 /// the prefix while a launch was pending, too), and a result the user moved on from must not open over what they went

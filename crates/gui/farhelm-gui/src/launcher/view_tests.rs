@@ -430,7 +430,7 @@ fn the_refusal_beside_launch_is_an_alert(cx: &mut TestAppContext) {
 
 /// The hover help Launch shows once the pointer has rested on it for the hover delay, which for a draft Launch would
 /// refuse is the refusal's reason. The pointer stays on Launch afterwards; a later click elsewhere moves it.
-pub(super) fn launch_help(cx: &mut VisualTestContext) -> Option<String> {
+pub(crate) fn launch_help(cx: &mut VisualTestContext) -> Option<String> {
     let launch = test_support::center(cx, "launcher-launch");
     cx.simulate_mouse_move(launch, None, gpui::Modifiers::none());
     test_support::advance(cx, layers::HOVER_DELAY);

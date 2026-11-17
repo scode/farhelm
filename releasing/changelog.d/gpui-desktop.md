@@ -31,6 +31,8 @@ reaches the program.
 The prompt boxes in the session launcher and the template editor grow with their text up to a limit and then scroll;
 you can no longer drag them to resize.
 
+A launch onto a suspended sandbox or container now asks you to resume it in Hosts first.
+
 When Enter or Escape closes the last open dialog or menu, the same key pressed again within half a second does nothing,
 so a double-tapped Escape no longer reaches the terminal and interrupts the agent in it.
 

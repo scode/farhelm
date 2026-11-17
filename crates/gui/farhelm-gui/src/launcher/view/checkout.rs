@@ -512,7 +512,7 @@ impl Launcher {
         // A quick launch's launcher is never drawn, so its preview is asked for here rather than while drawing.
         self.follow_preview(cx);
         // Compared with the launcher's own constant, never with helm words: a reworded reason must reword the constant.
-        if self.refusal(cx).as_deref() == Some(WAIT_FOR_PREVIEW)
+        if matches!(self.refusal(cx), Some(super::Refusal::Plain(words)) if words == WAIT_FOR_PREVIEW)
             && self.checkout_preview(cx) == Preview::Waiting
             && let Some(key) = self.preview_key(cx)
         {
