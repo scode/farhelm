@@ -299,9 +299,6 @@ consequences.
   container created under a login shell's Podman configuration can survive while Stop reports absence from a different
   store.
 
-- [`image-inspection-inherits-keep-id-account.md`](image-inspection-inherits-keep-id-account.md) — An ambient Podman
-  keep-id setting can make account inspection reject an image whose ordinary keeper account is valid.
-
 - [`late-bound-agent-host-misses-adoption.md`](late-bound-agent-host-misses-adoption.md) — If an interrupted terminal
   starts only after its replacement supervisor finishes both startup scans, the agent can keep running while Farhelm
   cannot open its terminal. Another supervisor restart is needed to find it.
@@ -472,9 +469,6 @@ consequences.
 - [`add-host-refusal-bypasses-dialog-admission.md`](add-host-refusal-bypasses-dialog-admission.md) — A delayed Add-host
   refusal may reopen a mutually inert dialog beside Settings; Escape remains available.
 
-- [`browser-menu-focus-retains-evaluator-channels.md`](browser-menu-focus-retains-evaluator-channels.md) — Browser menu
-  focus retains evaluator channels per request; practical memory impact is unmeasured.
-
 - [`browser-suite-ignores-explicit-port.md`](browser-suite-ignores-explicit-port.md) — The browser suite silently
   ignores its documented manual port override.
 
@@ -490,9 +484,6 @@ consequences.
 
 - [`instruction-file-case-alias-evades-check.md`](instruction-file-case-alias-evades-check.md) — Case aliases evade the
   local instruction-file check; actual vendor lookup on case-insensitive filesystems is unverified.
-
-- [`menu-blur-can-leave-delayed-arrow-current.md`](menu-blur-can-leave-delayed-arrow-current.md) — A blur without
-  focus-in may leave delayed menu-arrow work current; browser event behavior is unverified.
 
 - [`normal-quit-misses-empty-download-directory.md`](normal-quit-misses-empty-download-directory.md) — A narrow
   normal-Quit race may leave an empty download staging folder; saved files are unaffected by this mechanism.
@@ -671,15 +662,6 @@ consequences.
 - [`post-clone-test-save-overtakes-restoration.md`](post-clone-test-save-overtakes-restoration.md) — Post-clone, Hosts,
   naming, bolt-test and bulk-Delete saves can remain in flight after private-stack restoration, then overwrite it.
   Adverse scheduling and required incoming values remain unmeasured; no production user-work loss is claimed.
-
-- [`auth-skew-remount-retains-row-operation-count.md`](auth-skew-remount-retains-row-operation-count.md) — After another
-  tab restores shared credentials, a build-skew remount can leave the old GUI usable but keep an abandoned mutation
-  count that blocks Restart. The conditional route needs an outstanding mutation, authentication loss, build change and
-  another GUI.
-
-- [`shortcut-armed-state-survives-auth-remount.md`](shortcut-armed-state-survives-auth-remount.md) — A sequence started
-  inside New can reappear saying Enter apply after New is gone. A complete credential and input sequence turning that
-  into a harmful launch remains unestablished; upgrade-filter coverage is only partial and uncertain.
 
 - [`held-font-test-lacks-mount-attempt-witness.md`](held-font-test-lacks-mount-attempt-witness.md) — The font test can
   finish its no-mount observation window before a terminal first tries mounting. Ordinary page text can request the font
@@ -998,16 +980,9 @@ consequences.
 - [`narrow-sidebar-tests-measure-outer-container.md`](narrow-sidebar-tests-measure-outer-container.md) — Two narrow row
   tests retain containment bounds from the wider outer sidebar after shrinking only its content area.
 
-- [`remove-retirement-may-release-later-dialog.md`](remove-retirement-may-release-later-dialog.md) — A late desktop
-  Remove retirement or Suspend dismissal may release a later opening's modal protection; the required native ordering
-  remains unverified.
-
 - [`native-confirmation-reopen-paint-order-source-gap.md`](native-confirmation-reopen-paint-order-source-gap.md) — A
   pre-existing retained Delete flyout is focusable while unmeasured; an ordinary native sequence accepting an unseen
   answer remains unestablished.
-
-- [`tunnel-spacing-shrinks-confirmation-buttons.md`](tunnel-spacing-shrinks-confirmation-buttons.md) — When the tunnel
-  pill appears, Restart, Replace and Delete confirmation buttons also become narrower.
 
 - [`session-navigation-interrupts-close-all.md`](session-navigation-interrupts-close-all.md) — Switching sessions while
   Close all waits for a response leaves later tunnel listeners open without attempting their closure or reporting that
@@ -1237,23 +1212,9 @@ consequences.
   download reopens the checkout pathname after verifying it; a complete uncancelled delivery through replacement remains
   unestablished.
 
-- [`template-container-off-on-discards-editor-values.md`](template-container-off-on-discards-editor-values.md) — Turning
-  a template's container option off and back on loses its image, port and token-path draft values before Save.
-
-- [`image-tmpdir-stages-skeleton-inside-checkout.md`](image-tmpdir-stages-skeleton-inside-checkout.md) — An
-  image-selected temporary directory can put account-preparation scratch files inside the checkout despite the stated
-  exclusion.
-
-- [`interrupted-image-inspection-leaves-unnamed-allocation.md`](interrupted-image-inspection-leaves-unnamed-allocation.md)
-  — An interrupted account inspector can leave container storage allocated before its automatic-removal cleanup becomes
-  effective.
-
 - [`podman-remote-routing-host-contract-ambiguity.md`](podman-remote-routing-host-contract-ambiguity.md) — Ambient
   Podman routing can choose a remote engine despite Farhelm's host-local container description; the intended
   configuration boundary is unresolved.
-
-- [`inspector-workdir-hides-missing-home.md`](inspector-workdir-hides-missing-home.md) — Image inspection can create the
-  selected home path as its WORKDIR and then incorrectly decide that normal home preparation is unnecessary.
 
 - [`account-assertion-chain-can-reach-false-readiness.md`](account-assertion-chain-can-reach-false-readiness.md) — A
   shell helper can continue after a failed intermediate account/home assertion and still publish its ready marker.
@@ -1393,9 +1354,6 @@ consequences.
 
 - [`failed-template-save-retains-attempted-draft.md`](failed-template-save-retains-attempted-draft.md) — A failed
   template Save leaves the attempted draft reusable even though the general GUI rule says failed saves discard it.
-
-- [`take-control-skips-recovery-terminals.md`](take-control-skips-recovery-terminals.md) — Taking control in a new tab
-  during a build mismatch can leave existing terminals in Recovery until Reconnect now is used.
 
 - [`omp-readiness-comment-excludes-early-save.md`](omp-readiness-comment-excludes-early-save.md) — An OMP readiness
   comment says saving requires the first reply, although the current integration can persist a newly created
@@ -2143,11 +2101,6 @@ consequences.
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 
-- [`pending-test-host-start-cleanup.md`](pending-test-host-start-cleanup.md) — After a supervisor crashes during a
-  terminal launch, browser-test cleanup can report success and delete its state while a terminal host finishes starting.
-  That leaves an owned test process running without its socket or retained run directory. This concerns maintainer
-  tooling, not an established loss of user sessions.
-
 - [`stty-tool-format-mismatch.md`](stty-tool-format-mismatch.md) — The terminal-settings test can fail on a Mac with GNU
   command-line tools first on PATH even when the host's terminal settings are correct. Its reference and host samples
   use different stty implementations, whose saved-settings strings cannot match.
@@ -2187,11 +2140,6 @@ consequences.
   file hover when other cells on that row redraw. One redraw can cause temporary rechecking. Another relevant row change
   during replacement admission can leave the link absent while the pointer stays at rest; movement or completion of a
   later gesture can retry. A first click started without a hovered link does not activate the file.
-
-- [`osc-admission-repeats-row-work.md`](osc-admission-repeats-row-work.md) — Unverified after investigation: admitting a
-  dense row of program hyperlinks in a container terminal repeats whole-row construction for each candidate, potentially
-  delaying pointer or UI work. The repeated work is source-confirmed; material latency has not been measured. This is
-  separate from asynchronous redraw losing a hover.
 
 - [`delete-reader-notice-bypass.md`](delete-reader-notice-bypass.md) — Input arriving while a session is being deleted
   can make its terminal detach with an input-failure notice instead of the Delete's notice or its cleanup-failure
@@ -2437,10 +2385,6 @@ consequences.
   named focus target for horizontally clipped approval facts and text-only scrolling approval bodies. The layout test
   currently requires that omission.
 
-- [`requester-full-id-uses-unnamed-generic-span.md`](requester-full-id-uses-unnamed-generic-span.md) — The requesting
-  session's shortened ID relies on an accessible label on a generic span, where that label is prohibited. The markup
-  mismatch is confirmed; actual assistive-technology output was not tested.
-
 - [`approval-copy-test-assumes-clipboard-object.md`](approval-copy-test-assumes-clipboard-object.md) — The Copy ID test
   can fail before its assertion if the engine provides no clipboard object. Whether the supported browser configuration
   omits it remains unverified after investigation.
@@ -2576,9 +2520,6 @@ consequences.
   Replace-test cleanup constructs owned-session deletion steps before draining a callback that can add the replacement
   ID.
 
-- [`resume-test-selection-settlement-witness.md`](resume-test-selection-settlement-witness.md) — The Resume
-  no-navigation test changes selection itself before witnessing that the operation reply settled.
-
 - [`nonblocking-reply-tests-lack-settlement-witness.md`](nonblocking-reply-tests-lack-settlement-witness.md) —
   Delayed-launch regressions can dismiss newer dialogs before proving reply processing or blocked naming admission,
   leaving the intended overlap untested.
@@ -2589,15 +2530,8 @@ consequences.
 - [`stop-progress-omits-row-movement.md`](stop-progress-omits-row-movement.md) — Stop progress can wrap an earlier
   noncompact row without updating a later row's open menu or notification position; exact native geometry is unmeasured.
 
-- [`started-report-test-exceeds-expiry.md`](started-report-test-exceeds-expiry.md) — A browser test reasserts the brief
-  Started report after an unrelated API read that can outlast its correct four-second expiry.
-
 - [`replace-question-omits-prefix-movement.md`](replace-question-omits-prefix-movement.md) — A background Replace
   question can move session rows without updating another row's open menu position; runtime geometry was not measured.
-
-- [`native-launcher-restore-races-resubmit.md`](native-launcher-restore-races-resubmit.md) — A native restoration frame
-  may race a later resubmit and reclaim hidden-launcher isolation; the necessary native ordering remains unverified
-  after investigation.
 
 - [`deleted-source-retains-replace-question.md`](deleted-source-retains-replace-question.md) — A deleted session's
   retained Replace permission question survives authoritative absence, contrary to the final subject-gone rule; an empty
