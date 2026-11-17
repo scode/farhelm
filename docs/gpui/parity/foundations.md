@@ -68,6 +68,9 @@ partly
 - crates/gui/farhelm-gui/src/templates/summary_tests.rs `template_values_are_host_text` (template summaries split
   command fonts: the wrapper prefix and flags as monospace parts beside labels in words, in the Templates dialog and the
   quick switcher alike)
+- crates/gui/farhelm-gui/src/templates/dialog_tests.rs `the_number_keys_digits_are_drawn_at_equal_widths` (of the third
+  case, the shortcut digits keep equal widths: the key buttons' chords for keys 1 and 8 are equally wide, each drawn in
+  the monospace face)
 
 Not yet ported:
 
@@ -76,7 +79,6 @@ Not yet ported:
   search's "Use this path" and "Browse this path" rows, words in the interface face and paths in the monospace face (the
   launcher area's); and the version readout (desktop integration's `update_readout/view/tests.rs`, pending there)
 - the second case, the Trash dialog's archive times (other dialogs')
-- of the third, the number keys' equal-width digits (templates and quick launch's)
 
 "A bundled face loaded" has no case here, since the fonts are built into the app (`assets.rs`). The row's pin glyph is
 not measured: no bundled face but the monospace one has it, so the text system draws it from that face whichever face
@@ -288,10 +290,16 @@ whose session or anchor is gone closes)
 
 ### `tests/popover-template-movement.spec.ts`
 
-Tests: 1. Covers: rename ${moves ? "closes a displaced" : "keeps an unchanged"} template number popup.
+Tests: 6. Covers: closes a number popup below a new bolt chord.
 
 superseded: SPEC.md "Things changing underneath" (an open menu moves with its session); port the remaining cases (a menu
 whose session or anchor is gone closes)
+
+- crates/gui/farhelm-gui/src/templates/dialog_tests.rs `the_key_menu_follows_its_button_through_what_the_helm_pushes`
+  (all six cases, inverted: the four ⚡ transfers and the two renames leave the open number-key menu open, moving with
+  its button where the change moved it and staying put where it did not)
+- crates/gui/farhelm-gui/src/templates/dialog_tests.rs `the_key_menu_closes_when_its_template_is_gone` (the remaining
+  case: the menu closes with its template's row)
 
 ### `tests/popover-width-movement.spec.ts`
 
