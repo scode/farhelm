@@ -104,6 +104,15 @@ const NOT_ATTACHED_TEXT_SIZE: f32 = 14.;
 /// `.tab-strip`: `gap: 4px`.
 const STRIP_GAP: f32 = 4.;
 
+/// The narrowest the strip is drawn while the top row shows a tunnel pill, room permitting: the old app's
+/// `.session-topbar:has(> .session-tunnel-pill) .tab-strip { flex: 0 1 auto; min-width: 112px }`, which kept a pill
+/// from squeezing the strip to nothing.
+///
+/// It is a ceiling on the floor, not a guarantee: the top row's fit gives the strip less when the row cannot hold the
+/// pill whole and the actions beside it, and its module docs (`session_pane::header`'s `fit`) give the rule and why.
+/// The strip's own element keeps `min_w_0`: the floor is the top row's to apply, and no floor applies without a pill.
+pub(crate) const STRIP_FLOOR_BESIDE_PILL: f32 = 112.;
+
 /// `.tab-strip[inert]`: `opacity: 0.45`.
 const INERT_OPACITY: f32 = 0.45;
 
@@ -232,6 +241,24 @@ struct Tab {
     terminal: Option<Entity<AttachedTerminal>>,
     /// Its button's focus handle in the strip, kept with the tab so focus stays on its button as tabs come and go.
     focus: FocusHandle,
+    /// Its ×'s focus handle, kept with the tab for the same reason, and so the strip can tell when the × holds focus
+    /// ([`TerminalSet::reveal_focused`]).
+    close_focus: FocusHandle,
+}
+
+/// A control in the strip that keyboard focus can rest on, as [`TerminalSet::reveal_focused`] tells them apart: each
+/// is revealed once when focus reaches it, and a tab and its × share one item of the strip but are revealed
+/// differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StripControl {
+    /// The Agent tab, the strip's first item.
+    Agent,
+    /// Shell tab `n`'s button, at the start of the item that holds it and its × (item `n + 1`).
+    Tab(usize),
+    /// Shell tab `n`'s ×, at the end of that same item.
+    Close(usize),
+    /// New terminal, the strip's last item (after the shell tabs' items and the divider).
+    Add,
 }
 
 /// The open session's terminals. See the module docs.
@@ -252,12 +279,14 @@ pub struct TerminalSet {
     hold: SharedHold,
     /// The Agent tab's focus handle in the strip.
     agent_focus: FocusHandle,
-    /// The strip's sideways scroll, and the tab it last scrolled into view for keyboard focus: a tab Tab reaches
-    /// is scrolled into view once, so the wheel can still move the strip while a tab holds focus. A `Cell` because the
-    /// strip is built while the header draws, from a shared reference, and asking the scroll handle to reveal a tab
-    /// then is how GPUI expects it (the handle acts on it when it lays the strip out).
+    /// New terminal's focus handle in the strip, held here so the strip can tell when it holds focus.
+    add_focus: FocusHandle,
+    /// The strip's sideways scroll, and the control it last scrolled into view for keyboard focus: a control Tab
+    /// reaches is scrolled into view once, so the wheel can still move the strip while it holds focus. A `Cell` because
+    /// the strip is built while the header draws, from a shared reference, and asking the scroll handle to reveal a
+    /// control then is how GPUI expects it (the handle acts on it when it lays the strip out).
     scroll: ScrollHandle,
-    revealed: Cell<Option<usize>>,
+    revealed: Cell<Option<StripControl>>,
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
     /// A tab New terminal opened that the pushed row does not list yet, with the press that asked and its window: it is
@@ -289,6 +318,7 @@ impl TerminalSet {
             chosen: None,
             hold,
             agent_focus: cx.focus_handle().tab_stop(true),
+            add_focus: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             revealed: Cell::new(None),
             inert: false,
@@ -476,6 +506,7 @@ impl TerminalSet {
                 id,
                 terminal: None,
                 focus: cx.focus_handle().tab_stop(true),
+                close_focus: cx.focus_handle().tab_stop(true),
             });
             if tab.terminal.is_none()
                 && index < MAX_ATTACHED_TABS
@@ -540,20 +571,21 @@ impl TerminalSet {
     /// out of room (SPEC.md: "only the tab strip takes the remaining width and scrolls horizontally when needed").
     ///
     /// Each tab is a button reporting whether its terminal is the one shown (pressed), as the old strip's were, not a
-    /// tab list, which could not hold the close buttons beside them. A tab that keyboard focus reaches while scrolled
-    /// out of view is scrolled into it.
+    /// tab list, which could not hold the close buttons beside them. A tab, ×, or New terminal that keyboard focus
+    /// reaches while scrolled out of view is scrolled into it ([`TerminalSet::reveal_focused`]).
     pub fn strip(set: &Entity<TerminalSet>, window: &mut Window, cx: &mut App) -> AnyElement {
         let this = set.read(cx);
         let key = this.key.clone();
         let chosen = this.chosen.clone();
         let inert = this.inert;
         this.reveal_focused(window);
-        let listed: Vec<(String, FocusHandle)> = this
+        let listed: Vec<(String, FocusHandle, FocusHandle)> = this
             .tabs
             .iter()
-            .map(|tab| (tab.id.clone(), tab.focus.clone()))
+            .map(|tab| (tab.id.clone(), tab.focus.clone(), tab.close_focus.clone()))
             .collect();
         let agent_focus = this.agent_focus.clone();
+        let add_focus = this.add_focus.clone();
         let scroll = this.scroll.clone();
         let palette = theme::palette(cx);
         let tab = |id: String,
@@ -582,7 +614,7 @@ impl TerminalSet {
             None,
             &agent_focus,
         )];
-        for (index, (id, focus)) in listed.into_iter().enumerate() {
+        for (index, (id, focus, close_focus)) in listed.into_iter().enumerate() {
             let label = tab_label(index);
             let closing = closing(&key, &id, cx);
             let anchor = Anchor::for_element(
@@ -603,6 +635,7 @@ impl TerminalSet {
                 )
                 .tier(Tier::TerminalTabClose)
                 .accessible_name(format!("Close {label}"))
+                .focus(&close_focus)
                 .disabled(inert)
                 .busy(closing)
                 .on_click(move |_, window, cx| ask_to_close(&set, &id, &label, &anchor, window, cx))
@@ -658,6 +691,7 @@ impl TerminalSet {
             )
             .tier(Tier::Neutral)
             .square(px(ADD_SIDE))
+            .focus(&add_focus)
             .disabled(inert || refused)
             .on_click(move |_, window, cx| {
                 let mark = Mark::take(cx);
@@ -683,17 +717,58 @@ impl TerminalSet {
             .into_any_element()
     }
 
-    /// Scroll the strip to the tab keyboard focus is on, once per tab it reaches (see `revealed`).
+    /// Scroll the strip to the control keyboard focus is on, once per control it reaches (see `revealed`): a tab, a
+    /// tab's ×, or New terminal. Without this a control Tab reaches can hold focus while drawn wholly outside the
+    /// strip's visible part, which happens readily beside a tunnel pill, where the top row may leave the strip only a
+    /// few pixels (`session_pane::header`'s fit).
+    ///
+    /// The strip's items are the Agent tab, then one item per shell tab holding its button and its ×, then the divider
+    /// and New terminal, which [`StripControl`] maps focus onto. A tab and New terminal are scrolled to as items; a ×
+    /// sits at the end of its tab's item, so it is revealed by that item's end ([`Self::reveal_end`]). Focus moving
+    /// from a tab to its own × still counts as reaching a new control.
     fn reveal_focused(&self, window: &Window) {
-        let focused = std::iter::once(&self.agent_focus)
-            .chain(self.tabs.iter().map(|tab| &tab.focus))
-            .position(|handle| handle.is_focused(window));
+        let focused = if self.agent_focus.is_focused(window) {
+            Some(StripControl::Agent)
+        } else if self.add_focus.is_focused(window) {
+            Some(StripControl::Add)
+        } else {
+            self.tabs.iter().enumerate().find_map(|(n, tab)| {
+                if tab.focus.is_focused(window) {
+                    Some(StripControl::Tab(n))
+                } else if tab.close_focus.is_focused(window) {
+                    Some(StripControl::Close(n))
+                } else {
+                    None
+                }
+            })
+        };
         if focused != self.revealed.get() {
-            // The strip's children are the agent's tab, then one item per shell tab, so the index carries over.
-            if let Some(index) = focused {
-                self.scroll.scroll_to_item(index);
+            match focused {
+                Some(StripControl::Agent) => self.scroll.scroll_to_item(0),
+                Some(StripControl::Tab(n)) => self.scroll.scroll_to_item(n + 1),
+                Some(StripControl::Close(n)) => self.reveal_end(n + 1),
+                // After the shell tabs' items and the divider.
+                Some(StripControl::Add) => self.scroll.scroll_to_item(self.tabs.len() + 2),
+                None => {}
             }
             self.revealed.set(focused);
+        }
+    }
+
+    /// Scroll the strip so the end of its item `index` shows, where a tab's × sits. `scroll_to_item` shows an item
+    /// wider than the strip from its start, which for a tab's item is the tab and leaves the × out of view, so such an
+    /// item is lined up with the strip's right edge instead; an item that fits is scrolled to as usual, which shows it
+    /// whole. The item's width comes from the frame the strip was last drawn in (the scroll handle keeps it), so an
+    /// item not drawn yet is scrolled to as usual too.
+    fn reveal_end(&self, index: usize) {
+        let viewport = self.scroll.bounds();
+        match self.scroll.bounds_for_item(index) {
+            Some(item) if item.size.width > viewport.size.width => {
+                let mut offset = self.scroll.offset();
+                offset.x = viewport.right() - item.right();
+                self.scroll.set_offset(offset);
+            }
+            _ => self.scroll.scroll_to_item(index),
         }
     }
 
