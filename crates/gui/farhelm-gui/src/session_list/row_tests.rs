@@ -468,6 +468,16 @@ fn the_selected_and_stale_rows_use_their_own_inks() {
 /// does not need), over a helm holding `rows` in that order and the sidebar at its narrowest width: the driver record
 /// of its second frame (the list asks for one to give its rows their height estimates).
 fn narrowest_layout(rows: &[super::tests::Fixture]) -> Vec<DriverNode> {
+    narrowest_layout_choosing(rows, Vec::new(), None)
+}
+
+/// [`narrowest_layout`] with `extra` collections in the helm's snapshot (a host registry, say) and, when `host` names
+/// one, that host chosen on the rail before the first frame, through the same call an avatar's click makes.
+fn narrowest_layout_choosing(
+    rows: &[super::tests::Fixture],
+    extra: Vec<CollectionState>,
+    host: Option<i64>,
+) -> Vec<DriverNode> {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
         assets::UI_FONT,
     ));
@@ -480,14 +490,27 @@ fn narrowest_layout(rows: &[super::tests::Fixture]) -> Vec<DriverNode> {
         ..Preferences::default()
     });
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
-    fake.connect(vec![listing(&order, rows), preferences]);
+    let mut snapshot = vec![listing(&order, rows), preferences];
+    snapshot.extend(extra);
+    fake.connect(snapshot);
     cx.run_until_parked();
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let keep = opened.clone();
     let window = cx
-        .open_window(size(px(1000.), px(600.)), |window, cx| {
+        .open_window(size(px(1000.), px(600.)), move |window, cx| {
             let main = cx.new(|cx| MainView::new(window, cx));
+            *keep.borrow_mut() = Some(main.clone());
             cx.new(|cx| Root::new(main, window, cx))
         })
         .unwrap();
+    if let Some(host) = host {
+        let main = opened.borrow().clone().expect("the main view was made");
+        cx.update(|cx| {
+            let list = main.read(cx).session_list().clone();
+            list.update(cx, |list, cx| list.choose_host(Some(host), cx));
+        });
+        cx.run_until_parked();
+    }
     cx.update_window(window.into(), |_, window, cx| {
         window.set_driver_enabled(true);
         window.draw(cx).clear(cx);
@@ -599,6 +622,83 @@ fn a_long_title_directory_and_error_stay_inside_the_row_at_the_narrowest_sidebar
         texts.iter().any(|text| text.ends_with("last-segment")),
         "the directory keeps its end: {texts:?}"
     );
+}
+
+/// The chosen host's chip shares the heading's filter row with the status segments, and a long alias must be cut inside
+/// the chip rather than push the chip, or its ✕, out of the list (the old `filters.spec.ts`, "the host chip truncates a
+/// long alias at the minimum sidebar width"). Only the real text system measures the name. Specified, at the narrowest
+/// width with a remote host aliased far longer than the list is wide and chosen on the rail: the status segments and the
+/// chip are each drawn horizontally inside the list's column; the chip paints a name cut short with "…" and its ✕, both
+/// inside the chip.
+#[test]
+fn a_chosen_hosts_long_alias_is_cut_inside_its_chip_at_the_narrowest_sidebar() {
+    let long =
+        "Build farm for the release verification sessions with a deliberately long host alias";
+    let build = remote(3, "ops@build.example").alias(long);
+    let nodes = narrowest_layout_choosing(&[session("a")], vec![hosts(&[local(), build])], Some(3));
+    let list = bounds_of(&nodes, "session-list");
+    for id in ["session-status", "host-filter-chip"] {
+        let part = bounds_of(&nodes, id);
+        assert!(
+            part.left() >= list.left() && part.right() <= list.right(),
+            "{id} {part:?} lies inside the list {list:?}"
+        );
+    }
+    let chip = bounds_of(&nodes, "host-filter-chip");
+    let painted = texts_within(&nodes, "host-filter-chip");
+    let name = painted
+        .iter()
+        .find(|text| text.text.starts_with("Build farm"))
+        .expect("the chip painted the alias");
+    assert!(name.text.ends_with('…'), "cut short: {:?}", name.text);
+    for text in painted
+        .iter()
+        .filter(|text| text.text.starts_with("Build") || text.text == "✕")
+    {
+        assert!(
+            text.bounds.right() <= chip.right() + px(0.5),
+            "{:?} at {:?} lies inside the chip {chip:?}",
+            text.text,
+            text.bounds
+        );
+    }
+    assert!(
+        painted.iter().any(|text| text.text == "✕"),
+        "the chip kept its ✕"
+    );
+}
+
+/// At the sidebar's narrowest width the list's heading must still show the order's title and its three icon buttons,
+/// Trash, Templates and New, each whole: the old `sidebar-resize.spec.ts` checked the heading's actions inside the
+/// sidebar at 296, 396 and 656 pixels, and the narrowest is the width that can run out of room (the heading wraps its
+/// actions below the title rather than covering it). Only the real text system measures the title. Specified, at the
+/// narrowest width over one row: the title, Trash, Templates and New are each drawn horizontally inside the list's
+/// column, and no two of them overlap.
+#[test]
+fn the_headings_title_and_actions_stay_whole_at_the_narrowest_sidebar() {
+    let nodes = narrowest_layout(&[session("a")]);
+    let list = bounds_of(&nodes, "session-list");
+    let parts = [
+        "session-order",
+        crate::trash::BUTTON_ID,
+        "templates-button",
+        super::NEW_ID,
+    ]
+    .map(|id| (id, bounds_of(&nodes, id)));
+    for (id, part) in parts {
+        assert!(
+            part.left() >= list.left() && part.right() <= list.right(),
+            "{id} {part:?} lies inside the list {list:?}"
+        );
+    }
+    for (index, (one, first)) in parts.iter().enumerate() {
+        for (other, second) in &parts[index + 1..] {
+            assert!(
+                !first.intersects(second),
+                "{one} {first:?} and {other} {second:?} overlap"
+            );
+        }
+    }
 }
 
 /// The old stylesheet drew a row's working directory in the monospace face (`.session-cwd` in its technical-value

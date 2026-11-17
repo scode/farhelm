@@ -48,8 +48,11 @@ mismatch to reverse under), `a failed manual mark closes on acceptance and prese
 `a manual mark-unread is visible to a second client that never touched the session` (the helm's shared state;
 scripts/gui-e2e-smoke.py `test_36_mark_read_and_unread_from_the_row_menu` reads it back from the helm's listing);
 `a dot with no seen-state toggle still opens the row on click` has no case to port, since only a live row draws a dot
-and every live row offers the toggle. The bulk Mark read and Mark unread of marked rows wait for marking; the
-menu-geometry case's items in order, Pin to top or Unpin and Clone and Replace with… among them: menu_tests.rs
+and every live row offers the toggle. The bulk Mark read and Mark unread of marked rows:
+crates/gui/farhelm-gui/src/session_list/marking_tests.rs `metadata_writes_go_once_per_eligible_row_and_clear_the_marks`
+(Mark read sent; Mark unread offered but not sent there, its write being the row's own, seen_tests.rs
+`the_menu_item_follows_the_seen_state_and_sends_the_stamp_or_null`); the menu-geometry case's items in order, Pin to top
+or Unpin and Clone and Replace with… among them: menu_tests.rs
 `the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection`; the auto-select and visit-history cases:
 tests.rs `the_automatic_choice_prefers_history_then_the_last_selection_then_the_newest`,
 `a_selection_settles_only_on_evidence`, `a_selection_moves_only_once_a_complete_listing_shows_it_gone`,
@@ -60,12 +63,18 @@ a failed read's fallback) is superseded by the channel, which pushes every prefe
 migration's orchestrator, 2026-11-15; selection.rs's NOTE); the app bar (its first case):
 crates/gui/farhelm-gui/src/sidebar/tests.rs `the_header_shows_the_wordmark_and_the_build_with_its_hover_help`,
 `the_wordmark_is_the_file_for_the_appearances_ground`, crates/gui/farhelm-gui/src/assets.rs
-`the_wordmark_paths_are_not_swapped`. Waiting: the helm and window skew half of that case ("The helm runs Farhelm
+`the_wordmark_paths_are_not_swapped`. Superseded: the helm and window skew half of that case ("The helm runs Farhelm
 <helm>; this window is a development build of Farhelm.", and "... this window was built as Farhelm <window>." for a
-release window), until the GUI learns the helm's build; the macOS cases (the 48-pixel bar with room for the window
-buttons, controls clear of them while the shell scrolls, the build mismatch notice below the bar, the reservation before
-the shell exists), for the desktop-integration area's title band. The bar staying put while the list scrolls holds by
-construction (the header is outside the list's scroller) and has no test of its own
+release window) and the macOS build mismatch notice below the bar: the desktop app attaches only to the helm it embeds
+(SPEC.md, "Non-goals for v1": "the desktop app attaches only to the helm it embeds"), so the window and its helm are one
+build (the version readout's deviation below). The other macOS cases: the 48-pixel bar with room for the window buttons
+is crates/gui/farhelm-gui/src/desktop/tests.rs
+`the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear`, and the controls staying clear of the
+buttons in a narrow window is `in_a_narrow_window_the_app_bar_runs_above_both_panes` (both built on macOS only, so only
+a Mac run shows them); the reservation before the session shell exists is superseded, since the GPUI app has no sign-in
+page before its shell and its connection screens draw a band strip across their top
+(`desktop::title_band::Row::EmptyPane`). The bar staying put while the list scrolls holds by construction (the header is
+outside the list's scroller) and has no test of its own
 
 ### `tests/sidebar.spec.ts` (its row-content cases)
 
@@ -116,10 +125,10 @@ covered here). `compact hides the second line and persists across client seeds`:
 `choosing_compact_sends_its_sparse_write_and_the_rows_follow_it` (a second client's seed is the channel's snapshot, as
 for the order; the path the old case read from the summary card is in the compact row's card, summary_tests.rs
 `a_compact_row_shows_the_same_card_with_its_hidden_folder`, and in its description, a deviation below, compact_tests.rs
-`a_compact_rows_help_says_what_its_hidden_lines_would`; the host mark stays on the first line by construction). Waiting
-for the row's tint: `an open menu tints its own row and presses its own toggle` (the pressed toggle is `Tier::RowMenu`'s
-expanded look); the managed checkout's form of the last line (its `·` separator and repository mark) is not ported and
-no piece has it yet
+`a_compact_rows_help_says_what_its_hidden_lines_would`; the host mark stays on the first line by construction).
+`an open menu tints its own row and presses its own toggle`: the pressed toggle is `Tier::RowMenu`'s expanded look, with
+no test of its own, and the row's tint is not drawn (a deviation below); the managed checkout's form of the last line
+(its `·` separator and repository mark) is not ported (a deviation below)
 
 ### `tests/tooltip.spec.ts` (its session-row cases)
 
@@ -257,9 +266,13 @@ crates/gui/farhelm-gui/src/session_list/host_rail/avatar_menu_tests.rs
 batch's `app-rail-host-context-menu` scene; the expanded rail's choosing and badges and the narrow-window geometry:
 crates/gui/farhelm-gui/src/session_list/host_rail/expansion/tests.rs `choosing_and_badges_work_in_the_expanded_rail` and
 `the_sidebar_widens_by_164_pixels_down_to_the_main_panes_floor` (real text system); scripts/gui-e2e-smoke.py
-`test_77_the_rails_avatar_menu_and_expansion`. Waiting: the chip at the minimum sidebar width (the sidebar resize), and
-the ContextMenu key on an avatar (GPUI names no such key); the foot's notices bell and Help and the Help menu are the
-other-dialogs area's; the Add host dialog's own cases are in the settings-and-hosts parity file
+`test_77_the_rails_avatar_menu_and_expansion`. The chip at the minimum sidebar width with a long alias:
+crates/gui/farhelm-gui/src/session_list/row_tests.rs
+`a_chosen_hosts_long_alias_is_cut_inside_its_chip_at_the_narrowest_sidebar` (real text system: the segments and the chip
+inside the list, the name cut with "…" and the ✕ inside the chip; the old case's empty sentence, which wraps the name in
+full, has no layout check of its own here). Dropped: the ContextMenu key on an avatar, which GPUI names on neither
+platform (a deviation below); the foot's notices bell and Help and the Help menu are the other-dialogs area's; the Add
+host dialog's own cases are in the settings-and-hosts parity file
 
 ### `tests/status-filter.spec.ts`
 
@@ -323,9 +336,9 @@ old app, `escape_ends_a_drag_begun_with_a_rows_menu_open`, `escape_ends_a_drag_a
 `the_escape_that_ends_a_drag_goes_no_further` for Escape wherever focus is in the sidebar;
 crates/gui/farhelm-gui/src/session_list/pin_drag.rs `a_drop_names_the_pin_below_the_pointers_line_or_the_last_one` and
 `a_release_outside_the_drawn_group_lands_nowhere` for where a drop lands; scripts/gui-e2e-smoke.py
-`test_78_dragging_a_pins_grip_moves_it_in_the_helms_order` reads the move back from the helm's listing; the second
-client and the reload are the helm's, as for Move; the keyboard way to rearrange pins stays the row menu's Move up and
-Move down, since the old grip had no keys and no Tab stop),
+`test_78_dragging_a_pins_grip_moves_it_in_the_helms_order` reads the move back from the helm's listing; the reload is
+the helm's, as for Move, and there is no second client, since one helm serves one window; the keyboard way to rearrange
+pins stays the row menu's Move up and Move down, since the old grip had no keys and no Tab stop),
 `pin dragging survives a failed listing and replacement list mount` (pin_drag_tests.rs
 `a_failed_listing_ends_a_drag_and_the_recovered_list_drags_again`: a failed read keeps the rows here, so a drag on them
 ends by rule, where the old list's root went away with it)
@@ -345,11 +358,15 @@ partly: crates/gui/farhelm-gui/src/sidebar/tests.rs `the_sidebar_draws_the_store
 crates/gui/farhelm-gui/src/components/tests/divider.rs `a_divider_reports_its_drag_double_click_and_arrows`;
 scripts/gui-e2e-smoke.py `test_37_the_focused_sidebar_divider_steps_the_helms_width`. The device storage cases
 (`localStorage` holding the width less the rail, a reload keeping it) are superseded: the width is a helm preference
-(SPEC.md, "Session list", decided by the maintainer on 2026-11-13), and the reload case is the pushed-change test.
-Waiting: the heading actions (Add host, Update all, Trash, New, Templates) inside the sidebar at 296, 396 and 656, for
-the areas that build them; the terminal's columns growing after a narrower drag, which follows from the terminal's own
-fit of its pane and has no test here; the second case's narrow-window chrome (the fixed macOS app bar) and row-menu
-pointer cutoffs, for the macOS title band and the row menu's pointer; the shown width with the rail expanded is
+(SPEC.md, "Session list", decided by the maintainer on 2026-11-13), and the reload case is the pushed-change test. The
+heading actions inside the sidebar at 296, 396 and 656: the heading now holds the order's title, Trash, Templates and
+New (Add host is the rail's, Update all the attention list's), and at the narrowest width, the one that can run out of
+room, crates/gui/farhelm-gui/src/session_list/row_tests.rs
+`the_headings_title_and_actions_stay_whole_at_the_narrowest_sidebar` (real text system). The terminal's columns growing
+after a narrower drag are the terminal area's, from its own fit of its pane. The second case's narrow-window chrome: the
+fixed macOS app bar is the title band's 48 pixels (crates/gui/farhelm-gui/src/desktop/tests.rs
+`the_band_rows_are_48_high_at_the_top_and_the_app_bar_keeps_the_lights_clear`, macOS only); its row-menu pointer cutoffs
+are dropped, since the row menu draws no pointer (a deviation below). The shown width with the rail expanded is
 crates/gui/farhelm-gui/src/session_list/host_rail/expansion/tests.rs
 `the_shown_width_adds_164_pixels_within_the_main_panes_floor` and
 `the_sidebar_widens_by_164_pixels_down_to_the_main_panes_floor` (real text system),
@@ -393,14 +410,20 @@ reaches it), `a_refused_expansion_leaves_the_rail_as_stored_and_shows_nothing`,
 gone, marks in their column and foot controls unmoved) and
 `the_sidebar_widens_by_164_pixels_down_to_the_main_panes_floor` (the 164 pixels and a long name cut short, real text
 system); the screenshot batch's `app-host-rail-expanded` scene; scripts/gui-e2e-smoke.py
-`test_77_the_rails_avatar_menu_and_expansion`. Waiting: scrolling from the rail's padding (the rail scrolls on its own,
-with no test of a wheel over its padding)
+`test_77_the_rails_avatar_menu_and_expansion`. Scrolling from the rail's padding holds by construction: the rail's
+padding and gaps are inside its scrolling element (`host_rail::rail`'s docs), so a wheel over them is GPUI's own
+scrolling of that element, with no test of a wheel over the padding
 
 ### `tests/rail-notices.spec.ts`
 
 Tests: 4. Covers: rail notices quiet, alerting and resolved in ${palette}.
 
-not yet ported
+replaced: the bell and its panel are the other-dialogs area's, and [Other dialogs](other-dialogs.md), "The rail notices
+bell and panel", names their tests (crates/gui/farhelm-gui/src/rail_notices/tests.rs and the `notices-alerting`,
+`notices-empty` and `notices-bell-loud` goldens). This area's half is the bell's place at the top of the rail's foot,
+above Hosts, and its Tab stop: crates/gui/farhelm-gui/src/session_list/host_rail/tests.rs
+`the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help` and
+`tab_reaches_the_foot_after_the_rail_and_the_lists_controls`.
 
 ### `tests/host-updates.spec.ts`
 
@@ -436,11 +459,15 @@ are `update_and_update_all_send_exactly_the_displayed_hosts`, their wait for a l
 `host-setup-failed` (the list beside the rail's avatar during a setup and after it failed) wait for a bridge verb that
 can script a fake host, since staging either takes the helm's host script, probe and provision calls, which no scene
 step can make; meanwhile the tests above and smoke step 76 (a scripted setup failing with Hosts closed, its row, and
-Details) cover the behaviour. Not yet ported:
-`attention opens the menu header of an expanded host spanning the viewport` (Details on a host whose open row is taller
-than the panel; the reveal scrolls the toggle itself into view, which is that case's rule, but no test drives such a
-row). The rest are in Settings and hosts. The old list's environment rows had no case of their own in this spec (the old
-app's unit tests covered them), and are crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+Details) cover the behaviour. `attention opens the menu header of an expanded host spanning the viewport` (Details on a
+host whose open row is taller than the panel, its menu toggle scrolled out above) by the rule's two halves: the reveal
+focuses that row's menu toggle itself (`reveal_focuses_a_far_rows_toggle_and_scrolls_it_into_view`), and the focus
+coordinator scrolls a focused control into view from either side by the least distance, whatever holds it
+(crates/gui/farhelm-gui/src/focus_tests.rs
+`tab_to_a_field_below_the_fold_scrolls_it_into_view_and_shift_tab_scrolls_back` and
+`tab_scrolls_the_least_distance_and_not_at_all_for_a_control_already_in_view`); no test draws a row taller than the
+panel. The rest are in Settings and hosts. The old list's environment rows had no case of their own in this spec (the
+old app's unit tests covered them), and are crates/gui/farhelm-gui/src/session_list/attention/tests.rs
 `environment_phases_have_their_rows_and_routine_ones_none` (a stopped environment, a failed deletion and a failed resume
 as problems, "Deleting" as work in progress, routine suspensions with no row),
 `credentials_and_tunnels_join_a_rows_words` (undelivered credentials and failed tunnels added to a row's words, tunnels
@@ -456,7 +483,19 @@ revised to say so.
 
 Tests: 1. Covers: active sessions lead across bursts, idle demotion, reload and rename.
 
-not yet ported
+replaced. The order is the helm's and the supervisor's (SPEC.md, "Session list": "The grouping and the key are
+authoritative helm and supervisor data"): crates/farhelm-helm/src/aggregate.rs
+`activity_order_moves_for_a_new_burst_or_a_group_change_only` (running first, a finished session dropping below on an
+unchanged key, a new burst promoting) and `activity_keeps_the_work_start_order_and_tiebreaks_inside_each_group`, with
+what starts a burst in crates/farhelm-supervisor/src/service/ticker.rs
+`work_starts_and_activity_dates_follow_the_reading_transitions`. The window draws the order it is pushed and tells the
+helm nothing: crates/gui/farhelm-gui/src/session_list/tests.rs
+`rows_follow_the_pushed_order_and_the_selection_follows_its_session`. A row moving under its open Rename editor keeps
+the editor's draft, caret and focus, and Save sends what was typed:
+crates/gui/farhelm-gui/src/session_list/rename/tests.rs
+`a_reorder_under_an_open_editor_keeps_its_draft_caret_and_focus`. The reload is the channel's snapshot in the stored
+order (crates/farhelm-helm/src/ui_channel_tests.rs `a_channel_opens_in_the_stored_list_order_or_most_recent_activity`),
+and the second client has nothing to port, since one helm serves one window.
 
 ### `tests/bulk-session-actions.spec.ts`
 
@@ -509,15 +548,22 @@ it, as the old app's reservation at acceptance did), `a_stop_batch_holds_no_auto
 `a_reset_drops_the_queued_rows` and `a_batch_acts_only_on_the_marks_shown`. Retired containerized sessions:
 `a_bulk_stop_leaves_a_retired_session_out_and_delete_takes_it`,
 `with_only_retired_sessions_marked_the_bar_draws_delete_and_no_stop` and
-`with_no_menu_toggle_cancel_returns_focus_to_the_pressed_button`. Not yet ported: a golden of the bulk question;
-`archive cues need a visible Trash` (the cue already skips a Trash button not drawn, `trash/cue.rs`, but no test drives
-it while marked); and `host attention movement closes the marked menu and reopening remeasures`, which the bulk work and
-the Hosts attention list share, is crates/gui/farhelm-gui/src/session_list/attention/tests.rs
-`menus_below_close_when_the_list_moves_and_stay_through_progress`. Sandbox and recipe container rows' environment-wide
-cases wait for the environment Delete's piece (milestone M3.4b). No end-to-end smoke step, and no app scene of the bulk
-question: the bridge's command line (`scripts/gui-agent.py`'s `click`) sends no modifier keys, so neither can mark a
-row. The bridge's protocol does carry modifiers on a mouse-down, so a modifier option on its `click` would make both
-possible.
+`with_no_menu_toggle_cancel_returns_focus_to_the_pressed_button`. `archive cues need a visible Trash`:
+crates/gui/farhelm-gui/src/trash/cue/tests.rs `an_archive_while_sessions_are_marked_plays_nothing`.
+`host attention movement closes the marked menu and reopening remeasures`, which the bulk work and the Hosts attention
+list share: crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+`menus_below_close_when_the_list_moves_and_stay_through_progress`. The question's "Sessions affected" stop scrolls by
+keyboard when its rows overflow under the dialog frame's rule, which the prompt reuses: the stop itself is
+`a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks`'s region, its keys
+crates/gui/farhelm-gui/src/components/tests/dialog.rs `the_scroll_keys_scroll_a_dialog_body_through_its_stop` and
+crates/gui/farhelm-gui/src/prompt_tests.rs `a_question_given_a_scroll_stop_lets_the_keyboard_reach_its_text`. Dropped: a
+golden of the bulk question. The golden set takes no new pictures since 2026-11-16 (decided by the GPUI migration's
+orchestrator), and an app scene, which stands in for one, cannot show the question: the bridge's command line
+(`scripts/gui-agent.py`'s `click`, which passes on `gpui-agent`'s) sends no modifier keys, so it cannot mark a row, and
+SPEC.md has no keyboard way to mark. The question's rows and words are
+`a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks`'s. The bridge's protocol does carry modifiers on a
+mouse-down, so a modifier option on its `click` would make a scene and an end-to-end smoke step possible. Waiting for
+bulk environment Delete: sandbox and recipe container rows' environment-wide cases.
 
 ### `tests/menu-highlight.spec.ts`
 
@@ -576,16 +622,35 @@ host-menu and host-permission cases are other areas' and stay unported
 
 Tests: 4. Covers: restoring confirmations reports save failure and recovers.
 
-partly (the row's Stop, Replace and Delete with confirmations skipped):
+ported, its four tests as follows.
+
+`skip session confirmations walks row header interrupted card and tab actions`: the row's Stop, Replace and Delete,
 crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
-`skipped_confirmations_stop_and_replace_on_the_click_with_their_rows_guards`,
+`skipped_confirmations_stop_and_replace_on_the_click_with_their_rows_guards` and
 crates/gui/farhelm-gui/src/session_list/menu_tests.rs `skipped_confirmations_delete_on_the_click_with_the_rows_guard`;
-the header's Restart with confirmations skipped is crates/gui/farhelm-gui/src/session_pane/header_tests.rs
-`a_skipped_restart_question_goes_ahead_with_consent_for_the_working_agent` and Escape returning to the terminal is
-`escape_returns_to_the_terminal_and_cancel_to_the_button` (the header's Stop, Replace and Delete skip their questions
-through the same row functions, not tested separately); the interrupted card's Replace with confirmations skipped is
-crates/gui/farhelm-gui/src/session_pane/card_tests.rs `skipped_confirmations_replace_from_the_card_at_once`. Waiting:
-restoring confirmations, for Settings
+the header's Restart, crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+`a_skipped_restart_question_goes_ahead_with_consent_for_the_working_agent` (the header's Stop, Replace and Delete skip
+their questions through the same row functions, not tested separately); the interrupted card's Replace,
+crates/gui/farhelm-gui/src/session_pane/card_tests.rs `skipped_confirmations_replace_from_the_card_at_once`; and a tab's
+Close, the terminal area's crates/gui/farhelm-gui/src/terminal/set/tests.rs
+`skipped_questions_close_at_once_side_by_side_and_a_refusal_shows_on_its_tab`.
+
+`Escape cancels header restart replace and delete questions and restores terminal focus`: header_tests.rs
+`escape_returns_to_the_terminal_and_cancel_to_the_button`.
+
+`restoring confirmations reports save failure and recovers`: Settings' Skip session confirmations switch saves its own
+field (crates/gui/farhelm-gui/src/settings/tests.rs
+`each_switch_saves_its_own_preference_field_under_the_preferences_key`), and a refused save puts the switch back with
+its failure line (`a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`, shown on another
+switch under the same rule); the questions come back once the helm stores the choice, since each reads the stored
+preference, a change from the old app that [Settings and hosts](settings-and-hosts.md) records among its deviations.
+
+`superseded restoration cannot report an older failure` is superseded: Settings sends no second save while one is in
+flight, refusing the press with its busy line, a second click on the saving switch included (settings/tests.rs
+`a_press_during_another_settings_save_says_why_it_sent_nothing`), so no newer choice of the switch ever stands behind an
+older save whose failure could show. Where the list's own preferences do queue a newer choice behind a write in flight,
+a refused write shows nothing at all (`session_list/order/tests.rs`
+`a_choice_queued_behind_a_refused_write_is_still_sent`).
 
 ### `tests/delete-precondition.spec.ts`
 
@@ -660,13 +725,19 @@ the GUI has no per-command deadline and the helm answers a slow host within its 
 
 Tests: 3. Covers: row Replace YOLO arrival respects ${focus} focus.
 
-partly: crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
+ported: crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
 `a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actions` ("Stopping…" on the row, the session's
 actions usable again once the reply lands), `a_pending_stop_or_replace_holds_no_automatic_choice_back` (pending Stop and
 Replace do not delay automatic selection), `a_yolo_question_after_the_user_moved_on_waits_without_focus` and
 `a_yolo_refused_replace_asks_the_launchers_question_in_its_row` (the YOLO question's arrival, without and with focus;
 the case is the launcher's in its parity file, whose row should point here, which the migration's orchestrator has asked
-the launcher area to do); New terminal and Clone wait for their areas
+the launcher area to do). `Stop settles before its held status refresh`:
+crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs `a_stops_reply_alone_frees_its_sessions_clone` (Clone works
+once Stop's reply lands, with its notice on the row and no listing awaited); New terminal waits on the same session key
+(crates/gui/farhelm-gui/src/terminal/set/tests.rs `new_terminal_is_refused_while_a_lifecycle_request_is_pending`), so it
+is free again with Clone by construction, with no test of its own after the reply.
+`bulk Stop completion leaves the bystander terminal focused`: crates/gui/farhelm-gui/src/session_list/bulk_tests.rs
+`a_finished_stop_batch_leaves_the_open_sessions_terminal_focused`
 
 ### `tests/session-action-shortcuts.spec.ts`
 
@@ -682,7 +753,8 @@ crates/gui/farhelm-gui/src/session_pane/header_tests.rs
 `the_delete_shortcut_asks_the_headers_question_even_with_nothing_alive` (the chord asks the header's Delete question,
 even for an ended session with no tabs), crates/gui/farhelm-gui/src/session_list/menu_tests.rs
 `the_shortcut_asks_about_the_open_session_and_waits_while_a_question_is_open`; the Rename chord on a filtered open
-session (its untouched-save and second-client cases aside) in crates/gui/farhelm-gui/src/session_pane/carried_tests.rs
+session (its untouched-save case aside, and its second-client case, since one helm serves one window) in
+crates/gui/farhelm-gui/src/session_pane/carried_tests.rs
 `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename`
 
 ### `tests/header.spec.ts`
@@ -720,7 +792,7 @@ whole title, the ended badge's the whole status), `a_stale_session_draws_no_badg
 `…`, the live mark and the age whole, on one line); crates/gui/farhelm-gui/src/session_pane/carried_tests.rs
 `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename` (the actions and the bar of an open
 session a filter hides) and `this_windows_delete_of_a_hidden_open_session_opens_the_next_session` and
-`a_carried_session_deleted_elsewhere_moves_the_selection_on` (deleted by another client), and
+`a_carried_session_deleted_elsewhere_moves_the_selection_on` (deleted elsewhere, by the command line or an agent), and
 `a_carried_session_cut_away_on_its_own_host_stays_open` (an old open session its own host's cap left out, under a host
 filter naming another host, stays open); crates/gui/farhelm-gui/src/session_pane/details_tests.rs
 `the_copy_fields_show_name_help_and_copy_their_values` (the `~` fold, names and `— click to copy` tooltips, the
@@ -757,12 +829,12 @@ Space on a caret and switching from one caret's open menu to the other's by a cl
 compact cases, a pill's content changing in place across the boundary, a pill hidden while mounted or closed (only the
 pane's widening brings the ordinary look back in a test), a strip replaced after an interruption (the fit measures the
 strip it is drawn with, every frame) and the condensed row's open menus and questions, which keep their size (they are
-drawn by the layer manager, apart from the row). Waiting: the condensed text size buttons (the old `.btn` rule gave them
-2 pixels of padding too; the terminal area, which owns them, agreed on 2026-11-16 to give the group's drawing a
-`compact: bool` that the header will pass into its condensed look), the text size buttons, the tab strip and the tunnel
-pill themselves, with the pill's ports, the tab strip's floor beside a pill and the selected tab's reveal (the terminal
-area's); the bar's 32-pixel height, its position at the window's bottom and the macOS title-band inset, which no test
-pins yet (the goldens and screenshots show them)
+drawn by the layer manager, apart from the row). Waiting on the terminal area's named change: the condensed text size
+buttons (the old `.btn` rule gave them 2 pixels of padding too; the terminal area, which owns them, agreed on 2026-11-16
+to give the group's drawing a `compact: bool` that the header will pass into its condensed look). The terminal area's:
+the text size buttons, the tab strip and the tunnel pill themselves, with the pill's ports, the tab strip's floor beside
+a pill and the selected tab's reveal (the terminal area's); the bar's 32-pixel height, its position at the window's
+bottom and the macOS title-band inset, which no test pins yet (the goldens and screenshots show them)
 
 ### `tests/stop-tabs.spec.ts`
 
@@ -837,13 +909,14 @@ its own instead (recorded in the PR). The old retired-container card is `tests/r
 row. Recorded deviations: the card's question is the prompt's plain inline look, with its title line ("Replace
 confirmation") and its answers at its end, where the old card drew the consequence and the two buttons in one wrapped
 row; and while it is open the card's Replace keeps the primary fill, which is the pressed look too, where the old one
-turned to the accent's hover fill. Waiting: Restart with… beyond its entry in the header's Restart menu (the launcher's;
-the entry is crates/gui/farhelm-gui/src/session_pane/header_tests.rs
+turned to the accent's hover fill. Other areas': Restart with… beyond its entry in the header's Restart menu is the
+launcher's, in [Launcher](launcher.md) (the entry is crates/gui/farhelm-gui/src/session_pane/header_tests.rs
 `the_with_choices_and_clone_open_the_launcher_and_return_focus_on_cancel` and
-`an_unavailable_choice_stays_in_its_menu_with_its_reason`), the button padding of 4 pixels (the card's buttons are the
-ordinary 6-pixel ones), and the scrollback and lost-reply cases after a Restart (the terminal area's). A restart's
-reattach (the terminal's half: the restart's detach reconnects by itself, with no Reconnect offered, and the new run's
-replay replaces the old screen in one redraw) by crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`an_unavailable_choice_stays_in_its_menu_with_its_reason`), and the scrollback and lost-reply cases after a Restart are
+the terminal area's. The old card's button padding of 4 pixels is not matched: the card's buttons are the ordinary
+6-pixel ones (a deviation below). A restart's reattach (the terminal's half: the restart's detach reconnects by itself,
+with no Reconnect offered, and the new run's replay replaces the old screen in one redraw) by
+crates/gui/farhelm-gui/src/terminal/attached/tests.rs
 `a_restarts_detach_reattaches_by_itself_and_shows_the_new_run_in_one_redraw`. The detach-banner case after a Restart ("a
 restarted session reconnects without a detach banner") by crates/gui/farhelm-gui/src/session_pane/tests.rs
 `a_restart_reattaches_without_a_card_or_a_red_band` (no reconnect card, red band or status line at any step while the
@@ -896,17 +969,21 @@ partly (its stale cases; the rest of the spec is in [Terminal](terminal.md)):
 "stale-session-view-with-no-status-renders-metadata-and-no-badge" by
 crates/gui/farhelm-gui/src/session_pane/unavailable_tests.rs
 `the_band_keeps_the_last_known_status_and_age_of_a_stale_session_only` (a session nobody classified has its age and no
-status in the band) with crates/gui/farhelm-gui/src/session_pane/details_tests.rs for the bar's metadata. Waiting:
-"opening a stale session shows metadata and calm terminal recovery", whose card is the dropped stream's "Session
-unavailable — reconnecting" with Reconnect now, the terminal area's reconnect display (M3)
+status in the band) with crates/gui/farhelm-gui/src/session_pane/details_tests.rs for the bar's metadata; "opening a
+stale session shows metadata and calm terminal recovery" by the same metadata tests for its metadata. Its terminal half,
+a first attach the helm refuses or detaches ("no such session on this host entry") shown as the calm "Session
+unavailable — reconnecting" card with no banner, is a deviation below: the GPUI terminal shows its red band with
+Reconnect there, by the terminal area's crates/gui/farhelm-gui/src/terminal/attached/tests.rs
+`detached_and_refused_offer_reconnect` and `detached_refused_and_closed_streams_keep_the_red_band`, and keeps the card
+for a drop it recovers from by itself (`a_dropped_stream_shows_the_reconnect_card_over_the_kept_screen`)
 
 ### `tests/session-view-claims.spec.ts`
 
 Tests: 2. Covers: navigation survives another client deleting a session with a Restart prompt.
 
 ported: crates/gui/farhelm-gui/src/session_pane/header_tests.rs
-`a_session_deleted_elsewhere_leaves_the_next_sessions_header_usable` (the open session deleted by another client while
-its header Restart question is open, and while its Restart runs)
+`a_session_deleted_elsewhere_leaves_the_next_sessions_header_usable` (the open session deleted elsewhere, by the command
+line or an agent, while its header Restart question is open, and while its Restart runs)
 
 ### `tests/quick-switcher.spec.ts`
 
@@ -997,7 +1074,8 @@ Case: Resume restores owned controls and Stop and suspend keeps its host-wide qu
 
 partly: the card's Resume and its request, Suspend back in the header once connected, and, with skip on, the menu's Stop
 and suspend asking "Stop and suspend sandbox?" after the activity read, sending one `stop-and-suspend` and no Suspend,
-its refusal on the row. Not driven: the header's copy of that refusal, and Replace with's host (the launcher's).
+its refusal on the row, and the same refusal below the open session's header (the same test's last check). Replace
+with's host is the launcher's.
 
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_suspended_card_says_so_and_resumes`
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
@@ -1081,7 +1159,7 @@ provider's reason as its help, and the same in the details bar in the age's plac
 the header refused, Clone's and Delete's descriptions and the header's Stop, Clone and Delete help giving the reason;
 the Delete shortcut refused; nothing sent; and everything back once the host leaves Deleting. Bulk Stop and Delete leave
 such a session out of their question and their batch with "Stop: " or "Delete: " and the reason on its row, as the old
-batch did when it was drawn. Waiting for the bulk environment work: the marked bar's Stop and Delete drawn unavailable,
+batch did when it was drawn. Waiting for bulk environment Delete: the marked bar's Stop and Delete drawn unavailable,
 with "The marked sessions' environments are being deleted, so their actions are unavailable", when every mark is such a
 session.
 
@@ -1098,15 +1176,19 @@ session.
 
 Case: bulk Delete of a connected sandbox's sessions sends one environment Delete each.
 
-not yet ported (bulk Delete and the environment Delete).
+waiting for bulk environment Delete, the next environment piece; the single environment Delete it builds on is ported
+(the cases above).
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
 Case: a held sandbox Suspend and a launch on another host proceed side by side.
 
-not yet ported: the sidebar half (Suspend does not wait on a launch elsewhere) holds by construction, Suspend taking no
-part in the launch and registry exclusion (`Work::creates_a_session` and `changes_host_registry` are false), but no test
-drives it; the refusal while this window's launch targets the same host waits for the launcher's environment work.
+partly: the sidebar half, a pending Suspend holding no launch back, since Suspend takes no part in the launch and
+registry exclusion (`Work::creates_a_session` and `changes_host_registry` are false): New stays available and opens the
+launcher while it runs. Not ported: Suspend's refusal while this window's own launch targets the same host (a deviation
+below).
+
+- crates/gui/farhelm-gui/src/session_list/environment_tests.rs `a_suspend_in_flight_leaves_new_available`
 
 ### `tests/podman-environments.spec.ts` (settings and hosts)
 
@@ -1140,8 +1222,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   words and quotes no title.
 - A pending Delete shows the spinner the row and the scrim use beside its words in place of the header's actions; the
   old header showed a pulsing dot there.
-- The app bar is 40 pixels high on macOS too, where the old one was 48 with room for the window buttons; the macOS title
-  band brings both (the desktop-integration area).
 - The version readout always shows this window's build, and its hover help never names the helm's: the GUI does not
   learn the helm's build yet. In the desktop app the helm runs in the same process, so the two cannot differ there; a
   remote helm would need it.
@@ -1253,9 +1333,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   This one is meant to stay.
 - The rail's Add host is never disabled, where the old one was while a launch or a change to the host registry was in
   flight (the old page's one token for both). Under the decision of 2026-11-14 each action refuses for itself, so the
-  refusal belongs to the dialog's Add, but that Add does not refuse during a launch yet (interim, in the dialog's module
-  docs and the settings-and-hosts parity file's Add host deviations). Until it does, adding a host while a session
-  launches is allowed, which the old app did not allow.
+  refusal belongs to the dialog's Add: pressed while a session launch, Restart or Replace is in flight, it sends nothing
+  and says why in its error line, the fields kept (`hosts/add/tests.rs`
+  `add_refuses_while_a_session_launch_restart_or_replace_is_in_flight`; the settings-and-hosts parity file's Add host
+  deviations).
 - The rail's expansion is the helm's `host_rail_open` preference, shared by every client (the maintainer decided on
   2026-11-13), where the old app kept it per device in `localStorage`; nothing carries over. It is written the way
   Compact is: a refused write is logged and shows nothing, the rail going back to what the helm stores. The old toggle
@@ -1322,6 +1403,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   old `@media (hover: none), (any-pointer: coarse)` rule), since GPUI reports no coarse pointer to ask about. Its other
   reveal rules are the old ones, tested by `session_list/row_tests.rs`
   `the_menu_button_shows_for_hover_focus_its_open_menu_and_selection_and_none_latches`.
+- A row whose menu is open draws no tint of its own; only its menu button takes the pressed look (`Tier::RowMenu`'s
+  expanded look). The old row tinted itself as well (`tests/sidebar.spec.ts`, "an open menu tints its own row and
+  presses its own toggle"). SPEC.md names a row tint only for marked rows and asks for none here; nothing in the port
+  draws one yet.
+- A managed checkout's row draws its last line as an ordinary folder's, without the old `·` separator and repository
+  mark; no part of the port draws that form yet, and the details bar's checkout mark still says which sessions run in a
+  managed checkout.
 - The heading's actions, Trash, Templates and New, are all drawn. The old Templates button was disabled while a launch
   or a change was in flight (the old page's one token for both); this one opens the dialog whenever it is pressed, as
   the rail's Add host does under the decision of 2026-11-14 recorded above (each action refuses for itself). New is
@@ -1418,6 +1506,20 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The unavailable card's "Resume host" has hover help, "Resume host: this session continues when its host resumes",
   where the old button had none; every GPUI control has help. A refused Resume shows on the card, and the lines above
   the terminal leave it out while the card shows it.
+- While a Suspend or Resume waits for its provider, the unavailable card's evidence line says "Asked the environment
+  provider to suspend at …" (or resume), the Hosts row's shared phase words (`hosts::identity::phase`), where the old
+  card named who was asked: "Asked Tensorlake …" for a sandbox, "Asked the container host …" for a container. The
+  per-provider words wait for an answer for them in the provider wording module (`environment_ui.rs`), which the Hosts
+  details are to share; the card takes it up then, with a test of the exact words for a sandbox and a container.
+- The interrupted card's Restart and Replace are the component layer's ordinary buttons, with 6 pixels of padding, where
+  the old card's had 4. SPEC.md names no size for them; the component layer's condensed look, which gives up padding, is
+  used only by the header, under a tunnel pill's pressure, which the card never meets.
+- A session whose first attach the helm refuses or detaches (the old `terminal.spec.ts` case's "no such session on this
+  host entry") shows the terminal's red band with Reconnect over an empty terminal, where the old app showed the calm
+  "Session unavailable — reconnecting" card and no banner. The terminal keeps that card for a drop its stream recovers
+  from by itself; a refusal or a detach waits for the user, and SPEC.md keeps "explicit banners" for such decisions
+  (`terminal/attached/tests.rs` `detached_and_refused_offer_reconnect` and
+  `detached_refused_and_closed_streams_keep_the_red_band`).
 - Not yet ported, waiting for the launcher's environment work: Suspend and Resume refused while this window's own launch
   targets or is waking the same host (the old "A launch on this host is in progress; try again once it finishes"), and
   Clone's environment wording ("New session in a new environment, keep this one"), which would describe a Clone the
@@ -1429,17 +1531,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   the status dot do not consult that place, as they do not while a Suspend or Resume runs either, so they still act. A
   compact row keeps its stale clock and cause ("Host being deleted") rather than drawing the phase, as the old compact
   row had no being-deleted mark.
-- A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words, while the Hosts panel offers no
-  Retry yet: it comes with settings-and-hosts' Delete sandbox. The session list offers no Retry, as the old row did not.
 - The helm answers an environment session's Delete within 20 seconds and carries on past that, where the old app waited
   up to nine minutes (decided by the migration's orchestrator on 2026-11-16, and SPEC.md says so). The port shows the
   bound's 504 as no failure: the row and header drop their Delete progress and the pushed lists show how it ended. So a
   Delete of one session still unanswered then does not open the warned whole-sandbox question; the next Delete does,
-  once the host reads not connected, and while it stays connected, Hosts' Delete sandbox is the way out (not ported
-  yet). A success after the bound shows no "The sandbox stays" count, since its reply never reaches the window. A
-  whole-sandbox Delete that fails after the bound leaves the sandbox listed in its ordinary state with the reason only
-  in the helm's log, where the old app showed the reason on the row. Tested by
-  `session_list/environment_delete_tests.rs` `a_504_at_the_bound_is_not_a_failure_but_a_refusal_shows`.
+  once the host reads not connected, and while it stays connected, Hosts' Delete sandbox is the way out. A success after
+  the bound shows no "The sandbox stays" count, since its reply never reaches the window. A whole-sandbox Delete that
+  fails after the bound leaves the sandbox listed in its ordinary state with the reason only in the helm's log, where
+  the old app showed the reason on the row. Tested by `session_list/environment_delete_tests.rs`
+  `a_504_at_the_bound_is_not_a_failure_but_a_refusal_shows`.
 - An environment session's "unasked" answer asks the warned whole-sandbox question again only while the user has not
   moved on since answering the first, as every completion that would open a question does here. Otherwise the helm's
   words stay on the row, and the next Delete picks its lane from the hosts read again; the old question waited on the

@@ -334,9 +334,10 @@ impl SessionPane {
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
-        // and on the store only for whether the open session shows its interrupted card, whether its row is stale (the
-        // unavailable card) and whether the fleet is empty (New as home), which the card's follower reports when any of
-        // them changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
+        // and on the store only for whether the open session shows its interrupted card, whether its row's host is
+        // reached (a stale row shows the unavailable card), whether the session is retired (the retired card, and never
+        // a terminal) and whether the fleet is empty (New as home), which the card's follower reports when any of them
+        // changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
         // change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {

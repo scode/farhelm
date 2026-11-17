@@ -20,7 +20,7 @@ use crate::layers;
 use crate::main_view::MainView;
 use crate::operations::OpKey;
 use crate::session;
-use crate::session_list::tests::{Fixture, listing, preferences, session};
+use crate::session_list::tests::{Fixture, listing, preferences, row_order, session};
 use crate::test_support::started;
 use crate::test_support::{self, any_open, frame, keys, settle, terminal_focused};
 
@@ -318,6 +318,44 @@ fn typing_after_an_unrelated_push_continues_at_the_caret(cx: &mut TestAppContext
     );
     keys(cx, "y");
     assert_eq!(field(cx), "oldxy", "the push left the caret where it was");
+}
+
+/// SPEC.md, "Session list": the activity order moves a row when its session's work starts or ends, so the row whose
+/// Rename is open can move while the user types (the old `work-start-order.spec.ts` demoted a session under its open
+/// editor and checked the editor came through whole). The order is the helm's, and the window only draws it, so what
+/// this window must keep is the editor: "Text, caret and focus stay as they are". Specified: with Rename open on a and
+/// End and a letter typed, a push that moves a below b draws the rows as b, a; the field keeps focus and its text, the
+/// next letter follows the first, and Enter sends the typed title for a.
+#[gpui::test]
+fn a_reorder_under_an_open_editor_keeps_its_draft_caret_and_focus(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_main(cx, fleet("old"));
+    assert_eq!(row_order(&frame(cx)), ["a", "b"], "the premise: a leads");
+    keys(cx, RENAME);
+    keys(cx, "end x");
+    assert_eq!(field(cx), "oldx", "the premise: End then a letter appends");
+
+    push(
+        &mut helm,
+        only(&[session("b"), session("a").title("old")]),
+        &[],
+        cx,
+    );
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["b", "a"],
+        "the rows took the pushed order"
+    );
+    assert!(field_focused(cx), "the field kept focus");
+    keys(cx, "y");
+    assert_eq!(
+        field(cx),
+        "oldxy",
+        "the reorder left the caret where it was"
+    );
+
+    keys(cx, "enter");
+    let (_, title) = one_rename(&mut helm);
+    assert_eq!(title, json!("oldxy"));
 }
 
 /// An untouched draft does not follow pushes while its save is in flight, since the value on screen must stay the one

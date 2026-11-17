@@ -346,44 +346,8 @@
       ]
     },
     {
-      "id": "app-sidebar-resized",
-      "title": "The sidebar widened to 446 pixels with five Right presses on its focused divider (last in its app run, since the width is stored with the helm)",
-      "reference": "main-running-session",
-      "mockup": false,
-      "steps": [
-        [
-          "click",
-          "id:sidebar-divider-grip"
-        ],
-        [
-          "press",
-          "right"
-        ],
-        [
-          "press",
-          "right"
-        ],
-        [
-          "press",
-          "right"
-        ],
-        [
-          "press",
-          "right"
-        ],
-        [
-          "press",
-          "right"
-        ],
-        [
-          "hover",
-          "text:Recently active"
-        ]
-      ]
-    },
-    {
       "id": "app-sort-menu",
-      "title": "The list title's order menu, opened with a click: the shared header, the three orders with Recently active checked and highlighted, Compact unchecked after a separator, and the title in its open look (the sidebar still widened by the scene before)",
+      "title": "The list title's order menu, opened with a click: the shared header, the three orders with Recently active checked and highlighted, Compact unchecked after a separator, and the title in its open look",
       "reference": "sort-menu",
       "mockup": false,
       "steps": [
@@ -456,7 +420,7 @@
     },
     {
       "id": "app-header-delete-question",
-      "title": "Delete asked from the open session's header (the exited Fixture 4, which the row would delete unasked): the question hung under the Delete button, asked with the Delete shortcut because the narrow window's pane clips that button, as the old app's did",
+      "title": "Delete asked from the open session's header (the exited Fixture 4, which the row would delete unasked): the question hung under the Delete button, asked with the Delete shortcut, since the narrow window's 504-pixel pane (900 less the 396-pixel sidebar, rail included) is under the 650 pixels below which SPEC.md lets the header's row clip, and the old app's narrow picture clipped that button",
       "reference": "header-delete-question",
       "mockup": false,
       "steps": [
@@ -1432,6 +1396,55 @@
           "wait",
           "--text",
           "Collapse"
+        ]
+      ]
+    },
+    {
+      "id": "app-sidebar-resized",
+      "title": "The sidebar widened to 446 pixels with five Right presses on its focused divider, after Collapse on the expanded rail (last in its app run, since the width and the rail's expansion are stored with the helm)",
+      "reference": "main-running-session",
+      "mockup": false,
+      "start": [
+        "--fleet",
+        "running,waiting,idle,exited"
+      ],
+      "steps": [
+        [
+          "click",
+          "id:host-rail-toggle"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Collapse"
+        ],
+        [
+          "click",
+          "id:sidebar-divider-grip"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "hover",
+          "text:Recently active"
         ]
       ]
     },

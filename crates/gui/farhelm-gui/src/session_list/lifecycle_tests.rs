@@ -24,7 +24,9 @@ use serde_json::{Value, json};
 use super::delete_notice;
 use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, push, snapshot};
 use super::outcome::PROGRESS_SHOWS_AFTER;
-use super::tests::{Fixture, change, listing_meta, open_main, painted, selected, sent, session};
+use super::tests::{
+    Fixture, change, launcher_drawn, listing_meta, open_main, painted, selected, sent, session,
+};
 use crate::focus::Mark;
 use crate::main_view::MainView;
 use crate::operations::{HelmMarker, OpKey};
@@ -450,6 +452,40 @@ fn a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actio
         drawn(cx, "prompt"),
         "a's Replace asks once its Stop settled"
     );
+}
+
+/// The old `session-action-completion.spec.ts`, "Stop settles before its held status refresh": Stop's own reply ends
+/// its hold on the session, whether or not any listing has shown the agent end, so Clone (and New terminal, which reads
+/// the same session key) works at once. A hold that waited for the status would keep both refused while the agent
+/// winds down. Specified: with b's Stop unanswered, b's row says "Stopping…" and Clone from b's menu opens nothing;
+/// once the helm answers with a partial-Stop notice, and with no push since, "Stopping…" is gone, the notice shows on
+/// b's row and Clone opens the launcher.
+#[gpui::test]
+fn a_stops_reply_alone_frees_its_sessions_clone(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    pending(&mut fake);
+    choose(cx, "session-menu-b", "session-menu-stop");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Stop was sent");
+    };
+    assert!(
+        texts(cx).iter().any(|text| text == "Stopping…"),
+        "the premise"
+    );
+    choose(cx, "session-menu-b", "session-menu-clone");
+    assert!(!launcher_drawn(cx), "the premise: Clone waits for the Stop");
+    test_support::keys(cx, "escape");
+
+    let notice = "Terminal 2 could not be closed: fixture partial Stop";
+    fake.reply(id, 200, Some(json!({ "notice": notice })));
+    test_support::settle(cx);
+    assert!(!texts(cx).iter().any(|text| text == "Stopping…"));
+    assert_eq!(
+        label_of(cx, "session-outcome-b"),
+        Some(format!("Stop: {notice}"))
+    );
+    choose(cx, "session-menu-b", "session-menu-clone");
+    assert!(launcher_drawn(cx), "Clone opened the launcher");
 }
 
 /// SPEC.md: "After about two seconds waiting for the reply, the sidebar … share a spinner, the host and elapsed
