@@ -745,7 +745,10 @@ systemd or SSH substrate ran.
   run's wrapper through its private PATH and the machine's own login bash, whatever the caller's PATH and profile say;
   no credential or caller configuration left; the scripted backend forced on at every launch, a relaunch included; the
   wrapped names matching the helm's launch programs), its remote supervisors against a stand-in `farhelm` (started
-  staged, recorded before any wait, stopped with their terminal hosts, a stranger's pid never claimed), the app's
+  staged, recorded before any wait, stopped with their terminal hosts, a stranger's pid never claimed), its private sshd
+  against the machine's real `sshd` and `ssh` (both staged spellings of this machine logging in through the shim with
+  the run's own key, known_hosts and no agent, every other destination refused, and `stop` leaving neither the sshd, its
+  connections nor a detached shared connection running; skipped, which is missing coverage, without OpenSSH), the app's
   environment (nothing of the caller's display, bus, bridge or `FARHELM_*` variables; on Linux the run's own compositor
   and lavapipe; the run's state directory and supervisor program, the window size, appearance and payload directory a
   run asks for, and the start dialogs off unless it asks for them), a `--user-session` run (the caller's runtime
@@ -756,12 +759,16 @@ systemd or SSH substrate ran.
   and only the waiting kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local
   host's YOLO setting it turns on), a `--scenario` run (the scenario's checks and refusals, its pins file, the create
   requests and replay scripts it makes, and against a stand-in helm the open session created first and the status and
-  shield checks), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm
-  reply without a body read as none, that a recorded pid whose start time no longer matches is never signalled (from
-  /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped,
-  kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed while it
-  waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on Linux and
-  macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs
+  shield checks), a scenario `capture` (the transcript's readiness line, the pointer parked only clear of hover and
+  tooltip reactions, the leak check refusing machine paths anywhere and the account's ssh spelling and the hostname only
+  where drawn, the size check quoting the window's points and scale, and against a stand-in bridge the order of park,
+  focus click, park and shot, with nothing written on a failed check), the wait for a fleet's statuses,
+  `terminal-text --wait` asking again until its text shows, a helm reply without a body read as none, that a recorded
+  pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and
+  UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may still be
+  running, given up by a holder whose `start` was killed while it waited, and a lock path that cannot be opened failing
+  at once. Seconds; builds nothing and starts no app (the sshd tests start a private sshd on 127.0.0.1); runs on Linux
+  and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs
   `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the
   tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
   `farhelm-desktop`, or the app's startup changes.
@@ -1031,6 +1038,10 @@ systemd or SSH substrate ran.
   rewritten to the pushed commit together or not at all, that a dry run touches nothing, and that reading the scenario
   through the loader leaves no bytecode in `scripts/`. Run it, with `shellcheck`, when the script or
   `scripts/scenario_json5.py` changes; seconds, no network, needs ImageMagick's `convert` and `identify`.
+- `bash -n scripts/readme-screenshot.sh && shellcheck scripts/readme-screenshot.sh` — the README hero's capture command,
+  which ships the checkout to a Mac and drives `scripts/gui-agent.py` there (`docs/readme-hero/SPEC.md`). Its staging
+  and checks are `gui-agent.py`'s, tested above; the command itself is only checked end to end, by a run (`--local` on
+  Linux stops at the size check by design). Run it when the script changes; seconds, no network.
 - `python3 -I scripts/test-scenario-json5.py` — the docs-media scenario loader (`scripts/scenario_json5.py`), which
   reads the subset of JSON5 the three `scenario.json5` files under `docs/` use: each of them parses into its viewport,
   hosts and sessions; line comments, unquoted keys and trailing commas are translated without touching strings holding
