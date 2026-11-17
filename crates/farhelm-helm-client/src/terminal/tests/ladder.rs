@@ -139,3 +139,57 @@ async fn a_5xx_upgrade_answer_is_retried_and_any_other_refusal_waits_for_the_use
         assert_eq!(offsets(&attempts), [0], "{status}: retried by itself");
     }
 }
+
+/// How a caller lets go of a stream: the three ways [`TerminalEvents`] and [`TerminalHandle`] say end it.
+#[derive(Debug, Clone, Copy)]
+enum LetGo {
+    Close,
+    DropHandles,
+    DropFeed,
+}
+
+/// Old `terminal-reconnect.spec.ts`, "leaving-a-session-cancels-a-pending-reconnect". Why: a reconnect wait that
+/// outlived the view that let its terminal go would attach later for a session nothing on screen shows, under a lease
+/// nobody uses, taking the terminal from wherever it is. The GUI lets a terminal go by closing its stream or by
+/// dropping its handle and feed with the view, so each of the three must end a wait that is running.
+///
+/// Spec: a stream whose first attach failed is waiting the ladder's first rung (500 ms); closing it, or dropping every
+/// handle, shows `Closed` and ends the feed, and dropping the feed ends it silently; in all three, no attempt is made
+/// after the first, ten minutes on.
+#[tokio::test(start_paused = true)]
+async fn letting_go_of_a_stream_during_its_reconnect_wait_cancels_the_reconnect() {
+    for how in [LetGo::Close, LetGo::DropHandles, LetGo::DropFeed] {
+        let script = vec![ConnectError::Failed("refused".into())];
+        let (handle, mut events, attempts) = scripted(attach("s1"), script);
+        assert_eq!(
+            events_now(&mut events, 2).await,
+            [
+                TerminalEvent::State(StreamState::Attaching),
+                reconnecting(1, 6, Retrying, Some(500)),
+            ],
+            "{how:?}: the premise, a reconnect wait"
+        );
+        if let LetGo::DropFeed = how {
+            drop(events);
+        } else {
+            if let LetGo::Close = how {
+                handle.close();
+            } else {
+                drop(handle);
+            }
+            assert_eq!(
+                events_now(&mut events, 1).await,
+                [TerminalEvent::State(StreamState::Closed)],
+                "{how:?}"
+            );
+            let after = timeout(Duration::from_secs(3600), events.recv()).await;
+            assert!(
+                matches!(after, Ok(None)),
+                "{how:?}: the feed went on: {after:?}"
+            );
+        }
+        // sleep-ok: paused clock: an observation window far past the wait that was running
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        assert_eq!(offsets(&attempts), [0], "{how:?}: a reconnect fired");
+    }
+}

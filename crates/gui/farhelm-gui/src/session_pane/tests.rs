@@ -1316,6 +1316,49 @@ fn a_restart_does_not_hold_back_a_stall(cx: &mut TestAppContext) {
     assert!(!fleet.drawn(CARD));
 }
 
+/// Old `terminal-restart.spec.ts`, "a restart whose response is lost still recovers the terminal", the pane's half.
+/// Why: a Restart relaunches the agent whether or not its answer gets back, and the supervisor has moved the viewer by
+/// then, so a terminal whose recovery waited on that answer would sit dead for a session that is running perfectly
+/// well. The stream reattaches by itself, and no part of showing the reattach may wait on the answer. The helm's half,
+/// what it records from a restart's reply, is farhelm-helm `a_reply_carrying_unknown_never_erases_a_known_status`; a
+/// reply lost to a broken channel is a reset, whose reattach is `a_reset_reattaches_the_surviving_selection`. The old
+/// case's other assertion, that the failure is surfaced, is the header's
+/// `a_restart_says_after_two_seconds_how_long_it_has_waited_and_then_its_refusal`.
+///
+/// Spec: with a's Restart confirmed and never answered, the viewer's `other` detach puts the stream into a reconnect
+/// (the premise); its reattach attaches and replays, and the terminal is live with no card, no red band and no status
+/// line, while the Restart is still in flight; a typed key reaches the new attachment.
+#[gpui::test]
+fn a_restart_whose_answer_never_comes_still_recovers_the_terminal(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    fleet.restart_open_session();
+    fleet.restart_happens_to(0);
+    assert!(
+        fleet.reconnecting(),
+        "the premise: the restart's detach reconnects"
+    );
+
+    fleet.go_live(0);
+    assert!(!fleet.reconnecting(), "live again");
+    fleet.shows_no_outage("live, the Restart unanswered");
+    assert!(
+        fleet
+            .cx
+            .update(|_, cx| crate::session_list::restart::in_flight("a", cx)),
+        "the premise: the Restart is still in flight"
+    );
+
+    click(fleet.cx, "session-row-a");
+    assert!(
+        terminal_focused(fleet.cx),
+        "the premise: a's terminal has focus"
+    );
+    fleet.input(0);
+    keys(fleet.cx, "x");
+    assert_eq!(fleet.input(0), [letter("x", 88)]);
+}
+
 // ---- A Suspend of the open session's host -------------------------------------------------------------------------
 
 impl Fleet<'_> {
