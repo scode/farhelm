@@ -16,12 +16,14 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Background, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    Role, TestAppContext, VisualTestContext, px, size,
+    Background, Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
+    PlatformInput, Point, Role, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point,
+    px, size,
 };
 use serde_json::{Value, json};
 
 use super::host_rail::tests::{node, texts_within};
+use super::lifecycle_tests::node_bounds;
 use super::pins_tests::away;
 use super::tests::{
     Fixture, change, launcher_drawn, listing_meta, open_main, painted, row_order, selected, sent,
@@ -1302,6 +1304,74 @@ fn a_refusal_shows_on_the_row_until_the_next_delete_starts(cx: &mut TestAppConte
     let texts = painted(&frame(cx));
     assert!(!texts.iter().any(|text| text == "the agent is busy"));
     assert!(texts.iter().any(|text| text == "Stopping agent…"));
+}
+
+/// A row's menu shows the session's last refusal uncut, under its commands, and the helm's words can make it taller
+/// than a small window; placed by the layer manager's clamp alone, such a menu sat at the window's top and ran past its
+/// bottom, out of reach. The old panel was capped to the viewport and scrolled, with the refusal inside its scroll
+/// (`tests/sidebar.spec.ts`, "a retained refusal stays inside a bottom-row menu's scrolling panel", at reference commit
+/// `24bc0580`, whose 120-word refusal this reuses). Specified: in a window of the app's least size, with b's Delete
+/// refused in 120 words, b's reopened menu lies inside the window with focus on Rename, drawn wholly inside the menu,
+/// and the refusal runs past the menu's bottom; End reaches Delete, drawn wholly inside the menu (the commands fit
+/// unscrolled, so this checks reach, not the reveal); a wheel turn over the menu brings the refusal's end inside it, and
+/// the menu stays where it was; with Rename scrolled out above the menu, Home focuses it and scrolls it wholly inside.
+#[gpui::test]
+fn a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    let height = crate::bootstrap::MIN_WINDOW_SIZE.height;
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    test_support::settle(cx);
+    deletes(&mut fake);
+    choose_delete(cx, "session-menu-b");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _)] = deletes(&mut fake)[..] else {
+        panic!("one Delete was sent");
+    };
+    let refusal: Vec<String> = (0..120).map(|n| format!("refusal-sentinel-{n}")).collect();
+    fake.reply(id, 409, Some(json!(refusal.join(" "))));
+    test_support::settle(cx);
+
+    test_support::click(cx, "session-menu-b");
+    let menu = test_support::bounds(cx, "session-menu");
+    assert!(
+        menu.top() >= px(0.) && menu.bottom() <= height,
+        "inside the window: {menu:?}"
+    );
+    let inside = |item: Bounds<Pixels>| menu.top() <= item.top() && item.bottom() <= menu.bottom();
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert!(inside(node_bounds(cx, "session-menu-rename")));
+    let line = node_bounds(cx, "session-menu-outcome-b");
+    assert!(
+        line.bottom() > menu.bottom(),
+        "the premise: the refusal runs past the menu: {line:?} in {menu:?}"
+    );
+    test_support::keys(cx, "end");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
+    assert!(inside(node_bounds(cx, "session-menu-delete")));
+
+    cx.simulate_mouse_move(menu.center(), None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: menu.center(),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-5000.))),
+        ..Default::default()
+    });
+    test_support::settle(cx);
+    assert_eq!(test_support::bounds(cx, "session-menu"), menu);
+    // The refusal alone is taller than the menu, as in the old case, so only its end can come inside.
+    let line = node_bounds(cx, "session-menu-outcome-b");
+    assert!(
+        menu.top() < line.bottom() && line.bottom() <= menu.bottom(),
+        "the refusal's end scrolled into the menu: {line:?} in {menu:?}"
+    );
+
+    let rename = node_bounds(cx, "session-menu-rename");
+    assert!(
+        rename.top() < menu.top(),
+        "the premise: Rename scrolled out of the menu: {rename:?} in {menu:?}"
+    );
+    test_support::keys(cx, "home");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert!(inside(node_bounds(cx, "session-menu-rename")));
 }
 
 /// SPEC.md, "Session list": "Automatic selection after Delete waits until every admitted Delete has settled … and

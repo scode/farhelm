@@ -217,10 +217,10 @@ rest, case by case (tests in crates/gui/farhelm-gui/src unless a path says other
   `a_selection_settles_only_on_evidence`, and session_pane/tests.rs
   `a_first_launch_over_an_empty_fleet_ends_on_the_new_sessions_terminal`; a session pushed from elsewhere replacing the
   placeholder: test to port (raised 2026-11-16).
-- `a retained refusal stays inside a bottom-row menu's scrolling panel`: test to port with the row menu's height fix
-  that follows the parity test PRs (raised 2026-11-16). The old menu capped its height to the room below its clamped top
-  and scrolled, the refusal inside the scroll; the GPUI menu has no cap and no scroll, so a long refusal in a bottom
-  row's menu runs past the window.
+- `a retained refusal stays inside a bottom-row menu's scrolling panel`: session_list/menu_tests.rs
+  `a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window`, with the old case's 120-word refusal on a Delete
+  rather than a Stop, on any row, since the menu's height cap does not depend on where its top is placed. Its pointer
+  half has nothing to port: the menu draws no notch toward its row (the row menu's deviation below).
 - `scrolling the sidebar closes an open row menu` and `resizing the viewport closes an open row menu`: superseded
   (decided by the migration's orchestrator on 2026-11-16): the menu stays open (the deviation "An open row menu stays
   open and moves with its button" below). A resize re-places it every frame, layers_tests.rs
@@ -2060,9 +2060,15 @@ Where the port does not match the old app, and why. Each stays until the work na
   button's right edge and its top 4 pixels above the button's, as the old flyout did, but through the layer manager's
   one beside placement, so they keep its clamp rather than the old flyout's: flush inside the window rather than 8
   pixels from its edges, moved up only as far as the menu's own height needs (the old one kept 528 pixels of room below
-  the menu's top, so a short menu on a low row rose further), and never capped in height with a scrollbar (the full row
-  menu fits in the minimum window). The old flyout's pointer notch toward its row is not drawn: the layer manager draws
-  no notch for a popover; it draws one only for hover help beside the sidebar. Tested by `session_list/menu_tests.rs`
+  the menu's top, so a short menu on a low row rose further). Its height is capped, as the old one's was, and it
+  scrolls, header and all, so a long refusal under its commands leaves the menu inside the window: the cap is the
+  content area's height less 16 pixels, where the old one was the room below the menu's top less 8
+  (`a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window`). It scrolls with no scrollbar, like the app's
+  other menus, where the old panel showed the platform's. Page Up and Page Down do not scroll it: the old menu left them
+  to WebKit, which scrolled the panel from a focused command, but here no key scrolls past Delete, so the end of a long
+  refusal is reached with the pointer; the whole refusal also shows under the row. The old flyout's pointer notch toward
+  its row is not drawn: the layer manager draws no notch for a popover; it draws one only for hover help beside the
+  sidebar. Tested by `session_list/menu_tests.rs`
   `the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection` (the exact offset) and
   `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it` (the question beside the row); the layer manager's
   own tests pin the placement and its clamp for any anchor.

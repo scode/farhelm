@@ -14,6 +14,20 @@
 //! to fit. The questions the commands ask open from the same anchor ([`SessionList::ask_about_row`]), so they stand
 //! beside the row too.
 //!
+//! **It never outgrows the window.** The layer manager only shifts a popover, so a menu taller than the window's
+//! content area would sit at the area's top and run past its bottom, out of reach. A row's menu can grow that tall:
+//! the session's last refusal shows in it uncut, under the commands, and the helm's words can run long. So the panel
+//! is capped at the content area's height less 16 pixels ([`crate::notices_bell::window_cap`], as the Help menu and the
+//! notices panels are) and scrolls inside that, header and all, as the old panel did; the commands stay at its top and
+//! the refusal is reached by scrolling. The old flyout kept its top at least 8 pixels down and its height at most the
+//! room below that top less 8 (`menu_panel.rs`'s `session_menu_placement_style` at reference commit `24bc0580`); here
+//! the cap does not depend on the menu's top, which the layer manager decides from the menu's measured height, and its
+//! clamp puts the menu flush against the area's edge (its `Placement::Beside` docs), so the 16 pixels lie on one side.
+//! The panel is a [`focus::scroll_region`], so Up, Down, Home, End and Tab bring the command they land on into view.
+//! The one exception is where the menu opens: Up on the closed button starts it on Delete, and nothing scrolls to a
+//! layer's start below the fold (the focus coordinator's module docs), so an environment session's menu, whose two
+//! extra commands make its commands alone taller than the cap in the smallest window, can open on a Delete out of view.
+//!
 //! The menu's header is the shared [`MenuHeader`], which the host menu draws too: it names the session and says, in one
 //! line, which agent it runs and its status. Below it come the commands, in a [`Role::Menu`] of their own, so the
 //! header is not read out as one of them.
@@ -97,10 +111,11 @@
 //!
 //! NOTE: The old row menu had no Restart, which the open session's header offers instead (`session_pane/header.rs`).
 //! Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
-//! no notch for a popover; it comes with the row hovers' notch), the beside placement's own clamp (the layer manager's
-//! `Placement::Beside` docs record how it differs), the old reveal's 100 ms fade (the button appears and goes at once:
-//! a fade per row would need a ticker animation for each row in motion, which nothing else in the list holds), and its
-//! rule that a touch screen always shows the button (GPUI reports no coarse pointer to ask about).
+//! no notch for a popover; it comes with the row hovers' notch), the beside placement's own clamp of the menu's top
+//! (the layer manager's `Placement::Beside` docs record how it differs; the height cap is this menu's own, above), the
+//! old reveal's 100 ms fade (the button appears and goes at once: a fade per row would need a ticker animation for each
+//! row in motion, which nothing else in the list holds), and its rule that a touch screen always shows the button
+//! (GPUI reports no coarse pointer to ask about).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -109,9 +124,9 @@ use std::rc::Rc;
 use farhelm_helm_client::{Collections, PathError};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, WeakEntity,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Div, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _,
+    Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::environment::{self, Environment};
@@ -386,6 +401,7 @@ impl SessionList {
             list,
             rename_focus,
             delete_focus,
+            scroll: ScrollHandle::new(),
         });
         let opened = layers::open_popover(
             Popover::menu(view, cx.focus_handle(), anchor, start)
@@ -686,14 +702,31 @@ pub(super) struct RowMenu {
     /// The Delete command's focus handle: the menu's last command, where Up on the closed button opens it and End
     /// goes. Delete is last whichever commands the row offers, as in the old menu's order.
     delete_focus: FocusHandle,
+    /// The panel's scroll position, kept across frames so a menu capped at the content area
+    /// ([`crate::notices_bell::window_cap`]) stays where the wheel or a keyboard move scrolled it.
+    scroll: ScrollHandle,
 }
 
 impl Render for RowMenu {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Capped so the layer manager, which only shifts a popover, can keep all of it inside the content area (the
+        // module docs, "It never outgrows the window"). Its children keep their full height: none is a scroll
+        // container, so the flex column does not shrink them below their content.
         let panel = layers::panel(cx)
             .id("session-menu")
             .debug_selector(|| "session-menu".into())
-            .w(px(PANEL_WIDTH));
+            .w(px(PANEL_WIDTH))
+            .max_h(crate::notices_bell::window_cap(window))
+            .overflow_y_scroll();
+        focus::scroll_region(self.contents(panel, cx), &self.scroll)
+    }
+}
+
+impl RowMenu {
+    /// The menu's header, its commands and the session's refusal or notice line, drawn into `panel` from the store as
+    /// it reads now; `panel` stays empty while the session is gone from the store, until the frame that drops its row
+    /// closes the menu.
+    fn contents(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
@@ -911,9 +944,7 @@ impl Render for RowMenu {
             .child(items)
             .children(outcome::menu_line(&self.key, cx))
     }
-}
 
-impl RowMenu {
     /// An environment session's own commands, at the head of the Clone group (the module docs): Suspend or Resume, as
     /// the phase reads now, with the old items' words, then Stop and suspend unless the environment is to be resumed.
     /// Each closes the menu and goes on as [`environment::begin`] decides, a question opening beside the row's button.
