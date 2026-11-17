@@ -59,7 +59,10 @@
 //!   Delete scrim shares) on the terminal scrim, with the heading and its spinner, the old explanation line, the phase
 //!   and attempt line ("The phase line" below) and Reconnect now, which asks the stream to skip its backoff
 //!   ([`AttachedTerminal::reconnect_now`]). The last complete screen stays up beneath it. A pane too short for the card
-//!   scrolls the card, as the old one scrolled.
+//!   scrolls the card, as the old one scrolled: the wheel over it scrolls it, and so do Page Up, Page Down, Home and
+//!   End while Reconnect now holds focus ([`crate::components::scroll_from_controls`]), as WebKit scrolled the old card
+//!   around its focused button. Without the keys, Tab onto the button would scroll the explanation above it out of
+//!   view with no way back from the keyboard.
 //! - **The pointer.** The scrim around the card draws no hitbox, like the Delete scrim's: a press there still reaches
 //!   the terminal, which takes focus as usual, and the wheel still scrolls its history, so the kept screen stays
 //!   readable and nothing on its way out eats a click. The card itself takes the pointer, because it holds a button: a
@@ -272,7 +275,7 @@ use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
 use crate::components::{
     Banner, Button, HoverHelp, Role, SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, Spinner, Tier,
-    status_card, status_heading,
+    scroll_from_controls, status_card, status_heading,
 };
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
@@ -2062,6 +2065,10 @@ impl AttachedTerminal {
                     .child(reconnect_line(status)),
             )
             .child(div().mt(px(10.)).flex().child(button));
+        // Tab onto Reconnect now scrolls the button into view, which in a short pane scrolls the heading and the
+        // explanation above it out of view. Page Up, Page Down, Home and End from the button scroll the card, so the
+        // keyboard can bring them back as the wheel can (SPEC.md, "Reaching everything by keyboard").
+        let card = scroll_from_controls(card, &self.card_scroll);
         // No listener, no focus tracking and no occlusion, so GPUI gives the scrim no hitbox, as the Delete scrim has
         // none: a press beside the card reaches the terminal.
         div()
