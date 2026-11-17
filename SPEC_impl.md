@@ -654,15 +654,21 @@ listener. A key press that closes a layer hands focus to something else (the lau
 terminal), so its repeats would land there as new presses. The coordinator swallows them instead, at the same point: the
 same key, still held from that press, or pressed again within 500 ms of it, 500 ms included (the old app's submit-repeat
 interval), is neither counted nor delivered, so a repeated Enter on Launch neither stops the launch from opening its
-session nor reaches the terminal's program. Three kinds of close keep only their held repeats. A close that leaves a
-layer holding focus open (Enter choosing in a select's list inside the launcher) returns focus to a control the user is
-still working in, where the next Enter is a new press (Launch). A dismissal (Escape) keeps only its held repeats too, so
-pressing Escape twice still closes two layers, while a held Escape closes one. And a close after which a layer opens (a
-menu item opening its question) keeps only its held repeats as well, since the new layer's start is where the next press
-is meant to go ("Delete then Enter deletes"). Any other key press or a click ends the closing press's repeats. The press
-is recorded before anything acts on the key, so a layer the key capture closes (its handler runs inside the keystroke
-interceptor) is taken as closed by that press. GPUI shows no key release before bindings run, and needs none here: a
-held repeat is marked as one, and only a fresh press follows a release.
+session nor reaches the terminal's program. A dismissal (Escape, or a dialog's Close or Cancel pressed with Enter or
+Space, which go through the same dismissal) is no exception: once it has closed the last layer holding focus, the same
+key pressed again within the interval is swallowed too, so a double-tapped Escape cannot interrupt the agent in the
+terminal (the maintainer decided this on 2026-11-16; until then a dismissal kept only its held repeats). Three kinds of
+close keep only their held repeats. A close that leaves a layer holding focus open (Enter choosing in a select's list
+inside the launcher, Escape closing a dialog over another) returns focus to a control the user is still working in,
+where the next press is a new one (Enter on Launch; Escape closing the dialog below, so pressing Escape twice still
+backs out of two layers, while a held Escape closes one). A close after which a layer opens (a menu item opening its
+question) keeps only its held repeats as well, since the new layer's start is where the next press is meant to go
+("Delete then Enter deletes"). And Tab or Shift+Tab out of a session header's caret menu, which closes it and returns
+focus to the caret (`layers::close_on_tab`), keeps only its held repeats, since the next Tab is meant to go on from the
+caret. Any other key press or a click ends the closing press's repeats. The press is recorded before anything acts on
+the key, so a layer the key capture closes (its handler runs inside the keystroke interceptor) is taken as closed by
+that press. GPUI shows no key release before bindings run, and needs none here: a held repeat is marked as one, and only
+a fresh press follows a release.
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),

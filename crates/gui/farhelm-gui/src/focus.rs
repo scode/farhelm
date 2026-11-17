@@ -217,18 +217,23 @@ const CLOSING_REPEAT: Duration = Duration::from_millis(500);
 ///
 /// The repeats are the same keystroke while still held from that press (auto-repeat), and the same keystroke pressed
 /// again within [`CLOSING_REPEAT`] of it, as the old app's interval measured from the first press (a swallowed press
-/// does not extend it). Three kinds of close keep only the held repeats:
+/// does not extend it). A dismissal through the layer manager (Escape, or a dialog's Close or Cancel pressed with Enter
+/// or Space, which go through the same dismissal) is no exception: Escape is what interrupts an agent's turn in its
+/// terminal, and a user backing out of a dialog often taps it twice, so once the last layer holding focus has closed, a
+/// second press of the same key within the interval reaches nothing either (SPEC_impl.md has the decision's history).
+/// Three kinds of close keep only the held repeats:
 ///
-/// - A close that leaves a layer holding focus open, such as Enter choosing in a select's list inside the launcher, or
-///   answering a question over a dialog: focus goes back to a control the user is still working in, and the next Enter
-///   there (Launch, from the closed select) is a new press. The old app's window covered only the case where focus fell
-///   to the page.
-/// - A dismissal (Escape, through the layer manager): Escape pressed twice in quick succession is the ordinary way to
-///   back out of two layers, while a held Escape closes one layer and then reaches nothing, not every layer below and
-///   the terminal's program after them. (A dismissal of the last layer also keeps only its held repeats, so a second
-///   Escape pressed at once reaches the terminal.)
+/// - A close that leaves a layer holding focus open, such as Enter choosing in a select's list inside the launcher,
+///   answering a question over a dialog, or Escape closing a dialog over another: focus goes back to a control the user
+///   is still working in, and the next press there (Enter on Launch, from the closed select) is a new one. This is what
+///   keeps Escape pressed twice in quick succession backing out of two layers, while a held Escape closes one layer and
+///   then reaches nothing, not every layer below and the terminal's program after them. The old app's window covered
+///   only the case where focus fell to the page.
 /// - A close after which a layer opens ([`enter_layer`]), such as a menu item opening its question: the new layer starts
 ///   where the next press is meant to go.
+/// - Tab or Shift+Tab out of a session header's caret menu ([`layers::close_on_tab`]), which closes the menu and
+///   returns focus to its caret: the key is navigation that happens to close the menu, and SPEC.md's caret rule means a
+///   second Tab to go on from the caret to the next control.
 ///
 /// Any other fresh key press or a click ends it.
 struct Closing {
@@ -236,7 +241,7 @@ struct Closing {
     /// When the press that closed the layer arrived, on the executor's clock (a test's fake clock).
     at: Instant,
     /// Whether a fresh press within [`CLOSING_REPEAT`] is a repeat too: only when no layer holding focus was left open
-    /// and the user did not dismiss the layer, and no longer once a layer opens.
+    /// and the key did not tab out of a caret menu, and no longer once a layer opens.
     fresh_presses: bool,
 }
 
@@ -254,8 +259,9 @@ impl Closing {
 /// Remember the key press that closed a layer just now, if a key press did: the last fresh press since the last
 /// click. The layer manager's close calls this through [`return_to`], once per layer that held focus and returned it,
 /// after the closed layers have left the stack, so [`layers::focus_layer_open`] says whether a layer holding focus is
-/// still open. `dismissed` is whether the user dismissed it (Escape). A dismissal, or a layer holding focus left open,
-/// keeps only the held repeats ([`Closing`]).
+/// still open. `held_only` is whether the closer asked to swallow only the press's held repeats (Tab out of a caret
+/// menu); that, or a layer holding focus left open, keeps only the held repeats ([`Closing`]). A dismissal, by Escape or
+/// by a dialog's Close or Cancel, is treated as any other close.
 ///
 /// The press is the last one, not one known to be in flight: GPUI has no hook at the end of a key's handling, and a
 /// close the key causes may run later in the same update (an event a control emits). A layer that closes on its own
@@ -263,8 +269,8 @@ impl Closing {
 /// window is measured from the press, so an old press swallows only a key still held from it, which was meant for the
 /// layer that went. A press is recorded before anything acts on it ([`note_press`]), so a layer the key capture's
 /// handler closes, inside the interceptor, is taken as closed by it, not by the press before.
-fn note_closing(dismissed: bool, window: &Window, cx: &mut App) {
-    let fresh_presses = !dismissed && !layers::focus_layer_open(window, cx);
+fn note_closing(held_only: bool, window: &Window, cx: &mut App) {
+    let fresh_presses = !held_only && !layers::focus_layer_open(window, cx);
     if let Some(moved) = installed_mut::<MovedOn>(cx)
         && let Some((keystroke, at)) = moved.last_press.clone()
     {
@@ -1622,16 +1628,17 @@ pub enum ReturnTo {
 }
 
 /// Return focus where `target` says because a layer closed, `opener` being what held focus when it opened, or recover
-/// if that is gone (the layer manager calls this). `dismissed` is whether the user dismissed the layer (Escape): the key
-/// press that closed it has its repeats swallowed from here on, and a dismissal only its held ones ([`Closing`]).
+/// if that is gone (the layer manager calls this). The key press that closed the layer has its repeats swallowed from
+/// here on ([`Closing`]); with `held_only`, only its held ones, for a key that moves on from the layer rather than
+/// closing it (Tab out of a caret menu, [`layers::close_on_tab`]).
 pub(crate) fn return_to(
     target: ReturnTo,
     opener: Option<&WeakFocusHandle>,
-    dismissed: bool,
+    held_only: bool,
     window: &mut Window,
     cx: &mut App,
 ) {
-    note_closing(dismissed, window, cx);
+    note_closing(held_only, window, cx);
     // A layer closing with focus returned ends any pending move made in it, also when focus returns through recovery
     // below, which would keep it.
     if let Some(state) = state(window, cx) {
