@@ -534,7 +534,7 @@ pub(crate) fn check_store(
 // The extension point for a helper several tests share (docs/gpui/foundation-ownership.md, Test harness row): an area
 // appends it here, with a docstring, and its test in `shared_helper_tests` below, adding lines only. A `use` the helper
 // needs goes in a `use` line of its own (or the type is named by path), because extending a grouped `use` rewraps it,
-// which the ownership check refuses. The helpers above this section and the per-step checks change only by request.
+// which the extension point does not admit. The helpers above this section and the per-step checks change only by request.
 
 /// One fresh frame's driver record: every element drawn, with its role, accessible name, state, flags and the lines of
 /// text it painted, as assistive technology and the agent bridge see it. Turns the window's driver record on (it stays
