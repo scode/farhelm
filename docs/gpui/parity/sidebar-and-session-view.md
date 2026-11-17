@@ -1793,16 +1793,27 @@ belongs to [Settings and hosts](settings-and-hosts.md) (not yet listed there; ra
 
 Case: ${name} trust hint stays scoped to its managed agent terminal and own dismissal (the band's half).
 
-not yet ported, being built: the Codex and Muse hint band SPEC.md describes is not built yet; the session view draws
-Claude's band only (`session_pane::trust_band`). The migration's orchestrator decided on 2026-11-16 that the band is
-built in the migration; the case's tests come with it, on the pattern of `trust_band_tests.rs`' Claude cases.
+partly: Codex's and Muse's band is Claude's band speaking for the agent that asks (`session_pane::trust_band`), built in
+the migration as the migration's orchestrator decided on 2026-11-16. The gates every agent shares (the managed checkout,
+the agent terminal and not a tab, trust known off, a failed read never counting as off, a Settings close or a tick
+reading trust again) are tested once, on Claude's band, under `tests/claude-trust.spec.ts` above. Not ported: the
+390-pixel pass (one-pane Settings is not built) and the second page (one window; the shared dismissal is the pushed
+preference row), as for Claude.
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `codexs_band_is_its_own` and `muses_band_is_its_own` (the
+  agent's words, Settings at its own switch, × per occurrence and agent, and its own dismissal, which the other agent's
+  band does not read)
+- which agent a session's question belongs to, from its structured launch:
+  crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `only_a_sessions_own_launch_names_the_agent_asking`
 
 ### `tests/workspace-trust.spec.ts` (settings and hosts)
 
 Case: Pi and command launches do not borrow a workspace trust hint.
 
-not yet ported, being built: true today only because no workspace band exists; its test comes with the band above, which
-the migration's orchestrator decided on 2026-11-16 is built in the migration.
+ported:
+
+- crates/gui/farhelm-gui/src/session_pane/trust_band_tests.rs `pi_and_command_launches_borrow_no_band`, and for every
+  harness, a command launch and a legacy session, `only_a_sessions_own_launch_names_the_agent_asking`
 
 ## Deviations from the old app
 
@@ -2236,8 +2247,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   `session_list/tests.rs` `opening_an_ended_or_stale_session_marks_it_seen` and
   `new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks`, and the retired half by
   `session_list/retired_tests.rs` `opening_a_retired_session_stamps_nothing_and_rename_opens_nothing`.
-- Claude's trust hint band does not show under the unavailable card, where the question is not visible (SPEC.md: "While
-  Claude's trust question is visible in the agent terminal"); the old view drew it there (orchestrator, 2026-11-16).
+- The trust hint band, Claude's, Codex's and Muse's alike, does not show under the unavailable card, where the question
+  is not visible (SPEC.md: "While Claude's trust question is visible in the agent terminal", and Codex's and Muse's
+  question "current in a managed checkout's agent terminal"); the old view drew it there (orchestrator, 2026-11-16, for
+  Claude's band, which the other two share).
 - The band shows only the stored dismissal, never a Settings switch's pending one as the old band did (decided by the
   sidebar-and-session-view area on 2026-11-16).
 - A Don't show again pressed while another preference save holds the row's key sends nothing and says so with the shared
