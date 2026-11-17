@@ -199,7 +199,10 @@ fn the_permanent_answer_stops_asking_then_launches(cx: &mut gpui::TestAppContext
 /// SPEC.md: "if changing that setting fails, nothing is started and the confirmation stays up with the reason". And
 /// while the write is out, Escape must not close the launcher under it, or the write's success would start a session
 /// the user dismissed. Specified: Escape during the write leaves the launcher open; a refused write sends no create and
-/// keeps the question up, saying it could not stop asking for host1, why, and that nothing started.
+/// keeps the question up, saying it could not stop asking for host1, why, and that nothing started. A plain Launch then
+/// sends one create without consent, whose YOLO refusal brings back a clean question. Why: a failed host write must not
+/// leave consent behind ("don't ask again marks the host safe before launching, and a failed mark launches nothing",
+/// `e2e/tests/yolo-guard.spec.ts` at `24bc0580`, its plain-Launch half).
 #[gpui::test]
 fn a_failed_stop_asking_starts_nothing_and_keeps_the_question(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched_with(cx, yolo_command_draft());
@@ -239,11 +242,25 @@ fn a_failed_stop_asking_starts_nothing_and_keeps_the_question(cx: &mut gpui::Tes
         )
     );
     assert!(any_open(cx), "the question stayed up");
+    test_support::click(cx, "launcher-launch");
+    let sent = creates(&mut helm, cx);
+    let [retry] = &sent[..] else {
+        panic!("one create after plain Launch, not {}", sent.len());
+    };
+    assert_eq!(retry.body.as_ref().unwrap()["confirm_yolo"], json!(false));
+    refuse_for_yolo(&mut helm, cx, retry.id);
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Start YOLO session anyway")
+    );
+    assert_eq!(name_of(cx, "yolo-stop-asking-failed"), None);
 }
 
 /// SPEC.md: the guarded answer starts "the same launch guarded instead, without YOLO confirmation", and it comes before
 /// the YOLO answers. Specified: for Codex with YOLO chosen, the first extra answer is "Start guarded session instead",
-/// and it sends a create with Guarded permissions and no consent.
+/// and it sends exactly one create with Guarded permissions and no consent, and no host write. Why: the guarded answer
+/// chooses a different launch rather than turning off future YOLO questions ("the YOLO question can launch guarded and
+/// remember that permission", `e2e/tests/yolo-guard.spec.ts` at `24bc0580`, its no-host-write half).
 #[gpui::test]
 fn the_guarded_answer_launches_guarded_without_consent(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched_with(cx, yolo_codex_draft());
@@ -253,9 +270,19 @@ fn the_guarded_answer_launches_guarded_without_consent(cx: &mut gpui::TestAppCon
         Some("Start guarded session instead")
     );
     test_support::click(cx, "prompt-alternative-0");
-    let sent = creates(&mut helm, cx);
-    let [retry] = &sent[..] else {
-        panic!("one create, not {}", sent.len());
+    cx.run_until_parked();
+    let sent = helm.commands();
+    assert!(
+        sent.iter()
+            .all(|command| !command.path.ends_with("yolo-without-asking")),
+        "the guarded answer writes nothing to the host"
+    );
+    let creates: Vec<_> = sent
+        .iter()
+        .filter(|command| command.path == "/api/sessions")
+        .collect();
+    let [retry] = &creates[..] else {
+        panic!("one create, not {}", creates.len());
     };
     let body = retry.body.as_ref().unwrap();
     assert_eq!(body["confirm_yolo"], json!(false));

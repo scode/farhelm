@@ -120,15 +120,17 @@ partly: `launcher::view_tests::the_tabs_switch_fields_and_keep_each_draft`,
 `launcher::draft_tests::each_tab_keeps_its_own_draft_across_switches`; the remembered wrapper prefix on an agent switch,
 shown escaped when it holds an invisible character, in
 `launcher::view_tests::an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`; search moving to the Agent tab in
-`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`; not yet ported: a `name:` row
-taken on the Command tab keeping that tab and its command, and a folder row keeping the typed command ("search on the
-command tab switches to the agent tab only for an agent choice"; a folder row keeping the tab is in the bullet below),
-and an unparsable wrapper left on the Agent tab not blocking Save as template on the Command tab ("a dormant invalid
-wrapper does not block saving a command template"; its test would sit with Save as template's in
-`templates::save_tests`)
+`launcher::search_view_tests::a_model_taken_on_the_command_tab_switches_to_the_agent_tab`; not yet ported: a folder row
+keeping the typed command ("search on the command tab switches to the agent tab only for an agent choice"; a folder row
+keeping the tab is in the bullet below), and an unparsable wrapper left on the Agent tab not blocking Save as template
+on the Command tab ("a dormant invalid wrapper does not block saving a command template"; its test would sit with Save
+as template's in `templates::save_tests`)
 
 - New opening on the Agent tab with focus in the search box:
   `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`.
+- "search on the command tab switches to the agent tab only for an agent choice", its `name:` half: naming the session
+  keeps the Command tab and its typed command, in
+  `launcher::search_view_tests::a_name_row_on_the_command_tab_keeps_the_tab_and_its_command`.
 - "search on the command tab switches to the agent tab only for an agent choice", a folder row: a saved folder taken
   from search on the Command tab sets the folder and keeps the tab, in
   `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout` (its draft holds no command, so
@@ -301,7 +303,7 @@ host's preview and checking the new host's setup (1297)
 
 Tests: 6. Covers: launcher refusals use warning colors in ${appearance} appearance.
 
-partly: "composer word search drives a structured launch" and "empty composer search does not launch an incomplete
+replaced: "composer word search drives a structured launch" and "empty composer search does not launch an incomplete
 selection" in
 `launcher::search_view_tests::{a_word_and_enter_choose_it_and_empty_the_box, enter_on_an_empty_box_presses_launch_and_spaces_do_not, only_a_fresh_enter_on_an_empty_box_launches}`;
 "name and host labels apply one draft choice without launching" in
@@ -311,12 +313,16 @@ selection" in
 in `launcher::search_tests::empty_results_say_why_and_warn_only_on_a_miss`; the drawn warning colors are layout: the
 "Not launched." alert in both appearances is the `app-launcher-refusal` scene (the scenes run light and dark), and the
 search box's warning line is not separately tested, since no scene types a query that warns and the test above fixes
-which lines are warnings; not yet ported: the refusal alert's alert role, the whole keyboard path of "composer word
-search drives a structured launch" in one launcher (an effort row taken through the box, `effort:default` resetting it,
-`guarded` replacing YOLO, and the create carrying them), and, for "New's command tab keeps the agent draft dormant and
-preserves the raw invocation", a Command create carrying no agent launch while the Agent tab holds one (a folder row
-keeping the Command tab is in the bullets below)
+which lines are warnings; the alert role, whole keyboard path and dormant agent draft's create are in the bullets below
 
+- "launcher refusals use warning colors in ${appearance} appearance", its alert role:
+  `launcher::view_tests::the_refusal_beside_launch_is_an_alert`.
+- "composer word search drives a structured launch", the whole keyboard path in one launcher, including effort's default
+  reset, Guarded replacing YOLO and the create carrying the choices:
+  `launcher::search_view_tests::the_whole_keyboard_path_builds_a_launch_and_sends_it`.
+- "New's command tab keeps the agent draft dormant and preserves the raw invocation", its create carrying no agent
+  launch while Claude and YOLO stay on Agent, and the command sent byte for byte:
+  `launcher::request_tests::a_command_launch_leaves_the_agent_draft_dormant`.
 - "New's command tab keeps the agent draft dormant and preserves the raw invocation", a folder row:
   `launcher::search_view_tests::a_saved_folder_from_search_leaves_a_managed_checkout` (a saved folder taken on the
   Command tab sets the folder and keeps the tab).
@@ -517,7 +523,7 @@ staying in the session switched to; New's is ported below, and the three share t
 
 Tests: 13. Covers: a YOLO launch asks first and starts only when confirmed${height === 844 ? "" : ` at 390x${height}`}.
 
-partly: `launcher::yolo_tests::a_yolo_refusal_asks_the_question_with_cancel_focused`,
+replaced: `launcher::yolo_tests::a_yolo_refusal_asks_the_question_with_cancel_focused`,
 `launcher::yolo_tests::the_one_off_answer_launches_with_consent`,
 `launcher::yolo_tests::the_permanent_answer_stops_asking_then_launches`,
 `launcher::yolo_tests::a_failed_stop_asking_starts_nothing_and_keeps_the_question`,
@@ -532,13 +538,10 @@ burst start nothing" is the prompt's first-answer-wins rule; "after a lost launc
 create keys and retries nothing), and so are the five shorter legs (601 to 480 high), whose stacked-action checks need a
 window below the minimum (Deviations); all six legs are 390 wide, and what the 844-high one checks is ported at the
 sizes the window allows; the plain Replace cases are the sidebar's and the header's, whose YOLO questions are tested,
-and the template cases are the templates area's, except two that the launcher's own rule decides (below); not yet
-ported: of "don't ask again marks the host safe before launching, and a failed mark launches nothing" (511), a plain
-Launch after the host write fails sending no consent and asking a question without the failure's reason (that case's
-focus going back to Cancel after the failure is superseded: an inline question keeps focus on the answer after a failed
+and the template cases are the templates area's, except two that the launcher's own rule decides (below); 511's focus
+going back to Cancel after the failure is superseded: an inline question keeps focus on the answer after a failed
 answer, SPEC_impl.md, "Questions: the prompt", pinned by
-`prompt_tests::a_failing_answer_keeps_its_question_up_with_the_reason`); of "the YOLO question can launch guarded and
-remember that permission" (201), that the guarded answer writes nothing to the host (its test checks the create alone)
+`prompt_tests::a_failing_answer_keeps_its_question_up_with_the_reason`
 
 - "a YOLO launch asks first and starts only when confirmed" (58), the 844-high leg: the question's heading, what YOLO
   means and that nothing started are wording, shown in the `app-launcher-yolo-confirmation` scene; why this launch is
@@ -565,11 +568,14 @@ remember that permission" (201), that the guarded answer writes nothing to the h
   `launcher::yolo_tests::each_yolo_launch_gets_its_own_reason` (its sentence is wording, not separately tested), no
   guarded answer in `launcher::yolo_tests::only_an_explicit_yolo_choice_offers_guarded`, and Cancel in the inline list's
   tests.
-- "don't ask again marks the host safe before launching, and a failed mark launches nothing" (511), beyond the gap named
-  above: the write before the create in `launcher::yolo_tests::the_permanent_answer_stops_asking_then_launches`, and a
-  refused write starting nothing and keeping the question up with its reason in
-  `launcher::yolo_tests::a_failed_stop_asking_starts_nothing_and_keeps_the_question`; the reason's warning ink is
-  layout, not separately tested, since no scene shows a failed write.
+- "don't ask again marks the host safe before launching, and a failed mark launches nothing" (511): the write before the
+  create in `launcher::yolo_tests::the_permanent_answer_stops_asking_then_launches`, and a refused write starting
+  nothing and keeping the question up with its reason in
+  `launcher::yolo_tests::a_failed_stop_asking_starts_nothing_and_keeps_the_question`, including a plain Launch then
+  sending no consent and asking a clean question without the failure's reason; the reason's warning ink is layout, not
+  separately tested, since no scene shows a failed write.
+- "the YOLO question can launch guarded and remember that permission" (201), its guarded answer writing nothing to the
+  host: `launcher::yolo_tests::the_guarded_answer_launches_guarded_without_consent`.
 - "template edits retain an unchanged YOLO question and retire a changed one" and "command templates preserve equal YOLO
   questions and retire changed commands" (877 and 1072): a `tl:` template that leaves the launch as it was keeps the
   question, whose one-off answer then sends the same create with consent, one that changes it retires the question, and
@@ -1139,12 +1145,13 @@ the card's offer of Replace with in place of Replace in
 
 Case: Restart with keeps its draft and avoids a safe-retry promise after a deadline.
 
-partly: the Restart with request shares the session's pending line
+replaced: the Restart with request shares the session's pending line
 (`launcher::restart_with_tests::restart_with_stops_a_working_agent_with_consent`) and keeps its draft on a refusal
-(`restart_with_settles_as_plain_restart_does`); not yet ported: a timed-out Restart with coming back with the helm's
-words and no "Restart error." lead, as New's timed-out create does
-(`launcher::launch_tests::a_timed_out_create_comes_back_without_not_launched`); the old return of the dialog after the
-user switched away is the notice deviation below
+(`restart_with_settles_as_plain_restart_does`); the old return of the dialog after the user switched away is the notice
+deviation below
+
+- A timed-out Restart with coming back with the helm's words and no "Restart error." lead:
+  `launcher::restart_with_tests::a_timed_out_restart_with_settles_its_row_before_the_launcher_returns`.
 
 ### `tests/terminal.spec.ts` (terminal)
 
@@ -1156,10 +1163,7 @@ while one create is in flight produces exactly one session" and "a blank title c
 working directory's basename, not an empty string". Only the launcher's cases are listed here; the spec's other cases
 are the terminal area's, whose file tracks the spec, and the sidebar and session view's.
 
-partly: every case's launcher half is named below; not yet ported: a second press after a refusal, once the folder is
-fixed, launching and opening the session ("create dialog surfaces a precondition failure, preserves the form, and
-creates no session"), and opening another session while a create is out ("create dialog disables the submit control
-while a create is in flight", with nonblocking-launch's 59)
+replaced: every case's launcher half is named below
 
 - "the create form prefills the working directory with ~ when no session is selected": New without an open session
   starts in `~` in `launcher::folder_default_tests::new_waits_for_the_hosts_last_folder_and_starts_there`, and a history
@@ -1172,10 +1176,13 @@ while a create is in flight", with nonblocking-launch's 59)
 - "create dialog surfaces a precondition failure, preserves the form, and creates no session": the refusal shown after
   "Not launched." with the draft kept, and an edit taking it away, in
   `launcher::launch_tests::a_refused_launch_brings_the_launcher_back_with_the_helms_words`; one press sends one create
-  (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`).
+  (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`); a second press after fixing the folder
+  launches and opens the session in `launcher::launch_tests::a_second_press_after_a_refusal_launches_the_fixed_draft`.
 - "create dialog disables the submit control while a create is in flight": the launcher hides while its create is out,
   so nothing in it can be pressed (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`), and New
   is unavailable meanwhile (`launcher::entry_tests::new_waits_for_a_pending_launch_and_then_brings_back_its_refusal`).
+- "create dialog disables the submit control while a create is in flight", opening another session while the create is
+  out (with nonblocking-launch's 59): `launcher::pending_tests::the_window_keeps_working_while_a_create_is_out`.
 - "submitting the create form twice while one create is in flight produces exactly one session":
   `launcher::launch_tests::{launching_sends_one_create_and_hides_the_launcher, a_repeated_enter_on_launch_still_opens_the_session}`.
 - "a blank title creates a session titled after the working directory's basename, not an empty string": a blank name
