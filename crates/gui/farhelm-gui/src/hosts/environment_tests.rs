@@ -1,7 +1,8 @@
 //! Tests of a sandbox's and a container's own host actions over the helm client's fake: Delete sandbox and Delete
 //! container (which always ask), Retry on a failed deletion (which deletes again), a sandbox's Re-run of its failed
-//! setup (the creation question, or none under Tensorlake's own skip), and each refusing while a session launch is in
-//! flight.
+//! setup (the creation question, or none under Tensorlake's own skip), the deletion and rerun actions each refusing
+//! while a session launch is in flight, and Resume (which never asks) and Suspend (which asks unless every session
+//! there is known idle), which a launch elsewhere does not hold.
 //!
 //! Every test starts from the Hosts panel's harness (`hosts/tests.rs`) over the reference hosts plus a Tensorlake
 //! sandbox `gpubox` (4) and a container `crate-1` (5), in a column of the sidebar's width and a window as large as the
@@ -20,11 +21,17 @@ use serde_json::{Value, json};
 
 use crate::hosts::LAUNCH_IN_FLIGHT;
 use crate::hosts::tests::{
-    connected, host, hosts, open_panel_in_column, progress, reference_hosts, run, start_work,
+    connected, connecting, host, hosts, open_panel_in_column, progress, reference_hosts, run,
+    start_work,
 };
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{any_open, click, frame, label, meta, one_command, settle};
+use crate::session_list::environment_tests::{idle, listing};
+use crate::session_list::host_rail::tests::hover_help;
+use crate::session_list::tests::{Fixture, session};
+use crate::test_support::{
+    any_open, click, focused_id, frame, keys, label, meta, one_command, settle,
+};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -103,6 +110,20 @@ fn panel(
     cx.simulate_resize(size(px(1600.), px(1000.)));
     settle(cx);
     (helm, cx)
+}
+
+/// Push `gpubox` in `state` as the helm does when its phase changes.
+fn push_sandbox(helm: &mut FakeHelm, state: HostStateView) {
+    let view = sandbox(state);
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1", "2", "3", "4", "5"]),
+        upsert: vec![KeyedEntry {
+            key: HostView::key(view.id),
+            value: serde_json::to_value(&view).expect("a host view encodes"),
+        }],
+        remove: Vec::new(),
+    });
 }
 
 /// The labels of the open question's answers, in their drawn order.
@@ -484,4 +505,597 @@ fn the_tensorlake_skip_creates_without_asking_and_a_failed_read_asks(cx: &mut Te
         "a failed read asks"
     );
     assert!(helm.commands().is_empty(), "nothing was submitted");
+}
+
+// ---- Resume --------------------------------------------------------------------------------------------------------
+
+/// `gpubox` suspended outside Farhelm.
+fn suspended() -> HostStateView {
+    HostStateView::Suspended {
+        observed_at: 0,
+        suspended_by_farhelm_at: None,
+        resume_failed: None,
+    }
+}
+
+/// `gpubox` resuming, asked at the epoch.
+fn resuming() -> HostStateView {
+    HostStateView::TensorlakeChanging {
+        starting: false,
+        direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
+        requested_at: 0,
+    }
+}
+
+/// Why this matters: a suspended sandbox is out of reach until it resumes, and the old row put its Resume inline,
+/// where the user sees the phase, besides the menu. A Tensorlake Resume routinely outlasts the helm's 20-second reply
+/// bound, so the 504 that says it carries on must not read as a failure. The request is the host's, on its key.
+///
+/// Specified: suspended `gpubox`'s row draws "Resume", named "Resume gpubox"; pressing it sends
+/// `POST /api/hosts/4/resume` with no body and no question, as `Resume` work on the host's key, the row's status reads
+/// "Resuming…" meanwhile beside its Resume, drawn unavailable, and focus moves to the row's menu toggle; the helm's 504
+/// opens nothing and leaves no record under the host's key; pushed resuming, the row's status still reads "Resuming…"
+/// and its Resume shows unavailable.
+#[gpui::test]
+fn the_rows_resume_sends_the_hosts_resume_and_a_late_answer_is_no_failure(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, suspended(), Vec::new());
+    assert_eq!(label(cx, "host-resume-4").as_deref(), Some("Resume gpubox"));
+    click(cx, "host-resume-4");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/hosts/4/resume");
+    assert_eq!(body, Value::Null);
+    assert!(!any_open(cx), "Resume never asks");
+    assert_eq!(work(cx, "4"), Some(Work::Resume));
+    assert_eq!(label(cx, "host-status-4").as_deref(), Some("Resuming…"));
+    assert!(
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("host-resume-4"))
+            .is_some_and(|node| !node.flags.click),
+        "Resume stays inline, unavailable, while its request is out"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-menu-toggle-4"),
+        "the press hands focus to the row's menu toggle"
+    );
+    helm.reply(
+        id,
+        504,
+        Some(json!(
+            "resuming the host did not finish within 20 seconds; it carries on, and the host's state in the hosts \
+             list and the session list will show the result"
+        )),
+    );
+    settle(cx);
+    assert!(!any_open(cx), "the 504 is no failure");
+    assert!(
+        cx.update(|_, cx| session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).failure(&OpKey::host("4")).is_none())),
+        "nothing recorded under the host's key"
+    );
+    push_sandbox(&mut helm, resuming());
+    settle(cx);
+    assert_eq!(label(cx, "host-status-4").as_deref(), Some("Resuming…"));
+    assert!(
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("host-resume-4"))
+            .is_some_and(|node| !node.flags.click),
+        "Resume shows unavailable while the change runs"
+    );
+}
+
+/// Why this matters: SPEC.md, "Topology": a Suspend shows "Suspending…" "with a spinner and how long ago Tensorlake was
+/// asked", and a Resume the same, so a user watching a slow provider can tell a change still waiting from one that
+/// stalled; the count must move with nothing pushed, under reduced motion too, where only the panel's one-second clock
+/// redraws it.
+///
+/// Specified: under reduced motion, `gpubox` pushed resuming, asked 12 seconds before the test clock, reads "asked
+/// Tensorlake 12 s ago" after its status's "Resuming…", and a second later, with nothing pushed, the panel has redrawn
+/// by itself to read "asked Tensorlake 13 s ago"; the status is still named "Resuming…".
+#[gpui::test]
+fn a_changing_row_counts_the_seconds_since_farhelm_asked(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, suspended(), Vec::new());
+    // Under reduced motion no pulse redraws the panel, so only the one-second clock can move the count on.
+    cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    let now = cx.update(|_, cx| crate::ticker::wall_now(cx));
+    let now_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| i64::try_from(since.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0);
+    push_sandbox(
+        &mut helm,
+        HostStateView::TensorlakeChanging {
+            starting: false,
+            direction: farhelm_proto::tensorlake::LifecycleDirection::Resuming,
+            requested_at: now_ms - 12_000,
+        },
+    );
+    settle(cx);
+    assert_eq!(label(cx, "host-status-4").as_deref(), Some("Resuming…"));
+    assert!(
+        painted(cx).contains("Resuming… asked Tensorlake 12 s ago"),
+        "{}",
+        painted(cx)
+    );
+    // What the window last drew, not a fresh frame of the test's own: only the panel's clock can have redrawn it.
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    crate::test_support::advance(cx, std::time::Duration::from_secs(1));
+    assert!(
+        cx.update(|_, cx| crate::render_count::count("hosts-panel", cx)) > 0,
+        "the clock redrew the panel by itself"
+    );
+    let drawn = cx
+        .update(|window, _| window.driver_nodes().to_vec())
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(drawn.contains("asked Tensorlake 13 s ago"), "{drawn}");
+}
+
+/// Why this matters: SPEC.md, "Topology": a changing machine shows its words "with a spinner" until the provider
+/// confirms, which here is the shared pulse on the row's dot; the ticker's rule is that a view holds the pulse only
+/// while it draws a pulsing mark, and never under reduced motion, where the dot stays still.
+///
+/// Specified: with suspended `gpubox` and nothing else running, half a second delivers no tick; pushed resuming, half
+/// a second delivers ticks; pushed connected again, half a second delivers none; under reduced motion, pushed resuming
+/// again, half a second delivers none.
+#[gpui::test]
+fn a_changing_rows_dot_pulses_while_the_change_lasts(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, suspended(), Vec::new());
+    let ticks_in_half_a_second = |cx: &mut VisualTestContext| {
+        let before = cx.update(|_, cx| crate::ticker::ticks(cx));
+        crate::test_support::advance(cx, std::time::Duration::from_millis(500));
+        cx.update(|_, cx| crate::ticker::ticks(cx)) - before
+    };
+    assert_eq!(ticks_in_half_a_second(cx), 0, "the premise: nothing pulses");
+    push_sandbox(&mut helm, resuming());
+    settle(cx);
+    assert!(ticks_in_half_a_second(cx) > 0, "the changing dot pulses");
+    push_sandbox(&mut helm, connected());
+    settle(cx);
+    assert_eq!(ticks_in_half_a_second(cx), 0, "and stops with the change");
+    cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    push_sandbox(&mut helm, resuming());
+    settle(cx);
+    assert_eq!(ticks_in_half_a_second(cx), 0, "still under reduced motion");
+}
+
+/// Why this matters: every control carries its help, and Resume's is the provider's, which says what continues; the
+/// old button had none, a recorded deviation.
+///
+/// Specified: suspended `gpubox`'s inline Resume is helped by "Resume this environment; preserved processes continue".
+#[gpui::test]
+fn the_inline_resume_carries_the_providers_help(cx: &mut TestAppContext) {
+    let (_helm, cx) = panel(cx, suspended(), Vec::new());
+    assert_eq!(
+        hover_help(cx, "host-resume-4").as_deref(),
+        Some("Resume this environment; preserved processes continue")
+    );
+}
+
+/// Why this matters: the menu offers Resume where the row does, and the helm can refuse a Resume (the provider refused
+/// it, the host is busy); the old app showed that refusal in its host refusal dialog.
+///
+/// Specified: suspended `gpubox`'s menu offers "Resume" after Retry; choosing it sends `POST /api/hosts/4/resume`; the
+/// helm's 409 opens "Resume host · gpubox" with its words, and no record stays under the host's key to show again.
+#[gpui::test]
+fn the_menus_resume_shows_a_refusal_in_the_refusal_dialog(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, suspended(), Vec::new());
+    click(cx, "host-menu-toggle-4");
+    assert_eq!(label(cx, "host-menu-resume").as_deref(), Some("Resume"));
+    assert!(
+        crate::test_support::bounds(cx, "host-menu-retry").top()
+            < crate::test_support::bounds(cx, "host-menu-resume").top(),
+        "Resume comes after Retry"
+    );
+    click(cx, "host-menu-resume");
+    let (id, _) = one_command(&mut helm, Method::Post, "/api/hosts/4/resume");
+    helm.reply(id, 409, Some(json!("Tensorlake refused the resume")));
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).failure(&OpKey::host("4")).is_none())),
+        "shown in the dialog, so not again under the row"
+    );
+    assert_eq!(
+        label(cx, "host-refusal-title").as_deref(),
+        Some("Resume host · gpubox")
+    );
+    assert_eq!(
+        label(cx, "host-refusal-reason").as_deref(),
+        Some("Tensorlake refused the resume")
+    );
+}
+
+/// Why this matters: a connected sandbox has nothing to resume, so its row must not offer it.
+///
+/// Specified: a connected sandbox's row draws no Resume, and its menu offers none.
+#[gpui::test]
+fn a_connected_sandbox_offers_no_resume(cx: &mut TestAppContext) {
+    let (_helm, cx) = panel(cx, connected(), Vec::new());
+    assert_eq!(label(cx, "host-resume-4"), None);
+    click(cx, "host-menu-toggle-4");
+    assert!(
+        label(cx, "host-menu-delete").is_some(),
+        "the premise: the menu is open"
+    );
+    assert_eq!(label(cx, "host-menu-resume"), None);
+}
+
+/// Why this matters: SPEC.md, "Creation": Suspend and Resume are not changes to the host registry, refused only while
+/// this window's own launch targets or wakes that same host, and launches on other hosts proceed beside them; the
+/// registry exclusion that holds a host's setup or removal during any launch must not hold a Resume.
+///
+/// Specified: with a launcher `Launch` in flight (one this window started for no host of the panel's), suspended
+/// `gpubox`'s inline Resume sends `POST /api/hosts/4/resume`.
+#[gpui::test]
+fn a_launch_elsewhere_does_not_hold_resume(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, suspended(), Vec::new());
+    start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    assert!(
+        cx.update(|_, cx| crate::hosts::launch_in_flight(cx)),
+        "the premise: a launch is in flight"
+    );
+    click(cx, "host-resume-4");
+    one_command(&mut helm, Method::Post, "/api/hosts/4/resume");
+    assert_eq!(work(cx, "4"), Some(Work::Resume));
+}
+
+/// Why this matters: the attention list's working rows and the rail's ring are for setup, Update and uninstall only
+/// (SPEC.md, "Session list"), and the old attention list treated an explicit lifecycle request as routine work, so a
+/// Resume in flight must neither add a working row, which would also hide a problem behind it, nor ring the rail.
+///
+/// Specified: in the main window, with suspended `gpubox` in the rail, a Resume from the Hosts panel is in flight on
+/// the host's key; with Hosts closed again, the rail draws no ring for `gpubox` and nothing reads "Resuming".
+#[gpui::test]
+fn a_resume_in_flight_is_no_live_work(cx: &mut TestAppContext) {
+    let mut listed = reference_hosts();
+    listed.push(sandbox(suspended()));
+    let (mut helm, cx) = crate::session_list::tests::open_main(
+        cx,
+        vec![
+            crate::session_list::tests::listing(&["a"], &[session("a")]),
+            crate::session_list::tests::preferences(&["a"], None),
+            hosts(&listed),
+        ],
+    );
+    crate::session_list::host_rail::tests::answer_everything(&mut helm);
+    assert!(
+        crate::session_list::menu_tests::drawn(cx, "host-rail-dot-4"),
+        "the premise: the rail lists gpubox"
+    );
+    click(cx, "hosts-panel-toggle");
+    click(cx, "host-resume-4");
+    // Opening Hosts may write a preference beside the Resume, so only the Resume is looked for.
+    let sent = helm.commands();
+    assert!(
+        sent.iter()
+            .any(|command| (command.method, command.path.as_str())
+                == (Method::Post, "/api/hosts/4/resume")),
+        "the Resume was sent: {sent:?}"
+    );
+    click(cx, "hosts-panel-toggle");
+    assert_eq!(work(cx, "4"), Some(Work::Resume), "the premise: it is out");
+    assert!(!crate::session_list::menu_tests::drawn(
+        cx,
+        "host-rail-ring-4"
+    ));
+    assert!(
+        !painted(cx).contains("Resuming"),
+        "no working row: {}",
+        painted(cx)
+    );
+}
+
+// ---- Suspend -------------------------------------------------------------------------------------------------------
+
+/// Open `gpubox`'s menu, choose Suspend and answer its activity read (`GET /api/sessions?host=4`) with `status` and
+/// `body`.
+fn suspend_read(cx: &mut VisualTestContext, helm: &mut FakeHelm, status: u16, body: Value) {
+    click(cx, "host-menu-toggle-4");
+    click(cx, "host-menu-suspend");
+    let (read, _) = one_command(helm, Method::Get, "/api/sessions?host=4");
+    helm.reply(read, status, Some(body));
+    settle(cx);
+}
+
+/// `rows` as sessions on `gpubox` (host 4), as the helm lists them for `GET /api/sessions?host=4`.
+fn on_gpubox<const N: usize>(rows: [Fixture; N]) -> [Fixture; N] {
+    rows.map(|row| row.host(4))
+}
+
+/// Hold the operation store's launch key for a launcher `Launch`, as a launch in flight does, without a command on the
+/// wire: the fake helm answers in order, so a sent launch left unanswered would stop the read's reply behind it.
+fn hold_launch(cx: &mut VisualTestContext) {
+    cx.update(|_, cx| {
+        let operations = session::current_operations(cx).expect("a UI session");
+        operations.update(cx, |operations, cx| {
+            operations
+                .hold(&OpKey::new_launch(), Work::Launch, cx)
+                .expect("the launch holds its key");
+        });
+    });
+    settle(cx);
+}
+
+/// Why this matters: Suspend freezes every process on the machine, so it may go at once only when Farhelm knows no
+/// agent there is working (SPEC.md, "Topology": a connected host after the activity read and a complete listing with
+/// conclusive non-working statuses); the old Hosts panel read the host's own listing for that, never the pushed one. A
+/// Suspend routinely outlasts the helm's reply bound, so its 504 must not read as a failure, and the request is the
+/// host's, on its key.
+///
+/// Specified: connected `gpubox`'s menu offers "Suspend"; choosing it sends `GET /api/sessions?host=4` and nothing
+/// else; a complete listing of an idle and a waiting session asks nothing and sends `POST /api/hosts/4/suspend` with no
+/// body, as `Suspend` work on the host's key, the row's status reading "Suspending…"; the helm's 504 opens nothing and
+/// leaves no record under the host's key; pushed suspending, the row's status still reads "Suspending…".
+#[gpui::test]
+fn suspend_goes_at_once_when_every_session_there_is_idle(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    click(cx, "host-menu-toggle-4");
+    assert_eq!(label(cx, "host-menu-suspend").as_deref(), Some("Suspend"));
+    keys(cx, "escape");
+    let waiting = session("b").status(json!({"state": "waiting"}));
+    suspend_read(
+        cx,
+        &mut helm,
+        200,
+        listing(&on_gpubox([idle("a"), waiting]), false),
+    );
+    assert!(!any_open(cx), "a known idle host is not asked about");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/hosts/4/suspend");
+    assert_eq!(body, Value::Null);
+    assert_eq!(work(cx, "4"), Some(Work::Suspend));
+    assert_eq!(label(cx, "host-status-4").as_deref(), Some("Suspending…"));
+    helm.reply(
+        id,
+        504,
+        Some(json!(
+            "suspending the host did not finish within 20 seconds; it carries on, and the host's state in the hosts \
+             list and the session list will show the result"
+        )),
+    );
+    settle(cx);
+    assert!(!any_open(cx), "the 504 is no failure");
+    assert!(
+        cx.update(|_, cx| session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).failure(&OpKey::host("4")).is_none())),
+        "nothing recorded under the host's key"
+    );
+    push_sandbox(
+        &mut helm,
+        HostStateView::TensorlakeChanging {
+            starting: false,
+            direction: farhelm_proto::tensorlake::LifecycleDirection::Suspending,
+            requested_at: 0,
+        },
+    );
+    settle(cx);
+    assert_eq!(label(cx, "host-status-4").as_deref(), Some("Suspending…"));
+}
+
+/// Why this matters: suspending a machine where an agent works freezes it mid-task, and an incomplete or failed read,
+/// or a host that is not connected, proves nothing about that; the old question asked then, with Cancel focused first
+/// so a stray Enter keeps the machine running, and nothing went out before the answer.
+///
+/// Specified: answered with a running session (which the Hosts panel's own list never shows), with a session whose
+/// status is unknown, with an idle session read stale, with an idle but truncated listing, with a failed read (503),
+/// and, with `gpubox` pushed connecting before the click, with an idle complete listing, Suspend asks "Suspend gpubox?"
+/// each time, with the line "An agent on gpubox is working, or its status could not be checked. Suspend keeps it as it
+/// is and it continues when you resume the host.", the answers Cancel and Suspend, and focus on Cancel; nothing is sent
+/// before the answer, and Cancel (clicked and Escape, in turn) sends nothing. The last question's Suspend sends
+/// `POST /api/hosts/4/suspend`.
+#[gpui::test]
+fn suspend_asks_when_an_agent_works_or_its_activity_is_unknown(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    let unknown = session("u").status(json!({"state": "unknown"}));
+    let cases = [
+        (
+            200,
+            listing(&on_gpubox([idle("a"), session("b")]), false),
+            "a running session",
+        ),
+        (
+            200,
+            listing(&on_gpubox([idle("a"), unknown]), false),
+            "a session whose status is unknown",
+        ),
+        (
+            200,
+            listing(&on_gpubox([idle("a").stale()]), false),
+            "an idle session read stale",
+        ),
+        (
+            200,
+            listing(&on_gpubox([idle("a")]), true),
+            "a listing the cap cut",
+        ),
+        (503, json!("the helm is busy"), "a failed read"),
+        (
+            200,
+            listing(&on_gpubox([idle("a")]), false),
+            "a host already unreachable at the click",
+        ),
+    ];
+    let last = cases.len() - 1;
+    for (index, (status, body, why)) in cases.into_iter().enumerate() {
+        if index == last {
+            push_sandbox(&mut helm, connecting(1, Some("connection refused")));
+            settle(cx);
+        }
+        suspend_read(cx, &mut helm, status, body);
+        assert_eq!(
+            label(cx, "prompt").as_deref(),
+            Some("Suspend gpubox?"),
+            "{why}"
+        );
+        assert_eq!(
+            label(cx, "host-suspend-line").as_deref(),
+            Some(
+                "An agent on gpubox is working, or its status could not be checked. Suspend keeps it as it is and \
+                 it continues when you resume the host."
+            ),
+            "{why}"
+        );
+        assert_eq!(answers(cx), ["Cancel", "Suspend"], "{why}");
+        assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"), "{why}");
+        assert!(
+            helm.commands().is_empty(),
+            "nothing before the answer ({why})"
+        );
+        if index == last {
+            break;
+        }
+        if index % 2 == 0 {
+            click(cx, "prompt-cancel");
+        } else {
+            keys(cx, "escape");
+        }
+        settle(cx);
+        assert!(!any_open(cx), "the question closed ({why})");
+        assert!(helm.commands().is_empty(), "Cancel sends nothing ({why})");
+    }
+    click(cx, "prompt-confirm");
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/hosts/4/suspend");
+    assert_eq!(body, Value::Null);
+    assert_eq!(work(cx, "4"), Some(Work::Suspend));
+}
+
+/// Why this matters: the helm can refuse a Suspend (the provider refused it, the host is busy); the old app showed
+/// that refusal in its host refusal dialog.
+///
+/// Specified: the helm's 409 to `gpubox`'s Suspend opens "Suspend host · gpubox" with its words.
+#[gpui::test]
+fn the_menus_suspend_shows_a_refusal_in_the_refusal_dialog(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    suspend_read(cx, &mut helm, 200, listing(&on_gpubox([idle("a")]), false));
+    let (id, _) = one_command(&mut helm, Method::Post, "/api/hosts/4/suspend");
+    helm.reply(id, 409, Some(json!("Tensorlake refused the suspend")));
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-refusal-title").as_deref(),
+        Some("Suspend host · gpubox")
+    );
+    assert_eq!(
+        label(cx, "host-refusal-reason").as_deref(),
+        Some("Tensorlake refused the suspend")
+    );
+}
+
+/// Why this matters: SPEC.md asks for "a connected host after the activity read": a host that disconnects while the
+/// read is out proves nothing about the agents the read listed, even when it lists none, and a check made only at the
+/// click would miss it (the old e2e "an empty cached listing asks when the host disconnects during the read").
+///
+/// Specified: with connected `gpubox`, Suspend's read is out; `gpubox` is pushed connecting, and its row reads
+/// "Connecting"; the read then answers with an empty, complete listing, and Suspend asks "Suspend gpubox?",
+/// sending nothing.
+#[gpui::test]
+fn suspend_asks_when_the_host_disconnects_during_its_read(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    click(cx, "host-menu-toggle-4");
+    click(cx, "host-menu-suspend");
+    let (read, _) = one_command(&mut helm, Method::Get, "/api/sessions?host=4");
+    push_sandbox(&mut helm, connecting(1, Some("connection refused")));
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-status-4").as_deref(),
+        Some(crate::hosts::identity::phase::words(&connecting(
+            1,
+            Some("connection refused")
+        ))),
+        "the premise: gpubox reads connecting while the read is out"
+    );
+    helm.reply(read, 200, Some(listing(&[], false)));
+    settle(cx);
+    assert_eq!(label(cx, "prompt").as_deref(), Some("Suspend gpubox?"));
+    assert!(helm.commands().is_empty(), "nothing before the answer");
+}
+
+/// Why this matters: the read and the question can outlast the phase they were asked in. A question about a host
+/// already suspended, being suspended or deleted, or gone would ask about something no longer true, and its answer
+/// would only meet a refusal; the other host questions close when their host goes.
+///
+/// Specified: pushed suspended while its read is out, `gpubox`'s Suspend opens no question and sends nothing; asked
+/// while connected, then pushed suspended while the question is up, the question's Suspend sends nothing; asked again
+/// while connected, the question closes when the registry drops `gpubox`.
+#[gpui::test]
+fn the_suspend_question_follows_its_host(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    let running = || listing(&on_gpubox([session("a")]), false);
+
+    click(cx, "host-menu-toggle-4");
+    click(cx, "host-menu-suspend");
+    let (read, _) = one_command(&mut helm, Method::Get, "/api/sessions?host=4");
+    push_sandbox(&mut helm, suspended());
+    settle(cx);
+    helm.reply(read, 200, Some(running()));
+    settle(cx);
+    assert!(!any_open(cx), "no question about a suspended host");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+
+    push_sandbox(&mut helm, connected());
+    settle(cx);
+    suspend_read(cx, &mut helm, 200, running());
+    assert_eq!(label(cx, "prompt").as_deref(), Some("Suspend gpubox?"));
+    push_sandbox(&mut helm, suspended());
+    settle(cx);
+    click(cx, "prompt-confirm");
+    assert!(helm.commands().is_empty(), "no Suspend of a suspended host");
+
+    push_sandbox(&mut helm, connected());
+    settle(cx);
+    suspend_read(cx, &mut helm, 200, running());
+    assert_eq!(label(cx, "prompt").as_deref(), Some("Suspend gpubox?"));
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1", "2", "3", "5"]),
+        upsert: Vec::new(),
+        remove: vec![HostView::key(4)],
+    });
+    settle(cx);
+    assert!(!any_open(cx), "the question closed with its host");
+}
+
+/// Why this matters: a question never opens over what the user turned to while the read was out (SPEC.md, "Keyboard
+/// focus"), and dropping the Suspend silently would leave the user wondering what their press did; Uninstall's late
+/// plan says so under the row, and Suspend follows it.
+///
+/// Specified: with `gpubox`'s Suspend read out, a key press moves the user on; the read's answer, a running session,
+/// opens nothing and sends nothing, and the row reads "Farhelm checked this host's sessions after you moved on. Choose
+/// Suspend again to see the question."
+#[gpui::test]
+fn a_suspend_read_after_the_user_moved_on_says_so(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    click(cx, "host-menu-toggle-4");
+    click(cx, "host-menu-suspend");
+    let (read, _) = one_command(&mut helm, Method::Get, "/api/sessions?host=4");
+    keys(cx, "shift-tab");
+    helm.reply(read, 200, Some(listing(&on_gpubox([session("a")]), false)));
+    settle(cx);
+    assert!(!any_open(cx), "no question");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+    assert_eq!(
+        label(cx, "host-error-4").as_deref(),
+        Some(crate::hosts::lifecycle::MOVED_ON)
+    );
+}
+
+/// Why this matters: SPEC.md, "Creation": Suspend and Resume are not changes to the host registry, refused only while
+/// this window's own launch targets or wakes that same host, and launches on other hosts proceed beside them; the
+/// registry exclusion that holds a host's setup or removal during any launch must not hold a Suspend.
+///
+/// Specified: with a launcher `Launch` holding its key (for no host of the panel's), connected `gpubox`'s Suspend, its
+/// read listing an idle session, sends `POST /api/hosts/4/suspend`.
+#[gpui::test]
+fn a_launch_elsewhere_does_not_hold_suspend(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    hold_launch(cx);
+    assert!(
+        cx.update(|_, cx| crate::hosts::launch_in_flight(cx)),
+        "the premise: a launch is in flight"
+    );
+    suspend_read(cx, &mut helm, 200, listing(&on_gpubox([idle("a")]), false));
+    one_command(&mut helm, Method::Post, "/api/hosts/4/suspend");
+    assert_eq!(work(cx, "4"), Some(Work::Suspend));
 }

@@ -142,6 +142,7 @@ conflicted across all of it.
 | Recent setups                   | `crates/gui/farhelm-gui/src/launcher/recents.rs`                                                                                                                                                                                                                                                                               | [reported](#recent-setups)               | none                                  |
 | Attached terminal               | `crates/gui/farhelm-gui/src/terminal/attached.rs`                                                                                                                                                                                                                                                                              | [reported](#attached-terminal)           | none                                  |
 | Session details                 | `crates/gui/farhelm-gui/src/session_pane/details.rs`                                                                                                                                                                                                                                                                           | [reported](#session-details)             | none                                  |
+| Session environments            | `crates/gui/farhelm-gui/src/session_list/environment.rs`                                                                                                                                                                                                                                                                       | [reported](#session-environments)        | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -1064,6 +1065,16 @@ there, and the review gate judges it.
 
 Lint exceptions: none.
 
+### Session environments
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it as the
+environment sessions' Suspend, Resume and Stop and suspend, and shared with settings-and-hosts, whose Hosts panel's
+Suspend and Resume (`hosts/lifecycle.rs`) read a host's activity through it (`read_activity`), send its commands
+(`suspend_command`, `resume_command`) and read the helm's answer that the change carries on past its bound
+(`CARRIES_ON`). Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
 ## What is not a foundation
 
 The rest of `crates/gui/farhelm-gui/src/` is area code, owned by the area that builds it and outside this table: the
@@ -1235,3 +1246,4 @@ without a conflict marker.
 | Recent setups          | `crates/gui/farhelm-gui/src/launcher/recents.rs`                 | `reported`    |
 | Attached terminal      | `crates/gui/farhelm-gui/src/terminal/attached.rs`                | `reported`    |
 | Session details        | `crates/gui/farhelm-gui/src/session_pane/details.rs`             | `reported`    |
+| Session environments   | `crates/gui/farhelm-gui/src/session_list/environment.rs`         | `reported`    |

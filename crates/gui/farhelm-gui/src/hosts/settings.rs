@@ -1155,6 +1155,7 @@ fn heading(view: &HostView, palette: &Palette) -> Div {
                         .child(phase_dot_and_words(
                             &view.state,
                             phase::tone(&view.state),
+                            1.,
                             palette,
                         )),
                 )
