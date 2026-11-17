@@ -46,10 +46,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 What the GPUI migration left when its area sessions ended on 2026-11-17, planned for the planning system.
 
-- **One shared placement picker.** The template editor's environment choice is a near-copy of the launcher's Runs on
-  controls (about 130 lines), differing only in authoring rules; the old app had one picker. Share it, with no visible
-  change. Plan: `plans/queue/gpui-shared-placement.md`.
-
 ## Near term
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host

@@ -718,12 +718,10 @@ orchestrator.
   text elsewhere is; the select has no host-text option labels yet.
 - **No build note under Container host.** The old editor drew the launcher's status line under a container template's
   Container host too: the place's reason, or "Preparing…", "Ready on <host>", "Builds on first launch here (a few
-  minutes)" or "Checking build status…" for the recipe there. The GPUI editor draws none: the launcher's note is drawn
-  by the launcher's own view, and sharing it would mean changing that view's code for the editor. The Container host
-  select still names each host's reason after its name, as the old one did, and the launcher draws the note once the
-  template is applied there. The editor also starts no Podman check: the old editor's read of the places asked the helm
-  to check every host never checked, while the GPUI editor shows each host's last pushed reason ("this host needs a
-  Podman check" until the launcher or Settings asks for one).
+  minutes)" or "Checking build status…" for the recipe there. The GPUI editor and launcher share the placement controls.
+  The launcher adds the build note when you apply the template there. In the editor, the Container host select shows
+  each host's last reported reason after its name ("this host needs a Podman check" until the launcher or Settings asks
+  for one). The old editor asked the helm to check every host that had never been checked.
 - **The Runs on switch's two small differences.** A chosen segment that has nowhere to enter (New container on a
   container template while no listed host can hold containers) is drawn enabled and does nothing when pressed, where the
   old one was drawn disabled. A new environment entered with no recipe the provider can run shows "Choose a recipe" in
