@@ -1373,6 +1373,27 @@ impl Harness<'_> {
             .update(|window, cx| layers::shown_tooltip(window, cx))
             .map(|shown| shown.text.to_string())
     }
+
+    /// Whether a fresh frame shows the card's explanation line and its Reconnect now whole, in that order: each drawn
+    /// and not cut by the clip of the card that scrolls them, which is what a user in a pane too short for the card can
+    /// read without scrolling it. Only the height is compared, since the card scrolls only up and down, and with half a
+    /// pixel to spare for the clip's arithmetic.
+    fn card_in_view(&mut self) -> (bool, bool) {
+        let nodes = test_support::frame(self.cx);
+        let whole = |bounds: Bounds<Pixels>, visible: Bounds<Pixels>| {
+            visible.size.height >= bounds.size.height - px(0.5)
+        };
+        let explanation = nodes
+            .iter()
+            .flat_map(|node| &node.texts)
+            .find(|line| line.text == RECONNECT_EXPLANATION)
+            .is_some_and(|line| whole(line.bounds, line.visible_bounds));
+        let button = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(RECONNECT_NOW_ID))
+            .is_some_and(|node| whole(node.bounds, node.visible_bounds));
+        (explanation, button)
+    }
 }
 
 /// SPEC.md, "Session list": a dropped terminal stream "uses the same card with `Session unavailable — reconnecting` and
@@ -1467,6 +1488,65 @@ fn reconnect_now_is_reached_and_pressed_from_the_keyboard(cx: &mut TestAppContex
     );
     keys(h.cx, "enter");
     assert_eq!(h.reconnect_nows(), 1);
+}
+
+/// Why: in a pane too short for the card, Tab onto Reconnect now scrolls the button into view and the explanation above
+/// it out of view, and before the card took the page keys from its button nothing on the keyboard brought the
+/// explanation back (a wheel turn did), against SPEC.md's keyboard reach. This is the Page Up half of the old
+/// `terminal-reconnect.spec.ts` case "manual-reconnect-is-offered-during-the-first-rung", which focused the button in a
+/// 48-pixel viewport and asserted that Page Up scrolled the card up.
+///
+/// Spec: SPEC.md, "Reaching everything by keyboard": every scrollable region can be scrolled with the keyboard alone.
+/// With a terminal holding history and its link dropped, in a pane short enough to cut the card, Reconnect now focused
+/// from the keyboard shows whole while the explanation does not; Page Up shows the explanation whole; Page Down shows
+/// the button whole again; Home and End do the same. None of those keys reaches the program, and the terminal's own
+/// view stays at the bottom of its history (guarded by the layout, not by the wrap: the card is drawn beside the
+/// grid, outside its key handler, and the link is down).
+#[gpui::test]
+fn the_page_keys_scroll_a_cut_card_from_reconnect_now(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(60);
+    h.fake().drop_link();
+    settle(h.cx);
+    // 110 pixels less the scrim's 20 a side leave the card 70, too few for its heading, explanation, phase line and
+    // button together; the premise after the Tab checks that the card is cut.
+    h.size.set((PANE.0, 110.));
+    redraw(h.cx);
+    assert!(h.card_drawn(), "the premise: the card shows");
+    assert!(h.following(), "the premise: the terminal shows the bottom");
+    h.sent();
+    keys(h.cx, "shift-tab");
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(RECONNECT_NOW_ID),
+        "the premise: Reconnect now holds focus"
+    );
+    assert_eq!(
+        h.card_in_view(),
+        (false, true),
+        "the premise: focus brought the button into view and cut the explanation"
+    );
+
+    keys(h.cx, "pageup");
+    assert!(h.card_in_view().0, "Page Up brings the explanation back");
+    keys(h.cx, "pagedown");
+    assert!(h.card_in_view().1, "Page Down goes back to the button");
+    keys(h.cx, "home");
+    assert_eq!(
+        h.card_in_view(),
+        (true, false),
+        "Home goes to the card's top"
+    );
+    keys(h.cx, "end");
+    assert_eq!(h.card_in_view(), (false, true), "End goes to its bottom");
+
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(RECONNECT_NOW_ID),
+        "the keys left focus on the button"
+    );
+    assert_eq!(h.sent(), [], "the program heard none of the keys");
+    assert!(h.following(), "the terminal's own view did not scroll");
 }
 
 /// The card sits over a screen that still answers the pointer: the scrim around it lets presses through, so the user
