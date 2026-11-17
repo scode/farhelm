@@ -182,11 +182,12 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
-  # Validate the optional mirror before any work that could make a failed
-  # configuration look like a network or release failure. This deliberately
-  # mirrors the helm's release-base parser: credentials, queries, and
-  # fragments are refused because they are either unsafe to expose or do not
-  # survive the asset URL joining contract faithfully.
+  # Validate the optional test origin before any work that could make a
+  # failed configuration look like a network or release failure. It refuses
+  # what the standalone helm's release-base parser refused before that
+  # setting was removed: credentials, queries, and fragments, because they
+  # are either unsafe to expose or do not survive the asset URL joining
+  # contract faithfully.
   validate_release_base_url() {
     vrbu_value=$1
     case "$vrbu_value" in
@@ -690,14 +691,18 @@ PLIST_EOF
       *) error 'HOME must be an absolute path; refusing to install\n'; exit 1 ;;
     esac
     # Only the installer is macOS-only. The helm provisions Linux hosts
-    # itself; refusing here must happen before downloads or filesystem writes.
+    # itself, and the desktop app runs on Linux with its own helm, but no
+    # Linux build of the app ships yet (packaging/farhelm-desktop/dist.toml),
+    # so there is nothing here to install. Refusing must happen before
+    # downloads or filesystem writes.
     os=$(uname -s)
     if [ "$os" != Darwin ]; then
       error 'This installer only supports macOS for now.\n'
       printf '%s\n' \
-        '   Linux is supported for running a helm and session hosts; only this installer is' \
-        '   limited, and that will be fixed. If you want to install on Linux, please open an' \
-        "   issue and it will be prioritized: ${ERR_CYAN}https://github.com/scode/farhelm/issues${ERR_RESET}" >&2
+        '   Linux remains supported for session hosts, and the Farhelm app runs on' \
+        '   Linux with its own helm, but no Linux build of the app is released yet.' \
+        '   If you want to install on Linux, please open an issue and it will be' \
+        "   prioritized: ${ERR_CYAN}https://github.com/scode/farhelm/issues${ERR_RESET}" >&2
       exit 1
     fi
     # Rosetta reports x86_64 on Apple silicon, which can run the native build.
@@ -722,11 +727,12 @@ PLIST_EOF
     # suites can point it at a fixture server instead of get.farhelm.io. It
     # stands in for the WHOLE origin (latest, and every <tag>/ path below
     # it), never for one release's directory. It deliberately has its own
-    # name: the helm's release mirror setting, FARHELM_RELEASE_BASE_URL, is
-    # safe for the helm because it verifies the release signature, and this
-    # script verifies none itself (SPEC.md, "Installation and updates"), so
-    # the helm's variable left exported in a shell must never redirect an
-    # install. Plain HTTP is accepted only for a loopback fixture (see
+    # name: FARHELM_RELEASE_BASE_URL, the release mirror setting the
+    # standalone helm had before it was removed, was safe for the helm
+    # because the helm verifies the release signature, and this script
+    # verifies none itself (SPEC.md, "Installation and updates"), so that
+    # variable still exported in a shell must never redirect an install.
+    # Plain HTTP is accepted only for a loopback fixture (see
     # validate_release_base_url); an HTTPS value keeps the same
     # no-downgrade pinning as the default origin.
     if [ -n "${FARHELM_INSTALL_TEST_BASE_URL:-}" ]; then

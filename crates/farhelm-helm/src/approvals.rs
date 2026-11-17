@@ -1502,7 +1502,9 @@ pub(crate) mod tests {
         assert_eq!(tunneled.fragment(), Some("part"));
     }
 
-    /// A standalone helm cannot gain a native capability through an answer payload.
+    /// A helm started without native capabilities (no link opener, which only
+    /// tests do now that the standalone helm is gone) cannot gain one through
+    /// an answer payload.
     /// The rejected answer leaves the original browser card available to answer normally.
     #[farhelm_testtrace::test]
     async fn standalone_tunnel_answer_keeps_the_browser_card_waiting() {
