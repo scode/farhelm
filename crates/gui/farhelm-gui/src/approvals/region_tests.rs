@@ -98,7 +98,8 @@ fn a_short_pane_gives_the_region_the_window_and_a_tiny_one_scrolls_it() {
 // ---- The window --------------------------------------------------------------------------------------------------------
 
 /// A waiting stop request `id` from host `host`.
-fn stop(id: &str, host: &str) -> PendingApproval {
+/// Used by another module's tests (`templates::save_tests`), so it is `pub(crate)`.
+pub(crate) fn stop(id: &str, host: &str) -> PendingApproval {
     PendingApproval {
         id: id.to_owned(),
         host_id: 1,
@@ -121,7 +122,8 @@ fn stop(id: &str, host: &str) -> PendingApproval {
 }
 
 /// The approvals collection holding `approvals`, oldest first.
-fn waiting(approvals: &[PendingApproval]) -> CollectionState {
+/// Used by another module's tests (`templates::save_tests`), so it is `pub(crate)`.
+pub(crate) fn waiting(approvals: &[PendingApproval]) -> CollectionState {
     let ids: Vec<&str> = approvals
         .iter()
         .map(|approval| approval.id.as_str())
@@ -140,7 +142,8 @@ fn waiting(approvals: &[PendingApproval]) -> CollectionState {
 }
 
 /// The pushed list becomes `approvals`, oldest first.
-fn push(helm: &mut FakeHelm, approvals: &[PendingApproval], gone: &[&str]) {
+/// Used by another module's tests (`templates::save_tests`), so it is `pub(crate)`.
+pub(crate) fn push(helm: &mut FakeHelm, approvals: &[PendingApproval], gone: &[&str]) {
     let ids: Vec<&str> = approvals
         .iter()
         .map(|approval| approval.id.as_str())
