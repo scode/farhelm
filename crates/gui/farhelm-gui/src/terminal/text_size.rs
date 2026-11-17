@@ -37,7 +37,7 @@ use gpui::{
 use super::TextSize;
 use super::attached::AttachedTerminal;
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, Tier};
+use crate::components::{Button, Condensed, HoverHelp, IconButton, Tier};
 use crate::session;
 use crate::{operations, theme};
 
@@ -177,7 +177,16 @@ pub(crate) fn step(delta: i8, cx: &mut App) {
 /// The − / readout / + group for the start of the session's top row's right-hand group (`.terminal-text-size`): two
 /// magnifier buttons sharing one border with the fixed-width readout of the current size in points between them. The
 /// readout is display-only and no tab stop; the buttons step [`current`] by one point.
-pub(crate) fn controls(cx: &App) -> AnyElement {
+///
+/// The group is exactly as tall as the header's lifecycle buttons beside it, in the header's ordinary look and, when
+/// `compact`, in its condensed one (23 and 21 pixels), its shared border included: its height is
+/// [`Button::compact_height`], the same figure those buttons are drawn at, and the buttons and the readout stretch to
+/// fill it. The magnifiers take the header buttons' compact geometry (a 13-pixel icon and 2 pixels of padding, the old
+/// condensed rule's for them too). The maintainer decided on 2026-11-16 that the group matches the header's buttons,
+/// a deviation from the old app, whose group was shorter than its neighbors (a bug, in the maintainer's words).
+///
+/// It keeps no state of its own, so the header can build it in both looks every frame and draw the one that fits.
+pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
     let palette = theme::palette(cx);
     let points = current(cx).points();
     let readout = div()
@@ -195,6 +204,9 @@ pub(crate) fn controls(cx: &App) -> AnyElement {
         .text_color(theme::color(palette.fg_1))
         .text_size(theme::metrics::TEXT_SM)
         .child(SharedString::from(points.to_string()));
+    // The header's lifecycle buttons take the condensed look that shrinks their words, so that is the height to match.
+    // The magnifiers take the header's compact geometry; an icon-only button draws the same in every look of it.
+    let condensed = compact.then_some(Condensed::Words);
     div()
         .id(GROUP_ID)
         .debug_selector(|| GROUP_ID.into())
@@ -203,6 +215,7 @@ pub(crate) fn controls(cx: &App) -> AnyElement {
         .flex()
         .flex_row()
         .flex_none()
+        .h(Button::compact_height(condensed))
         .items_stretch()
         .border_1()
         .border_color(theme::color(palette.border))
@@ -217,6 +230,7 @@ pub(crate) fn controls(cx: &App) -> AnyElement {
                 Role::Button,
             )
             .tier(Tier::Ghost)
+            .compact()
             .on_click(|_, _, cx| step(-1, cx)),
         )
         .child(readout)
@@ -229,6 +243,7 @@ pub(crate) fn controls(cx: &App) -> AnyElement {
                 Role::Button,
             )
             .tier(Tier::Ghost)
+            .compact()
             .on_click(|_, _, cx| step(1, cx)),
         )
         .into_any_element()

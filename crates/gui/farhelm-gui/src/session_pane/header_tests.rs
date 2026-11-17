@@ -3,7 +3,8 @@
 //! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
 //! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane, and the tab strip's
 //! floor beside the pill), and the terminal text size group at the start of the actions (its steps, readout, range,
-//! shortcut, and the size a terminal opens at). The header of an open session the list does not show is
+//! shortcut, the size a terminal opens at, and its height beside the buttons in both looks). The header of an open
+//! session the list does not show is
 //! `carried_tests.rs`'s.
 //!
 //! Everything but the layout test runs in the real main view over the helm client's fake, as the session list's own
@@ -2746,4 +2747,50 @@ fn a_reset_forgets_an_unanswered_text_size_step(cx: &mut TestAppContext) {
         newest.is_some() && newest == wanted,
         "the reopened terminal draws at 14 points"
     );
+}
+
+/// The text size group sits in the header's row of buttons, and a group taller than its neighbors reads as a different
+/// control: the port's first group was 30 pixels against the buttons' 23, and the old app's was shorter than its
+/// buttons, which the maintainer counted as a bug too (decided on 2026-11-16 that it matches them). The group's height
+/// comes from `Button::compact_height`, so this also checks that figure against the buttons it describes.
+///
+/// Spec: in a 1400-pixel pane for a remote session with no tunnel pill (the header's ordinary look), and in a 650-pixel
+/// pane once that session's terminal lists one tunnel to a very long host name (the condensed look), Stop is drawn at
+/// `Button::compact_height` for its look (ordinary, or `Condensed::Words` when condensed, 2 pixels shorter), and the
+/// text size group's outer box has Stop's top and bottom, so it is exactly as tall as Stop and level with it.
+#[test]
+fn the_text_size_group_is_as_tall_as_the_header_buttons_in_both_looks() {
+    use crate::components::{Button, Condensed};
+    use crate::terminal::text_size::GROUP_ID;
+    let check = |look: &str, nodes: &[gpui::DriverNode], condensed: Option<Condensed>| {
+        let stop = only_node(nodes, Action::Stop.id()).bounds;
+        assert_eq!(
+            stop.size.height,
+            Button::compact_height(condensed),
+            "the premise: Stop is drawn in the {look} look"
+        );
+        let group = only_node(nodes, GROUP_ID).bounds;
+        assert_eq!(
+            (group.top(), group.bottom()),
+            (stop.top(), stop.bottom()),
+            "the {look} text size group spans Stop's height: group {group:?}, Stop {stop:?}"
+        );
+    };
+
+    let mut wide = RealPane::open(1400., remote_session());
+    let nodes = wide.draw();
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("session-tunnel-pill")),
+        "the premise: no pill in the ordinary look"
+    );
+    check("ordinary", &nodes, None);
+
+    let mut narrow = RealPane::open(650., remote_session());
+    narrow.draw();
+    narrow.open_tunnel(&long_host());
+    let nodes = narrow.draw();
+    only_node(&nodes, "session-tunnel-pill");
+    check("condensed", &nodes, Some(Condensed::Words));
 }
