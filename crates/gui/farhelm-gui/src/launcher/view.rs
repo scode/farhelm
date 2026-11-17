@@ -2192,8 +2192,10 @@ impl Render for Launcher {
         self.follow_folder_check(cx);
         self.follow_browse(cx);
         self.follow_checkout(window, cx);
-        // The launch history follows the chosen host's connection the same way (`history`), and the folder list forgets
-        // a list the layer manager closed on its own, with its highlight (`folder_list`).
+        // The helm's history of new environments is read on the first draw, and the chosen host's launch history
+        // follows its connection the same way (`history`); the folder list forgets a list the layer manager closed on
+        // its own, with its highlight (`folder_list`).
+        self.follow_environment_history(cx);
         self.follow_history(cx);
         if self.settle_folder_default(cx) {
             self.sync_fields(window, cx);
@@ -2392,13 +2394,9 @@ impl Render for Launcher {
             .children(tabs)
             .children(fields);
         let search = self.search_row(palette, window, cx);
-        // Recent setups sit between the search box and the destination, and take no room without rows (`recents`).
-        // Not while a new environment is chosen: its folder is fixed, and recent setups name an existing host's folders.
-        let recents = if self.draft.target.is_some() {
-            None
-        } else {
-            self.recents_strip(palette, window, cx)
-        };
+        // Recent setups sit between the search box and the destination, and take no room without rows (`recents`). They
+        // show while a new environment is chosen too, as the old strip did: each restores its own placement.
+        let recents = self.recents_strip(palette, window, cx);
         let body = div()
             .flex()
             .flex_col()

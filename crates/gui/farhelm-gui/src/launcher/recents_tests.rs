@@ -8,7 +8,7 @@ use farhelm_proto::{
 };
 
 use super::recents::{
-    DraftDestination, RecentFilter, destination_label, explicit_before_permissions,
+    DraftDestination, RecentFilter, destination_label, explicit_before_permissions, merged,
     permission_value, ranked, remembered_folder, selection_summary, strip,
     summary_before_permissions, uses_guarded_default,
 };
@@ -258,17 +258,110 @@ fn checkout_setups_group_by_repository() {
     );
 }
 
-/// A launch into a disposable environment is left out until the launcher can create environments again. Why: taking
-/// it would fill a recipe and place the launcher cannot yet hold.
-#[test]
-fn environment_launches_are_left_out() {
-    let mut sandbox = launch("~", selection(LaunchHarness::Codex));
-    sandbox.target = Some(LaunchTarget::Environment {
-        recipe: "rust".into(),
+/// A Codex launch into a new container of `recipe` on host4, at `created_at`.
+fn in_container(recipe: &str, created_at: i64) -> LaunchHistoryEntry {
+    let mut entry = launch("~", selection(LaunchHarness::Codex));
+    entry.target = Some(LaunchTarget::Environment {
+        recipe: recipe.into(),
         place: Place::PodmanHost(4),
     });
-    let history = history(vec![sandbox]);
-    assert!(ranked(&history, &RecentFilter::default(), None).is_empty());
+    entry.created_at = created_at;
+    entry
+}
+
+/// A launch into a new environment is offered whatever folder the draft holds, since it started in that environment's
+/// own home, but under a chosen repository only with that repository; and its recipe and place group it as its choices
+/// do, so the same choices in two recipes, or in a container and on a host, are separate setups. Why: SPEC.md,
+/// "Creation", recent setups restore "recipe and place together", and one row for two placements would launch one of
+/// them where the user did not pick it (old `ranked_recents`, which let a target through the folder match and grouped
+/// by it).
+#[test]
+fn environment_launches_pass_the_folder_and_group_by_their_placement() {
+    let mut checkout = in_container("rust", 0);
+    checkout.github_repo = Some(repo("acme", "bar"));
+    let history = history(vec![
+        in_container("go", 0),
+        in_container("rust", 0),
+        in_container("rust", 0),
+        launch("~", selection(LaunchHarness::Codex)),
+        checkout,
+    ]);
+    let rows = |destination: DraftDestination<'_>| {
+        ranked(&history, &RecentFilter::default(), Some(destination))
+            .into_iter()
+            .map(|row| {
+                let recipe = row.target.as_ref().map(|target| target.recipe().to_owned());
+                (recipe, row.github_repo.is_some())
+            })
+            .collect::<Vec<_>>()
+    };
+    let rust = || Some("rust".to_owned());
+    assert_eq!(
+        rows(DraftDestination::Folder("/elsewhere")),
+        [
+            (rust(), false),
+            (Some("go".to_owned()), false),
+            (rust(), true)
+        ],
+        "every environment setup, the more launched first; the host's `~` launch is another folder's"
+    );
+    assert_eq!(
+        rows(DraftDestination::Folder("~")).len(),
+        4,
+        "the host's `~` launch is a setup of its own beside the environments'"
+    );
+    assert_eq!(
+        rows(DraftDestination::Repository(&repo("acme", "bar"))),
+        [(rust(), true)]
+    );
+    assert!(rows(DraftDestination::Repository(&repo("acme", "baz"))).is_empty());
+}
+
+/// The helm's launches into new environments merge into the chosen host's history by the time of each source's next
+/// launch, a tie going to the host's, while each source keeps its own order; the host's saved folders stay its own, and
+/// with no host's history the environments' launches stand alone, with no folders. Why: a newer environment setup must
+/// not sink below every host setup because it came from another read, re-sorting either source by its clock would
+/// reorder launches a clock jump made out of order, and an environment's home must never read as a host's folder (old
+/// `merge_recent_launches` and `offered_recent_history`, with their tests).
+#[test]
+fn the_environments_launches_merge_by_each_sources_next_launch() {
+    let mut ordinary = history(vec![
+        launch("/a", selection(LaunchHarness::Claude)),
+        launch("/b", selection(LaunchHarness::Claude)),
+        launch("/c", selection(LaunchHarness::Claude)),
+    ]);
+    for (entry, at) in ordinary.launches.iter_mut().zip([10, 50, 5]) {
+        entry.created_at = at;
+    }
+    ordinary.folders = vec![FolderHistoryEntry {
+        host: 1,
+        canonical_cwd: "/a".into(),
+        canonical_proven: true,
+        display_cwd: "/a".into(),
+        created_at: 10,
+        creation_seq: None,
+    }];
+    let environment = [
+        in_container("x", 30),
+        in_container("y", 5),
+        in_container("z", 40),
+    ];
+    let both = merged(Some(&ordinary), &environment).expect("both histories");
+    let order: Vec<String> = both
+        .launches
+        .iter()
+        .map(|entry| match &entry.target {
+            Some(target) => target.recipe().to_owned(),
+            None => entry.cwd.clone(),
+        })
+        .collect();
+    assert_eq!(order, ["x", "/a", "/b", "/c", "y", "z"]);
+    assert_eq!(both.folders, ordinary.folders);
+
+    let alone = merged(None, &environment).expect("the environments' launches");
+    assert_eq!(alone.launches, environment);
+    assert!(alone.folders.is_empty());
+    assert_eq!(merged(None, &[]), None);
 }
 
 // ---- A row's words -------------------------------------------------------------------------------------------------

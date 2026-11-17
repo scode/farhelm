@@ -31,9 +31,10 @@
 //!   and the model as that type's custom id. A recent setup fills the draft as a click on the strip's row does
 //!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
 //!   filled, and SPEC.md's Enter that launches is the strip's focused row. A setup carrying a retired container choice,
-//!   or a folder or setup from a history that is no longer the chosen host's, is refused above the box in the old
-//!   words. While a new environment is chosen, every folder row and Browse is refused there too, in the old words: the
-//!   environment's folder is its fixed home (`environment_refusal`). A recent setup is still taken, with its own place.
+//!   a new environment's setup in Replace with, or a folder or setup from a history that is no longer the chosen
+//!   host's, is refused above the box in the old words. While a new environment is chosen, every folder row and Browse
+//!   is refused there too, in the old words: the environment's folder is its fixed home (`environment_refusal`). A
+//!   recent setup is still taken, with its own place.
 //!
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
@@ -51,7 +52,7 @@ use gpui::{
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
-use super::recents::RecentRefusal;
+use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -93,9 +94,10 @@ impl Launcher {
         } else {
             Ok(Vec::new())
         };
-        // The chosen host's history rows name that host as its own field does, phase included.
-        let placement = self.chosen_host(cx).map(host_name_with_phase);
-        let history = self.launch_history(cx).zip(placement.as_ref());
+        // The chosen host's history rows name that host as its own field does, phase included; a new environment's
+        // setup names its own placement.
+        let host = self.chosen_host(cx).map(host_name_with_phase);
+        let history = self.recent_history(cx);
         // Empty unless the query is `gh:` (`checkout`).
         let repositories = self.search_repositories(cx);
         search(&Inputs {
@@ -107,7 +109,8 @@ impl Launcher {
             catalog_pending: self.catalog.is_none() && self.catalog_error.is_none(),
             hosts: &hosts,
             templates: templates.as_deref(),
-            history,
+            history: history.as_ref(),
+            host: host.as_ref(),
             repositories: &repositories,
         })
     }
@@ -217,7 +220,8 @@ impl Launcher {
 
     /// Why taking `row` would change nothing, in the old launcher's words where it had some: a field this launcher
     /// holds fixed ([`Self::held_by_row`]), a folder row or Browse while a new environment is chosen
-    /// ([`environment_refusal`]), a recent setup carrying a retired container choice, or a saved folder or recent setup
+    /// ([`environment_refusal`]), a recent setup carrying a retired container choice or, in Replace with, a new
+    /// environment ([`KEEPS_ENVIRONMENT`]), or a saved folder or recent setup
     /// from a history that is no longer the chosen host's (the host changed after the row was drawn).
     fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
         if let Some(field) = self.held_by_row(row) {
@@ -238,6 +242,7 @@ impl Launcher {
         let stale = match row {
             Row::Recent { entry, .. } => match self.recent_refusal(entry, cx)? {
                 RecentRefusal::Retired => return Some(RETIRED_CONTAINER_REASON.to_owned()),
+                RecentRefusal::KeepsEnvironment => return Some(KEEPS_ENVIRONMENT.to_owned()),
                 RecentRefusal::Stale => true,
                 // Not reached: `held_by_row` refused above what Restart with holds.
                 RecentRefusal::Held => {

@@ -13,8 +13,8 @@
 //! - `pill`: the progress pill and the "Started" report a hidden launcher leaves at the bottom of the window.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //!   The Templates editor's model suggestions are its rows for one agent type.
-//! - [`recents`]: which recent setups the chosen host's launch history offers, in what order, and a row's words, with no
-//!   GPUI types.
+//! - [`recents`]: which recent setups the chosen host's launch history and the helm's launches into new environments
+//!   offer, in what order, and a row's words, with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends: the ordinary
 //!   create, or a launch into a new environment (New container, New sandbox), which has its own route and its own
 //!   reasons, a new sandbox's checked against the Tensorlake account the launcher reads as it opens.
@@ -66,6 +66,8 @@ mod draft_tests;
 mod entry_tests;
 #[cfg(test)]
 pub(crate) mod environment_launch_tests;
+#[cfg(test)]
+mod environment_recents_tests;
 #[cfg(test)]
 pub(crate) mod environment_tests;
 #[cfg(test)]

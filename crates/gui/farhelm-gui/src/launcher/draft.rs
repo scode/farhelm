@@ -33,12 +33,13 @@
 //!
 //! - A placement ([`LaunchDraft::target`]): an existing host, or a new disposable environment made from a recipe at a
 //!   place (SPEC.md, "Creation", the Runs on bullet). Its three hand edits are [`LaunchDraft::choose_runs_on`],
-//!   [`LaunchDraft::choose_recipe`] and [`LaunchDraft::choose_container_host`], and Clone and New opened beside an
-//!   environment session seed the source's recipe and place through [`LaunchDraft::seed_target`], which shares the
-//!   first edit's effects. While a recipe is chosen a folder destination is the new environment's home, `~`, and
-//!   nothing edits it: no folder default waits for a host's history, and no installation binds it. A managed checkout
-//!   works as on a host, its repository cloned inside the new environment (SPEC.md, "Container sessions" and "Sandbox
-//!   sessions"), and it survives entering and leaving.
+//!   [`LaunchDraft::choose_recipe`] and [`LaunchDraft::choose_container_host`], a recent setup restores its whole
+//!   placement through [`LaunchDraft::choose_placement`], and Clone and New opened beside an environment session seed
+//!   the source's recipe and place through [`LaunchDraft::seed_target`]; the last two share the first edit's effects.
+//!   While a recipe is chosen a folder destination is the new environment's home, `~`, and nothing edits it: no folder
+//!   default waits for a host's history, and no installation binds it. A managed checkout works as on a host, its
+//!   repository cloned inside the new environment (SPEC.md, "Container sessions" and "Sandbox sessions"), and it
+//!   survives entering and leaving.
 //!
 //! Not here: the composer search's parsing, recent setups and the host's default-folder precedence (the view passes
 //! the folder a host change should seed), a managed checkout's suggestions and preview (the view reads them from the
@@ -361,9 +362,9 @@ pub struct LaunchDraft {
     /// Where the launch runs when it is not an existing host: a new disposable environment made from a recipe at a
     /// place, which the helm creates for this launch alone (SPEC.md, "Sandbox sessions" and "Container sessions").
     /// `None` is Existing host, the Host row's choice. Set only through the Runs on edits
-    /// ([`Self::choose_runs_on`], [`Self::choose_recipe`], [`Self::choose_container_host`]) and the seed a source's
-    /// environment gives Clone and New ([`Self::seed_target`]); [`Self::host`] is kept while it is set, so leaving the
-    /// environment gives the Host row back as it was.
+    /// ([`Self::choose_runs_on`], [`Self::choose_recipe`], [`Self::choose_container_host`]), a recent setup's
+    /// ([`Self::choose_placement`]) and the seed a source's environment gives Clone and New ([`Self::seed_target`]);
+    /// [`Self::host`] is kept while it is set, so leaving the environment gives the Host row back as it was.
     pub target: Option<LaunchTarget>,
 }
 
@@ -1337,9 +1338,22 @@ impl LaunchDraft {
         self.place_on(Some(target));
     }
 
+    /// Choose the whole placement `target` at once (`None` is Existing host), as taking a recent setup does: it
+    /// restores the recipe and place the setup ran with together (SPEC.md, "Creation"), even inside the segment already
+    /// chosen, with the effects entering or leaving the segment by hand has ([`Self::choose_runs_on`]). The placement
+    /// already chosen changes nothing, as with the hand edit, so a managed checkout's numbered name keeps its place in
+    /// the series (an ordinary setup taken on Existing host would otherwise start Clone's `-clone-2` over). Refused,
+    /// changing nothing, where the mode holds the host (Restart with and Replace with keep the existing environment).
+    pub fn choose_placement(&mut self, target: Option<LaunchTarget>) {
+        if self.holds(Field::Host) || self.target == target {
+            return;
+        }
+        self.place_on(target);
+    }
+
     /// Move the launch onto `target` (`None` is Existing host) with every effect a change of placement carries: the one
-    /// path both the hand edit ([`Self::choose_runs_on`]) and the seed ([`Self::seed_target`]) take, so the two cannot
-    /// drift apart. Callers check what the mode holds.
+    /// path the hand edits ([`Self::choose_runs_on`], [`Self::choose_placement`]) and the seed ([`Self::seed_target`])
+    /// take, so they cannot drift apart. Callers check what the mode holds.
     fn place_on(&mut self, target: Option<LaunchTarget>) {
         if target.is_some() {
             self.folder = Draft::load(ENVIRONMENT_HOME.to_owned());

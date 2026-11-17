@@ -680,23 +680,33 @@ follows the pushed Podman checks it asks for on opening and whose note follows t
 `launcher::environment_view_tests::{opening_the_launcher_checks_the_container_hosts, opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable, new_container_shows_its_rows_with_unusable_hosts_disabled, the_note_follows_the_recipe_place}`;
 New container's default host and its note going with its host in
 `launcher::environment_view_tests::{new_container_defaults_to_the_last_container_host, no_note_once_the_container_host_is_gone}`;
-not yet ported: "restored container placement displays the recipe and host it submits", a saved container template taken
-from the composer search showing the recipe and container host it then sends in one create (its draft half, entering a
-new container at its home, is `templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`); and
-"environment recents hold focused intent until deliberate promotion" and "environment recents stay independent of a held
-ordinary folder default", which wait for recent setups of new environments, not yet built (the desktop integration
-area's next environments work). The spec's other cases are other areas': "container template quick launch retains its
-saved place" is the templates and quick launch area's, "a connected container's Delete asks its Farhelm and reports the
-container that stays" is the session view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes`
-surface of the delayed-probe case are in [Settings and hosts](settings-and-hosts.md). Beyond this spec's cases,
-SPEC.md's carried placements (Container sessions follow Sandbox sessions' Clone, and New beside an open environment
-session preselects its recipe and place, never in a quick launch): one seed for both providers in
+the search half of "environment recents hold focused intent until deliberate promotion" and "environment recents stay
+independent of a held ordinary folder default" in
+`launcher::environment_recents_tests::{an_environment_setup_shows_by_a_chosen_recipe_with_no_host_connected, environment_setups_stay_apart_from_a_hosts_held_folder_default}`,
+with a taken setup's placement shown, sent and its destination brought along in
+`launcher::environment_recents_tests::{a_taken_environment_setup_shows_and_sends_its_placement, an_environment_setup_brings_its_own_destination}`,
+the two histories' merge, the setups' ranking and a search row's placement in
+`launcher::recents_tests::{the_environments_launches_merge_by_each_sources_next_launch, environment_launches_pass_the_folder_and_group_by_their_placement}`
+and `launcher::search_tests::an_environment_setup_names_its_own_placement`; superseded: the rest of "environment recents
+hold focused intent until deliberate promotion" (a re-read on every activity-feed notice, held back from a focused row
+until a deliberate choice), since the launcher reads the environments' history once as it opens; not yet ported:
+"restored container placement displays the recipe and host it submits", a saved container template taken from the
+composer search showing the recipe and container host it then sends in one create (its draft half, entering a new
+container at its home, is `templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`). The spec's
+other cases are other areas': "container template quick launch retains its saved place" is the templates and quick
+launch area's, "a connected container's Delete asks its Farhelm and reports the container that stays" is the session
+view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are
+in [Settings and hosts](settings-and-hosts.md). Beyond this spec's cases, SPEC.md's carried placements (Container
+sessions follow Sandbox sessions' Clone, and New beside an open environment session preselects its recipe and place,
+never in a quick launch): one seed for both providers in
 `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_and_chooses_nothing`, driven with a sandbox
 in
 `launcher::entry_tests::{clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe, new_beside_an_open_environment_session_preselects_its_recipe_and_place}`,
 and Replace with keeping the existing environment in
 `launcher::entry_tests::replace_with_of_an_environment_session_keeps_its_environment` and
-`launcher::environment_tests::restart_with_and_replace_with_keep_the_existing_environment`.
+`launcher::environment_tests::restart_with_and_replace_with_keep_the_existing_environment`, its recent setups of new
+environments refused in the old words in
+`launcher::environment_recents_tests::replace_with_refuses_an_environment_setup`.
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts`
 
@@ -1222,8 +1232,7 @@ not yet ported: all 13 wait for resume before create, not yet built in the launc
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
 - A launch on a suspended host is refused until the environments work brings resume-before-create.
-- While a new environment's recipe is chosen, the recent setups strip is hidden; recent setups of new environments come
-  with the environments work's recent setups. The composer search's folder rows and Browse are refused in the old words,
+- While a new environment's recipe is chosen, the composer search's folder rows and Browse are refused in the old words,
   and so is a `~` path, which the old search took as a choice of the home the folder already was.
 - New sandbox reads the Tensorlake account once as the launcher opens; the old launcher read it again on every fleet
   notice. Settings, where it changes, opens from the page the launcher covers, so a key saved there shows at the
@@ -1360,8 +1369,6 @@ not yet ported: all 13 wait for resume before create, not yet built in the launc
 - The permission-escalation banner's eight seconds keep running while the window is inactive; the old banner's clock
   paused then. SPEC_impl.md, "Animation time: the ticker", has one-shot deadlines, banner expiry among them, fire on
   time whether or not the window is active.
-- The composer search's recent setups and its models from past launches leave out launches into a disposable
-  environment, as the strip does, until the environments work brings them back.
 - The composer search's recent-setup rows are drawn in the shared option row's padding with the list's 2-pixel gap; the
   old rows were a fixed 44 pixels tall with 4 pixels between them ("composer search recents keep complete 44px two-line
   rows"). The rows are drawn in the `app-launcher-search-recents` scene.
@@ -1371,13 +1378,12 @@ not yet ported: all 13 wait for resume before create, not yet built in the launc
   configuration's revision comes with that read, so a checkout configuration change made from the command line while New
   is open (another checkout folder, say) is not followed either: a preview already shown stays until the next read or a
   press, which the helm refuses as stale and the launcher answers with a new preview and nothing sent
-  (`launcher::checkout_tests::a_lost_race_takes_a_new_preview_and_sends_nothing`).
+  (`launcher::checkout_tests::a_lost_race_takes_a_new_preview_and_sends_nothing`). The helm's history of launches into
+  new environments, which the old app re-read on the same notices, is read once as the launcher opens.
 - The folder dropdown leaves out Local home in Replace with, which keeps its host; the old dropdown offered it there too
   (`launcher::folder_list_tests::replace_with_offers_no_local_home`).
 - The folder dropdown's headings (Recent, Reset) are labelled lines among the options, not groups named by them, so its
   rows scroll into view one by one; and like the model field, the folder field reports no expanded or active-row state.
-- The recent setups strip leaves out launches into a disposable environment (a recipe and place) until the environments
-  work brings them back; the old strip offered them.
 - The recent setups strip's cells are fixed tracks in pixels rather than the old `ch` units (the host and choices tracks
   shrink only when the row is narrow, as the old `minmax(0, …)` did), and at narrow widths the host cell is not hidden
   as the old `max-width: 560px` rule hid it. Its rows keep their color under the pointer rather than turning to the

@@ -23,15 +23,22 @@
 //!   for a quick launch prepared out of sight, which is never drawn. A re-read (a reconnect) never moves it again.
 //! - **The checkout configuration's revision** comes with every answer and goes to the managed-checkout destination
 //!   ([`Launcher::observe_checkout_config_revision`]), which asks for a new preview when it rises.
+//! - **Launches into new environments** are the helm's own history, not a host's (`GET
+//!   /api/environment-launch-history`): helm-wide, kept after the disposable host is gone, and answered with no host
+//!   connected. The launcher reads it once, when it is first drawn, and merges it into the host's for the recent
+//!   setups alone ([`Launcher::recent_history`]); the folder list, New's folder default and the saved folders read the
+//!   host's history only, so an environment's home never becomes a host's folder. A failed read offers none of them.
+//!   The old launcher also re-read it on every activity-feed notice, which the desktop app has not (the same deviation
+//!   as above).
 
 use farhelm_helm_client::ApiPath;
-use farhelm_proto::session_requests::LaunchHistoryReply;
+use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostStateView;
 use gpui::{App, Context};
 
 use super::super::draft::{FolderDefault, Install};
 use super::super::entry::session_folder;
-use super::super::recents::remembered_folder;
+use super::super::recents::{merged, remembered_folder};
 use super::Launcher;
 use crate::{local_state, operations};
 
@@ -51,6 +58,10 @@ pub(super) struct LaunchHistory {
     answered: Option<(HistoryKey, LaunchHistoryReply)>,
     /// The key whose read failed, while it is still the one asked about: New's folder default then settles on `~`.
     failed: Option<HistoryKey>,
+    /// Whether the helm's history of launches into new environments has been asked for: once per launcher.
+    environment_asked: bool,
+    /// That history's answer, newest first; `None` until it arrives, and after a failed read.
+    environment: Option<Vec<LaunchHistoryEntry>>,
 }
 
 impl Launcher {
@@ -123,6 +134,59 @@ impl Launcher {
                 });
             },
         );
+    }
+
+    /// Read the helm's history of launches into new environments, the first time the launcher is drawn (module docs).
+    /// A launcher prepared out of sight for a quick launch is never drawn, and offers no recent setups, so it never
+    /// asks.
+    pub(super) fn follow_environment_history(&mut self, cx: &mut Context<Self>) {
+        if self.history.environment_asked {
+            return;
+        }
+        self.history.environment_asked = true;
+        let Ok(path) = ApiPath::api(&["environment-launch-history"]) else {
+            return;
+        };
+        let launcher = cx.weak_entity();
+        operations::read::<Vec<LaunchHistoryEntry>>(
+            path,
+            "GET /api/environment-launch-history",
+            cx,
+            move |answer, cx| {
+                let _ = launcher.update(cx, |launcher, cx| {
+                    if let Ok(entries) = answer {
+                        launcher.history.environment = Some(entries);
+                        // The new rows shift the search's rows under its highlight.
+                        launcher.reset_search_highlight(cx);
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// The history recent setups are drawn from, in the strip and the search: the chosen host's while it is current,
+    /// with the launches into new environments merged in ([`merged`]); `None` with neither.
+    pub(super) fn recent_history(&self, cx: &App) -> Option<LaunchHistoryReply> {
+        merged(
+            self.launch_history(cx),
+            self.history.environment.as_deref().unwrap_or_default(),
+        )
+    }
+
+    /// Whether `entry` is still among the recent setups' history as it stands, so a row drawn from an earlier one (the
+    /// host changed under it) is not taken.
+    pub(super) fn recent_offered(&self, entry: &LaunchHistoryEntry, cx: &App) -> bool {
+        match &entry.target {
+            Some(_) => self
+                .history
+                .environment
+                .as_ref()
+                .is_some_and(|entries| entries.contains(entry)),
+            None => self
+                .launch_history(cx)
+                .is_some_and(|history| history.launches.contains(entry)),
+        }
     }
 
     /// Settle New's pending folder default when the chosen host's default is known (`LaunchDraft::folder_default`): the

@@ -25,10 +25,11 @@
 //! Every row is a draft choice the view applies through the draft's own edit methods, the same ones a hand edit uses
 //! (a template row through the templates' application path); this module only builds rows. The group order is the old
 //! one.
-//! - **From the launch history** (`super::view::history`'s read of the chosen host): saved folders, offered after a
-//!   typed path's "Use this path"; whole recent setups, last, ranked as the recent setups strip ranks them but neither
-//!   capped nor narrowed by the draft; and models from past launches that the catalog does not list, after the
-//!   catalog's own, each with the agent type it ran with.
+//! - **From the launch history** (`super::view::history`'s reads of the chosen host's and of the helm's new
+//!   environments): saved folders, the host's alone, offered after a typed path's "Use this path"; whole recent setups,
+//!   last, ranked as the recent setups strip ranks them but neither capped nor narrowed by the draft, each naming where
+//!   it ran; and models from past launches that the catalog does not list, after the catalog's own, each with the agent
+//!   type it ran with.
 //!
 //! - **Repositories** are offered only under `gh:`: the choices the managed-checkout destination gives the query
 //!   (`super::view::checkout`'s `repository_choices`, handed in by the view), so a valid typed `owner/repo` is always
@@ -45,7 +46,7 @@ use farhelm_proto::{GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::ElementId;
 
 use super::draft::{Tab, harness_label, repo_identifier};
-use super::recents::{RecentFilter, destination_label, ranked, selection_summary};
+use super::recents::{RecentFilter, destination_label, placement, ranked, selection_summary};
 use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
 use crate::host_text::{HostSentence, HostText};
@@ -235,7 +236,8 @@ pub enum Row {
     BrowsePath(String),
     /// A folder an earlier launch on this host started in, as the user typed it then.
     Folder(String),
-    /// A whole earlier setup, from the chosen host's history, with the host as the row names it.
+    /// A whole earlier setup, from the chosen host's history or the helm's of new environments, with where it ran as
+    /// the row names it (`super::recents::placement`).
     Recent {
         entry: Box<LaunchHistoryEntry>,
         placement: HostText,
@@ -443,9 +445,13 @@ pub struct Inputs<'a> {
     /// Every template as the templates' rows give it (`crate::templates::rows::rows` with an empty filter: the store's
     /// templates in the helm's order), or why the templates cannot be listed, which a `tl:` query shows in place of rows.
     pub templates: Result<&'a [TemplateRow], &'a HostSentence>,
-    /// The chosen host's launch history while it is read and current, and the host as its rows name it; `None` before
-    /// or without one, which offers no saved folders, recent setups or past models.
-    pub history: Option<(&'a LaunchHistoryReply, &'a HostText)>,
+    /// The recent setups' history (`super::recents::merged`): the chosen host's while it is read and current, with the
+    /// helm's launches into new environments; `None` with neither, which offers no saved folders, recent setups or
+    /// past models.
+    pub history: Option<&'a LaunchHistoryReply>,
+    /// The chosen host as the rows of its own history name it; a new environment's setup names its own placement
+    /// instead (`super::recents::placement`).
+    pub host: Option<&'a HostText>,
     /// A `gh:` query's repository choices, in order (the module docs); only a `gh:` query reads them.
     pub repositories: &'a [GithubRepo],
 }
@@ -562,7 +568,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
         // Then models from past launches, in the recent setups' order, that the catalog does not list for their agent
         // type under the catalog's spelling of the id, each once: the same test that makes a taken recent setup's model
         // a custom one (`LaunchDraft::restore_recent`).
-        if let Some((history, _)) = inputs.history {
+        if let Some(history) = inputs.history {
             let catalog = inputs.catalog.unwrap_or_default();
             for entry in ranked(history, &RecentFilter::default(), None) {
                 let Some(id) = &entry.selection.model else {
@@ -625,7 +631,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
         rows.push(Row::UsePath(value.to_owned()));
         rows.push(Row::BrowsePath(value.to_owned()));
     }
-    if let Some((history, placement)) = inputs.history {
+    if let Some(history) = inputs.history {
         // Saved folders, matched on the folder as typed (so a visible `<U+…>` never stands for the character it
         // escapes), uncapped, after a typed path's own row.
         if any(Scope::Folder) && !blank_all {
@@ -651,9 +657,11 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                         );
                         matches(&words.to_ascii_lowercase())
                     })
-                    .map(|entry| Row::Recent {
-                        entry: Box::new(entry.clone()),
-                        placement: placement.clone(),
+                    .filter_map(|entry| {
+                        Some(Row::Recent {
+                            placement: placement(entry, inputs.host, inputs.hosts)?,
+                            entry: Box::new(entry.clone()),
+                        })
                     }),
             );
         }
