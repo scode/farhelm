@@ -17,24 +17,27 @@ install/start, a separate installer upgrade, click-to-upgrade discovery/relaunch
 successful agent, then remote supervisor upgrade with one successful agent; on each host, an agent session started on
 the previous stable must also survive the upgrade in its terminal host, then restart onto a new terminal host and resume
 its conversation. Finally, Remove/re-add the remote host with its sessions preserved, then Uninstall after ending all
-its sessions. Stop at the first failure or missing prerequisite, except for bounded pre-action provider 429 recovery.
-After P0 passes, P1 sends one live feedback submission from the candidate on P0's last Mac guest, before that fixture is
-exported and cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate
-verdict and does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends
-after recording P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts.
-**Stop after P1 checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?**
-from the separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its
-own verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the
-maintainer's call for that release. Missing prerequisites mean could not run; resolve them with the maintainer instead
-of guessing machine bindings. A test request does not authorize publication or release promotion.
+its sessions. Preserve failed attempts and repair safe harness or setup problems under "Repair and continue"; keep
+working toward the requested brick-test coverage instead of ending the task at the first obstacle. After P0 passes, P1
+sends one live feedback submission from the candidate on P0's last Mac guest, before that fixture is exported and
+cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate verdict and
+does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends after recording
+P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts. **Stop after P1
+checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?** from the
+separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its own
+verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the maintainer's
+call for that release. Resolve missing prerequisites from evidence and existing authorization; ask only when a needed
+binding, permission or consequential decision cannot be established. A test request does not authorize publication or
+release promotion.
 
 Use the guest-native executor of `releasing/mac-vm-test/BRICK-TEST.md` for actual tests: an independent Codex process
 inside the Mac guest drives native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned
 networking and evidence, but does not drive product UI. Resolve native permissions and explicit Mac/Linux
 credential-copy consent during fixture setup. Prepared bases remain credential-free; standing authorization may cover
 this machine's disposable test clones. An OS/CUA/authentication permission block during P0 or an evaluation is a harness
-bug: stop, retain the failure, repair setup separately and start a new run. Do not manually approve or switch to host UI
-to rescue it. Ordinary Farhelm confirmations are authorized product interactions handled by the guest tester.
+bug: end that attempt, retain the failure, repair already-authorized setup separately and start a safe new attempt or
+run. Do not manually approve or switch to host UI to rescue it. Ordinary Farhelm confirmations are authorized product
+interactions handled by the guest tester.
 
 For full or P1-only scope, resolve authorization during setup for the live feedback send to farhelm.io, which creates an
 issue in the private inbox. P0-only scope does not authorize or require that send.
@@ -90,10 +93,11 @@ order: fresh installation and app startup; installer upgrade from the previous p
 discovery and relaunch from that stable; local supervisor upgrade with one successful genuine agent; remote supervisor
 upgrade with one successful genuine agent. The two supervisor checks each include that host's old session, started on
 the previous stable: it must survive the upgrade in its terminal host, then restart onto a new terminal host and resume
-its conversation. Stop on the first failure or unavailable prerequisite. Broader functionality and historical-version
-coverage are bonus work after P0 and the separate P1 check, never prerequisites inserted between these seven checks.
-After the supervisor checks, P0 also exercises remote menu Remove/re-add with both sessions preserved, then Uninstall
-after ending all remote sessions, retaining their data. These are the sixth and seventh named P0 results.
+its conversation. Pause dependent checks while repairing a failure or unavailable prerequisite under "Repair and
+continue". Broader functionality and historical-version coverage are bonus work after P0 and the separate P1 check,
+never prerequisites inserted between these seven checks. After the supervisor checks, P0 also exercises remote menu
+Remove/re-add with both sessions preserved, then Uninstall after ending all remote sessions, retaining their data. These
+are the sixth and seventh named P0 results.
 
 **P1** sends one real feedback submission through the candidate app after P0 passes, on the Mac guest of
 `p0-updater-upgrade`, before the final export and cleanup of that pair. Its first line is `[brick-test] vX.Y.Z`, naming
@@ -128,6 +132,47 @@ appropriately authorized run rather than restoring a deleted pair or inventing i
 Read [RECIPE.md](RECIPE.md) for the product checks and [OPERATIONS.md](OPERATIONS.md) for guest commands, GUI mechanics
 and evidence collection. [BRING-UP.md](BRING-UP.md) covers preparing another machine. A previously successful run proves
 that run's versions and paths; a new candidate needs its own checks against its actual artifacts.
+
+## Repair and continue
+
+The goal is to complete the requested brick test. A recoverable harness problem is work to diagnose and fix, not the
+default endpoint of the task. Inspect its actual error, retained events, current guest state and journal; make a narrow
+repair or evidence-preserving workaround, validate it, and continue without asking for routine implementation choices.
+Patch the shared harness or these instructions when the cause can recur. Preserve unrelated checkout changes.
+
+A tool failure can end one attempt without ending the task. Keep the original attempt, hashes and observation; never
+overwrite accepted results, clear a failure flag by hand, waive a checkpoint, fabricate a receipt or replay an action
+whose outcome is uncertain. Use a supported retry transition only when retained evidence proves its safety. Otherwise
+repair setup separately and use a new disposable fixture/run. Keep each failed run in the report alongside later
+observations. Try at most three evidence-based repairs for the same cause; stop repeating a workaround that makes no
+progress and report the remaining concrete block.
+
+For a read-only prerequisite response with `status: not-ready`, the guest tester follows its corrective instruction and
+samples again after readiness. No acceptance receipt exists until the sample succeeds; the bridge bounds repeated
+deferrals. Older runs stopped by the early new-agent sample guard can use
+`brick_test.py retry-readiness "$test_run" <pass>`, then `test` again. The command requires acknowledged termination,
+intact earlier evidence and retained events proving that no product action or uncertain call occurred. It archives the
+failed claim and its hashes in `readiness_retries`; the next checkpoint gets a fresh attempt. It never retries feedback
+or clears a real product failure. If it refuses, inspect why and use a clean run where necessary, not a state-file edit.
+
+For a diagnosed fixture prerequisite recorded as `could-not-run`, repair it and inspect the native event sequence for
+uncertain or already-completed actions. When repeating the checkpoint is safe, use
+`brick_test.py retry-unavailable "$test_run" <pass> --reason '<verified repair and replay-safety evidence>'`, then
+`test`. This retains the original observation and hashes in `checkpoint_retries`; it refuses product failures,
+automation errors, uncertain tool calls, later accepted checkpoints and P1. The recorded reason is the host's
+evidence-based judgment, not a waiver of the checkpoint. If a product action has an uncertain outcome, use a new fixture
+instead.
+
+Continue feasible independent diagnosis and checks while repairing a blocker; preserve the declared P0 dependencies and
+do not send P1 until P0 passes. A confirmed product defect remains a failure even if another scenario works. Do not
+replace published release bytes with a source build to manufacture a release pass; diagnose the defect and report the
+coverage that can still be established.
+
+Stop or ask when proceeding needs missing authorization, risks the live install or unrelated state, could destroy
+retained evidence, or has a consequential outcome that cannot be established safely. Permission prompts still end the
+current attempt; no host UI rescue or unapproved permission/authentication change. Repair authorized fixture setup
+separately. Publication, promotion, frozen-base changes and deletion retain their existing fences. A final could-not-run
+report should identify the unresolved prerequisite or risk and the repairs attempted, not merely repeat a tool error.
 
 ## Discover the private machine
 
@@ -304,19 +349,20 @@ guest. Signature verification, fixture cleanliness and fresh installation run as
 model turns. GUI checkpoints use fresh guest Codex turns with shell tools disabled. Fixed operations and native CUA
 share one serial failure gate; their guest-only approval is explicit in the invocation. It selects the update branch
 from a fresh `/latest` observation at the action boundary, imports bounded private evidence, and stops at the first
-model, tool or permission failure, or product failure outside P1. The sole automatic recovery is a provider HTTP 429
-before any test action: strict retained event and protocol records must prove no command, native action, approval or
-product observation, and the executor must acknowledge stopped cleanup. Up to three fresh attempts back off 60, 120 and
-240 seconds within the checkpoint deadline; every failed attempt and its hashes remain retained and reported. No
-permission block, uncertain action or feedback send is retried. Update checks reobserve the public default after backoff
-and stop if it changed. `--timeout` bounds each checkpoint including backoff (30–3600 seconds, default 1200). Exact
-native text entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial
-delivery. Each turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test.
-Bonus native readiness additionally proves a real Finder window move and folder double-click before installing Farhelm.
-P0 retains its smaller prerequisites. A gesture tool's successful return is insufficient: an independent same-window
-frame change must establish drag delivery, or that fixture stops as unavailable. Status remains queryable while a turn
-runs; cleanup and another tester refuse an active attempt. If the controller disappears, reconcile the retained claim
-and guest process before cleanup; a stale claim is not permission to start a second tester.
+model, tool or permission failure, or product failure outside P1. This ends the attempt, not the host's repair work
+under "Repair and continue". The built-in whole-attempt automatic recovery is a provider HTTP 429 before any test
+action: strict retained event and protocol records must prove no command, native action, approval or product
+observation, and the executor must acknowledge stopped cleanup. Up to three fresh attempts back off 60, 120 and 240
+seconds within the checkpoint deadline; every failed attempt and its hashes remain retained and reported. No permission
+block, uncertain action or feedback send is retried. Update checks reobserve the public default after backoff and stop
+if it changed. `--timeout` bounds each checkpoint including backoff (30–3600 seconds, default 1200). Exact native text
+entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial delivery. Each turn
+receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test. Bonus native
+readiness additionally proves a real Finder window move and folder double-click before installing Farhelm. P0 retains
+its smaller prerequisites. A gesture tool's successful return is insufficient: an independent same-window frame change
+must establish drag delivery, or that fixture stops as unavailable. Status remains queryable while a turn runs; cleanup
+and another tester refuse an active attempt. If the controller disappears, reconcile the retained claim and guest
+process before cleanup; a stale claim is not permission to start a second tester.
 
 If that owner has disappeared, run `brick_test.py reconcile-tester "$test_run" <pass>`. A kernel-held owner lease
 refuses interference with a live coordinator. Reconciliation asks the exclusive guest executor to cancel and requires
@@ -364,24 +410,25 @@ The native event log is bounded to 96 MiB (including base64 images), result evid
 collection to 128 MiB. Executor logs live outside the model's working directory. These are accidental-corruption and
 provenance checks, not a sandbox against a malicious same-user `--yolo` tester. Review the event stream for prohibited
 UI automation or permission grants when judging an actual pass. A tool error stops the attempt; diagnostics and safe
-unverified observation files remain available, and the harness does not recover silently. `automation.verdict: fail`
-reports a harness bug separately; release/P0 verdicts remain `could not run` for it. Only an actual recorded product
-failure produces the release `fail` verdict. If an aborted turn nevertheless reported a product failure,
-`unverified_product_failures` surfaces that observation at both run and P0 level.
-`promotion_blocked_pending_review: true` requires review of the retained failure claim before any promotion decision; do
-not treat it as a harness-only unavailable check. A nonpass native preflight is always a fixture/harness failure, even
-if its tester called it `fail` or `could-not-run`. A false review-block flag does not clear an unavailable or failed
-automation gate: inspect its retained attempt and resolve that outcome before treating P0 as successful.
+unverified observation files remain available. The host repairs safe problems under "Repair and continue"; recovery is
+retained and reported, never silent. `automation.verdict: fail` reports a harness bug separately; release/P0 verdicts
+remain `could not run` for it. Only an actual recorded product failure produces the release `fail` verdict. If an
+aborted turn nevertheless reported a product failure, `unverified_product_failures` surfaces that observation at both
+run and P0 level. `promotion_blocked_pending_review: true` requires review of the retained failure claim before any
+promotion decision; do not treat it as a harness-only unavailable check. A nonpass native preflight is always a
+fixture/harness failure, even if its tester called it `fail` or `could-not-run`. A false review-block flag does not
+clear an unavailable or failed automation gate: inspect its retained attempt and resolve that outcome before treating P0
+as successful.
 
 After P0 succeeds, report its verdict promptly. Unless asked to stop after P0, the guest tester performs RECIPE's P1
 feedback send on the candidate still running in `p0-updater-upgrade`. Report its separate verdict, then export and clean
 up the pair. A valid P1 product failure or unavailable observation does not require retaining the clones and does not
-fence bonus coverage; its evidence and verdict remain saved. Model, tool or permission failures still stop the
-automation. P0's per-check exports establish its verdict before P1; the final export adds P1's native captures. Stop
-here in P1-only scope. Otherwise continue the full fresh pass (`fresh`) and full upgrade passes (`upgrade-v<previous>`),
-newest baseline first, as bonus coverage on separate clones. Historical manifests without explicit P0 fixtures report
-`p0.verdict: not planned`; those that never declared P1 report `p1.verdict: not planned`. Do not relabel historical
-observations or add a live send to a run that never planned it.
+fence bonus coverage; its evidence and verdict remain saved. Model, tool or permission failures stop the current
+attempt; the host follows "Repair and continue". P0's per-check exports establish its verdict before P1; the final
+export adds P1's native captures. Stop here in P1-only scope. Otherwise continue the full fresh pass (`fresh`) and full
+upgrade passes (`upgrade-v<previous>`), newest baseline first, as bonus coverage on separate clones. Historical
+manifests without explicit P0 fixtures report `p0.verdict: not planned`; those that never declared P1 report
+`p1.verdict: not planned`. Do not relabel historical observations or add a live send to a run that never planned it.
 
 The guest tester receives the public helper/recipe and a credential-free public source URL. It checks the previous tag's
 source identity, then runs
@@ -419,7 +466,9 @@ P0 must show that a user upgrading from the previous stable keeps them. In `p0-u
 one genuine Codex session on each host through the old app, submits one prompt, requires the captured conversation and
 records the session, conversation and terminal-host identities. Its terminal sample is refused until that attempt has
 observed the captured session, and requires exactly one terminal host with one live child: a previous stable that runs
-the session anywhere else cannot be tested this way. The later checks:
+the session anywhere else cannot be tested this way. Terminal acceptance covers terminal hosts only: tmux session
+survival, terminal-kind labels and migration-band checks are permanently outside this flow. An older app's installer
+prerequisites do not establish supported terminal behavior in the candidate. The later checks:
 
 - `local-old-session` follows `local-supervisor-agent`; `remote-old-session` follows `remote-supervisor-agent`, whose
   remote Update upgrades that host's supervisor. Each first runs its side's one-time survival comparison
@@ -553,12 +602,13 @@ After every planned pass, run `status` and inspect its saved report. **P0 pass**
 **P1 pass** requires its feedback check, and a **full pass** additionally requires P1 and every planned bonus check. Any
 product failure makes the relevant verdict fail; missing checks or fixtures make it could not run. In P0-only scope,
 `requested_verdict` follows P0, while the full `verdict` remains incomplete if bonus work did not run. A bonus failure
-does not erase valid P0 evidence, and a P0 pass does not excuse that bonus failure. Stop on a failure outside P1,
-preserve diagnostics, and resolve it before continuing. For P1, report the failure promptly, retain evidence, clean up
-the pair and continue bonus coverage unless the requested scope ends there. Report exact versions, checksum hash, update
-paths, before/after-public-default coverage, omitted agents, diagnostic gaps, cleanup and private evidence retention.
-Publish only a redacted summary if separately requested. Never commit profiles, raw evidence, guest names, private
-paths, addresses or credentials. This procedure grants no GitHub writes or release promotion.
+does not erase valid P0 evidence, and a P0 pass does not excuse that bonus failure. Preserve a failure outside P1 and
+repair safe harness/setup problems under "Repair and continue" before resuming dependent work. For P1, report the
+failure promptly, retain evidence, clean up the pair and continue bonus coverage unless the requested scope ends there.
+Report exact versions, checksum hash, update paths, before/after-public-default coverage, omitted agents, diagnostic
+gaps, cleanup and private evidence retention. Publish only a redacted summary if separately requested. Never commit
+profiles, raw evidence, guest names, private paths, addresses or credentials. This procedure grants no GitHub writes or
+release promotion.
 
 ## Validate changes to this coordinator
 

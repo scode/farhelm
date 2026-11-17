@@ -185,9 +185,12 @@ a fail. The rediscovered terminal must still show the earlier 17 + 25
 answer. Send: What is 6 times 8? Answer with the number only. Require the old
 agent's separate new answer 48.
 Then the session must offer Restart (offering only Clone or Replace for this
-captured conversation is a fail); use the session's ordinary Restart and its
-ordinary confirmation. It is the session's own action, not the app updater:
-use ordinary native clicks{clicks}.
+captured conversation is a fail); use the session's ordinary Restart.
+Handle an ordinary Restart confirmation only if offered. An idle agent
+restarts directly; confirmation is required only while it is working. A direct
+restart after the completed answer is expected, not a failure. Do not change
+confirmation preferences or repeat a completed Restart to obtain a dialog.
+It is the session's own action, not the app updater: use ordinary native clicks{clicks}.
 The final sample checks that the session moved to one new terminal host with
 the old one gone. Ask: Which word did I ask you to remember in my first
 message? Answer with the word only. Require a separate actual reply naming

@@ -91,7 +91,8 @@ The post-upgrade question's answer must differ from the 42 already on screen.
 The agent restart must not be routed through the app updater's owned restart
 transition, and the turn ends with the final sample the import requires, which
 is also what checks the move onto a new terminal host. Neither envelope keeps
-a path without a Restart or a terminal kind to read.
+a path without a Restart or a terminal kind to read. A completed idle agent
+restarts directly, without a working-agent confirmation.
 """
         for side, survival, final in (('local', 'host_survival', 'old_session_after'),
                                       ('remote', 'remote_host_survival', 'remote_old_session_after')):
@@ -108,6 +109,9 @@ a path without a Restart or a terminal kind to read.
                                'never brick_ui method restart', 'never supply it', 'earlier 17 + 25\nanswer',
                                'new answer 48', 'moved to one new terminal host with\nthe old one gone'):
                     self.assertIn(phrase, text)
+                for phrase in ('confirmation only if offered', 'An idle agent\nrestarts directly',
+                               'repeat a completed Restart to obtain a dialog'):
+                    self.assertIn(phrase, text)
                 plain = instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
                 for envelope in (text, plain):
                     for phrase in ('band', 'details', 'terminal kind', 'branch', 'do not restart'):
@@ -115,6 +119,7 @@ a path without a Restart or a terminal kind to read.
                 self.assertNotIn('brick_ui', plain)
                 self.assertIn('Which word did I ask you to remember', plain)
                 self.assertIn('new answer 48', plain)
+                self.assertIn('confirmation only if offered', plain)
                 # A survival comparison made after touching the session no longer
                 # describes the upgrade: that is the tester's error, not a release failure.
                 self.assertIn('touched the old session\nbefore this call: then report automation-failure', text)

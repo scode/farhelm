@@ -4,6 +4,20 @@ For the standard **`brick test release vX.Y.Z`** request, start with [BRICK-TEST
 discovers private machine bindings and supplies the handles used below. These lower-level helpers also remain useful for
 bring-up and reconciliation; they do not by themselves produce a release verdict.
 
+Safe harness problems are repaired under BRICK-TEST.md's "Repair and continue" rather than ending the whole task. An
+early read-only terminal-host sample returns `status: not-ready`, with no acceptance receipt; establish the named
+prerequisite and sample again. Three deferrals are allowed per attempt. Real command/native failures still close the
+action gate. For an older attempt stopped solely by the early new-agent sample guard, `brick_test.py retry-readiness`
+verifies retained no-action evidence and stopped execution before authorizing a fresh checkpoint attempt. It retains the
+original failure and hashes in `readiness_retries`; never edit the manifest to clear a failure.
+
+An unavailable fixture checkpoint can use `brick_test.py retry-unavailable` after a verified repair and event review,
+with `--reason` recording why replay is safe. The original observation stays in `checkpoint_retries`. This cannot retry
+feedback or clear a product fail. If peer SSH times out, compare both guests' current routes with the saved binding: a
+missing Linux return route was observed on a long-lived fixture. The existing `network.py --route-via-gateway` setup can
+reapply only the owned peers' routes and pinned SSH configuration, then prove SSH again; it never enables host
+forwarding. Record the missing route and actual restored connectivity rather than guessing why the route vanished.
+
 These stdlib Python helpers run on the macOS host and operate only the fresh clones recorded in one private manifest.
 The guest-native tester performs GUI checks; the operator judges its retained evidence. Use Python 3.13+ for the guest
 tester and Python 3.11+ for these host helpers, installed Tart with guest execution support, two stopped private bases
@@ -154,6 +168,11 @@ observations retain their files while the handoff contains the latest receipt fo
 fixed operations check each subprocess result before another action. Expected absence, such as a launch log that has not
 appeared, is returned explicitly; unexpected command or transport failures close the gate and retain diagnostics.
 
+The old-session Restart follows the product's status-dependent confirmation rule: a working agent asks, while an idle
+agent restarts directly. Handle a confirmation when offered; its absence after a completed answer is expected. Never
+repeat a completed Restart to manufacture a dialog. The fixed survival and final samples still require the original host
+to survive the upgrade and the restarted conversation to run in a replacement host.
+
 `checkpoint_contract.py` binds the host-selected update path to both the offered operations and the required evidence.
 The model receives only that path's instructions: a manual installer test cannot acquire override-removal obligations.
 Installers and app launches run at most once per attempt; repeated observations can poll for actual readiness. Fresh
@@ -220,6 +239,13 @@ its smaller screenshot/click/text prerequisites. With the native provider bundle
 Bring All to Front. Folder double-click navigation did work. The independent frame query distinguishes that missing
 delivery from a Farhelm drag failure. Revalidate a different runtime rather than assuming these gestures work because
 clicks and text do; do not substitute direct OS input or host Tart gestures for acceptance.
+
+Separate fixture diagnostics also reproduced the stationary Finder window with desktop `26.1111.21308`, `@oai/sky`
+0.7.21 and native helper `26.1111.1001923`, after verifying the official app's strict signature, normally quitting the
+old app, observing its helper exit, and launching the replacement. Merely opening another copy first reused the old
+running app and helper; that was not a runtime replacement. Halving the image coordinates did not restore window motion
+either. Do not repeat either change as a known fix: retain independent frame measurements and establish a new reason for
+expecting a different outcome. The native backend's cause remains unproved.
 
 The staged `fixture_probe.py` performs read-only cleanliness inspection in the Mac and its pinned Linux peer. Use its
 recorded helper path and SSH alias from the task context; it writes one private receipt. Do not replace it with guessed
