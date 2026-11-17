@@ -1711,6 +1711,58 @@ fn show_all_lists_every_agents_models_and_picking_one_switches_the_agent(cx: &mu
     assert_eq!(draft(cx).agent.model.as_deref(), Some("sonnet"));
 }
 
+/// Prompt and named-start controls follow the selected agent's capabilities, including the capture warning needed to
+/// explain why Restart cannot find some named starts later. Command mode exposes neither control (named-conversations
+/// specs' capability and reporting cases).
+#[gpui::test]
+fn prompt_and_conversation_rows_follow_the_agents_capabilities(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    assert!(!drawn(cx, "launcher-prompt-row"));
+    assert!(!drawn(cx, "launcher-conversation-row"));
+    let warns = |cx: &mut VisualTestContext| {
+        crate::session_list::tests::painted(&test_support::frame(cx))
+            .iter()
+            .any(|text| text.contains("Farhelm will not capture"))
+    };
+    // Cursor goes last so the Command switch has both fields and the warning to hide.
+    for (button, agent, prompt, captures) in [
+        ("launcher-harness-Claude", LaunchHarness::Claude, true, true),
+        ("launcher-harness-Codex", LaunchHarness::Codex, true, true),
+        ("launcher-harness-Grok", LaunchHarness::Grok, true, true),
+        ("launcher-harness-Muse", LaunchHarness::Muse, true, true),
+        ("launcher-harness-OMP", LaunchHarness::Omp, true, true),
+        (
+            "launcher-harness-OpenCode",
+            LaunchHarness::OpenCode,
+            true,
+            false,
+        ),
+        ("launcher-harness-Goose", LaunchHarness::Goose, false, false),
+        ("launcher-harness-Pi", LaunchHarness::Pi, false, true),
+        (
+            "launcher-harness-Cursor",
+            LaunchHarness::Cursor,
+            true,
+            false,
+        ),
+    ] {
+        test_support::click(cx, button);
+        assert_eq!(draft(cx).agent.harness, Some(agent), "{button}");
+        assert_eq!(drawn(cx, "launcher-prompt-row"), prompt, "{button}");
+        assert!(drawn(cx, "launcher-conversation-row"), "{button}");
+        assert_eq!(warns(cx), !captures, "{button}");
+    }
+    test_support::click(cx, "launcher-tabs-Command");
+    assert_eq!(
+        draft(cx).tab,
+        Tab::Command,
+        "the premise: Command is active"
+    );
+    assert!(!drawn(cx, "launcher-prompt-row"));
+    assert!(!drawn(cx, "launcher-conversation-row"));
+    assert!(!warns(cx));
+}
+
 /// With no agent type chosen, a typed id no single agent type owns needs one first, and says so.
 #[gpui::test]
 fn a_custom_id_with_no_agent_says_to_choose_one(cx: &mut TestAppContext) {

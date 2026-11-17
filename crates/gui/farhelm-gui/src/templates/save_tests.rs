@@ -847,6 +847,33 @@ fn a_wrapper_that_does_not_parse_refuses_on_a_plain_line(cx: &mut TestAppContext
     assert!(!painted(cx).contains("Not launched."));
 }
 
+/// Command saves project only the visible tab's choices. An unfinished wrapper on the Agent tab must not prevent
+/// saving an independent command draft (launcher-tabs.spec's dormant invalid wrapper case).
+#[gpui::test]
+fn a_dormant_invalid_wrapper_does_not_block_saving_a_command_template(cx: &mut TestAppContext) {
+    let mut draft = codex_draft();
+    draft.edit_wrapper("with-endpoint 'unfinished".into());
+    draft.choose_tab(Tab::Command);
+    draft.edit_command("printf hello".into());
+    let (mut helm, cx) = launcher_on(cx, draft, &[]);
+    let shown = crate::launcher::view_tests::shown_draft(cx);
+    assert_eq!(shown.tab, Tab::Command);
+    assert!(farhelm_proto::split_wrapper_prefix(&shown.agent.wrapper).is_err());
+    click(cx, "launcher-save-template");
+    assert!(
+        drawn(cx, "save-template-panel"),
+        "the visible command can be saved"
+    );
+    assert!(drawn(cx, "save-template-field-command"));
+    assert!(!drawn(cx, "save-template-field-wrapper"));
+    let (_, body) = save_as(&mut helm, "command-only", cx);
+    assert_eq!(body["command"], json!("printf hello"));
+    assert!(
+        body.get("wrapper_prefix").is_none(),
+        "the hidden wrapper is not part of the save"
+    );
+}
+
 /// SPEC.md: "Replace with does not offer this action". Specified: Replace with's footer has no Save as template.
 #[gpui::test]
 fn replace_with_offers_no_save_as_template(cx: &mut TestAppContext) {
