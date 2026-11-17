@@ -5,6 +5,10 @@ in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, n
 sections: Feedback, Welcome card, Announcements, Partial deletion, Status (session notifications, the rail's notices
 bell and sounds), and Desktop window chrome's Keyboard shortcuts paragraph.
 
+NOTE: The goldens and the `gui-e2e-smoke.py` steps named here are not part of `cargo test`. The goldens' one runner,
+`component_goldens`, is ignored there and runs through `scripts/check-gui-goldens.py`, and the smoke steps run through
+`scripts/gui-e2e-smoke.py`, so either is evidence only from a run of its script.
+
 ### `tests/trash-dialog.spec.ts`
 
 Tests: 14. Covers: trash list stays keyboard-scrollable while every list action is disabled.
@@ -21,58 +25,129 @@ the WebKit stacking-context case is superseded by the layer manager, which draws
 dialog's cases (the Discord link keeping the draft, sending exactly what is shown, thanks and closing, remembering,
 rewriting and clearing the contact, a failure keeping the text, a close queued behind Send waiting, blank and over-long
 messages) are replaced by `feedback::tests`, its look by the `feedback-dialog` and `feedback-dialog-reuse` goldens, and
-opening it from the menu, typing and Cancel by `gui-e2e-smoke.py`'s `test_48`. Missing: the send end to end in the
-running app, because nothing carries a stand-in endpoint into the app's embedded helm and a Send there would post real
-feedback, so no bridge run presses Send (the helm's forwarding is covered by its own tests against a stand-in); and the
-short and narrow window geometry checks (the dialog frame's own tests cover a scrolling body with pinned answers).
-`modal-layout.spec.ts`'s sent-feedback case is replaced by
+opening it from the menu, typing and Cancel by `gui-e2e-smoke.py`'s `test_48`. The send end to end in the running app is
+deferred, as the migration's coordinator decided on 2026-11-16: nothing carries a stand-in endpoint into the app's
+embedded helm and a Send there would post real feedback to the project, so no bridge run presses Send; the helm's half
+is covered by its forwarder's own tests against a stand-in (named below). The short and narrow window geometry checks,
+at 600 by 320 and 380 by 460, are dropped, as the migration's coordinator decided on 2026-11-16: both sizes are below
+the app's 720 by 560 minimum window (the dialog frame's own tests cover a scrolling body with pinned answers). Not yet
+ported: the failed send after the contact was edited and Re-use unchecked, then Cancel, writing no preference and
+leaving the next dialog on the remembered contact. `modal-layout.spec.ts`'s sent-feedback case is replaced by
 `feedback::tests::after_a_send_the_thanks_has_a_body_stop_of_its_own` (the text-only body's own stop, "Feedback sent";
 the shared stop's keys are tested in `components::tests::dialog`)
+
+- "feedback uses dark fields and pinned chrome at normal and short heights": the look is the `feedback-dialog` golden;
+  focus starting in the message and nothing sent before Send is
+  `feedback::tests::it_opens_on_the_remembered_contact_and_sends_nothing_before_send`; the pinned answers over a body
+  that scrolls are the shared frame's
+  `components::tests::dialog::a_long_dialog_body_scrolls_and_the_answers_stay_visible` and
+  `a_frame_too_tall_for_the_window_scrolls_as_a_whole`. The short and narrow sizes are dropped (above).
+- "the help menu sits below the gear and follows the menu conventions":
+  `help_menu::tests::the_help_button_sits_below_the_gear_with_its_name_and_help`,
+  `the_menu_opens_beside_the_button_and_escape_returns_focus_to_it`, `a_second_press_on_the_button_closes_the_menu` and
+  `the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last`, and end to end `gui-e2e-smoke.py`'s
+  `test_45_the_help_menu_opens_ssh_help_and_returns_to_the_button`. The arrow keys and Home and End are a deviation
+  (below, "Menu keys").
+- "${label} opens its page through the shared link opener" (three cases):
+  `help_menu::tests::the_link_items_open_their_pages_and_close_the_menu`.
+- "the feedback Discord link opens through the shared opener and keeps the draft":
+  `feedback::tests::chat_on_discord_opens_the_invite_and_keeps_the_draft`.
+- "send feedback sends exactly what the dialog shows, then thanks and closes":
+  `feedback::tests::send_sends_exactly_what_is_shown_then_thanks_and_closes`.
+- "successful feedback remembers the sent contact and writes it again from a stale client" and "successful feedback
+  clears contact when reuse is unchecked or the field is emptied":
+  `feedback::tests::a_successful_send_clears_or_rewrites_the_remembered_contact` (unchecked, emptied, and left as it
+  was, which writes the contact again) and `a_successful_send_remembers_only_an_opted_in_nonblank_contact` (the rule); a
+  contact another client wrote reaching the next dialog is
+  `a_pushed_contact_seeds_the_next_dialog_but_never_the_open_one`.
+- "failed feedback and cancel preserve remembered contact without a preference write", partly:
+  `feedback::tests::a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks that a failed send writes no
+  preference, but with the contact untouched. The edited contact, the unchecked Re-use and the Cancel leg are not yet
+  ported (above).
+- "a failed send keeps the text and says it failed":
+  `feedback::tests::a_failed_send_says_so_and_keeps_the_text_for_a_retry` and `a_refusal_is_shown_in_plain_words`; the
+  wording for a helm not reached at all is a deviation (below).
+- "a close queued behind send waits for the send":
+  `feedback::tests::nothing_closes_the_dialog_or_sends_again_while_a_send_is_out`.
+- "the dialog refuses blank and over-long messages without sending":
+  `feedback::tests::blank_and_over_long_messages_are_refused_before_sending`.
+- The helm's forwarding against a stand-in endpoint, which covers the helm's half of the deferred send end to end, in
+  `crates/farhelm-helm/src/feedback.rs`: `forwards_the_submission_unchanged_and_answers_204`,
+  `an_endpoint_refusal_is_a_502_naming_its_status`, `an_unreachable_endpoint_is_a_502`,
+  `a_stalled_endpoint_times_out_as_a_502` and `an_invalid_submission_is_refused_before_any_outbound_call`.
 
 ### `tests/welcome.spec.ts`
 
 Tests: 7. Covers: welcome dismissal by ${dismissal} is shared and survives reload.
 
-ported, below
+replaced, below
 
 ### `tests/announcements.spec.ts`
 
 Tests: 10. Covers: announcement dismissal by ${dismissal} survives reload.
 
-ported in process, below; no end-to-end leg, since the running app's helm has no announcement to show (its compiled
-release table is empty) and the bridge's fake fleet cannot queue one
+replaced, below; no end-to-end leg, since the running app's helm has no announcement to show (its compiled release table
+is empty) and the bridge's fake fleet cannot queue one
 
 ### `tests/keyboard-shortcuts.spec.ts`
 
 Tests: 5. Covers: the ${mac ? "Mac" : "non-Mac"} overview chord owns terminal input and labels.
 
-ported, below
+partly, below; a chord typed mid-composition is a recorded deviation (below)
 
 ### `tests/sounds.spec.ts`
 
-Tests: 6. Covers: device sounds.
+Tests: 7. Covers: device sounds.
 
-ported in process, below; playback is the desktop app's platform players, which no automated test plays through; the
-macOS player, and the Linux player in its earlier standard-input form, were checked by hand against real playback
-(Deviations)
+replaced, below; playback is the desktop app's platform players, which no automated test plays through; the macOS
+player, and the Linux player in its earlier standard-input form, were checked by hand against real playback (Deviations)
 
 ### `tests/notifications.spec.ts`
 
 Tests: 12. Covers: session notifications.
 
-ported: the bell's presence, loudness, name, help and place before the age, the list beside the bell without opening the
+partly: the bell's presence, loudness, name, help and place before the age, the list beside the bell without opening the
 session, newest first with New and Resolved and ages, Escape, the bell again, a press elsewhere and the row going each
 marking what the list showed, nothing sent when nothing unread was shown, a refused mark sent again on the next close,
 Clear all and the bell's return, and the docs-link rule are replaced by `notices_bell::tests` and the
-`session-bell-list` golden; the cleanup-helper case tested the old suite itself; the two build-mismatch cases and the
-older-failure race are superseded by the store (every change is pushed before its reply, and no mark is cached locally);
-the resize and moved-row dismissals are deviations (below)
+`session-bell-list` golden; the cleanup-helper case is test infrastructure (it tested the old suite itself); the two
+build-mismatch cases and the older-failure race are superseded by the store (every change is pushed before its reply,
+and no mark is cached locally); the resize and moved-row dismissals are deviations (below). Not yet ported: the bell's
+place in a compact row. The old case checked the bell's place in both densities, and no test here draws the bell with
+compact on, although compact rows are ported.
+
+- "a failed notification read mark retries on the next close":
+  `notices_bell::tests::a_refused_read_mark_is_sent_again_on_the_next_close`.
+- "resolved history is quiet and a cleared warning can recur as new", partly (resolving writing no read mark and the
+  recurrence's New in the list are not asserted):
+  `notices_bell::tests::only_unresolved_entries_above_the_read_mark_are_unread`,
+  `the_bells_ink_and_drawing_follow_unread_selection_and_open` and
+  `entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed`; the warning recurring after a clear is
+  `clear_all_removes_the_bell_until_a_new_notification_arrives`.
+- "only a docs link in notification text is clickable":
+  `notices_bell::tests::a_docs_link_in_notification_text_is_cut_out`, `nothing_but_a_plain_docs_link_is_ever_a_link`,
+  `entry_text_is_host_text_and_a_look_alike_is_no_link` and
+  `only_a_docs_link_is_clickable_and_it_opens_through_the_apps_opener`.
+- "the bell appears only with notifications, loud while unread, beside the time", partly:
+  `notices_bell::tests::only_a_row_with_notifications_draws_a_bell_before_its_age`,
+  `the_bells_name_and_help_count_the_unread_and_escape_the_title` and
+  `the_bells_ink_and_drawing_follow_unread_selection_and_open`, with compact rows off only (above).
+- "the list floats, marks new entries, and closing marks them read":
+  `notices_bell::tests::the_bell_opens_its_list_beside_it_without_opening_the_session`,
+  `entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed`,
+  `the_list_is_newest_first_whatever_order_arrives`, `every_close_path_marks_what_the_list_showed_read`,
+  `closing_a_list_with_nothing_unread_sends_nothing` and `a_push_is_marked_read_only_once_the_list_has_shown_it`, and
+  the `session-bell-list` golden.
+- "clear removes the bell until a new notification arrives":
+  `notices_bell::tests::clear_all_removes_the_bell_until_a_new_notification_arrives` and
+  `a_refused_clear_says_why_in_the_list`.
 
 ### `tests/rail-notices.spec.ts`
 
 Tests: 4. Covers: rail notices quiet, alerting and resolved in ${palette}.
 
-ported in process, below; the sidebar parity file lists it too
+partly, below (in process, and the empty panel end to end by `gui-e2e-smoke.py`'s `test_66`); the sidebar parity file
+lists it too
 
 ## `tests/welcome.spec.ts` and `tests/announcements.spec.ts`
 
@@ -116,7 +191,10 @@ and the automatic batch are `announcements` (`open_history`, `open_pending`). Re
   (`help_menu::tests::announcements_appear_after_a_showing_and_open_the_history`).
 - "Help exposes shown history after release notes and reopening writes nothing", "an empty queue leaves the history item
   hidden" and the content half of "announcement content, modal isolation and short-window controls": the history tests
-  in `announcements/tests.rs`, `an_empty_queue_or_a_later_push_opens_nothing` and
+  in `announcements/tests.rs` (`the_history_shows_shown_announcements_newest_first_and_writes_nothing`,
+  `escape_and_the_header_close_close_the_history`, `enter_on_the_dialog_itself_presses_got_it`,
+  `text_is_never_markup_and_the_link_opens_in_the_browser` and `with_nothing_shown_the_history_opens_nothing`),
+  `an_empty_queue_or_a_later_push_opens_nothing` and
   `help_menu::tests::announcements_appear_after_a_showing_and_open_the_history`. That case's isolation half is the
   shared dialog behavior, tested once for every dialog (`focus_tests::tab_stays_inside_the_topmost_dialog`,
   `components::tests::dialog::a_long_dialog_body_scrolls_and_the_answers_stay_visible` and
@@ -145,8 +223,8 @@ The Trash button is `trash::TrashButton`, which the session list keeps and draws
 is `trash::dialog`; the rules both use are `trash::listing`. Ported: the button, its reads and rechecks, and the dialog
 with each checkout's own Delete and Retry, and the per-host and global confirmed deletes (each host's "Delete all on"
 and the footer's Delete all), the archive cue's wiggle (`trash::cue`), and the rail notices panel's Retry now and Open
-Trash, which call into the button (`TrashButton::retry`, `TrashButton::open`). The archive cue's flight comes with its
-own piece.
+Trash, which call into the button (`TrashButton::retry`, `TrashButton::open`). The archive cue's flight is deferred
+(below, "### Archive cue").
 
 Replacing tests, in `crates/gui/farhelm-gui/src/trash/dialog/tests.rs` unless named otherwise (`trash/tests.rs` is the
 button's, `trash/listing/tests.rs` the rules'):
@@ -201,37 +279,52 @@ button's, `trash/listing/tests.rs` the rules'):
   notice naming every ID it sent until later reports settle them,
   `a_bulk_delete_answer_is_one_notice_that_later_reports_shrink` in `trash/listing/tests.rs`; it is kept and shown on
   the next opening as an entry delete's is (`a_refused_delete_stays_visible_on_the_next_opening`), through the same
-  path.
-- "a late trash poll cannot restore a confirmed deletion": answered by the decision in `trash/listing.rs`'s module docs,
-  not by read generations: commands are answered in order, the newest read per host wins, and the host is read again
-  once the delete settles.
-- "trash header and global confirmation remain reachable at width ${1000 | 360}", partly: the global question is drawn
-  in the frame's pinned region above the footer, which scrolls on its own, and the focus coordinator scrolls its
-  starting answer into view (`delete_all_sends_one_frozen_delete_per_reachable_host` checks the answer takes focus; the
+  path; the button's "Some checkouts could not be deleted" help is checked by
+  `the_summary_and_help_say_what_the_trash_holds_and_who_frees_space` in `trash/listing/tests.rs` and, after an entry
+  delete's timed-out answer, by `a_refused_delete_stays_visible_on_the_next_opening`. The split between an HTTP failure
+  and a transport failure is superseded, as the migration's coordinator decided on 2026-11-16: the GPUI app's helm
+  client reports both through one refusal path, so either way a lost answer is the one notice above, kept and shown on
+  the next opening. Not yet ported, at the dialog: a Delete all where one host's answer is lost while the other's
+  carries a per-checkout issue, that help while one host is still pending, and two reopenings each showing both notices
+  with no progress.
+- "a late trash poll cannot restore a confirmed deletion": superseded, as the migration's coordinator decided on
+  2026-11-16. The ordered channel and the reads issued after a delete settles replace the old poll and its read
+  generations: commands are answered in order, the newest read per host wins, and the host is read again once the delete
+  settles (`trash/listing.rs`'s module docs). No test drives a late read after a confirmed deletion.
+- "trash header and global confirmation remain reachable at width ${1000 | 360}": the global question is drawn in the
+  frame's pinned region above the footer, which scrolls on its own, and the focus coordinator scrolls its starting
+  answer into view (`delete_all_sends_one_frozen_delete_per_reachable_host` checks the answer takes focus; the
   `checkout-trash-confirm-all` golden shows it). Page Up, Page Down, Home and End scroll the region from that answer
   back to the question's first line and forward again
-  (`page_keys_scroll_the_global_questions_region_from_its_focused_answer`). The 360-pixel width is below the app's
-  minimum window.
+  (`page_keys_scroll_the_global_questions_region_from_its_focused_answer`). The answers staying inside the frame over a
+  clipped, scrollable body are the shared frame's
+  `components::tests::dialog::a_long_dialog_body_scrolls_and_the_answers_stay_visible`. Dropped, as the migration's
+  coordinator decided on 2026-11-16: the 360-pixel width and the old test's 300-pixel height (at either width), each
+  below the app's 720 by 560 minimum window.
 - `tests/github-checkouts.spec.ts`, "trash count and cue follow the final reference, including another client": the
   count following another window's change is `reads_follow_each_hosts_connection_and_trash_epoch_only` (a moved trash
   epoch reads that host); the per-host confirmation is `a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there`;
   the cue playing only for this client's confirmed archive is `trash/cue/tests.rs`'s
   `a_confirmed_archive_from_this_window_wiggles_the_can` and `nothing_but_a_confirmed_archive_wiggles` (a bare Delete, a
   refusal and another client's removal play nothing), and reduced motion and a hidden button
-  `reduced_motion_or_a_hidden_button_plays_nothing`; the flight waits for a foundation change (under "### Archive cue"
-  below). "trash global confirmation freezes archives and reports preserved recovery work": the freezing is
+  `reduced_motion_or_a_hidden_button_plays_nothing`; the flight is deferred, as the migration's coordinator decided on
+  2026-11-16: it is not built, while the can's wiggle is (under "### Archive cue" below). "trash global confirmation
+  freezes archives and reports preserved recovery work": the freezing is
   `delete_all_sends_one_frozen_delete_per_reachable_host`, and a host's report of what it kept is shown as any delete's
   is (`a_refused_delete_stays_visible_on_the_next_opening`). "single trash delete removes one real archive and preserves
   its neighbour", partly: the frozen one-checkout command is
-  `an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_gone`; the real archive's removal is not
-  driven end to end, because the bridge's fake fleet holds no managed checkout (its sessions run in `/tmp`, and a
-  checkout needs a repository source the bridge does not set up). The end-to-end smoke test's step 49 opens the dialog
-  over the real helm and supervisor with an empty trash.
-- `tests/bulk-session-actions.spec.ts`, "a newly displayed retained mark preserves the open Trash dialog": marking is
-  not ported yet (the sidebar's); the dialog is a layer of its own, so nothing that hides the button can close it.
-  "archive cues require a visible Trash destination while marks remain", partly: a Trash button not drawn plays no
-  wiggle (`reduced_motion_or_a_hidden_button_plays_nothing`, with the Hosts panel in the list's place); the marks that
-  hide it in the old app wait for marking, and the flight it counted for a foundation change.
+  `an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_gone`; the real archive's removal end to
+  end is deferred, as the migration's coordinator decided on 2026-11-16: the bridge's fake fleet holds no managed
+  checkout (its sessions run in `/tmp`, and a checkout needs a repository source the bridge does not set up), and the
+  in-process tests named here cover the delete. The end-to-end smoke test's step 49 opens the dialog over the real helm
+  and supervisor with an empty trash.
+- `tests/bulk-session-actions.spec.ts`, "a newly displayed retained mark preserves the open Trash dialog" and "archive
+  cues require a visible Trash destination while marks remain": marking is the sidebar's, and that spec's entry in
+  [Sidebar and session view](sidebar-and-session-view.md) holds both, with
+  `session_list::marking_tests::the_trash_dialog_survives_marks_appearing` and
+  `trash::cue::tests::an_archive_while_sessions_are_marked_plays_nothing`. A Trash button hidden by the Hosts panel
+  playing no wiggle is `reduced_motion_or_a_hidden_button_plays_nothing` here; the flight the second case counted is
+  deferred (under "### Archive cue" below).
 
 The goldens are `trash-button-empty`, `trash-button-full`, `trash-button-emptying`, `checkout-trash-dialog` (the
 reference scene's trash), and `checkout-trash-confirm-all` and `checkout-trash-confirm-host` (its questions; the
@@ -270,13 +363,12 @@ the main view's ground) and the `?` menu's Keyboard shortcuts item. Replacing te
   `the_template_rows_follow_the_pushed_preferences_while_open_and_at_each_opening`; the failed read is a deviation
   (below).
 
-NOTE: Two of the shortcuts the overview advertises do nothing yet: the template list (Cmd+J, Ctrl+Shift+J) and the
-template number keys (the 0–9 row and each assigned key's row). The keymap reserves their chords, so they never reach a
-terminal's program, but no handler acts on them: the template list has no action, and `TemplateNumberKey` has no handler
-outside an armed sequence, which reads bare digits itself. They start working when the templates area wires them. Quick
-launch (Cmd+P, Ctrl+Shift+P) works: it has its action and the main view's handler, and the drift test checks its chord
-as bound to that action. The drift test checks that each chord is bound or reserved as its row says, not that anything
-handles it.
+NOTE: The drift test (`every_chord_the_table_shows_runs_the_action_its_row_names`) checks that each chord is bound or
+reserved as its row says, not that anything handles it. Every template shortcut the overview advertises has a handler on
+the main view's ground: the template list (Cmd+J, Ctrl+Shift+J) opens the quick switcher on templates, a template number
+key (the 0–9 row and each assigned key's row) starts its template through `templates::number_key`, and quick launch
+(Cmd+P, Ctrl+Shift+P) runs `templates::quick_launch`. What they do is the templates area's, recorded in its parity file,
+[Templates and quick launch](templates-and-quick-launch.md).
 
 The golden is `keyboard-shortcuts-dialog` (Linux forms; the old overview was never captured, so SPEC.md and the old code
 are its reference).
@@ -296,7 +388,9 @@ unless named otherwise:
   computed colors in both palettes are the `notices-alerting` and `notices-empty` goldens, and the closed loud bell is
   the `notices-bell-loud` golden. The bell's place above Hosts and its Tab stop are
   `session_list::host_rail::tests::the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help` and
-  `tab_reaches_the_foot_after_the_rail_and_the_lists_controls`.
+  `tab_reaches_the_foot_after_the_rail_and_the_lists_controls`. End to end over the real helm, which has no notices,
+  `gui-e2e-smoke.py`'s `test_66_the_rail_notices_bell_opens_its_empty_panel_and_escape_returns_to_it` checks the quiet
+  bell's name, the empty panel and Escape returning focus to the bell.
 - "rail close marks only shown notices and preserves independent focus":
   `every_close_path_marks_only_the_unread_notices_shown` (Escape, the bell, Close, a press elsewhere, Tab out of the
   panel), `a_press_on_hosts_closes_the_panel_marks_it_and_shows_host_management` (a press on another control closes and
@@ -305,11 +399,12 @@ unless named otherwise:
   reads them.
 - "Trash reads follow host epochs and coalesce independently": the Trash button's, in `trash/tests.rs`
   (`reads_follow_each_hosts_connection_and_trash_epoch_only`).
-- "rail Retry and Open Trash share the permanent guarded cleanup owner": `retry_now_follows_the_trashs_guards` and
-  `open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell` (with host management shown); the guard itself is
-  `trash::listing::tests::retry_needs_a_capable_listing_showing_the_checkout_stuck`. Marked sessions are not ported yet
-  (the sidebar's), so the case's marking half waits for them; the Trash dialog is a layer of its own, which nothing that
-  hides the header's button closes.
+- "rail Retry and Open Trash share the permanent guarded cleanup owner", partly: `retry_now_follows_the_trashs_guards`
+  and `open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell` (with host management shown, which hides the
+  header's Trash button too); the guard itself is
+  `trash::listing::tests::retry_needs_a_capable_listing_showing_the_checkout_stuck`. The Trash dialog is a layer of its
+  own, which nothing that hides the header's button closes. Not yet ported: the case's marking half, Open Trash and
+  Retry now while marked sessions hide the button. Marking is ported, but no test here marks a session.
 
 ## The status sounds
 
@@ -506,11 +601,12 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Archive cue
 
-- **Waiting for a foundation change: the row's outline does not fly into the can.** SPEC.md's cue has "the row's dashed
-  outline" fly into the trash before it wiggles. That outline is drawn above the sidebar, over whatever is there, and
-  only the layer manager may draw such an overlay; it has none for this (its one free-floating overlay is the
-  quick-launch pill). Requested of the foundations by the other-dialogs area's coordinator. Until then the can wiggles
-  at once on the archived reply, as the old cue did when it had no row to fly from.
+- **Deferred: the row's outline does not fly into the can.** The migration's coordinator decided on 2026-11-16 to defer
+  the flight; the can's wiggle is built. SPEC.md's cue has "the row's dashed outline" fly into the trash before it
+  wiggles. That outline is drawn above the sidebar, over whatever is there, and only the layer manager may draw such an
+  overlay; it has none for this (its one free-floating overlay is the quick-launch pill). Requested of the foundations
+  by the other-dialogs area's coordinator. Until then the can wiggles at once on the archived reply, as the old cue did
+  when it had no row to fly from.
 - **Only the can turns.** The old wiggle turned the whole button, its edge and count with it. GPUI turns an SVG, not a
   box of elements, so here the can turns inside a still button.
 - **The wiggle is drawn at the ticker's ten steps a second.** The old animation ran at the display's rate. Here each
