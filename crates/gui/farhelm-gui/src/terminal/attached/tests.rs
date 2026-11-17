@@ -2964,7 +2964,12 @@ fn the_scrollbar_shows_on_hover_and_for_a_moment_after_a_scroll(cx: &mut TestApp
 
 /// A press at the top of the terminal's scrollbar takes the view to the oldest line, a drag to its bottom brings it
 /// back to the live screen, and the program hears nothing of either: the bar is the terminal's own, as in the old
-/// app. (The press that a program with mouse reporting must not get is pinned once mouse reporting is built.)
+/// app. That holds under mouse reporting too, where every other press in the terminal is the program's: a bar whose
+/// press also went out as a report would click whatever the program draws under its right edge.
+///
+/// Spec: with 40 history lines, a press at the bar's top shows `h0` as the first line and a drag past its bottom
+/// follows the live screen again, first with mouse reporting off and then with the program's drag reporting on, and
+/// the program is sent nothing either time.
 #[gpui::test]
 fn the_terminals_scrollbar_moves_the_view_and_sends_nothing(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -2973,21 +2978,29 @@ fn the_terminals_scrollbar_moves_the_view_and_sends_nothing(cx: &mut TestAppCont
     h.choose(&owner);
     let bar = test_support::bounds(h.cx, "terminal-scrollbar");
     let top = point(bar.center().x, bar.top() + px(2.));
-    h.cx.simulate_mouse_down(top, MouseButton::Left, Modifiers::none());
-    settle(h.cx);
-    assert!(
-        h.text().unwrap().starts_with("h0\n"),
-        "a press at the top shows the oldest line"
-    );
     let bottom = point(bar.center().x, bar.bottom() + px(50.));
-    h.cx.simulate_mouse_move(bottom, MouseButton::Left, Modifiers::none());
-    h.cx.simulate_mouse_up(bottom, MouseButton::Left, Modifiers::none());
-    settle(h.cx);
-    assert!(
-        h.following(),
-        "dragged past the bottom, the view follows the screen"
-    );
-    assert_eq!(h.sent(), [], "the program hears nothing of the bar");
+    for reporting in ["off", "drag"] {
+        h.fake().output(mouse_mode(reporting));
+        settle(h.cx);
+        h.cx.simulate_mouse_down(top, MouseButton::Left, Modifiers::none());
+        settle(h.cx);
+        assert!(
+            h.text().unwrap().starts_with("h0\n"),
+            "a press at the top shows the oldest line (reporting {reporting})"
+        );
+        h.cx.simulate_mouse_move(bottom, MouseButton::Left, Modifiers::none());
+        h.cx.simulate_mouse_up(bottom, MouseButton::Left, Modifiers::none());
+        settle(h.cx);
+        assert!(
+            h.following(),
+            "dragged past the bottom, the view follows the screen (reporting {reporting})"
+        );
+        assert_eq!(
+            h.sent(),
+            [],
+            "the program hears nothing of the bar (reporting {reporting})"
+        );
+    }
 }
 
 // ---- Selection -----------------------------------------------------------------------------------------------------
@@ -3778,6 +3791,61 @@ fn a_printed_web_address_hovers_and_opens_on_a_click(cx: &mut TestAppContext) {
     assert_eq!(h.sent(), [], "the program hears nothing of it");
 }
 
+/// Why this matters: a printed web address is often exactly what the user wants to copy, so a drag that starts on it
+/// must be an ordinary selection that copies, not a gesture the link swallows; the link's only claim is that the drag
+/// does not open it. The copy halves of the old app's "a drag starting and ending inside one URL selects and copies
+/// without opening" and "dragging from inside a URL into surrounding text selects without opening"; that a drag opens
+/// nothing is `a_printed_web_address_hovers_and_opens_on_a_click`'s too.
+///
+/// Spec: on the row `go https://example.com/x and https://example.com/y` with no mouse reporting, a drag pressed on
+/// the first address at column 7 and released at column 20, inside it, copies exactly columns 7 to 19; one pressed
+/// there and released at column 28, past the address's end, copies its rest and ` and`; neither opens anything or
+/// reaches the program.
+#[gpui::test]
+fn a_drag_over_a_printed_web_address_selects_and_copies_it(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing(LINKED);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let inside = h.at_cell(7, 0);
+    h.cx.simulate_mouse_move(inside, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some(LINKED_URL),
+        "the premise: the press lands on the link"
+    );
+    let within = h.at_cell(20, 0);
+    h.drag(inside, within, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some(&LINKED[7..20]),
+        "a drag inside the address copies what it covers"
+    );
+    assert_eq!(h.cx.opened_url(), None, "and opens nothing");
+
+    h.cx.simulate_mouse_move(inside, None, Modifiers::none());
+    settle(h.cx);
+    let beyond = h.at_cell(28, 0);
+    h.drag(inside, beyond, Modifiers::none());
+    let copied = h.clipboard().unwrap();
+    assert_eq!(
+        copied,
+        &LINKED[7..28],
+        "a drag out of the address copies what it covers"
+    );
+    assert!(
+        copied.ends_with(" and"),
+        "the premise: the drag ran past the address into the words after it: {copied:?}"
+    );
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "a drag out of the address opens nothing"
+    );
+    assert_eq!(h.sent(), [], "the program hears nothing of either");
+}
+
 /// Hover lookups pause while a button is held, so the release looks again: a drag from a link onto plain text, let go
 /// there with no further move, leaves no link underlined, and a press on plain text released over a link hovers it.
 #[gpui::test]
@@ -3860,6 +3928,273 @@ fn the_link_choice_decides_who_gets_a_click_on_a_link(cx: &mut TestAppContext) {
     );
 }
 
+// ---- Printed addresses beyond the screen ---------------------------------------------------------------------------
+//
+// A printed address is found from the rows that hold it, which need not all be on the screen: its start can sit in
+// the history above the view, a resize can reflow it over other rows, and the view can scroll away from it and back.
+// These pin that hovering and opening follow the rows as they are now, wherever they are.
+
+/// One row of plain ASCII text on the wire, soft-wrapped into the row below when `wraps` is set.
+fn text_row(text: &str, wraps: bool) -> serde_json::Value {
+    serde_json::json!({"w":wraps,"r":[[0,text.len(),text,[0,-1,-1]]]})
+}
+
+/// ASCII `line` as a terminal `cols` wide holds it: full rows soft-wrapped into the next, then its rest on a last row.
+/// It splits by bytes, one cell each, so it takes ASCII only, as [`text_row`] does.
+fn wrapped(line: &str, cols: u16) -> Vec<serde_json::Value> {
+    let chunks: Vec<&str> = line
+        .as_bytes()
+        .chunks(usize::from(cols))
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect();
+    let last = chunks.len() - 1;
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| text_row(chunk, index < last))
+        .collect()
+}
+
+impl Harness<'_> {
+    /// Attach a screen that keeps history: the screen rows `rows` (the wire's `[line, row]` entries) below the history
+    /// lines `history` (rows, oldest first), replayed whole, then live.
+    fn attach_below_history(&mut self, history: Vec<serde_json::Value>, rows: serde_json::Value) {
+        let asked = self.fake().attach();
+        let mut replay = first_screen(asked.cols, asked.rows, "");
+        replay[2] = serde_json::from_value(serde_json::json!({"t":"rows","rows":rows})).unwrap();
+        if !history.is_empty() {
+            replay.push(
+                serde_json::from_value(
+                    serde_json::json!({"t":"history","first":0,"rows":history,"cols":asked.cols}),
+                )
+                .unwrap(),
+            );
+        }
+        for message in replay {
+            self.fake().output(message);
+        }
+        self.fake().replay_complete();
+        settle(self.cx);
+    }
+
+    /// Rest the pointer on `at` ([`Harness::rest_on`]) and say which link the view says it rests on.
+    fn hover_at(&mut self, at: Point<Pixels>) -> Option<String> {
+        self.rest_on(at);
+        self.hovered()
+    }
+}
+
+/// Why this matters: a long address a program printed a while ago has often scrolled partly off the top, leaving only
+/// its end on screen, and that end must still open the whole address rather than nothing or a truncated piece of it.
+/// The old app's "a URL beginning above the viewport activates from its visible continuation".
+///
+/// Spec: with a 191-character line `ABOVE https://example.com/above/ddd…end-above` soft-wrapped over three rows, the
+/// first two in the history above the live screen and the last on its top row, resting on that row's part of the
+/// address hovers the whole address, and a click there opens it whole.
+#[gpui::test]
+fn an_address_begun_above_the_view_hovers_and_opens_whole(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let url = format!("https://example.com/above/{}end-above", "d".repeat(150));
+    let mut rows = wrapped(&format!("ABOVE {url}"), FITTED.0);
+    let tail = rows.pop().unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "the premise: two rows of it go in the history"
+    );
+    h.attach_below_history(rows, serde_json::json!([[0, tail]]));
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let shown = h.text().unwrap();
+    assert!(
+        h.following() && !shown.contains("https://") && first_line(&shown).ends_with("end-above"),
+        "the premise: the live screen shows the address's end and not its start: {shown:?}"
+    );
+    let on = h.at_cell(5, 0);
+    assert_eq!(
+        h.hover_at(on),
+        Some(url.clone()),
+        "the end hovers the whole address"
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url(), Some(url), "and opens it whole");
+}
+
+/// Why this matters: narrowing the terminal reflows a long address over more rows, and with alacritty's reflow, which
+/// the supervisor's emulator follows, the rows above the cursor go into the history, the address's start among them.
+/// A link remembered from the rows as they were, or found from the screen's rows alone, would open a truncated
+/// address or nothing. The old app's "a wrapped URL still activates after a resize reflows it".
+///
+/// Spec: a 144-character line `REFLOW https://example.com/reflow/bbb…reflow-end` wrapped over two rows of the fitted
+/// width hovers whole from its second row; once the pane narrows, the owner sends one resize to fewer columns, and the
+/// supervisor's reflow at that width puts the line's first row in the history and its other two on the screen; resting
+/// on the end of the address where it now is hovers the whole address, and a click there opens it whole.
+#[gpui::test]
+fn an_address_reflowed_by_a_resize_hovers_and_opens_whole(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let url = format!("https://example.com/reflow/{}reflow-end", "b".repeat(100));
+    let line = format!("REFLOW {url}");
+    let before = wrapped(&line, FITTED.0);
+    assert_eq!(before.len(), 2, "the premise: two rows at the fitted width");
+    h.attach_below_history(
+        Vec::new(),
+        serde_json::json!([[0, before[0]], [1, before[1]]]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let end = |cols: u16| u16::try_from(line.len()).unwrap() % cols - 5;
+    let on = h.at_cell(end(FITTED.0), 1);
+    assert_eq!(
+        h.hover_at(on),
+        Some(url.clone()),
+        "the premise: the address hovers whole before the resize"
+    );
+
+    h.size.set((PANE.0 - 200., PANE.1));
+    redraw(h.cx);
+    let [(cols, rows)] = resizes(&h.opened)[..] else {
+        panic!("the premise: one resize for the narrower pane");
+    };
+    assert!(cols < FITTED.0, "the premise: fewer columns ({cols})");
+    let after = wrapped(&line, cols);
+    assert_eq!(after.len(), 3, "the premise: three rows at {cols} columns");
+    for message in [
+        serde_json::json!({"t":"history","first":0,"rows":[after[0]],"cols":cols}),
+        serde_json::json!({"t":"rows","rows":[[0, after[1]], [1, after[2]]]}),
+        frame(2, cols, rows),
+    ] {
+        h.fake().output(serde_json::from_value(message).unwrap());
+    }
+    settle(h.cx);
+    let shown = h.text().unwrap();
+    assert!(
+        !shown.contains("REFLOW")
+            && shown
+                .lines()
+                .nth(1)
+                .is_some_and(|row| row.contains("reflow-end")),
+        "the premise: the line's start went into the history and its end is on the second row: {shown:?}"
+    );
+    let on = h.at_cell(end(cols), 1);
+    assert_eq!(
+        h.hover_at(on),
+        Some(url.clone()),
+        "the reflowed end hovers the whole address"
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url(), Some(url), "and opens it whole");
+}
+
+/// Why this matters: output that scrolls an address off the screen moves it into the history, and a user scrolling
+/// back to it must find it a link again where it now shows, not at the place it was printed, nor dead because it
+/// left the screen. The old app's "a URL scrolled out of view activates after scrolling back to it".
+///
+/// Spec: `SCROLL https://example.com/scrollback` on the top row hovers; after 40 lines of output push it into the
+/// history and the view follows the live screen without it, wheeling back until its line shows, resting on the
+/// address where it now shows hovers it, and a click there opens it.
+#[gpui::test]
+fn an_address_scrolled_away_and_back_hovers_and_opens(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let url = "https://example.com/scrollback";
+    let line = format!("SCROLL {url}");
+    h.attach_below_history(Vec::new(), serde_json::json!([[0, text_row(&line, false)]]));
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(10, 0);
+    assert_eq!(
+        h.hover_at(on).as_deref(),
+        Some(url),
+        "the premise: printed on the screen, it hovers"
+    );
+
+    let mut pushed = vec![text_row(&line, false)];
+    pushed.extend((1..=40).map(|i| text_row(&format!("filler-{i}"), false)));
+    let (cols, rows) = FITTED;
+    for message in [
+        serde_json::json!({"t":"history","first":0,"rows":pushed,"cols":cols}),
+        serde_json::json!({"t":"rows","rows":[[0, text_row("filler-screen", false)]]}),
+        frame(2, cols, rows),
+    ] {
+        h.fake().output(serde_json::from_value(message).unwrap());
+    }
+    settle(h.cx);
+    assert!(
+        h.following() && !h.text().unwrap().contains("SCROLL"),
+        "the premise: the output scrolled it out of view"
+    );
+
+    let mut row = None;
+    for _ in 0..100 {
+        row = h
+            .text()
+            .unwrap()
+            .lines()
+            .position(|text| text.starts_with("SCROLL"));
+        if row.is_some() {
+            break;
+        }
+        h.wheel(1.);
+    }
+    let row = row.expect("the premise: wheeling back shows its line again");
+    let on = h.at_cell(10, u16::try_from(row).unwrap());
+    assert_eq!(
+        h.hover_at(on).as_deref(),
+        Some(url),
+        "scrolled back, it hovers where it now shows"
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url().as_deref(), Some(url), "and opens");
+}
+
+/// Why this matters: only a web address may reach the browser, so a forbidden scheme's text around an embedded
+/// `http://` must neither hover as a link nor open, and the embedded address must open exactly itself, never the
+/// enclosing `javascript:` or `data:` text. The old app recognized the embedded address on its own, as any printed
+/// address: its "an http substring inside a forbidden scheme opens only the http part".
+///
+/// Spec: with `EMBJS javascript:http://evil.example/js-1` and `EMBDATA data:text/plain,see-http://evil.example/data-1`
+/// printed on two rows, resting on the `javascript:` or the `data:` prefix hovers nothing and a click there opens
+/// nothing; resting on each embedded address hovers exactly that address, and a click opens exactly it.
+#[gpui::test]
+fn an_address_inside_a_forbidden_scheme_opens_only_the_address(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let (js, data) = ("http://evil.example/js-1", "http://evil.example/data-1");
+    let lines = [
+        format!("EMBJS javascript:{js}"),
+        format!("EMBDATA data:text/plain,see-{data}"),
+    ];
+    h.attach_rows(
+        serde_json::json!([
+            [0, text_row(&lines[0], false)],
+            [1, text_row(&lines[1], false)]
+        ]),
+        serde_json::json!([]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    // Inside `javascript:` (columns 6 to 16) and inside `data:text/plain,` (columns 8 to 23).
+    for (col, row) in [(9, 0), (11, 1)] {
+        let prefix = h.at_cell(col, row);
+        assert_eq!(h.hover_at(prefix), None, "no link on row {row}'s scheme");
+        h.click_at(prefix);
+        assert_eq!(h.cx.opened_url(), None, "and a click there opens nothing");
+    }
+    for (row, (line, address)) in lines.iter().zip([js, data]).enumerate() {
+        let col = u16::try_from(line.find("http").unwrap() + 4).unwrap();
+        let on = h.at_cell(col, u16::try_from(row).unwrap());
+        assert_eq!(
+            h.hover_at(on).as_deref(),
+            Some(address),
+            "row {row}'s embedded address hovers as exactly itself"
+        );
+        h.click_at(on);
+        assert_eq!(
+            h.cx.opened_url().as_deref(),
+            Some(address),
+            "row {row} opens exactly its embedded address"
+        );
+    }
+}
+
 // ---- A program's hyperlinks ----------------------------------------------------------------------------------------
 
 impl Harness<'_> {
@@ -3908,6 +4243,49 @@ fn a_program_hyperlink_shows_its_destination_and_opens_on_a_click(cx: &mut TestA
     );
     h.rest_on(off);
     assert_eq!(h.disclosure_shown(), (false, false), "moving off closes it");
+}
+
+/// Why this matters: a program's hyperlink covers its whole label, often a long one (a path, a title), and a user who
+/// drags across it wants that text copied, not the target opened behind their back; a click afterwards must still
+/// open it. The web half of the old app's "an OSC 8 ${kind} span ignores a selection drag and still accepts a click"
+/// (the file half is `terminal::files`'s `a_drag_across_a_checked_path_is_never_admitted`).
+///
+/// Spec: with no mouse reporting, on a 59-character label `OSC-DRAG-ccc…` that is all one hyperlink to
+/// `https://example.com/osc-drag`, a drag from column 4 to column 50 that starts with the destination display shown
+/// copies exactly the label's columns 4 to 49, opens nothing and sends the program nothing; resting on the label and
+/// clicking then opens the target.
+#[gpui::test]
+fn a_drag_across_a_program_hyperlink_copies_and_opens_nothing(cx: &mut TestAppContext) {
+    let target = "https://example.com/osc-drag";
+    let label = format!("OSC-DRAG-{}", "c".repeat(50));
+    let mut h = harness(cx);
+    h.attach_hyperlink(&label, target);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let end = label.len() - 9;
+    let (from, to) = (h.at_cell(4, 0), h.at_cell(u16::try_from(end).unwrap(), 0));
+    h.rest_on(from);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the press lands on the hyperlink with its display shown"
+    );
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some(&label[4..end]),
+        "the drag copies the label it covers"
+    );
+    assert_eq!(h.cx.opened_url(), None, "and opens nothing");
+    assert_eq!(h.sent(), [], "nor reaches the program");
+
+    h.rest_on(from);
+    h.click_at(from);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(target),
+        "a click afterwards still opens it"
+    );
 }
 
 impl Harness<'_> {
@@ -6575,6 +6953,80 @@ fn the_notices_x_puts_it_away_keeping_focus_and_sending_nothing(cx: &mut TestApp
     assert_eq!(h.notice(), None, "× puts it away");
     assert_eq!(h.sent(), [], "the program heard nothing of the press");
     assert!(h.focused(&owner), "the terminal keeps focus");
+}
+
+/// Why this matters: the × is the notice's one control, and every control has a role, a name and hover help (the
+/// component layer's rule, which the × keeps although it is built from a plain element). The old app's "drag-copy
+/// notice: shown only for a drag the program kept without copying" found the × as the button named "Dismiss drag-copy
+/// notice" and checked that hovering it showed "Dismiss this notice".
+///
+/// Spec: with the notice up, the × is drawn as a button named "Dismiss drag-copy notice"; resting the pointer on it
+/// shows the hover help "Dismiss this notice", and the notice stays up meanwhile.
+#[gpui::test]
+fn the_notices_x_is_a_named_button_with_its_hover_help(cx: &mut TestAppContext) {
+    let dismiss = super::super::drag_notice::DISMISS_ID;
+    let mut h = harness(cx);
+    h.attach_reporting("click");
+    h.raise_notice();
+    let drawn = test_support::frame(h.cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(dismiss))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())));
+    assert_eq!(
+        drawn,
+        Some((Some(Role::Button), Some("Dismiss drag-copy notice".into()))),
+        "the × is a button with the old name"
+    );
+    assert_eq!(
+        h.hover_help(dismiss).as_deref(),
+        Some("Dismiss this notice"),
+        "hovering × shows its help"
+    );
+    assert!(h.notice().is_some(), "hovering × leaves the notice up");
+}
+
+/// Why this matters: the scrollbar is the terminal's own, so a drag on it never went to the program and copied
+/// nothing it could have copied; a notice saying the program handles selection itself would be wrong there. The
+/// scrollbar case of the old unit test "no notice for a gesture that copied or never tried to".
+///
+/// Spec: with 40 history lines and the program's drag reporting on, a primary press at the top of the scrollbar,
+/// dragged past its bottom and released there, moves the view and sends the program nothing, and no notice shows
+/// once the grace window has passed; a plain drag over the grid after it still raises the notice.
+#[gpui::test]
+fn a_drag_on_the_scrollbar_under_mouse_reporting_raises_no_notice(cx: &mut TestAppContext) {
+    let grace = super::super::drag_notice::GRACE;
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let bar = test_support::bounds(h.cx, "terminal-scrollbar");
+    let (top, bottom) = (
+        point(bar.center().x, bar.top() + px(2.)),
+        point(bar.center().x, bar.bottom() + px(50.)),
+    );
+    h.cx.simulate_mouse_down(top, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.text().unwrap().starts_with("h0\n"),
+        "the premise: the bar took the press"
+    );
+    h.cx.simulate_mouse_move(bottom, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(bottom, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(h.following(), "the premise: the bar took the drag");
+    assert_eq!(h.sent(), [], "the premise: the program heard nothing of it");
+    h.wait(grace);
+    assert_eq!(h.notice(), None, "a drag on the scrollbar raises no notice");
+
+    h.plain_drag();
+    h.wait(grace);
+    assert_eq!(
+        h.notice(),
+        Some(generic_notice()),
+        "the premise holds: a plain drag over the grid still raises it"
+    );
 }
 
 /// The notice is pointer-transparent apart from its × (SPEC.md), and "the next mouse press in that terminal" puts it
