@@ -1,8 +1,10 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
 //! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, a
 //! square one keeps its side, the session list heading's padding lines its title's words up with the band's edge, a
-//! split button's muted caret reads retired while it still opens its menu, a badge draws over a button without
-//! changing its size or name, and a condensed header button takes the old `.actions-compact` box.
+//! split button's muted caret reads retired while it still opens its menu, the shown terminal tab, a chosen template
+//! row or host icon and a lit bolt keep their resting fill under keyboard focus while the rail's chosen entry does not,
+//! a badge draws over a button without changing its size or name, and a condensed header button takes the old
+//! `.actions-compact` box.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -324,6 +326,139 @@ fn a_muted_caret_reads_retired_until_it_opens() {
             caret(true, true).colors(palette),
             caret(false, true).colors(palette)
         );
+    }
+}
+
+/// Why: a keyboard user tabbing along the session view's tab strip must still see which terminal is shown, and the
+/// focus fill every other button takes would lift the shown tab to the hover accent, the look a tab under the pointer
+/// has. The old sheet restored the resting accent under keyboard focus, even with the pointer over the tab
+/// (`.tab.selected:focus-visible:not(:disabled) { background: var(--accent-fill) }`, after
+/// `.tab.selected:hover:not(:disabled) { background: var(--accent-fill-hover) }`), and the migration's orchestrator
+/// decided on 2026-11-16 to keep that rule.
+///
+/// Spec, in both palettes: the shown tab draws the resting accent at rest, focused, and focused under the pointer, and
+/// the hover accent under the pointer without focus; a tab that is not shown still takes the hover fill under focus.
+#[test]
+fn the_shown_terminal_tab_keeps_its_resting_accent_under_keyboard_focus() {
+    let tab = |pressed: bool| {
+        Button::new("t", "Agent", HoverHelp::tooltip("A tab"), Role::Button)
+            .tier(Tier::TerminalTab)
+            .pressed(pressed)
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let (rest, hover) = (Some(palette.accent_fill), Some(palette.accent_fill_hover));
+        assert_ne!(rest, hover, "the premise: the two accents differ");
+        let shown = tab(true);
+        assert_eq!(shown.fill(palette, false, false), rest, "at rest");
+        assert_eq!(shown.fill(palette, false, true), rest, "focused");
+        assert_eq!(shown.fill(palette, true, true), rest, "focused and hovered");
+        assert_eq!(shown.fill(palette, true, false), hover, "hovered");
+        assert_eq!(
+            tab(false).fill(palette, false, true),
+            Some(palette.control_hover),
+            "a tab that is not shown takes the focus fill"
+        );
+    }
+}
+
+/// Why: the resting fill under the ring belongs to the tiers `Button::fill` lists. The host rail's chosen entry keeps
+/// the pressed look's hover accent under the keyboard ring, as `Button::pressed` documents (a deliberate departure from
+/// the old sheet, whose later `.btn` focus fill put white ink on a light fill there).
+///
+/// Spec, in both palettes: a pressed host rail entry, which shares the tab's pressed colors, draws the resting accent
+/// at rest and the hover accent when focused, hovered, or both.
+#[test]
+fn another_pressed_tier_keeps_the_hover_accent_under_keyboard_focus() {
+    let entry = Button::new(
+        "r",
+        "All hosts",
+        HoverHelp::tooltip("A rail entry"),
+        Role::Button,
+    )
+    .tier(Tier::Rail)
+    .pressed(true);
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let hover = Some(palette.accent_fill_hover);
+        assert_eq!(entry.fill(palette, false, false), Some(palette.accent_fill));
+        for (hovered, focused) in [(false, true), (true, true), (true, false)] {
+            assert_eq!(
+                entry.fill(palette, hovered, focused),
+                hover,
+                "hovered {hovered}, focused {focused}"
+            );
+        }
+    }
+}
+
+/// Why: the chosen template row and the chosen host icon mark which template the editor holds and which icon the host
+/// has, and the focus fill every `.btn` took would lift them to the hover accent as a keyboard user reaches them. Their
+/// old buttons were not `.btn`, and their focus rules drew only the ring, chosen or not (`.templates-row` and
+/// `.host-icon-choice` have no `:focus-visible` background); the migration's orchestrator decided on 2026-11-17 to keep
+/// that, so the ring alone shows focus.
+///
+/// Spec, in both palettes: a chosen row or icon draws the resting accent at rest and focused, and the hover accent
+/// hovered and focused under the pointer; an unchosen one draws its own resting look under focus too.
+#[test]
+fn a_template_row_or_host_icon_keeps_its_resting_look_under_keyboard_focus() {
+    let choice = |tier: Tier, pressed: bool| {
+        Button::new("c", "Choice", HoverHelp::tooltip("A choice"), Role::Button)
+            .tier(tier)
+            .pressed(pressed)
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let (rest, hover) = (Some(palette.accent_fill), Some(palette.accent_fill_hover));
+        for tier in [Tier::TemplateRow, Tier::IconChoice] {
+            let chosen = choice(tier, true);
+            assert_eq!(chosen.fill(palette, false, false), rest, "{tier:?} at rest");
+            assert_eq!(chosen.fill(palette, false, true), rest, "{tier:?} focused");
+            assert_eq!(
+                chosen.fill(palette, true, true),
+                hover,
+                "{tier:?} focused and hovered"
+            );
+            assert_eq!(chosen.fill(palette, true, false), hover, "{tier:?} hovered");
+            let unchosen = choice(tier, false);
+            assert_eq!(
+                unchosen.fill(palette, false, true),
+                unchosen.fill(palette, false, false),
+                "{tier:?} unchosen, focused"
+            );
+        }
+    }
+}
+
+/// Why: a quick-launch bolt shows its state by its glyph (amber when lit), and the old bolt was not a `.btn`, so
+/// keyboard focus drew its ring over no fill, lit or not (`.templates-quick-mark` has no background rule); the
+/// migration's orchestrator decided on 2026-11-17 to keep that. The pointer's hover fill is a separate, documented
+/// departure (`Tier::QuickMark`).
+///
+/// Spec, in both palettes: a bolt, lit or not, has no fill at rest or focused, and the control hover fill hovered,
+/// focused or not.
+#[test]
+fn a_quick_launch_bolt_has_no_fill_under_keyboard_focus() {
+    let bolt = |lit: bool| {
+        Button::new(
+            "q",
+            "Quick launch",
+            HoverHelp::tooltip("A bolt"),
+            Role::Button,
+        )
+        .tier(Tier::QuickMark { lit })
+        .pressed(lit)
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let hover = Some(palette.control_hover);
+        for lit in [true, false] {
+            let bolt = bolt(lit);
+            assert_eq!(bolt.fill(palette, false, false), None, "lit {lit}: at rest");
+            assert_eq!(bolt.fill(palette, false, true), None, "lit {lit}: focused");
+            assert_eq!(
+                bolt.fill(palette, true, true),
+                hover,
+                "lit {lit}: focused and hovered"
+            );
+            assert_eq!(bolt.fill(palette, true, false), hover, "lit {lit}: hovered");
+        }
     }
 }
 
