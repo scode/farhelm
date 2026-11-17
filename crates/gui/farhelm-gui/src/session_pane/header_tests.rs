@@ -3,7 +3,8 @@
 //! Delete and Stop, exclusion, where Escape and Cancel leave focus, the row's layout at the 650-pixel floor with the
 //! real text system (its actions condensed beside a tunnel pill there, and not in a wide pane, and the tab strip's
 //! floor beside the pill), and the terminal text size group at the start of the actions (its steps, readout, range,
-//! shortcut, the size a terminal opens at, and its height beside the buttons in both looks). The header of an open
+//! shortcut, the size a terminal opens at, its buttons' places as the readout and the session change, and its height
+//! beside the buttons in both looks). The header of an open
 //! session the list does not show is
 //! `carried_tests.rs`'s.
 //!
@@ -2686,6 +2687,51 @@ fn a_terminal_opens_at_the_current_text_size(cx: &mut TestAppContext) {
     });
     assert_eq!(opened.len(), 1, "the premise: the open session's terminal");
     assert!(Some(opened[0]) == wanted, "it opened at 20 points");
+}
+
+/// The text size buttons are pressed in runs (a few Smaller presses in a row), so they must not move under the
+/// pointer when the readout between them goes from one digit to two, or the next press lands beside the button; and
+/// the group is drawn again for every session, which must not put it somewhere else (old `terminal-tabs.spec.ts`,
+/// "terminal text size readout survives switching sessions with fixed button positions"). The readout's fixed width is
+/// what holds them still. Specified: with sessions a and b alike, a open and the stored size 9, Smaller and Larger are
+/// drawn at the same bounds when the readout shows 9, after Larger shows 10, after the helm's push of 18, and after
+/// choosing session b, whose readout shows 18 too.
+#[gpui::test]
+fn the_text_size_buttons_keep_their_places_as_the_readout_and_the_session_change(
+    cx: &mut TestAppContext,
+) {
+    use crate::terminal::text_size::{LARGER_ID, SMALLER_ID};
+    let mut snapshot = snapshot_of(
+        vec![entry(&session("a"), 0), entry(&session("b"), 0)],
+        false,
+    );
+    snapshot[1].entries[0].value["terminal_text_size"] = json!(9);
+    let (mut fake, cx) = open_main(cx, snapshot);
+    size_writes(&mut fake);
+    assert_eq!(readout(cx), "9", "the premise: the stored size");
+    let places = |cx: &mut VisualTestContext| {
+        (
+            test_support::bounds(cx, SMALLER_ID),
+            test_support::bounds(cx, LARGER_ID),
+        )
+    };
+    let at_nine = places(cx);
+
+    test_support::click(cx, LARGER_ID);
+    assert_eq!(readout(cx), "10", "the premise: two digits now");
+    assert_eq!(places(cx), at_nine, "at 10");
+    let writes = size_writes(&mut fake);
+    assert_eq!(writes.len(), 1, "the premise: one write");
+    push_size(&mut fake, 10, cx);
+    fake.reply(writes[0].0, 204, None);
+    push_size(&mut fake, 18, cx);
+    assert_eq!(readout(cx), "18", "the premise: the pushed size");
+    assert_eq!(places(cx), at_nine, "at 18");
+
+    test_support::click(cx, "session-row-b");
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    assert_eq!(readout(cx), "18");
+    assert_eq!(places(cx), at_nine, "in session b");
 }
 
 /// The old app's limit-button case: a press on a size button at the end of the range once dropped the terminal's focus,
