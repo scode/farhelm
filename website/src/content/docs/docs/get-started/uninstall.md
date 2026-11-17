@@ -9,7 +9,7 @@ sidebar:
 
 If you use Tensorlake, decide what to keep before quitting Farhelm or uninstalling. To remove its cloud resources,
 [delete your sandbox hosts](/docs/using/tensorlake-sandboxes/#delete-a-sandbox), then
-[delete their recipes](/docs/using/tensorlake-sandboxes/#build-or-rebuild-a-snapshot) in Settings → **Tensorlake** to
+[delete their recipes](/docs/using/tensorlake-sandboxes/#build-or-rebuild-a-snapshot) in Settings → **Recipes** to
 delete the recipes' prepared snapshots too. Check **Sandboxes not on this helm** for resources left outside your host
 list. You can knowingly keep resources instead, but running sandboxes and stored snapshots continue to bill; suspending
 a sandbox still leaves snapshot storage charges. Keep Farhelm's local state if you keep cloud resources.
@@ -60,10 +60,10 @@ the foot of the [navigation rail](/docs/using/manage-hosts/) opens; see
 
 Uninstalling from an SSH host needs Farhelm to reach it, so it can check that no session is still running there. If the
 host shows as unreachable or with a problem in the list, fix that first, then choose **Uninstall** again. Farhelm also
-refuses in a few less common cases, such as a host where Farhelm was set up by running `farhelm helm setup` on the host
-itself, and says why when it does. The one exception is finishing an uninstall that stopped partway: once it has removed
-Farhelm's service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and choosing
-**Uninstall** again still finishes the job.
+refuses in a few less common cases, such as a host whose Farhelm service runs a copy of `farhelm` that the host list did
+not install, and says why when it does. The one exception is finishing an uninstall that stopped partway: once it has
+removed Farhelm's service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and
+choosing **Uninstall** again still finishes the job.
 
 Use **Delete container** to remove [container environments](/docs/agents/containerized-sessions/#stopping-and-deleting).
 Tensorlake hosts have **Delete sandbox** instead. That permanently deletes the whole sandbox, including its files,

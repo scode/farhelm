@@ -5,8 +5,6 @@ sidebar:
   order: 4
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
 A remote host is a Linux machine or another Mac your Mac reaches over ssh. Once it is added, sessions can run there
 just as they do on your Mac, and they keep running on the host while your Mac sleeps or Farhelm is closed.
 
@@ -23,11 +21,11 @@ setup, billing and suspension. The rest of this page covers **SSH**.
   Farhelm uses your own ssh setup, so keys, the agent, and the Host names in `~/.ssh/config` all apply. A host that asks
   for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
   Farhelm's ssh connections to it by hand. Choose **? → SSH needs 2FA?** for the two commands, or follow the link in
-  **Add host** for the destination you are about to add. Run both on your Mac when using the Mac app; in the web UI,
-  run them on the machine running your [helm](/docs/how-it-works/the-pieces/), as its user. Each asks for approval once
-  and stays connected in the background. Run its command again when a connection drops. The dialog also explains when
-  a connection cannot be shared from your helm. Adding or updating a host also opens one
-  ssh login of its own, so a key that asks for a touch on each login asks once more then.
+  **Add host** for the destination you are about to add. Run both on your Mac. Each asks for approval once and stays
+  connected in the background. Run its command again when a connection drops. The dialog also explains when a
+  connection cannot be shared from your [helm](/docs/how-it-works/the-pieces/), the part of Farhelm that shows you your
+  sessions. Adding or updating a host also opens one ssh login of its own, so a key that asks for a touch on each login
+  asks once more then.
 - Not BusyBox: hosts whose basic command-line tools come from BusyBox are not supported.
 - Your Mac downloads Farhelm for the host and copies it over ssh. The download starts at get.farhelm.io, which hands
   the release files themselves over from GitHub, so your Mac needs to reach both. The host does not: it never needs
@@ -35,15 +33,9 @@ setup, billing and suspension. The rest of this page covers **SSH**.
 
 ## Add it
 
-<Screenshot
-  name="add-a-remote-host/add-button"
-  alt="The Add host button on the navigation rail."
-/>
-
-<Screenshot
-  name="add-a-remote-host/add-dialog"
-  alt="The add host dialog with dev@new-box typed as the ssh destination, and what that field and the add button do."
-/>
+Choose **+** (Add host), below your hosts' marks on the navigation rail, the column of icons down the left edge of the
+sidebar. With **SSH** chosen, type the host's SSH destination, `user@host` or a Host name from your `~/.ssh/config`, and
+choose **Add**. Farhelm first checks the destination over ssh, and the button reads **Checking…** until it knows.
 
 The dialog also takes an optional alias: the name Farhelm shows for the host instead of its destination, everywhere
 except the host's details. You can change it later in the host's settings. An agent in one of your sessions can also ask to add a host. Its request waits as a card, and
@@ -51,25 +43,17 @@ except the host's details. You can change it later in the host's settings. An ag
 ([Approve what agents do](/docs/using/approve-agent-requests/#host-changes)).
 
 If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
-closes. Otherwise Farhelm shows what it would set up there and asks first:
-
-<Screenshot
-  name="add-a-remote-host/setup-plan"
-  alt="What setup will create on the host, with its set up and set up, don't ask again buttons explained."
-/>
+closes. Otherwise Farhelm asks first, in a question titled **Set up host** with the destination. It lists each step
+setup would take on the host, with the paths each step uses, and **Copy plan** copies that list. **Set up** goes ahead,
+**Set up, don't ask again** also sets up later hosts without asking, and **Cancel** changes nothing on the host.
 
 Farhelm does not need tmux on the host. On a Linux host the list includes removing the copy of tmux that earlier
 versions of Farhelm installed there; on a host that never had one, that step has nothing to do
 ([New terminals](/docs/using/new-terminals/#farhelm-no-longer-needs-tmux) has more). After you choose **Set up**, the
-dialog closes and setup runs: the host's mark on the [navigation rail](/docs/using/manage-hosts/), the
-column of icons down the left edge of the sidebar, shows a ring until it is done. Setup progress also appears above your
-sessions, naming the current step; hover over that row to see every step, or select it to open the host's row in
-**Hosts**:
-
-<Screenshot
-  name="add-a-remote-host/connected-host"
-  alt="A remote host in the host list with its green connected dot explained."
-/>
+dialog closes and setup runs: the host's mark on the [navigation rail](/docs/using/manage-hosts/) shows a ring until it
+is done. Setup progress also appears above your sessions, naming the current step; hover over that row to see every
+step, or select it to open the host's row in the host list, which **Hosts** at the foot of the navigation rail opens.
+Once setup is done, the host's row there reads **Connected**, with a green dot.
 
 The host now appears on the navigation rail, where choosing it shows only its sessions, and in the session launcher's
 host menu; see [Start a
