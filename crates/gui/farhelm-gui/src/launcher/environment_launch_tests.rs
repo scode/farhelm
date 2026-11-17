@@ -205,6 +205,18 @@ pub(crate) fn answer_with(
     account: Option<&Settings>,
     keep: impl Fn(&FakeCommand) -> bool,
 ) -> Vec<FakeCommand> {
+    answer_reads(helm, cx, account, None, keep)
+}
+
+/// [`answer_with`], with the helm's history of launches into new environments answered with `environments`; with
+/// `None` it gets no body, so the launcher offers none of them.
+pub(crate) fn answer_reads(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    account: Option<&Settings>,
+    environments: Option<&Value>,
+    keep: impl Fn(&FakeCommand) -> bool,
+) -> Vec<FakeCommand> {
     let mut kept = Vec::new();
     loop {
         cx.run_until_parked();
@@ -218,6 +230,8 @@ pub(crate) fn answer_with(
                 account.map(|account| serde_json::to_value(account).unwrap())
             } else if command.path.ends_with("launch-catalog") {
                 Some(json!([]))
+            } else if command.path == "/api/environment-launch-history" {
+                environments.cloned()
             } else if command.path.starts_with("/api/launch-history") {
                 Some(json!({ "launches": [], "folders": [], "checkout_config_revision": 1 }))
             } else {

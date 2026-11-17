@@ -600,6 +600,27 @@ fn a_numbered_name_starts_over_in_a_new_environment() {
     );
 }
 
+/// Taking a recent setup restores its whole placement, but the placement already chosen is no change: the checkout's
+/// numbered name keeps its place in the series, as `choose_host` keeps it on the same host, or a recent setup taken on
+/// Existing host would send the name the helm just previewed as taken. Specified: a base name `review`, moved to
+/// `review-2` on host1, stays `review-2` when Existing host is chosen again as a whole placement, and starts over once
+/// a container is.
+#[test]
+fn choosing_the_placement_already_chosen_keeps_a_numbered_name() {
+    let mut draft = complete();
+    draft.edit_name("review".into());
+    draft.set_template_name_kind(TemplateNameKind::Base);
+    draft.choose_repository(parse_github_repo("owner/repo").unwrap());
+    assert!(
+        draft.advance_checkout_name("review"),
+        "the premise: moved on"
+    );
+    draft.choose_placement(None);
+    assert_eq!(draft.checkout_title(), "review-2");
+    draft.choose_placement(Some(container("web", 1)));
+    assert_eq!(draft.checkout_title(), "review");
+}
+
 /// The helm numbers a managed checkout's name in a new environment only when the body calls it a base (`name_kind`);
 /// any other name is the user's exact one, which fails as a conflict where that folder exists. Clone's default
 /// `<title>-clone` carries no template name kind of its own, so the body must call it a base, as the old app did for a
