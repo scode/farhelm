@@ -1432,9 +1432,7 @@ impl AgentIntegration for CodexIntegration {
 // A crate-local helper rather than a `toml` runtime dependency, because
 // the only thing this crate ever needs to PRODUCE in TOML is one quoted
 // string, and pulling in a whole TOML writer for that would be a dependency
-// the rest of the crate never touches (`Cargo.lock` already carries
-// `toml`/`toml_edit` transitively, through `dx`'s own tooling — not through
-// anything this crate links). The `toml` crate is still used, as a
+// the rest of the crate never touches. The `toml` crate is still used, as a
 // DEV-dependency only, to round-trip-test the output below.
 // ---------------------------------------------------------------------
 

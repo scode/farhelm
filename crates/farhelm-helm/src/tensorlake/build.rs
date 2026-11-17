@@ -111,8 +111,9 @@ use crate::{
 pub(crate) const TENSORLAKE_BASE_IMAGE: &str = "tensorlake/ubuntu-systemd";
 
 /// The name prefix of every builder sandbox. Specific on purpose: the
-/// repository's browser-test harness names its sandboxes `farhelm-sbx-`, and
-/// the orphan list must never take one of those for a builder.
+/// repository's Tensorlake test harness names its sandboxes `farhelm-sbx-`
+/// (`.agents/tensorlake.md`), and the orphan list must never take one of those
+/// for a builder.
 pub(crate) const BUILDER_PREFIX: &str = "farhelm-build-";
 
 /// Separate namespace so preparation cannot occupy the recipe's build name.

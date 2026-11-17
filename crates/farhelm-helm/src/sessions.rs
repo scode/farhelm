@@ -3906,7 +3906,7 @@ pub(crate) struct DeleteQuery {
 /// before it answers ([`forget_session`]), so the merged list stops showing
 /// it at once rather than at the owning host's next refresh. Without that,
 /// a delete followed immediately by a create shows both rows — which is
-/// what the browser suite's own shared-session reset does on every test.
+/// what the removed browser suite's shared-session reset did on every test.
 ///
 /// It also clears the session's `session_seen` and
 /// `session_notification_marks` rows (SPEC_impl.md's `session_seen`

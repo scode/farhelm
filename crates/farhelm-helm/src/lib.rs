@@ -1072,8 +1072,7 @@ fn build_router(state: Arc<AppState>, port: u16) -> Router {
         // layers apply outside-in, so this one decorates every response the
         // stack can produce — including the guard's own 403, which returns
         // before anything inner runs. "Every reply carries the stamp" has to
-        // mean every reply, or the one path that skips it is the one a
-        // skewed client hits first.
+        // mean every reply, refusals included.
         .layer(axum::middleware::from_fn(middleware::stamp_build))
 }
 
@@ -1195,8 +1194,7 @@ mod router_boundary_tests {
     /// `Host` names a foreign origin — the DNS-rebinding defense
     /// `middleware`'s own tests pin exhaustively for `origin_is_allowed` — and
     /// [`middleware::stamp_build`]'s outer layering means even THAT rejection
-    /// carries the build stamp: a confused, DNS-rebound client asking why its
-    /// requests are failing needs the same skew signal a working one gets.
+    /// carries the build stamp, so a refusal names the build that refused.
     #[farhelm_testtrace::test]
     async fn foreign_host_is_rejected_but_still_carries_build_stamp_header() {
         let harness = rest_harness::idle_helm().await;
@@ -1453,8 +1451,8 @@ async fn serve_with_ready(
 /// The response header carrying this helm's build version to its client
 /// (PLAN_M6.md item 6).
 ///
-/// The name comes from [`farhelm_proto::http::BUILD_STAMP_HEADER`], which the
-/// UI reads as well.
+/// The name comes from [`farhelm_proto::http::BUILD_STAMP_HEADER`], whose
+/// docs say who reads it.
 const BUILD_STAMP_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 
 /// Classify an error chain into the coarse [`ErrorKind`] vocabulary this
@@ -1655,7 +1653,7 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
             axum::http::HeaderValue::from_static(farhelm_proto::http::HOST_BUSY_OPERATION),
         );
     }
-    // Helm-only too: it is what makes the page offer the warned
+    // Helm-only too: it asks a client to offer the warned
     // whole-environment Delete, so nothing a supervisor says may set it.
     if find_cause::<sessions::EnvironmentUnasked>(&e).is_some() {
         response.headers_mut().insert(

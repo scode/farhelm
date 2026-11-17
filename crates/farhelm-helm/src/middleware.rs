@@ -26,12 +26,11 @@
 //! function so the whole matrix can be pinned by unit tests rather than by
 //! whichever branches an integration test happens to reach.
 //!
-//! ## The build stamp is how a stale client finds out
+//! ## The build stamp names the build that answered
 //!
-//! `stamp_build` rides every response, successes and failures alike,
-//! because a client left running across a helm upgrade learns about the
-//! skew from whatever request it makes next — and a confused client is at
-//! least as likely to be making a request that fails.
+//! `stamp_build` rides every response, successes and failures alike, so
+//! whoever asks learns which build answered, whatever the answer was. Who
+//! reads it is on [`farhelm_proto::http::BUILD_STAMP_HEADER`].
 
 use crate::BUILD_STAMP_HEADER;
 use axum::response::IntoResponse;
@@ -123,19 +122,13 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16) -> bool {
 /// Stamp this helm's build version onto one response (PLAN_M6.md item 6's
 /// client↔helm skew edge; SPEC_impl.md's version-and-skew section).
 ///
-/// The UI compares it against the stamp compiled into its own bundle and
-/// surfaces a reload prompt; nothing here refuses anything, unlike the
-/// helm↔supervisor hello. The two edges differ deliberately: the supervisor
-/// edge refuses because a mismatched FRAME contract cannot be spoken at
-/// all, while a stale bundle still works well enough that taking the app
-/// away from its user would be the bigger harm.
+/// Nothing here refuses anything, unlike the helm↔supervisor hello, which
+/// refuses because a mismatched FRAME contract cannot be spoken at all. Who
+/// reads the stamp is on [`farhelm_proto::http::BUILD_STAMP_HEADER`].
 ///
-/// Universal by construction rather than by discipline. A browser tab left
-/// open across a helm upgrade must learn about it from whatever request it
-/// happens to make next, and that includes the requests that FAIL — a
-/// mismatch is at least as likely to surface as an inexplicable refusal as
-/// it is on a success, and a 403 from the origin guard is exactly the shape
-/// a confused client produces.
+/// Universal by construction rather than by discipline: the layer wraps the
+/// whole router, so the requests that FAIL carry it too, the origin guard's
+/// 403 included.
 pub(crate) async fn stamp_build(
     req: axum::extract::Request,
     next: axum::middleware::Next,

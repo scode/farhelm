@@ -1,8 +1,8 @@
 //! Build classification and the shared boundary for supported update mechanics.
 //!
 //! A development build has no published release to update from. Keeping this
-//! predicate here lets the web UI describe the same build the helm refuses to
-//! treat as a release, without depending on the native helm crate.
+//! predicate here lets the GUI describe the same build the helm refuses to
+//! treat as a release, without depending on the helm crate.
 
 /// Oldest release whose update mechanics this release supports.
 ///

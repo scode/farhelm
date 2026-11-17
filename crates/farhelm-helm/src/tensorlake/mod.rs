@@ -94,8 +94,8 @@ struct Inner {
     /// Forwards are read here and owned by the connected actors' leases.
     tunnels: tunnels::Tunnels,
     /// A fake serving connected tunnels from the same sandbox model as the
-    /// API. Only the removed browser suite selected one; production and
-    /// every current test leave it `None`.
+    /// API. Production leaves it `None`; only the tunnel tests that inject
+    /// [`e2e::E2eTensorlake`] through `Inner::new` set one.
     tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
     /// Explicit orphan deletions outlive the requesting component. Only
     /// successful snapshot cleanup removes their retry context.
@@ -161,8 +161,8 @@ impl Tensorlake {
         delivery: Arc<crate::provisioning::credential_delivery::CredentialDelivery>,
         preparer: Arc<dyn prepared::SnapshotPreparer>,
     ) -> anyhow::Result<Self> {
-        let (api, shell, fake): ProductionSeams = if cfg!(test) {
-            (Arc::new(Offline::test()), Arc::new(OfflineShell), None)
+        let (api, shell): ProductionSeams = if cfg!(test) {
+            (Arc::new(Offline::test()), Arc::new(OfflineShell))
         } else {
             production_seams()?
         };
@@ -172,7 +172,7 @@ impl Tensorlake {
             api,
             shell,
             Some(Arc::new(SshKeyStore::new(tensorlake_dir))),
-            fake,
+            None,
             delivery,
             preparer,
         ))))
@@ -420,25 +420,20 @@ fn ready(key: ssh_key::SshKey, tag: &str) -> SshKeyStatus {
     }
 }
 
-/// The API client, the sandbox shell and an optional tunnel fake, chosen
-/// together. Nothing sets the fake any more (see `Inner::tunnel_fake`).
-type ProductionSeams = (
-    Arc<dyn TensorlakeApi>,
-    Arc<dyn SandboxShell>,
-    Option<Arc<e2e::E2eTensorlake>>,
-);
+/// The API client and the sandbox shell, chosen together.
+type ProductionSeams = (Arc<dyn TensorlakeApi>, Arc<dyn SandboxShell>);
 
 /// The real client and ssh.
 fn production_seams() -> anyhow::Result<ProductionSeams> {
     let shell = Arc::new(SshSandboxShell::new());
     match http::HttpTensorlake::production() {
-        Ok(client) => Ok((Arc::new(client), shell, None)),
+        Ok(client) => Ok((Arc::new(client), shell)),
         // A machine whose TLS setup cannot build a client (no CA bundle,
         // say) still serves everything else; Tensorlake calls then fail
         // with a reason that names the likely fix.
         Err(error) => {
             tracing::warn!(%error, "the Tensorlake HTTP client could not be built");
-            Ok((Arc::new(Offline::no_client()), shell, None))
+            Ok((Arc::new(Offline::no_client()), shell))
         }
     }
 }

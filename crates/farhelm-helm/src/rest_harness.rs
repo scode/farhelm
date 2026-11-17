@@ -1511,11 +1511,11 @@ pub(crate) async fn spliced_helm(peer: DuplexStream) -> Harness {
 /// nothing else — for the tests whose requests never reach a handler at
 /// all.
 ///
-/// The CORS preflight is answered by the route itself and a refused origin
-/// never gets past the middleware, so scripting a supervisor exchange for
-/// either would be scenery. What is still needed is a REAL fleet behind the
-/// router, because the routes those tests name are session routes and a
-/// router with no hosts would answer differently for the wrong reason.
+/// A refused origin never gets past the middleware, so scripting a
+/// supervisor exchange for it would be scenery. What is still needed is a
+/// REAL fleet behind the router, because the routes those tests name are
+/// session routes and a router with no hosts would answer differently for
+/// the wrong reason.
 pub(crate) async fn idle_helm() -> Harness {
     helm_listing(vec![session("sess-1", 1_700_000_000)]).await
 }

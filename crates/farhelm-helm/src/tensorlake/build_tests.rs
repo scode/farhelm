@@ -2,8 +2,8 @@
 //! scripted sandbox shell, the store's billing invariants, the build route,
 //! and the recipe Delete's reply bound.
 //!
-//! The in-memory API drives the same [`FakeModel`] the browser suite's fake
-//! persists, so both levels share Tensorlake's rules (name uniqueness, 404s,
+//! The in-memory API drives the same [`FakeModel`] the filesystem fake
+//! (`e2e.rs`) persists, so both levels share Tensorlake's rules (name uniqueness, 404s,
 //! snapshots that complete after a poll). Engine tests run under paused
 //! tokio time: the engine's polls and deadlines advance instantly instead of
 //! sleeping, and the store's blocking calls hold the clock while they run.
@@ -545,7 +545,7 @@ fn seed_sandbox(model: &mut FakeModel, id: &str, name: &str, status: &str) {
 /// Spec: a builder is `farhelm-build-<tag>-<recipe>`, at most 63 bytes for
 /// the longest tag and recipe name, never exactly 21 letters and digits
 /// (Tensorlake refuses that shape, which is an ID's), and never in the
-/// browser harness's `farhelm-sbx-` namespace.
+/// Tensorlake test harness's `farhelm-sbx-` namespace.
 ///
 /// Why: the name is the builder's identity across crashes and the orphan
 /// list's attribution; a name Tensorlake refuses would fail every build, and

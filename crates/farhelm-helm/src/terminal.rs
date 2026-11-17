@@ -2045,22 +2045,17 @@ mod tests {
         assert!(!asked.unwrap(), "{path} must attach with if_unowned unset");
     }
 
-    /// Every reply carries this helm's build stamp (PLAN_M6.md item 6), so
-    /// a browser tab left open across a helm upgrade can notice on whatever
-    /// request it makes next.
+    /// Every reply carries this helm's build stamp (PLAN_M6.md item 6;
+    /// `farhelm_proto::http::BUILD_STAMP_HEADER` says who reads it).
     ///
     /// Asserted on the responses that do NOT come from a handler as well as
     /// the ones that do, and those are the interesting cases: the stamp is
-    /// added by the OUTERMOST layer precisely so a mismatch surfaces even
-    /// when it manifests as an inexplicable refusal, which is the shape a
-    /// stale bundle's failures usually take.
+    /// added by the OUTERMOST layer precisely so a refusal carries it too.
     ///
     /// The rejected-origin leg is the one that caught a real hole: the
     /// origin guard answers 403 and returns before anything inside it runs,
     /// so a stamp inserted in that guard's own success path — where this
-    /// started — was absent from exactly the reply a confused client is
-    /// most likely to receive. A skewed UI whose requests are being refused
-    /// would have been told nothing at all.
+    /// started — was absent from exactly that reply.
     #[farhelm_testtrace::test]
     async fn every_reply_carries_the_helms_build_stamp() {
         let harness = rest_harness::helm_listing(vec![]).await;

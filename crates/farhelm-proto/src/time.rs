@@ -1,9 +1,9 @@
 //! Calendar arithmetic shared by every crate that prints a UTC date.
 //!
-//! The browser formats session ages, and the supervisor names checkout
-//! directories and reads conversation files by date. None of them wants a date
-//! crate for one conversion (the wasm bundle least of all), so the conversion
-//! lives here once rather than as three hand-carried copies.
+//! The desktop GUI formats local dates (`farhelm-gui`'s `local_time`), and the
+//! supervisor names checkout directories and reads conversation files by date.
+//! None of them wants a date crate for one conversion, so the conversion lives
+//! here once rather than as hand-carried copies.
 
 /// Days since the Unix epoch to a proleptic Gregorian `(year, month, day)`.
 ///

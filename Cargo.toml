@@ -96,9 +96,9 @@ repository = "https://github.com/scode/farhelm"
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
-# Binary-to-text for credentials that travel inside text: the helm's web
-# token and device-cookie handling (farhelm-helm's auth) and the
-# supervisor's stored session bearer tokens (farhelm-supervisor's store).
+# Binary-to-text for credentials that travel inside text: the helm's minted
+# device credentials (farhelm-helm's auth) and the supervisor's stored
+# session bearer tokens (farhelm-supervisor's store).
 # (It once also encoded the session list's pagination cursors; the list is
 # served whole now and there are none.)
 base64 = "0.22"

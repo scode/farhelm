@@ -1153,7 +1153,7 @@ pub(super) fn production_payloads_with_key(
     };
     // Housekeeping only: nothing depends on the retired cache being gone, so
     // a failure to inspect or remove it must not stop the helm, and with it
-    // the web UI and every session, from starting. An error here never
+    // the app and every session, from starting. An error here never
     // resolves toward deletion: the cleanup returns before removing anything
     // it could not judge, and the cache is simply left for a later start.
     if let Err(error) = remove_leftover_embedded_payloads(cwd, helm_state_dir, selected_directory) {

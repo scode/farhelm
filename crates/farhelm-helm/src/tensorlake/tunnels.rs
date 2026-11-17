@@ -97,7 +97,7 @@ impl Tunnels {
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "the marked browser fixture adds sandbox identity to the shared connection lease inputs"
+        reason = "the tunnel fake (`super::e2e`) adds sandbox identity to the shared connection lease inputs"
     )]
     async fn start_with_fake(
         &self,
