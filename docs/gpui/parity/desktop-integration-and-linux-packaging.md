@@ -350,7 +350,8 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   `terminal::attached::tests::the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`. Checked on the test
   Mac in a real window (2026-11-17), over a focused terminal: Undo, Redo and Cut are disabled and Copy, Paste and Select
   All enabled, the menu's Paste reaches the terminal as a bracketed paste, and Select All then Copy copies the
-  terminal's text. Not yet checked: that Cmd+C on a focused button falls through to the disabled Copy without a beep.
+  terminal's text. A separate native Cmd+C check on the test Mac (2026-11-17) kept focus on the New session button and
+  left the system output device idle. A control beep activated the same device.
 - **The Open-Source Notices window** (new: the old app had no notices surface; the maintainer decided on 2026-11-13 that
   the notices live in it). Tested by `desktop::tests::the_notices_item_opens_one_window_and_brings_it_forward` (one
   window, the text drawn as a virtualized list, a second choice brings it forward, also when made from the notices

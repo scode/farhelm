@@ -15,8 +15,8 @@ A page's shots are declared in `scripts/docs-shots/<page>.py`; see `docs/docs-sh
 contract. `scripts/docs-screenshots.sh --local --only <page>` runs them through the GPUI test harness. On Linux every
 shot stops at the size check because the pictures need a 2x display.
 
-The Mac capture path, annotations and publishing come with the first page that shows shots again, which the maintainer
-decides. No page embeds a shot and nothing is published for now.
+For a 2x capture, run `scripts/docs-screenshots.sh --mac <destination>`. This uses the README hero's transport and the
+Mac-wide lock. Annotations and publishing belong to the first page that shows shots again, which the maintainer decides.
 
 Published release shots stay frozen. Only `scripts/publish-docs-shots.sh` may push `refs/docs-assets/keep`; never push
 the ref by hand.

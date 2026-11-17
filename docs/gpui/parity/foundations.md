@@ -625,6 +625,9 @@ Tests: 6. Covers: templates button.
 
 docs media: rebuilt on the GPUI tooling at cutover (M4)
 
+- On the test Mac (2026-11-17) both Launch templates shots reached the size check: the window fitted to 1600×972 points
+  at 2×, yielding 3200×1944 pixels against the required 3200×2000, and the runner refused both shots.
+
 ### `docs-shots/manage-hosts.spec.ts`
 
 Tests: 5. Covers: host menu.
@@ -672,6 +675,9 @@ docs media: rebuilt on the GPUI tooling at cutover (M4)
 Tests: 1. Covers: capture the README hero.
 
 docs media: rebuilt on the GPUI tooling at cutover (M4)
+
+- Captured on the test Mac (2026-11-17): the 1280×800-point window rendered at 2× and the runner fetched a 2560×1600
+  PNG.
 
 ### `readme-video/capture.spec.ts`
 
