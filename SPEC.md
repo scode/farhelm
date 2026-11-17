@@ -2305,29 +2305,32 @@ remains explicitly selected and unavailable until another host or All is chosen.
 and Help swaps session content for complete host management; hosts needing attention remain visible in the compact list
 above sessions while management is closed. Sessions is shown initially; opening or closing Hosts keeps the current
 query, sort, selected session and details choice. The control keeps focus and exposes its pressed and expanded state.
-All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff; a refused handoff
-leaves the panel as it was. Host reading, session reading, sounds and in-flight host work continue while their ordinary
-content is concealed. Rail menus and host dialogs remain available over Sessions. The list can be ordered independently
-by most recent activity, by creation time, or by title; the order someone picks is remembered by the helm as one
-preference shared by every client, together with the last-selected session, visit history and compact-row choice, and
-most recent activity is what a client shows until someone picks otherwise. The same shared preference row carries
-terminal web-link click ownership, the quick-launch template name and number-key bindings, the session-confirmation
-opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening types, automatic
-remote-host updates, and whether host setup or host removal confirmation should be skipped after an explicit permanent
-answer. A change to these preferences, by an agent or the command line included, reaches the open window as it happens;
-automatic session selection chooses from the visits as the helm last pushed them, template shortcuts read their bindings
-on each invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear at
-the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**, **Hosts**,
-**Recipes**, **Tensorlake**, **Containers**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and
-**Notifications**, followed by **App** only in a desktop app whose updater is active. Each section has an icon; the
-selected one uses the solid selection fill. One selected section appears beside the list, with a matching heading;
-notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by
-the window; short sections leave space below their content, and longer sections scroll inside the pinned header and
-footer. At 620px wide and below, the dialog shows either the selected section or the list; **‹ Settings** returns to the
-list. The gear always opens sessions and focuses its first switch, including at phone width. Trust hints instead open
-agent trust at the relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab
-rules. Switching sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields.
-Escape and either close control return focus to the gear.
+All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff, the header's Clone,
+Restart with… and Replace with… included (as in the old app; decided by the GPUI migration's orchestrator on
+2026-11-16), and the interrupted card's Replace with… too, which took the same path in the old app (applied by the
+sidebar-and-session-view area on 2026-11-17); a refused handoff leaves the panel as it was. Host reading, session
+reading, sounds and in-flight host work continue while their ordinary content is concealed. Rail menus and host dialogs
+remain available over Sessions. The list can be ordered independently by most recent activity, by creation time, or by
+title; the order someone picks is remembered by the helm as one preference shared by every client, together with the
+last-selected session, visit history and compact-row choice, and most recent activity is what a client shows until
+someone picks otherwise. The same shared preference row carries terminal web-link click ownership, the quick-launch
+template name and number-key bindings, the session-confirmation opt-out, the quick-launch naming choice, terminal-frame
+coloring, the desktop download-opening types, automatic remote-host updates, and whether host setup or host removal
+confirmation should be skipped after an explicit permanent answer. A change to these preferences, by an agent or the
+command line included, reaches the open window as it happens; automatic session selection chooses from the visits as the
+helm last pushed them, template shortcuts read their bindings on each invocation and the desktop helm reads the current
+file-opening list for each hover and open request. The gear at the foot of the host rail opens a settings dialog. Its
+left sidebar lists **Sessions**, **Appearance**, **Hosts**, **Recipes**, **Tensorlake**, **Containers**,
+**Credentials**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed by **App** only in a
+desktop app whose updater is active. Each section has an icon; the selected one uses the solid selection fill. One
+selected section appears beside the list, with a matching heading; notifications keeps **Sounds** and **ntfy alerts**
+sub-headings. The dialog keeps one height across sections, capped by the window; short sections leave space below their
+content, and longer sections scroll inside the pinned header and footer. At 620px wide and below, the dialog shows
+either the selected section or the list; **‹ Settings** returns to the list. The gear always opens sessions and focuses
+its first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and scroll its
+block into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved fields,
+outcome lines and pending saves; closing discards unsaved fields. Escape and either close control return focus to the
+gear.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can

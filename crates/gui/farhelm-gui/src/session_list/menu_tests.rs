@@ -1493,6 +1493,44 @@ fn the_next_session_opens_only_once_the_delete_has_settled(cx: &mut TestAppConte
     );
 }
 
+/// The old `sidebar.spec.ts` case "visit history chooses and remembers the next session after ${mode} deletion": SPEC.md
+/// has the automatic choice take "the most recent visit ... still listed" before the newest-created session, so a Delete
+/// takes the user back to where they were rather than to whatever was made last, and an ended session counts, since
+/// eligibility is about being listed, not alive. The rule is unit-tested
+/// (`the_automatic_choice_prefers_history_then_the_last_selection_then_the_newest`); the test above has a history of
+/// one entry. Specified: with b open, an ended a made first, c made last, and the visit history b then a, b's Delete
+/// from its row, once the helm removes b and answers, opens a, not c, and remembers a.
+#[gpui::test]
+fn after_a_delete_the_visit_history_beats_a_newer_session_and_an_ended_one_counts(
+    cx: &mut TestAppContext,
+) {
+    let rows = [
+        (session("b").created(200), 0),
+        (ended("a").created(0), 0),
+        (session("c").created(300), 0),
+    ];
+    let mut state = snapshot(&rows, false);
+    state[1].entries[0].value["visit_history"] = json!(["b", "a"]);
+    let (mut fake, cx) = open_main(cx, state);
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    deletes(&mut fake);
+    choose_delete(cx, "session-menu-b");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _)] = deletes(&mut fake)[..] else {
+        panic!("one Delete was sent");
+    };
+
+    fake.push(change(listing_meta(&["a", "c"], 2, false), &[], &["b"]));
+    fake.reply(id, 200, None);
+    test_support::settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert!(
+        sent(&mut fake)
+            .iter()
+            .any(|(path, body)| path == "/api/preferences" && body["last_selected"] == "a")
+    );
+}
+
 // ---- The Delete shortcut -------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Desktop window chrome": the shortcut "invokes the open session's header Delete action with its ordinary

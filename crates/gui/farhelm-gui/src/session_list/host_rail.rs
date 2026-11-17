@@ -192,8 +192,8 @@ impl SessionList {
     /// ([`HostsPanel::hidden`]: the rail's warnings keep their own copy of whether Hosts shows): Hosts pressed again,
     /// SPEC.md's returns to Sessions ("All or a host avatar returns to Sessions, as does an accepted quick-switcher pick
     /// or New handoff"; [`Self::choose_host`], [`Self::picked_from_switcher`], [`super::open_new`], and
-    /// [`super::show_sessions`] for a quick launch from the page). Unguarded: none of those runs while the window is
-    /// inert, and a reset shows Sessions on its own.
+    /// [`super::show_sessions`] for a quick launch from the page and the session pane's ways into the launcher). Unguarded:
+    /// none of those runs while the window is inert, and a reset shows Sessions on its own.
     ///
     /// [`HostsPanel::hidden`]: crate::hosts::HostsPanel::hidden
     pub(super) fn hide_hosts(&mut self, cx: &mut Context<Self>) {

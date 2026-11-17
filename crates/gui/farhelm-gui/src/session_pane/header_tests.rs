@@ -38,6 +38,7 @@ use crate::focus::Mark;
 use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::main_view::MainView;
 use crate::session_list::SessionList;
+use crate::session_list::host_rail::tests::panel_shown;
 use crate::session_list::lifecycle_tests::{
     Consent, ReplaceFrom, consented, drawn_inside, node_bounds, nothing_alive_guard_survives,
     refuse_for_yolo, replace,
@@ -633,6 +634,55 @@ fn cancelling_the_headers_question_gives_the_terminal_its_height_back(cx: &mut T
         "the premise: the question went"
     );
     assert_eq!(lines_height(cx), before);
+}
+
+/// The old `terminal-restart.spec.ts` case "Cancel queued behind don't ask again keeps a refused Replace save visible".
+/// While the permanent answer's host write is out, a Cancel must not close the question: SPEC.md has a failed write
+/// leave "the confirmation ... up with the reason", and a question already closed would have nowhere to show that
+/// reason, while a write that succeeded would then replace a session the user had dismissed. The prompt freezes every
+/// answer until the write settles (`prompt`'s fallible answers); this pins that for the header's Replace. Specified:
+/// with an ended a's header Replace refused for YOLO, the permanent answer sends only a's host write; Cancel pressed
+/// while it is out leaves the question up and sends nothing; the write's refusal sends no Replace, leaves the question
+/// up saying "Could not stop asking for buildbox: disk full. ..." and leaves a open; Cancel then closes the question,
+/// sending nothing, with a still open.
+#[gpui::test]
+fn a_cancel_during_the_host_write_keeps_the_question_for_its_refusal(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_from_the_header(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::click(cx, "prompt-alternative-0");
+    let sent = fake.commands();
+    let [write] = &sent[..] else {
+        panic!("only the host write is out, not {} commands", sent.len());
+    };
+    assert!(
+        write.path.ends_with("/yolo-without-asking"),
+        "the premise: the host write is out: {}",
+        write.path
+    );
+
+    test_support::click(cx, "prompt-cancel");
+    assert!(
+        drawn(cx, "prompt-cancel"),
+        "Cancel waits while the write is out"
+    );
+    assert!(fake.commands().is_empty(), "and sent nothing");
+
+    fake.reply(write.id, 500, Some(json!("disk full.")));
+    test_support::settle(cx);
+    assert_eq!(pending(&mut fake), [], "the refused write sent no Replace");
+    assert_eq!(
+        label_of(cx, "yolo-stop-asking-failed").as_deref(),
+        Some(
+            "Could not stop asking for buildbox: disk full. This answer started nothing; buildbox may still ask \
+             before YOLO launches."
+        )
+    );
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+
+    test_support::click(cx, "prompt-cancel");
+    assert!(!drawn(cx, "prompt-cancel"), "Cancel closed the question");
+    assert!(fake.commands().is_empty(), "Cancel sent nothing");
+    assert_eq!(selected(cx).as_deref(), Some("a"));
 }
 
 /// The header is drawn only for the open session, so a question asked from it would be shown nowhere once the user
@@ -1793,6 +1843,57 @@ fn clone_and_the_with_choices_wait_while_a_host_change_runs(cx: &mut TestAppCont
         Some("Clone: open the new-session form with these settings; this session keeps running")
     );
     assert!(clone(cx).flags.click, "Clone takes clicks again");
+}
+
+/// The old `hosts-panel.spec.ts` case "header Clone from Hosts reveals Sessions and restores launcher focus". SPEC.md
+/// has "an accepted ... New handoff" return the sidebar to Sessions and "a refused handoff" leave the panel, and the
+/// header's Clone, Restart with… and Replace with… count as New handoffs (decided by the GPUI migration's orchestrator
+/// on 2026-11-16, as the old app behaved): otherwise a launch started while Hosts shows makes a session the user cannot
+/// see. The focus half of the old case is a recorded deviation (the launcher returns focus to what held it).
+/// Specified, under the Linux click rule: with Hosts shown each time, Restart with… and Replace with… from their carets'
+/// menus and Clone each open the launcher with Sessions shown in place of the panel; with Hosts shown again and Add
+/// host's probe in flight, Clone's own handler (a press that beats the frame drawing Clone busy, since the busy button
+/// takes no click) opens nothing and Hosts still shows.
+#[gpui::test]
+fn clone_and_the_with_choices_from_hosts_show_sessions_and_a_refusal_leaves_hosts(
+    cx: &mut TestAppContext,
+) {
+    let a = session("a").unmanaged().not_launched_as_checkout();
+    let (mut fake, _connection) = started(cx);
+    fake.connect(snapshot_of(vec![entry(&a, 0)], false));
+    cx.run_until_parked();
+    let (main, cx) = test_support::open_view(cx, MainView::new);
+    let pane = cx.update(|_, cx| main.read(cx).session_pane().clone());
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    for (caret, choice) in [
+        (Some(RESTART_CARET), "session-header-restart-options-with"),
+        (Some(REPLACE_CARET), "session-header-replace-options-with"),
+        (None, "session-header-clone"),
+    ] {
+        test_support::click(cx, "hosts-panel-toggle");
+        assert!(panel_shown(cx), "the premise: Hosts shows");
+        if let Some(caret) = caret {
+            test_support::click(cx, caret);
+        }
+        test_support::click(cx, choice);
+        assert!(launcher_drawn(cx), "{choice} opened the launcher");
+        assert!(!panel_shown(cx), "{choice} showed Sessions");
+        test_support::keys(cx, "escape");
+        assert!(!launcher_drawn(cx), "the premise: the launcher closed");
+    }
+
+    test_support::click(cx, "hosts-panel-toggle");
+    start_host_change(cx, HostChange::Probe);
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        pane.update(cx, |pane, cx| {
+            pane.header_action(Action::Clone, &mark, window, cx)
+        });
+    });
+    test_support::settle(cx);
+    assert!(!launcher_drawn(cx), "the premise: Clone was refused");
+    assert!(panel_shown(cx), "a refused Clone leaves Hosts");
 }
 
 /// The helm's pinned host list as a hosts collection, so a launcher opened from the header has a host to launch on.

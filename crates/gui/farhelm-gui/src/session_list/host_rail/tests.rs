@@ -24,8 +24,8 @@ use farhelm_proto::ui_channel::{
     HostView, KeyedEntry, ListCounts, RefreshView, SESSION_QUERY_PATH,
 };
 use gpui::{
-    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Role, ScrollDelta,
-    ScrollEvent, TestAppContext, Toggled, VisualTestContext, point, px, size,
+    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, MouseButton, Role,
+    ScrollDelta, ScrollEvent, TestAppContext, Toggled, VisualTestContext, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -34,8 +34,8 @@ use super::{identity, status};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::hosts::identity::LOCAL_NAME;
 use crate::hosts::tests::{
-    connected, connecting, host as status_host, hosts as status_hosts, progress as status_progress,
-    run as status_run, skew,
+    aliased, connected, connecting, host as status_host, hosts as status_hosts,
+    progress as status_progress, run as status_run, skew,
 };
 use crate::main_view::MainView;
 use crate::session_list::tests::{
@@ -727,6 +727,124 @@ fn a_removed_chosen_host_keeps_a_pressed_inert_placeholder(cx: &mut TestAppConte
     assert!(node(&frame(cx), "host-rail-removed-3").is_none());
 }
 
+/// Whether the window sent a session query since the last look. Every command is taken, none answered: for a test
+/// whose steps are pushes the window must not answer with a query of its own.
+fn sent_a_query(fake: &mut FakeHelm) -> bool {
+    fake.commands()
+        .iter()
+        .any(|command| command.path == SESSION_QUERY_PATH)
+}
+
+/// The old `filters.spec.ts` case "registry changes retain the selected host ID and rail entry". The choice is a host
+/// id, never a name or a place in the rail, since the registry renames, reorders, drops and restores hosts under the
+/// user: a choice that followed a position would narrow the list to another host, and one that followed a name would
+/// lose the host the moment it was renamed. Each change is a push the helm makes on its own, so none of them is a
+/// reason to send a query, and none may take focus. Specified, under the Linux click rule, over the local host and
+/// remotes 2 and 3 with 2 chosen by a click (answered), which focuses it: a push renaming 2 "renamed host" while it
+/// turns unreachable keeps it pressed and focused, named "renamed host (dev@build-box.invalid): Unreachable,
+/// retrying"; a push reversing the order draws 3, 2, 1 with 2 still pressed and focused; with focus moved to All by
+/// the keyboard, a push without 2 draws its pressed placeholder, and a push with 2 back as "restored host" draws its
+/// live avatar pressed, focusable and clickable, named for its new name, the placeholder gone and focus still on All;
+/// none of these pushes sends a query.
+#[gpui::test]
+fn a_registry_change_keeps_the_chosen_host_by_id_through_rename_reorder_and_return(
+    cx: &mut TestAppContext,
+) {
+    const DESTINATION: &str = "dev@build-box.invalid";
+    let local = status_host(1, "local", connected());
+    let three = status_host(3, "ssh", connected());
+    let (mut fake, cx) = status_rail(
+        cx,
+        &[
+            local.clone(),
+            status_host(2, "ssh", connected()),
+            three.clone(),
+        ],
+        &[],
+    );
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    test_support::click(cx, "host-rail-host-2");
+    let (query, _) = one_query(&mut fake);
+    fake.reply(query.id, 204, None);
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-rail-host-2"),
+        "the premise: the click focused 2"
+    );
+
+    let renamed = aliased(
+        status_host(2, "ssh", unreachable()),
+        "renamed host",
+        DESTINATION,
+    );
+    push_hosts(
+        &mut fake,
+        &[local.clone(), renamed.clone(), three.clone()],
+        cx,
+    );
+    let nodes = frame(cx);
+    assert!(pressed(&nodes, "host-rail-host-2"), "rename: still chosen");
+    assert_eq!(
+        label(&nodes, "host-rail-host-2"),
+        "renamed host (dev@build-box.invalid): Unreachable, retrying"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-host-2"));
+
+    push_hosts(&mut fake, &[three.clone(), renamed, local.clone()], cx);
+    let nodes = frame(cx);
+    assert_eq!(
+        rail_entries(&nodes),
+        [
+            "host-rail-all",
+            "host-rail-host-3",
+            "host-rail-host-2",
+            "host-rail-host-1",
+            "host-rail-add"
+        ]
+    );
+    assert!(pressed(&nodes, "host-rail-host-2"), "reorder: still chosen");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-host-2"));
+
+    test_support::keys(cx, "shift-tab shift-tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-rail-all"),
+        "the premise: All has focus"
+    );
+    let left = status_hosts(&[three.clone(), local.clone()]);
+    fake.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: left.meta,
+        upsert: Vec::new(),
+        remove: vec![HostView::key(2)],
+    });
+    test_support::settle(cx);
+    assert!(
+        pressed(&frame(cx), "host-rail-removed-2"),
+        "removal: the placeholder is chosen"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
+
+    let restored = aliased(
+        status_host(2, "ssh", connected()),
+        "restored host",
+        DESTINATION,
+    );
+    push_hosts(&mut fake, &[three, restored, local], cx);
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-rail-removed-2").is_none());
+    assert!(pressed(&nodes, "host-rail-host-2"), "return: chosen again");
+    assert_eq!(
+        label(&nodes, "host-rail-host-2"),
+        "restored host (dev@build-box.invalid): Connected"
+    );
+    let avatar = node(&nodes, "host-rail-host-2").expect("2's avatar is drawn");
+    assert!(avatar.flags.focusable && avatar.flags.click, "live again");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
+    assert!(!sent_a_query(&mut fake), "no push sent a query");
+}
+
 /// The helm's channel forgets its query on a reset (a new channel starts unfiltered), so a window that kept its choice
 /// would press a host while the helm serves every session (SPEC_impl.md, "One failure path: the reset"). The open
 /// session survives the reset, so the one query the new channel gets only names it. Specified: with host 3 chosen and
@@ -822,7 +940,7 @@ const FIRST_SWITCH: &str = "settings-skip-session-confirmations";
 
 /// Whether the Hosts panel is drawn in place of the list's column: the panel's node is there and the list's is not.
 /// Fails on any other combination, which would mean both or neither show.
-fn panel_shown(cx: &mut VisualTestContext) -> bool {
+pub(crate) fn panel_shown(cx: &mut VisualTestContext) -> bool {
     let nodes = frame(cx);
     let panel = node(&nodes, "hosts-panel").is_some();
     let list = node(&nodes, "session-list").is_some();
@@ -1636,6 +1754,104 @@ fn running_work_rings_the_avatar_and_names_the_work(cx: &mut TestAppContext) {
     }
     assert!(!drawn(cx, "host-rail-update-2"));
     assert_eq!(label(&nodes, "hosts-panel-toggle"), "Hosts");
+}
+
+/// Whether `nodes` draw the element `id` inside the element `ancestor`, by the frame's own parent links.
+fn inside(nodes: &[DriverNode], id: &str, ancestor: &str) -> bool {
+    let Some(mut at) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        return false;
+    };
+    while let Some(parent) = nodes[at].parent {
+        if nodes[parent].element_id.as_deref() == Some(ancestor) {
+            return true;
+        }
+        at = parent;
+    }
+    false
+}
+
+/// Push `runs` as changed host progress, each under its host's id, and settle.
+fn push_runs(fake: &mut FakeHelm, runs: &[ProvisioningView], cx: &mut VisualTestContext) {
+    let state = status_progress(runs);
+    fake.push(CollectionChanges {
+        collection: Collection::HostProgress,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: Vec::new(),
+    });
+    test_support::settle(cx);
+}
+
+/// The rail half of the old `provisioning.spec.ts` case "accepted ADD registers before execution and releases the page
+/// lock while running". The helm registers an added host before its setup runs, so the rail must take the new avatar
+/// and its ring from the pushes alone, and drop the ring when the run completes while Hosts is closed (SPEC.md:
+/// "setup/update/uninstall adds a ring"; the panel follows the progress whether or not it shows). Those pushes redraw
+/// the rail under any menu open on it, and must leave another host's menu where it is, open, with the keyboard in it.
+/// The static ring is `running_work_rings_the_avatar_and_names_the_work`'s; the Hosts panel's own row is the
+/// settings-and-hosts area's. Specified, with Sessions shown over the local host and a connected remote 2: a pushed
+/// registration of 3 with its Add run running draws 3's avatar with its ring, named "...: Connected; setting up"; a
+/// right press on 2's avatar opens 2's menu with focus on one of its items; the run's completion pushed then takes 3's
+/// ring away and names it "...: Connected", while 2's menu stays open under the same name with focus where it was, and
+/// Hosts never opened.
+///
+/// The old case opened the menu with Shift+F10 on an avatar it had focused without choosing its host. A right press
+/// opens the same menu without choosing either, where focusing the avatar here would take a click that chooses the
+/// host and narrows the list; the gestures themselves are `avatar_menu_tests.rs`'s, Shift+F10 included.
+#[gpui::test]
+fn a_registered_hosts_ring_goes_with_its_run_and_leaves_another_avatars_menu_open(
+    cx: &mut TestAppContext,
+) {
+    use farhelm_proto::provisioning::ProvisioningOperation::Add;
+    use farhelm_proto::provisioning::RunStatus::{Completed, Running};
+    let local = status_host(1, "local", connected());
+    // Named apart from 3, which takes the fixtures' destination, so the menu's name tells their menus apart.
+    let two = aliased(
+        status_host(2, "ssh", connected()),
+        "ops box",
+        "ops@box.invalid",
+    );
+    let (mut fake, cx) = status_rail(cx, &[local.clone(), two.clone()], &[]);
+    assert!(!panel_shown(cx), "the premise: Sessions shows");
+
+    push_hosts(
+        &mut fake,
+        &[local, two, status_host(3, "ssh", connected())],
+        cx,
+    );
+    push_runs(&mut fake, &[status_run(3, Add, Running)], cx);
+    assert!(drawn(cx, "host-rail-ring-3"), "the new avatar is ringed");
+    assert_eq!(
+        label(&frame(cx), "host-rail-host-3"),
+        "dev@build-box.invalid: Connected; setting up"
+    );
+
+    let avatar = test_support::center(cx, "host-rail-host-2");
+    cx.simulate_mouse_down(avatar, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(avatar, MouseButton::Right, Modifiers::none());
+    test_support::settle(cx);
+    let menu = label(&frame(cx), "host-menu-items");
+    assert!(menu.contains("ops box"), "the premise: 2's menu: {menu}");
+    let focused = focused_id(cx);
+    assert!(
+        focused
+            .as_deref()
+            .is_some_and(|id| inside(&frame(cx), id, "host-menu-items")),
+        "the premise: focus is on one of the menu's items: {focused:?}"
+    );
+
+    push_runs(&mut fake, &[status_run(3, Add, Completed)], cx);
+    let nodes = frame(cx);
+    assert!(!drawn(cx, "host-rail-ring-3"), "the ring went with the run");
+    assert_eq!(
+        label(&nodes, "host-rail-host-3"),
+        "dev@build-box.invalid: Connected"
+    );
+    assert_eq!(label(&nodes, "host-menu-items"), menu, "2's menu is open");
+    assert_eq!(focused_id(cx), focused, "focus stayed in the menu");
+    assert!(!panel_shown(cx), "Hosts never opened");
 }
 
 /// Why this matters: SPEC.md, "Session list": "A setup or Update warning has its own mark and hover explanation,

@@ -1139,6 +1139,79 @@ fn the_one_off_answer_replaces_again_with_consent_exactly_once(cx: &mut TestAppC
     assert_eq!(pending(&mut fake), [], "no second Replace");
 }
 
+/// Where a fresh frame draws the element `id` inside `key`'s row item, by the frame's own parent links, if it does. For
+/// a test with a question open in more than one row: their answers share their ids, so [`drawn_inside`], which follows
+/// only the first element drawn under an id, and a click by id cannot tell them apart.
+fn in_row(cx: &mut VisualTestContext, id: &str, key: &str) -> Option<gpui::Bounds<Pixels>> {
+    let item = format!("session-item-{key}");
+    let nodes = frame(cx);
+    let inside = |mut at: usize| loop {
+        match nodes[at].parent {
+            Some(parent) if nodes[parent].element_id.as_deref() == Some(item.as_str()) => {
+                return true;
+            }
+            Some(parent) => at = parent,
+            None => return false,
+        }
+    };
+    nodes
+        .iter()
+        .enumerate()
+        .find(|(at, node)| node.element_id.as_deref() == Some(id) && inside(*at))
+        .map(|(_, node)| node.bounds)
+}
+
+/// The old `replace.spec.ts` case "plain Replace preserves two sources' YOLO questions and answers independently".
+/// SPEC.md keeps a plain Replace's YOLO question "with the control or surface that started the launch", and a session
+/// has one Replace in flight at most, so two sessions' Replaces may both be refused and wait at once; the replace
+/// module keeps one question per session for that reason. An answer that reached the other question, or a refusal that
+/// replaced or closed it, would replace the wrong session or lose the other's. The fake answers in order, so a's
+/// refusal comes first (the old case released the second source's first). Specified: with a's and then b's Replace
+/// confirmed from their rows' menus and both out, YOLO refusals of both draw a question in each row; b's one-off answer
+/// sends one Replace, of b with consent, takes b's question away and leaves a's; the helm's refusal of that Replace
+/// shows on b's row, a's question still drawn; a's one-off answer then sends one Replace, of a with consent.
+#[gpui::test]
+fn two_sources_yolo_questions_wait_and_answer_independently(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    pending(&mut fake);
+    let mut ids = Vec::new();
+    for button in ["session-menu-a", "session-menu-b"] {
+        choose(cx, button, "session-menu-replace");
+        test_support::click(cx, "prompt-confirm");
+        let [(id, _, _)] = pending(&mut fake)[..] else {
+            panic!("one Replace was sent from {button}");
+        };
+        ids.push(id);
+    }
+    for id in ids {
+        refuse_for_yolo(&mut fake, cx, id);
+    }
+    assert!(in_row(cx, "prompt-confirm", "a").is_some(), "a's question");
+    assert!(in_row(cx, "prompt-confirm", "b").is_some(), "b's question");
+
+    let answer = in_row(cx, "prompt-confirm", "b").expect("b's question");
+    cx.simulate_click(answer.center(), Modifiers::none());
+    test_support::check(cx);
+    let sent = pending(&mut fake);
+    let [(again, _, _)] = sent[..] else {
+        panic!("one Replace was sent, not {}", sent.len());
+    };
+    assert_eq!(requests(sent), [consented("b", false, false)]);
+    assert!(in_row(cx, "prompt-confirm", "b").is_none(), "b's went");
+    assert!(in_row(cx, "prompt-confirm", "a").is_some(), "a's stays");
+
+    fake.reply(again, 409, Some(json!("the host refused b")));
+    test_support::settle(cx);
+    assert_eq!(
+        label_of(cx, "session-outcome-b").as_deref(),
+        Some("Replace: the host refused b")
+    );
+    let answer = in_row(cx, "prompt-confirm", "a").expect("a's question survives b's refusal");
+    cx.simulate_click(answer.center(), Modifiers::none());
+    test_support::check(cx);
+    assert_eq!(requests(pending(&mut fake)), [consented("a", false, false)]);
+}
+
 /// While the permanent answer's host write is out (the launcher's to send and test), the question must stay up with
 /// its answers frozen, and the session's own Replace must not race the write's retry with a second request. Specified:
 /// after the permanent answer only one command is out; meanwhile the question is still drawn in a's row through a

@@ -21,6 +21,7 @@ use crate::actions::{DELETE_SESSION_CHORD, FocusNextControl};
 use crate::launcher::draft::{LaunchDraft, Mode, Tab};
 use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
 use crate::launcher::view_tests::fixture_hosts;
+use crate::session_list::host_rail::tests::panel_shown;
 use crate::session_list::lifecycle_tests::{consented, drawn_inside, refuse_for_yolo, replace};
 use crate::session_list::menu;
 use crate::session_list::menu_tests::{any_layer, drawn, label_of, push, snapshot};
@@ -804,6 +805,25 @@ fn the_cards_replace_with_opens_the_launcher_on_the_sessions_command(cx: &mut Te
             .map(|text| text.text.to_string())
             .collect();
     assert_eq!(command, ["claude"], "the Agent command field");
+}
+
+/// The card's Replace with is a New handoff like the header's (SPEC.md: an accepted "New handoff" returns the sidebar
+/// to Sessions). The GPUI migration's orchestrator counted the header's three on 2026-11-16; the card's took the same
+/// path in the old app, which hid Hosts, and the sidebar-and-session-view area applied the rule to it on 2026-11-17.
+/// The card sits beside the sidebar, so it can be pressed while Hosts shows, and the replacement must then appear
+/// where the user can see it. Specified: on a legacy session's card with host1 listed and Hosts shown, the card's
+/// Replace with opens the launcher and Sessions shows in place of the panel.
+#[gpui::test]
+fn the_cards_replace_with_from_hosts_shows_sessions(cx: &mut TestAppContext) {
+    let legacy = json!({"kind": "legacy", "invocation": "claude", "agent_kind": "claude", "resume_template": null});
+    let mut collections = snapshot(&[(interrupted("a").launch(legacy), 0)], false);
+    collections.push(fixture_hosts(&[0]));
+    let main = open_main(cx, collections);
+    test_support::click(main.cx, "hosts-panel-toggle");
+    assert!(panel_shown(main.cx), "the premise: Hosts shows");
+    test_support::click(main.cx, "session-card-replace-with");
+    assert!(launcher_drawn(main.cx), "Replace with opened the launcher");
+    assert!(!panel_shown(main.cx), "and Sessions shows");
 }
 
 /// SPEC.md: "an open lifecycle confirmation or a pending request refuses another lifecycle action". The card's inline

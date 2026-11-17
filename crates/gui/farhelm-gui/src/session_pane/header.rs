@@ -39,6 +39,13 @@
 //!   focusable then, as Restart and Replace do while they wait. The launcher returns focus to what held it when it
 //!   opened: Clone, or the caret, since a chosen menu item closes the menu first. A caret menu's anchor is named for
 //!   its session, so the menu closes when another session opens (a Delete from elsewhere, say).
+//! - **Into the launcher from Hosts.** Clone, Restart with… and Replace with… are New handoffs: once the launcher has
+//!   opened, the sidebar shows Sessions in place of the Hosts panel (`session_list::show_sessions`), so the session
+//!   the launch makes appears where the user can see it, as the old app did (SPEC.md: "All or a host avatar returns to
+//!   Sessions, as does an accepted quick-switcher pick or New handoff"; the GPUI migration's orchestrator counted these
+//!   three as New handoffs on 2026-11-16; the interrupted card's Replace with…, which took the same path in the old
+//!   app, is one too, applied by the sidebar-and-session-view area on 2026-11-17, `super::card`). A refused one leaves
+//!   the panel as it was.
 //! - **The row's code does the work.** Each action reads the open session's row as the session list reads it and calls
 //!   the same `begin` and `confirm` the row's menu calls (`session_list::stop`, `replace`, `delete`), which hold each
 //!   action's ask-or-send rule: the same questions, the same frozen preconditions, the same commands, the same pending
@@ -128,7 +135,7 @@ use crate::prompt::{self, Question};
 use crate::session;
 use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{
-    delete, environment, environment_delete, menu, outcome, replace, restart, retired, stop,
+    self, delete, environment, environment_delete, menu, outcome, replace, restart, retired, stop,
 };
 use crate::theme::{self, metrics};
 
@@ -309,12 +316,19 @@ impl Split {
         }
     }
 
-    /// Open the variant's launcher on `session` (the launcher's entry points), returning whether it opened.
+    /// Open the variant's launcher on `session` (the launcher's entry points), returning whether it opened. An opened
+    /// launcher is a New handoff, so Sessions then shows in place of the Hosts panel (the module docs' "Into the
+    /// launcher from Hosts"). Call it outside any update of the main view or the session list, which
+    /// [`session_list::show_sessions`] reads and updates.
     fn open_with(self, session: &str, window: &mut Window, cx: &mut App) -> bool {
-        match self {
+        let opened = match self {
             Split::Restart => entry::open_restart_with(session, window, cx),
             Split::Replace => entry::open_replace_with(session, window, cx),
+        };
+        if opened {
+            session_list::show_sessions(window, cx);
         }
+        opened
     }
 }
 
@@ -715,7 +729,8 @@ impl SessionPane {
     /// The user activated `action` in the open session's header at `mark`. It goes as the row's menu goes for the same
     /// session, through the same functions, with the question (when it asks) hung under the action's button. Nothing
     /// happens while that question is open, for a session the store holds no row for, or for one with a request in
-    /// flight.
+    /// flight. Clone that opens the launcher calls [`session_list::show_sessions`], which reads the main view and
+    /// updates the session list, so call this outside any update of either (GPUI refuses a second one).
     pub(crate) fn header_action(
         &mut self,
         action: Action,
@@ -779,8 +794,11 @@ impl SessionPane {
             }
             Action::Clone => {
                 // The launcher refuses while New is unavailable, as the button is drawn then; a press that beats
-                // that frame opens nothing.
-                if !entry::open_clone(&key, window, cx) {
+                // that frame opens nothing. An opened one is a New handoff, which shows Sessions in place of the
+                // Hosts panel (the module docs' "Into the launcher from Hosts").
+                if entry::open_clone(&key, window, cx) {
+                    session_list::show_sessions(window, cx);
+                } else {
                     tracing::debug!("the launcher refused to open Clone from the header");
                 }
             }

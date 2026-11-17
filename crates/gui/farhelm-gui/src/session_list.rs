@@ -1263,12 +1263,14 @@ pub(crate) fn open_new(
 
 /// Show Sessions in place of the Hosts panel in `window`, for a hand-off that starts outside the list: a quick launch
 /// from the page (the ⚡ chord, a number key, a sequence or the template list), once it has started a launch or opened
-/// New. The old app's quick launch went through the list's own New, which hid the panel (SPEC.md: "All or a host
-/// avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff"), so a session launched from the
-/// panel shows up where the user can see it. The list is the one the window's main view holds; a window without one (a
-/// golden's scene) has no panel, and nothing changes. Call it only once the hand-off was accepted, and never from inside
-/// an update of the main view or the session list: it reads the one and updates the other, which GPUI refuses while
-/// either is already being updated.
+/// New, and the open session's header Clone, Restart with… and Replace with… and its interrupted card's Replace with…,
+/// once the launcher has opened (`session_pane::header`, `session_pane::card`). The old app's quick launch went through
+/// the list's own New, which hid the panel, and its header and card revealed Sessions for those too (SPEC.md: "All or a
+/// host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff"), so a session launched from
+/// the panel shows up where the user can see it. The list is the one the window's main view holds; a window without one
+/// (a golden's scene) has no panel, and nothing changes. Call it only once the hand-off was accepted, and never from
+/// inside an update of the main view or the session list: it reads the one and updates the other, which GPUI refuses
+/// while either is already being updated.
 pub(crate) fn show_sessions(window: &mut Window, cx: &mut App) {
     let Some(Some(root)) = window.root::<gpui_component::Root>() else {
         return;
