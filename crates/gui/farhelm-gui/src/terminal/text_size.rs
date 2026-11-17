@@ -38,6 +38,7 @@ use super::TextSize;
 use super::attached::AttachedTerminal;
 use crate::assets::Icon;
 use crate::components::{Button, Condensed, HoverHelp, IconButton, Tier};
+use crate::desktop::title_band;
 use crate::session;
 use crate::{operations, theme};
 
@@ -176,7 +177,9 @@ pub(crate) fn step(delta: i8, cx: &mut App) {
 
 /// The − / readout / + group for the start of the session's top row's right-hand group (`.terminal-text-size`): two
 /// magnifier buttons sharing one border with the fixed-width readout of the current size in points between them. The
-/// readout is display-only and no tab stop; the buttons step [`current`] by one point.
+/// readout is display-only and no tab stop; the buttons step [`current`] by one point. In the macOS window the group is
+/// part of the title band, where the readout counts as text: a press on it neither drags nor zooms the window
+/// ([`title_band::claims_presses`]; SPEC.md, "Desktop window chrome").
 ///
 /// The group is exactly as tall as the header's lifecycle buttons beside it, in the header's ordinary look and, when
 /// `compact`, in its condensed one (23 and 21 pixels), its shared border included: its height is
@@ -189,7 +192,8 @@ pub(crate) fn step(delta: i8, cx: &mut App) {
 pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
     let palette = theme::palette(cx);
     let points = current(cx).points();
-    let readout = div()
+    // Text in the macOS title band keeps its presses; the buttons claim theirs as controls already.
+    let readout = title_band::claims_presses(div())
         .id(READOUT_ID)
         .debug_selector(|| READOUT_ID.into())
         .flex()
