@@ -747,7 +747,10 @@ systemd or SSH substrate ran.
   staged, recorded before any wait, stopped with their terminal hosts, a stranger's pid never claimed), the app's
   environment (nothing of the caller's display, bus, bridge or `FARHELM_*` variables; on Linux the run's own compositor
   and lavapipe; the run's state directory and supervisor program, the window size, appearance and payload directory a
-  run asks for, and the start dialogs off unless it asks for them), the payload directory's checks (absolute, and an
+  run asks for, and the start dialogs off unless it asks for them), a `--user-session` run (the caller's runtime
+  directory and bus reaching the app and nothing else of the caller's, refused on a Mac, without them or in a staged
+  run, and `stop` recording only the local host's sessions and containers from the run's helm and removing only those
+  and their exact units, against stand-in `podman` and `systemctl`), the payload directory's checks (absolute, and an
   existing directory), the seeding requests (a `--fleet` kind's replay shape, its transcript fitting a narrow terminal,
   and only the waiting kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local
   host's YOLO setting it turns on), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text

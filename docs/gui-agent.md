@@ -50,9 +50,11 @@ directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/d
 from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no release to download
 payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this option is the way to
 pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run.
-`--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs"). It builds
-with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases whatever
-`start` had already taken, the lock included.
+`--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs").
+`--user-session` (Linux only) gives the app your own runtime directory and session bus, so that its helm's Podman check
+works and New container shows; such a run shares your systemd user manager and Podman storage (see "User-session runs").
+It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
+whatever `start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
@@ -191,6 +193,56 @@ and `--fleet` sessions run on the local host as before, their command an absolut
 on a Mac has not been tried; there the vendors' credentials also live in the login Keychain, which a private HOME does
 not hide. On Linux it was checked with two remote hosts.
 
+## User-session runs
+
+NOTE: A user-session run shares your systemd user manager and your account's Podman storage with every other run on the
+machine and with the machine's own Farhelm installation. It must never touch a unit, container or process it did not
+create, and nothing it does may reach the live install.
+
+On Linux a run normally gives the app a private `XDG_RUNTIME_DIR` (the run's `runtime/`) and the compositor's private
+session bus. That keeps the app off your desktop, but it also means the embedded helm's local Podman check fails:
+`systemd-run --user` and `systemctl --user` cannot reach your user manager, and `podman info` looks for its run root in
+the wrong place. So New container never shows in an ordinary run, and the `app-launcher-new-container` scene could not
+work. `start --user-session` is for runs that need containers: it keeps your own `XDG_RUNTIME_DIR` and
+`DBUS_SESSION_BUS_ADDRESS` for the app, and through it for its helm and local supervisor. Everything else stays as in an
+ordinary run: the run's state directory and `farhelm`, your `FARHELM_*` variables kept out, lavapipe, and Mutter on its
+own runtime directory and bus (it registers its service names on the bus it runs on, where they would compete with your
+desktop's compositor). The app reaches Mutter by the absolute path of its Wayland socket. `start` refuses the option on
+a Mac (a Mac run already uses the GUI session's environment) and when your shell has no absolute `XDG_RUNTIME_DIR` or no
+bus address, and records both values, so a relaunch and `stop` use what `start` saw.
+
+It does not combine with a staged run (`--remote-host`). A staged run's HOME is private, so Podman would set up a
+storage of its own under it while its run root, under your runtime directory, stays the account's; two storages sharing
+one run root share its mount records (`containers/overlay-layers/mountpoints.json`), which could disturb your real
+containers. Lifting that needs a Podman storage configuration of the run's own in the private HOME, which nothing writes
+yet.
+
+What such a run creates on your account: the supervisor wraps each launch in a transient scope named from the session's
+id, which the run's own supervisor minted (`farhelm-<session>-<generation>.scope`, and
+`farhelm-<session>-tab-<tab>.scope` for a terminal tab); an ordinary run has none, because its supervisor cannot reach
+the user manager. The helm names an environment session's container `farhelm-sess-<helm tag>-...` (labelled
+`farhelm.helm=<helm tag>`), recipe images `localhost/farhelm-<helm tag>-...`, and short-lived build helpers
+`farhelm-build-<helm tag>-...` and `farhelm-prepare-<helm tag>-...`. The tag derives from the helm database, fresh for
+every run, so it is almost certainly the run's own (it is four characters). Podman's own scopes for a container, the
+scope the helm runs a container's Podman commands in, and the probe scopes the supervisor and the helm make and stop at
+once are not named for the run; a build also pulls the pinned Ubuntu base image into your shared image cache.
+
+`stop` asks the run's helm, before the app quits, for the sessions on the local host and the containers it made there,
+and adds their ids and names to `run.json`. Local only: a host added while the run is driven could be this machine's own
+installation over ssh, whose sessions' scopes sit on the same user manager. Once the app, its supervisor and its
+terminal hosts are down, `stop` runs `podman rm --force --ignore` on each recorded container (which takes Podman's
+scopes for it along), lists the user manager's scope units without a pattern, stops by exact name each launch or tab
+scope of a recorded session, and reports any still there. Nothing is matched by a `farhelm-*` pattern. If the app is
+already gone, `stop` removes what an earlier `stop` recorded, and warns when nothing was (an app that crashed, say: then
+look for the run's leftovers by its session ids and helm tag). It does not remove images: delete the run's recipe in the
+app (Settings → Recipes) before `stop`, which removes the recipe's images through the helm. A build interrupted by
+`stop` can leave a helper container carrying the run's helm tag; only that may be removed by hand.
+
+Other things that go to your session rather than the run's while the option is on: the app's sounds (`pw-play` finds
+your PipeWire through the runtime directory, and an app that is SIGKILLed leaves the player's `farhelm-sounds-<uuid>`
+directory in your `/run/user/<uid>`, where an ordinary run kept it inside the run directory) and anything the app asks
+your session bus for, such as a desktop portal.
+
 ## What a run is made of
 
 Everything lives under the run directory: on Linux the compositor's runtime directory and Wayland socket, the bridge's
@@ -205,8 +257,9 @@ credential for its own process to the run's `helm.json`, which is how `start` se
 
 On Linux, rendering is Mesa's software Vulkan driver (lavapipe), as for the screenshot goldens, so you need
 `mesa-vulkan-drivers` and `libegl-mesa0`, plus `mutter` and `dbus-run-session`. The compositor runs on its own session
-bus, where the supervisor cannot reach your systemd user manager, so terminal hosts start without a transient scope (the
-supervisor's ordinary fallback).
+bus, which the app shares, where the supervisor cannot reach your systemd user manager, so sessions start without a
+transient scope (the supervisor's ordinary fallback), and the helm's Podman check fails. A user-session run gives the
+app your own bus instead (see "User-session runs").
 
 ## Why the bridge never ships
 

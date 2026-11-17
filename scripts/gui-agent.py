@@ -8,8 +8,8 @@ a run starts lives under the run directory you name (which must not exist yet), 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
                                        [--templates] [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
-                                       [--remote-host DEST ...]
-    scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
+                                       [--remote-host DEST ... | --user-session (Linux)]
+    scripts/gui-agent.py RUN_DIR snapshot -i         # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
 
@@ -35,7 +35,10 @@ helm a directory of staged `farhelm` payloads to install on and update real remo
 a debug build otherwise has no release to download from; it is the one way to pass that setting in, since the caller's
 own `FARHELM_*` variables never reach the app. `--remote-host DEST` (repeatable) makes the run a staged one: it starts
 one more supervisor per destination, each in the run's own `r<N>` state directory, and has the app's helm register
-each as an SSH host reached at DEST, which must be this machine under a spelling of its own. Any other verb goes to the
+each as an SSH host reached at DEST, which must be this machine under a spelling of its own. `--user-session` (Linux)
+gives the app the caller's own runtime directory and session bus, so that its helm's Podman check reaches the user's
+systemd manager and New container shows; such a run shares that manager, and `stop` removes what the run's helm and
+supervisor left there by recorded name (USER_SESSION_ENV, `remove_user_session_objects`). Any other verb goes to the
 vendored `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
 vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
 
@@ -52,6 +55,11 @@ Staged runs (docs/gui-agent.md, "Staged runs", has the whole arrangement and why
 by an agent harness's bare name, so it always runs the app, its supervisor and every remote supervisor with a private
 HOME and PATH inside the run, where every harness name is a wrapper around the fake agent, and with the scripted
 provisioning backend on, since a staged remote host is this machine. `staged_start` says which runs are staged.
+
+User-session runs (docs/gui-agent.md, "User-session runs"). Everything else about the run stays private: its state,
+its compositor (which keeps its own runtime directory and bus), the caller's `FARHELM_*` variables kept out. The one
+thing shared is the caller's systemd user manager and, through the caller's HOME, its Podman storage. A staged run
+refuses the option (`check_user_session`).
 """
 
 from __future__ import annotations
@@ -162,8 +170,9 @@ def bridge_env(
 ) -> dict[str, str]:
     """The environment for the bridge's command line and, through it, the app.
 
-    Starts from `base` with every display and bridge variable from the caller's session removed. On Linux the app can
-    then only reach this run's Mutter and session bus, and rendering is pinned to lavapipe. On a Mac there is no display
+    Starts from `base` with every display and bridge variable from the caller's session removed. On Linux the app then
+    gets the `runtime`, `display` and `dbus` given, which `session_vars` chooses (this run's Mutter and its private
+    bus, unless the run is a user-session one), and rendering is pinned to lavapipe. On a Mac there is no display
     to choose (the app opens its window in the GUI session it runs in), so only the run's own bridge home is added.
     """
     env = {
@@ -422,6 +431,168 @@ def stop_terminal_hosts(farhelm: str | None, state: Path) -> bool:
     if not farhelm or not (state / "hosts").exists():
         return True
     return subprocess.run([farhelm, "internal", "stop-terminal-hosts", "--state-dir", str(state)]).returncode == 0
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# User-session runs: the caller's runtime directory and session bus for the app, and what `stop` removes after one
+
+
+# The two variables a `--user-session` run gives the app from the caller instead of the run's own. With them the app's
+# embedded helm and its local supervisor reach the user's systemd manager (`systemctl --user`, `systemd-run --user`)
+# and `podman` finds its real run root under the runtime directory; without them the helm's Podman check fails, so New
+# container never shows.
+USER_SESSION_ENV = ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+
+# What every container the helm creates for an environment session is named (`farhelm-sess-<helm tag>-...`, which
+# `register_pending_session_container` in crates/farhelm-helm/src/store/podman.rs insists on). `stop` removes a name it
+# recorded from the run's helm only when it has this shape, so an odd listing cannot make it remove anything else.
+SESSION_CONTAINER_PREFIX = "farhelm-sess-"
+
+
+def check_user_session(base: dict[str, str], platform: str, staged: bool) -> dict:
+    """What a `--user-session` run records of the caller (`runtime`, `dbus`, from USER_SESSION_ENV in `base`); a
+    UsageError when the option cannot do what it is for.
+
+    It is Linux only: a Mac run already keeps the GUI session's environment. It refuses a caller without an absolute
+    runtime directory or a bus address, since the app would then still miss the user manager. And it refuses a staged
+    run: there the app's HOME is the run's private one, so `podman` would make itself a storage under it while its run
+    root, under the caller's runtime directory, stays the account's, and two storages sharing one run root share its
+    mount records (`containers/overlay-layers/mountpoints.json`), which could disturb the account's own containers."""
+    if not platform.startswith("linux"):
+        raise UsageError("--user-session is Linux only: a Mac run already uses its GUI session's environment")
+    if staged:
+        raise UsageError(
+            "--user-session does not combine with a staged run: its private HOME would give Podman a storage of its "
+            "own that shares the account's run root (docs/gui-agent.md, \"User-session runs\")"
+        )
+    runtime, dbus = (base.get(name) for name in USER_SESSION_ENV)
+    if not runtime or not Path(runtime).is_absolute() or not dbus:
+        raise UsageError(f"--user-session needs {' and '.join(USER_SESSION_ENV)} set in the caller's environment")
+    return {"runtime": runtime, "dbus": dbus}
+
+
+def session_vars(record: dict) -> tuple[str | None, str | None, str | None]:
+    """The runtime directory, Wayland display and session bus everything after the compositor gets, as `bridge_env`
+    takes them: the run's private ones, or in a user-session run the caller's runtime directory and bus with the
+    compositor's socket named by its absolute path (a bare name would be looked up in the caller's runtime directory,
+    where it is not; GPUI takes an absolute `WAYLAND_DISPLAY`). The compositor keeps its own either way
+    (`start_mutter`), so it never registers on the caller's bus."""
+    user = record.get("user_session")
+    if not user:
+        return record.get("runtime"), record.get("display"), record.get("dbus")
+    return user["runtime"], str(Path(record["runtime"]) / record["display"]), user["dbus"]
+
+
+def uuid_shaped(text) -> bool:
+    """Whether `text` is a UUID in the canonical lowercase hyphenated spelling the supervisor mints session ids in."""
+    try:
+        return isinstance(text, str) and str(uuid.UUID(text)) == text
+    except ValueError:
+        return False
+
+
+def run_owned_unit(unit: str, sessions: list[str]) -> bool:
+    """Whether the user-manager unit `unit` is one the run's own supervisor named for one of `sessions`, the session
+    ids `record_user_session_objects` recorded (UUIDs only): `farhelm-<session>-<generation>.scope`, a launch's scope,
+    or `farhelm-<session>-tab-<tab uuid>.scope`, a terminal tab's (crates/farhelm-supervisor/src/scope.rs). Exactly
+    these shapes, and nothing that merely starts with `farhelm-`.
+
+    Not matched, because nothing ties them to the run: the throwaway probe scopes the supervisor and the helm name with
+    fresh random ids (`farhelm-probe-<uuid>.scope`, `farhelm-env-probe-<hex>.scope`), which their creators stop at once.
+    Nor the scope a container's Podman commands ran in (`farhelm-env-<container>-<hex>.scope`, which keeps the
+    container's conmon): it empties and is collected once `podman rm` removed the container, and stopping it while the
+    container is still there would only leave that container without its monitor."""
+    stem = unit.removesuffix(".scope")
+    for session in sessions:
+        tail = stem.removeprefix(f"farhelm-{session}-")
+        if stem != unit and tail != stem and (
+            (tail.isascii() and tail.isdigit()) or (tail.startswith("tab-") and uuid_shaped(tail[4:]))
+        ):
+            return True
+    return False
+
+
+def record_user_session_objects(run: Path, record: dict, request=None) -> str | None:
+    """Add to a user-session run's record the id of every session its helm lists on the local host and the name of
+    every environment container it made there (`kind: podman` hosts placed on the local host), and save it, so `stop`
+    can remove them by name once the helm is gone; return a warning when the helm could not be asked. `request` is
+    `helm_request` unless a test hands in its own.
+
+    Local only, because the run's scopes and containers are only those on this machine's user manager and Podman
+    storage: a host added while the run is driven could be this machine's own installation reached over ssh, and its
+    sessions' scopes are on the same user manager, so recording them would make `stop` end them. Runs at `stop`, before
+    the app quits, since sessions and containers come and go while the run is driven. What earlier calls recorded is
+    kept, so a second `stop` after the app is gone still removes it. A session id that is not a UUID, or a container
+    whose name lacks SESSION_CONTAINER_PREFIX, is not recorded."""
+    request = request or helm_request
+    if not (run / "helm.json").exists():
+        return None
+    try:
+        hosts = request(run, "GET", "/api/hosts")["hosts"]
+        rows = request(run, "GET", "/api/sessions")["sessions"]
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+        return f"could not ask the run's helm what it made ({error}); removing only what an earlier stop recorded"
+    local = {host.get("id") for host in hosts if host.get("kind") == "local"}
+    # The helm lists a session as `<host entry>:<id>`, the id after the colon being the bare one the supervisor minted
+    # and names the session's scopes with.
+    sessions = [str(row.get("id")).rpartition(":")[2] for row in rows if row.get("host") in local]
+    containers = []
+    for host in hosts:
+        environment = host.get("environment") or {}
+        place = (environment.get("target") or {}).get("place") or {}
+        if host.get("kind") == "podman" and place.get("kind") == "podman_host" and place.get("host") in local:
+            containers.append(environment.get("name"))
+    user = record["user_session"]
+    user["sessions"] = list(dict.fromkeys([*user.get("sessions", []), *filter(uuid_shaped, sessions)]))
+    named = [name for name in containers if isinstance(name, str) and name.startswith(SESSION_CONTAINER_PREFIX)]
+    user["containers"] = list(dict.fromkeys([*user.get("containers", []), *named]))
+    (run / "run.json").write_text(json.dumps(record, indent=2))
+    return None
+
+
+def remove_user_session_objects(
+    user: dict, base: dict[str, str], podman: str = "podman", systemctl: str = "systemctl"
+) -> list[str]:
+    """Remove what a user-session run left on the caller's account, by the names `record_user_session_objects`
+    recorded, and return the problems: each recorded container (`podman rm --force --ignore`, which also ends the
+    container's own scopes), then every unit of the user manager that `run_owned_unit` ties to a recorded session,
+    stopped by its exact name, and a check that none of those is left. With nothing recorded it does nothing, so a run
+    that never got as far as its app (or whose app crashed) cannot fail `stop` and keep its lock over a listing.
+
+    Run after the app, its supervisor and its terminal hosts are down, so nothing of the run makes more. The units are
+    listed without a pattern and matched here, never handed to systemctl as a glob. Images the run's helm built
+    (`localhost/farhelm-<helm tag>-...`) are not removed; deleting the run's recipe in the app removes them."""
+    sessions, containers = user.get("sessions", []), user.get("containers", [])
+    if not (sessions or containers):
+        return []
+    env = {**base, "XDG_RUNTIME_DIR": user["runtime"], "DBUS_SESSION_BUS_ADDRESS": user["dbus"]}
+    problems = []
+
+    def call(*argv: str) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        except OSError:
+            return None
+
+    def owned_units() -> list[str] | None:
+        listed = call(systemctl, "--user", "list-units", "--all", "--plain", "--no-legend", "--type=scope")
+        if listed is None or listed.returncode != 0:
+            return None
+        names = [line.split()[0] for line in listed.stdout.splitlines() if line.split()]
+        return [name for name in names if run_owned_unit(name, sessions)]
+
+    for name in containers:
+        removed = call(podman, "rm", "--force", "--ignore", "--", name)
+        if removed is None or removed.returncode != 0:
+            problems.append(f"podman could not remove the run's container {name}")
+    for unit in owned_units() or []:
+        call(systemctl, "--user", "stop", "--", unit)
+    left = owned_units()
+    if left is None:
+        problems.append("could not list the user manager's units to check that none of the run's is left")
+    elif left:
+        problems.append(f"the run's units are still on the user manager: {', '.join(left)}")
+    return problems
 
 
 # The scripted provisioning backend's switch, read by debug builds of the helm (`ProductionProvisioning::new` in
@@ -929,7 +1100,10 @@ def start_mutter(
 
     `dbus-run-session` gives Mutter a bus no desktop shares, and the bus address is read from Mutter's own environment
     because dbus-run-session does not print it. Under that bus the supervisor cannot reach the user's systemd manager,
-    so its terminal hosts start without a transient scope (the supervisor's ordinary fallback).
+    so its sessions start without a transient scope (the supervisor's ordinary fallback). Mutter keeps this bus also
+    in a user-session run, where only the app gets the caller's: Mutter registers its service names
+    (`org.gnome.Mutter.DisplayConfig` and others) on the bus it runs on, and on the caller's it would compete with a
+    desktop session's own compositor for them.
 
     If the compositor does not come up (no Wayland socket within `socket_wait` seconds, or no bus address), everything
     it started is stopped before the error propagates: `run.json` does not exist yet, so `stop` could not find it.
@@ -1091,16 +1265,19 @@ def wait_for_statuses(
         time.sleep(interval)  # sleep-ok: polling the helm's listing; the harness subscribes to no status events
 
 
-def run_env(run: Path, record: dict, base: dict[str, str] | None = None) -> dict[str, str]:
+def run_env(
+    run: Path, record: dict, base: dict[str, str] | None = None, platform: str = sys.platform
+) -> dict[str, str]:
     """The environment of everything the run starts after its compositor: the bridge's command line, the app it
     launches (and through the app its supervisor and every session), and a staged run's remote supervisors.
 
     That is `bridge_env` over the caller's environment (`base`, `os.environ` by default), and in a staged run (the
-    record holds `staging`) over `staged_env` of it, so the private HOME and PATH reach all of them."""
+    record holds `staging`) over `staged_env` of it, so the private HOME and PATH reach all of them. The runtime
+    directory, display and bus are the run's own, or the caller's in a user-session run (`session_vars`)."""
     base = dict(os.environ) if base is None else base
     if record.get("staging"):
         base = staged_env(base, record["staging"])
-    return bridge_env(base, run, record.get("runtime"), record.get("display"), record.get("dbus"))
+    return bridge_env(base, run, *session_vars(record), platform=platform)
 
 
 def cli(run: Path, record: dict, args: list[str], capture: bool = False) -> subprocess.CompletedProcess:
@@ -1162,6 +1339,14 @@ def start(run: Path, args: list[str]) -> int:
         help="stage a remote host: this machine over ssh at DEST, served by a supervisor of the run's own (repeatable; "
         "makes the run a staged one, see docs/gui-agent.md)",
     )
+    parser.add_argument(
+        "--user-session",
+        action="store_true",
+        help="Linux only: give the app the caller's own XDG_RUNTIME_DIR and session bus, so its helm's Podman check "
+        "reaches the user's systemd manager and New container shows. The run then shares that manager and the "
+        "account's Podman storage; `stop` removes the run's containers and units by recorded name (not in a staged "
+        "run; see docs/gui-agent.md, \"User-session runs\")",
+    )
     options = parser.parse_args(args)
     if options.window_size:
         parse_size(options.window_size)
@@ -1170,6 +1355,8 @@ def start(run: Path, args: list[str]) -> int:
     remote_hosts = parse_remote_hosts(options.remote_host)
     # A staged run always has the private HOME and PATH and the scripted provisioning backend; nothing turns either off.
     staged = staged_start(options)
+    # Before the ssh checks, so a refused combination fails without dialing anything.
+    user_session = check_user_session(dict(os.environ), sys.platform, staged) if options.user_session else None
     for destination in remote_hosts:
         check_ssh(destination)
     mac = sys.platform == "darwin"
@@ -1200,6 +1387,10 @@ def start(run: Path, args: list[str]) -> int:
     for sub in ("agent", "logs") if mac else ("runtime", "agent", "logs"):
         (run / sub).mkdir(mode=0o700)
     record: dict = {"state": str(run / "state")}
+    if user_session:
+        # Recorded, not read again later, so every launch of the run (a relaunch included) and `stop` use the
+        # session `start` was given, whatever shell runs them.
+        record["user_session"] = user_session
 
     def save() -> None:
         (run / "run.json").write_text(json.dumps(record, indent=2))
@@ -1354,13 +1545,26 @@ def stop(run: Path, record: dict) -> int:
     through the pid and start time recorded after launch, the supervisor through the app's record of it plus the state
     directory on its command line, a remote supervisor through its recorded pid and start time plus its state directory
     on its command line, Mutter through the pid and start time recorded when it started. A pid that has since been
-    reused by another process is never signalled.
+    reused by another process is never signalled. A user-session run's containers and units on the caller's account
+    are removed after the terminal hosts, by the names recorded from its helm before the app quit
+    (`record_user_session_objects`, `remove_user_session_objects`).
     """
     problems = []
+    app = record.get("app")
+    user_session = record.get("user_session")
+    if user_session and app:
+        # Asked while the helm still answers: once the app is down only the record says what the run made. An app that
+        # is already gone is not asked; that is worth a warning only when no earlier `stop` recorded anything.
+        warning = None
+        if running(app["pid"], app["start"]):
+            warning = record_user_session_objects(run, record)
+        elif "sessions" not in user_session:
+            warning = "the app was already gone, so its helm could not say what it made; nothing is recorded to remove"
+        if warning:
+            print(f"gui-agent: warning: {warning}", file=sys.stderr)
     # The app first, the ordinary way: SIGTERM, which the app turns into a quit (it then waits for its helm to stop),
     # and SIGKILL if it is still there after the grace. Not the bridge's `close`, which signals the recorded pid and its
     # process group without checking that the pid is still the app.
-    app = record.get("app")
     if app and not stop_process(app["pid"], app["start"], 15):
         problems.append(f"the app (pid {app['pid']}) did not stop")
     for name in SESSION_FILES:
@@ -1378,6 +1582,8 @@ def stop(run: Path, record: dict) -> int:
             problems.append(f"the supervisor for {remote['destination']} (pid {found[0]}) did not stop")
         elif not stop_terminal_hosts(farhelm, Path(remote["state"])):
             problems.append(f"stop-terminal-hosts could not confirm every terminal host of {remote['state']} stopped")
+    if user_session:
+        problems += remove_user_session_objects(user_session, dict(os.environ))
     mutter = record.get("mutter")
     if mutter:
         for pid in stop_tree(mutter["pid"], mutter["start"], 10):
