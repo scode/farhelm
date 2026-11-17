@@ -484,3 +484,45 @@ fn welcome_reopens_the_card_without_writing_and_returns_focus_to_the_button(
     assert_eq!(focused_id(cx).as_deref(), Some(BUTTON_ID));
     assert!(fake.commands().is_empty(), "reopening writes nothing");
 }
+
+// ---- A menu taller than the window --------------------------------------------------------------------------------
+
+/// A menu that runs past the window's edge leaves its last items where nobody can reach them, and one that scrolls
+/// without following the keyboard hides the item focus lands on. With every item, the menu is taller than the 720 by
+/// 560 minimum window on both platforms; the old panel was capped and scrolled (`.host-row-menu-flyout >
+/// .host-row-menu-panel`, `overflow-y: auto`). A 300-pixel window makes even the shortest menu overflow, whatever the
+/// text system. Specified: in a 720 by 300 window, the open menu lies inside the window with focus on its first item,
+/// and its last item lies below the menu's bottom edge; Down to the last item focuses it and shows it wholly inside the
+/// menu.
+#[gpui::test]
+fn a_menu_taller_than_the_window_fits_in_it_and_scrolls_to_the_focused_item(
+    cx: &mut TestAppContext,
+) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    cx.simulate_resize(size(px(720.), px(300.)));
+    test_support::settle(cx);
+    open_menu(cx);
+    let shown = expected(false);
+    let (first, last) = (shown[0].as_str(), shown[shown.len() - 1].as_str());
+    assert_eq!(focused_id(cx).as_deref(), Some(first));
+    let nodes = frame(cx);
+    let menu = node(&nodes, MENU).expect("the menu is open").bounds;
+    assert!(
+        menu.top() >= px(0.) && menu.bottom() <= px(300.),
+        "inside the window: {menu:?}"
+    );
+    let item = node(&nodes, last).expect("the last item is drawn").bounds;
+    assert!(
+        item.top() >= menu.bottom(),
+        "premise: the last item lies below the menu: {item:?}"
+    );
+    test_support::keys(cx, &vec!["down"; shown.len() - 1].join(" "));
+    assert_eq!(focused_id(cx).as_deref(), Some(last));
+    let nodes = frame(cx);
+    let menu = node(&nodes, MENU).expect("the menu is open").bounds;
+    let item = node(&nodes, last).expect("the last item is drawn").bounds;
+    assert!(
+        menu.top() <= item.top() && item.bottom() <= menu.bottom(),
+        "{item:?} in {menu:?}"
+    );
+}

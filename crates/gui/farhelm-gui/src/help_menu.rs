@@ -14,6 +14,12 @@
 //! - **The menu is a popover beside the button.** It is drawn as the session row's menu is (the same panel, header and
 //!   items, 246 pixels wide, `Anchor::beside`), and names the `?` button as where closing returns focus, so Escape and
 //!   every item leave focus there, also on macOS, where the click that opened the menu left the button unfocused.
+//! - **It never outgrows the window.** The panel is capped at the height of the window's content area less 16 pixels
+//!   ([`crate::notices_bell::window_cap`]) and scrolls inside that, header and all, as the old panel did
+//!   (`.host-row-menu-flyout > .host-row-menu-panel`'s `overflow-y: auto`). With every item offered, the menu is taller
+//!   than the 720 by 560 minimum window on macOS and Linux alike, so without the cap its last items would be cut off at
+//!   the window's edge. The panel is a [`focus::scroll_region`], so Up, Down and Tab bring the item they land on into
+//!   view.
 //! - **An item closes the menu first, then acts.** A link item opens its page in the system browser through
 //!   `cx.open_url`, the opener the app's other docs links use; Send feedback and SSH needs 2FA? open their dialogs
 //!   ([`crate::feedback::open`], [`crate::hosts::ssh_help::open`]) with the `?` button as their opener, so closing
@@ -45,8 +51,8 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px, svg,
+    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled as _, WeakEntity, Window, div, px, svg,
 };
 
 use crate::actions::OpenSourceNotices;
@@ -289,6 +295,7 @@ impl HelpButton {
             button,
             opener,
             first,
+            scroll: ScrollHandle::new(),
         });
         self.menu = layers::open_popover(
             // Tab stays inside the open menu, as the old bar menus kept it (`handle_menu_key`), like the row menus.
@@ -361,6 +368,9 @@ struct HelpMenu {
     opener: FocusHandle,
     /// The first item's focus handle, where the menu starts.
     first: FocusHandle,
+    /// The panel's scroll position, kept across frames so a menu taller than the window stays where the user or a
+    /// keyboard move scrolled it.
+    scroll: ScrollHandle,
 }
 
 impl HelpMenu {
@@ -401,7 +411,7 @@ impl HelpMenu {
 }
 
 impl Render for HelpMenu {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = items(
             crate::desktop::updates::runs(cx),
             crate::announcements::has_history(cx),
@@ -428,10 +438,14 @@ impl Render for HelpMenu {
                 entry
             }
         });
-        layers::panel(cx)
+        // The whole panel scrolls, header included, as the old one did; its children keep their full height (they are
+        // not scroll containers, so a flex column does not shrink them below their content).
+        let panel = layers::panel(cx)
             .id("help-menu")
             .debug_selector(|| "help-menu".into())
             .w(px(PANEL_WIDTH))
+            .max_h(crate::notices_bell::window_cap(window))
+            .overflow_y_scroll()
             .child(MenuHeader::app("Help", "Farhelm guides and feedback"))
             .child(
                 div()
@@ -441,6 +455,7 @@ impl Render for HelpMenu {
                     .flex()
                     .flex_col()
                     .children(entries),
-            )
+            );
+        focus::scroll_region(panel, &self.scroll)
     }
 }
