@@ -992,7 +992,9 @@ line or an agent, while its header Restart question is open, and while its Resta
 Tests: 8. Covers: opening a template reports the launcher's catalog read failure.
 
 partly: crates/gui/farhelm-gui/src/session_list/quick_switcher/tests.rs
-`subsequences_keep_the_original_character_positions`, `title_matches_come_first_and_each_group_keeps_the_helms_order`,
+`subsequences_keep_the_original_character_positions`, `title_matches_come_first_and_each_group_ranks_by_tier`,
+`tiers_split_word_starts_from_substrings_from_scattered_matches`,
+`ties_keep_activity_order_and_the_second_group_takes_the_better_value`,
 `matching_reads_raw_values_not_their_escaped_spelling`,
 `the_chord_from_a_terminal_opens_the_switcher_and_never_reaches_the_program`, `the_chord_does_nothing_over_a_menu`,
 `the_chord_does_nothing_before_the_preferences_arrive`, `loading_picks_nothing_and_a_failed_read_says_so`,
@@ -1000,8 +1002,8 @@ partly: crates/gui/farhelm-gui/src/session_list/quick_switcher/tests.rs
 `a_reply_to_an_earlier_opening_never_reaches_a_later_switcher`, `the_arrows_move_the_selection_and_stop_at_both_ends`,
 `the_selected_row_stays_in_view`, `a_pick_opens_the_session_remembers_it_and_focuses_its_terminal`,
 `escape_and_close_return_focus_to_where_it_was`, `a_press_outside_closes_it_and_returns_focus`,
-`marks_are_found_on_the_shown_spelling_of_a_matched_value`, and for a pick the sidebar's filters hide
-`a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them` and
+`marks_are_found_on_the_shown_spelling_of_a_matched_value`, `marks_show_the_occurrence_that_earned_the_tier`, and for a
+pick the sidebar's filters hide `a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them` and
 `a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices`, and for the `New session named` row
 `the_new_row_follows_the_matches_and_is_selected_when_nothing_matches`,
 `loading_keeps_the_new_row_from_the_keys_and_a_failed_read_leaves_it_usable`,
@@ -1356,6 +1358,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   to whatever held it when the switcher opened; SPEC.md's focus rulebook ("Choosing a session, including the one already
   selected, focuses its terminal") takes precedence. In the old tests the opener was that terminal, so both read the
   same there. This one is meant to stay.
+- The quick switcher ranks matches within each group by how well they matched (a word start, then an unbroken substring,
+  then scattered), with activity order only breaking ties, and marks the occurrence that earned the rank. The old
+  switcher, and the port at first, kept each group in activity order alone and marked the leftmost scattered alignment,
+  so a scattered title match from a newer session was listed above a title holding exactly the query. SPEC.md changed
+  with it. This one is meant to stay.
 - The old quick switcher closed on a primary click's release on its backdrop; the port closes on a press of any button
   outside the card, as the layer manager's popovers do. The press is still taken by the veil, so nothing under it acts.
 - The quick switcher's rows mark a session whose host the registry does not list (a removed host) with the default
