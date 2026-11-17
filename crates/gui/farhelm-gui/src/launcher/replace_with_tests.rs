@@ -159,7 +159,7 @@ fn replace_with_follows_the_source_and_sends_the_guard_it_shows(cx: &mut TestApp
 
 /// The helm lists `replacement` on host9 in `source`'s place (it creates the replacement and deletes the source
 /// before it answers), then answers Replace `id` with the replacement and no delete notice. `order` is the listing
-/// after the swap.
+/// after the swap. The push must keep the current selection until the success has settled.
 fn replaced(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
@@ -168,12 +168,18 @@ fn replaced(
     replacement: &'static str,
     order: &[&str],
 ) {
+    let before = selected(cx);
     helm.push(change(
         listing_meta(order, order.len() as u64, false),
         &[session(replacement).host(9)],
         &[source],
     ));
     settle(cx);
+    assert_eq!(
+        selected(cx),
+        before,
+        "the replacement is listed before the reply"
+    );
     helm.reply(
         id,
         200,
@@ -190,8 +196,8 @@ fn selected(cx: &mut VisualTestContext) -> Option<String> {
 
 /// Replace with has "exactly Replace's create-then-delete contract": its replacement opens where plain Replace's does,
 /// only while its source is still the open session, which the selection rules keep open through the helm's removal of
-/// it until the reply. Specified: with a open, a success whose listing has already dropped a, and lists a2 last (so a
-/// fallback selection after a went would pick another row), opens the replacement a2;
+/// it until the reply. With a open, typing after submission leaves it selected. A success whose listing drops a
+/// and lists a2 last (so fallback would pick another row) still opens a2;
 /// then, a Replace with of a2 answered after c was opened (with no key press, so only the open session differs), the
 /// success leaves c open.
 #[gpui::test]
@@ -199,6 +205,12 @@ fn replace_with_opens_its_replacement_only_where_the_source_was_open(cx: &mut Te
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(replace_with(cx, "a"));
     let replace = pressed(&mut helm, cx);
+    keys(cx, "x");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "typing keeps the source open"
+    );
     replaced(&mut helm, cx, replace.id, "a", "a2", &["b", "c", "d", "a2"]);
     assert_eq!(selected(cx).as_deref(), Some("a2"));
 
@@ -214,6 +226,105 @@ fn replace_with_opens_its_replacement_only_where_the_source_was_open(cx: &mut Te
         "a2",
         "a3",
         &["b", "c", "d", "a3"],
+    );
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+}
+
+/// The completion of Replace with leaves the keyboard with the terminal the user actually switched to.
+#[gpui::test]
+fn replace_with_leaves_the_keyboard_in_the_session_switched_to(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(replace_with(cx, "a"));
+    let replace = pressed(&mut helm, cx);
+    test_support::click(cx, "session-row-c");
+    assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c is open");
+    assert!(
+        test_support::terminal_focused(cx),
+        "c's terminal has the keyboard"
+    );
+    replaced(&mut helm, cx, replace.id, "a", "a2", &["b", "c", "d", "a2"]);
+    assert!(
+        cx.update(|_, cx| super::entry::new_available(cx)),
+        "the reply freed the launcher"
+    );
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+    assert!(
+        test_support::terminal_focused(cx),
+        "the keyboard stayed in c's terminal"
+    );
+}
+
+/// A definite missing-folder refusal leaves the original destination eligible for another press once it has been
+/// repaired outside the launcher. The fake scripts the host's changed answer without requiring a draft edit.
+#[gpui::test]
+fn replace_with_can_retry_the_unchanged_draft_after_a_folder_refusal(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(replace_with(cx, "a"));
+    let folder_error = "working directory does not exist: /home/user/src/a";
+    let first = pressed(&mut helm, cx);
+    helm.reply_marked(
+        first.id,
+        409,
+        vec![crate::operations::HelmMarker::CreateUnaccepted],
+        Some(json!(folder_error)),
+    );
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some(format!("Not launched. {folder_error}").as_str())
+    );
+    assert!(name_of(cx, "launcher-folder-problem").is_some());
+    let retry = pressed(&mut helm, cx);
+    assert_eq!(
+        retry.body, first.body,
+        "the retry keeps the original folder and launch choices"
+    );
+    replaced(&mut helm, cx, retry.id, "a", "a2", &["b", "c", "d", "a2"]);
+    assert_eq!(selected(cx).as_deref(), Some("a2"));
+}
+
+/// A complete fleet push may remove the source before Replace with is refused. Keep the source selected while
+/// the request waits, then show the refusal and fall back by visit history rather than listing order.
+#[gpui::test]
+fn a_refused_replace_with_falls_back_after_the_source_disappears(cx: &mut TestAppContext) {
+    use crate::session_list::tests::preferences;
+    use farhelm_proto::ui_channel::CollectionChanges;
+
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    let history = preferences(&["a", "c"], Some("a"));
+    helm.push(CollectionChanges {
+        collection: history.collection,
+        meta: history.meta,
+        upsert: history.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert!(replace_with(cx, "a"));
+    let replace = pressed(&mut helm, cx);
+    helm.push(change(
+        listing_meta(&["b", "c", "d"], 3, false),
+        &[],
+        &["a"],
+    ));
+    settle(cx);
+    assert!(!crate::session_list::menu_tests::drawn(cx, "session-row-a"));
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the unanswered Replace keeps its source selected"
+    );
+
+    helm.reply_marked(
+        replace.id,
+        403,
+        vec![crate::operations::HelmMarker::CreateUnaccepted],
+        Some(json!("replacement refused after external removal")),
+    );
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. replacement refused after external removal")
     );
     assert_eq!(selected(cx).as_deref(), Some("c"));
 }

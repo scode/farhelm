@@ -484,14 +484,16 @@ launch work); superseded: the retired variants of 237 and 1037, which revoked th
 operation store, not the view, settles a reply (SPEC_impl.md, "Work that finishes later: the operation stores";
 `operations_tests::work_started_from_a_view_settles_after_the_view_is_gone`), and 1782, since an automatic pick uses the
 preferences as the helm last pushed them, with no read to go stale (SPEC.md, "Terminal experience"); the quick-launch
-naming cases (567, 658) are the templates area's; not yet ported: Clone's and Replace with's half of 345 (the keyboard
-staying in the session switched to; New's is ported below, and the three share the submit and its completion)
+naming cases (567, 658) are the templates area's.
 
 - 59 and 901, another session opening, its Stop going out beside the create, and a row menu opened meanwhile staying
   open through the create's success: `launcher::pending_tests::the_window_keeps_working_while_a_create_is_out`.
 - 345, New's, and 59's typing half (the open session's terminal holding the keyboard while the create is out; what it
   does with the keys is the terminal's):
   `launcher::pending_tests::a_launchs_success_leaves_the_keyboard_in_the_session_switched_to`.
+- 345, Clone and Replace with: the selected terminal keeps the keyboard when the new row arrives and the request
+  succeeds in `launcher::entry_tests::a_clones_success_leaves_the_keyboard_in_the_session_switched_to` and
+  `launcher::replace_with_tests::replace_with_leaves_the_keyboard_in_the_session_switched_to`.
 - 454 and 809's YOLO variant, the question waiting behind the notice, its answer resending the same draft and
   destination with consent although the user opened a session on another host meanwhile, and the session then opening:
   `launcher::pending_tests::a_yolo_question_the_user_moved_on_from_waits_and_its_answer_resends_the_draft`.
@@ -507,15 +509,17 @@ staying in the session switched to; New's is ported below, and the three share t
 - 237's Rename variant, "Rename during a pending launch preserves its refusal and draft", reframed: opening Rename is a
   click, so the user has moved on, and a refusal the user moved on from waits behind its notice, which brings the
   launcher back with its draft and refusal, in
-  `launcher::launch_tests::a_refusal_the_user_moved_on_from_waits_behind_a_notice` (moved on with a key press); not yet
-  ported: Rename's field keeping the keyboard as the refusal arrives.
+  `launcher::launch_tests::a_refusal_the_user_moved_on_from_waits_behind_a_notice` (moved on with a key press) and
+  `launcher::pending_tests::a_refused_launch_leaves_the_keyboard_in_rename` (the field stays focused through the
+  refusal).
 - 970, "New preserves Hosts and reports its success without retaining its launcher": Hosts still showing and the
   "Started" report after a launch the user moved on from in
   `session_pane::tests::a_first_launch_the_user_moved_on_from_selects_nothing`, the report in
   `launcher::launch_tests::{a_launch_that_does_not_open_reports_started, a_slow_success_hands_the_pill_to_its_started_report}`,
   and the next New starting fresh in
-  `launcher::pending_tests::a_launchs_success_leaves_the_keyboard_in_the_session_switched_to`; not yet ported: the
-  remembered selection staying the source's, and the report holding no button or link.
+  `launcher::pending_tests::a_launchs_success_leaves_the_keyboard_in_the_session_switched_to`.
+- 970, the remembered selection and the report offering no button or link:
+  `launcher::pending_tests::started_in_hosts_leaves_the_source_remembered_and_offers_no_action`.
 - Line 1037's refusal outcome for Restart with:
   `launcher::restart_with_tests::restart_with_settles_as_plain_restart_does`.
 - Line 1436's pointer variant (a double click's second click is a repeat, not moving on):
@@ -879,8 +883,9 @@ whose detail is in the templates file's restart-with entry
   the shared Enter rule's).
 - "restart with model Enter refuses an unselected draft and held keys": the unselected draft in
   `launcher::view_tests::restart_with_model_enter_chooses_without_restarting`, and a held Enter in
-  `launcher::restart_with_tests::a_held_enter_in_the_model_field_does_nothing`; not yet ported: its composing Enter, an
-  input method's Enter while composing in the model field.
+  `launcher::restart_with_tests::a_held_enter_in_the_model_field_does_nothing`. Superseded: the synthetic `isComposing`
+  key variant, by the shared text-input Enter rule. A native input method owns composing keystrokes, and the model
+  field's Enter only applies a choice even after composition ends.
 - "restart with retries the catalog without reseeding its draft":
   `launcher::restart_with_tests::the_catalog_retry_keeps_an_edit`.
 - "restart with keeps gap focus and container Enter uses its enabled action", the gap half:
@@ -1120,10 +1125,7 @@ and that row naming the warning as their accessible description (deviations belo
 the helm keeps a source more alive than shown); also
 `launcher::replace_with_tests::{a_refused_replace_with_comes_back_and_stays_on_the_source, replace_with_waits_while_its_source_is_busy}`;
 1024 and 1081 (focus on search) in `launcher::search_view_tests::clone_and_replace_with_start_focus_in_the_search_box`;
-superseded: 801 (retry keys; the GUI sends none) and 161's check that the second attempt carries a new key; not yet
-ported: 161's second press, once the folder is repaired, sending a new create or Replace and opening its session (the
-refusal half is below), and 539's refusal variant, the launcher showing the refusal after the source was removed
-elsewhere while the Replace with was out, and the selection then falling back to the session visited before
+superseded: 801 (retry keys; the GUI sends none) and 161's check that the second attempt carries a new key.
 
 - 1024 and 1081, the row menu opening Replace with on its row:
   `session_list::menu_tests::the_menus_clone_and_replace_with_open_the_launcher_on_their_row`.
@@ -1131,9 +1133,17 @@ elsewhere while the Replace with was out, and the selection then falling back to
   `launcher::launch_tests::a_refused_launch_brings_the_launcher_back_with_the_helms_words` (Clone goes through the same
   submit, as `launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher` says) and for Replace with in
   `launcher::replace_with_tests::a_refused_replace_with_comes_back_and_stays_on_the_source`.
+- 161, retrying Replace with without editing the draft and opening the replacement:
+  `launcher::replace_with_tests::replace_with_can_retry_the_unchanged_draft_after_a_folder_refusal`. New and Clone share
+  the create path exercised by `launcher::launch_tests::a_second_press_after_a_refusal_launches_the_fixed_draft`, whose
+  retry edits the folder. The old cases' filesystem repair at the same path stays unported because it requires a real
+  host and folder to verify the refusal and recovery.
 - 539's success variant: a listing that drops the source and lists the replacement arrives before the reply, and the
   replacement still opens, in the first half of
   `launcher::replace_with_tests::replace_with_opens_its_replacement_only_where_the_source_was_open`.
+- 539's refusal variant: an authoritative listing removes the source while Replace with is held, and the refusal shows
+  as selection falls back to the last visited session still listed, in
+  `launcher::replace_with_tests::a_refused_replace_with_falls_back_after_the_source_disappears`.
 - 1166, the Replace body built from the create's:
   `launcher::request_tests::a_replace_with_body_carries_the_create_and_the_shown_guard`.
 
