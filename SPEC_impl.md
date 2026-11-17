@@ -33,7 +33,7 @@ after authentication and before typed request parsing, so a valid request can fi
 caller disconnects. Invalid requests still receive their existing rejection responses. Routes whose cancellation is
 intentional live outside that layer: read-only POSTs, tab operations, transfers, and handlers with narrower admission or
 owned-work boundaries documented at their registrations. GET, its implicit HEAD companion and WebSocket upgrades keep
-their existing lifetimes. Desktop preflight and the standalone token exchange remain outside ownership.
+their existing lifetimes.
 
 Ordinary HTTP handlers rely on that router boundary rather than spawning an additional whole-handler task. Narrower
 operations still own their work where they have non-HTTP callers or a different contract: template persistence and its
@@ -2368,20 +2368,22 @@ secondary attributes are alacritty's own and claim no other terminal, since a pr
 wrap its output in tmux's passthrough envelope, which this emulator drops; `CSI 14 t` assumes a 16 by 32 pixel cell,
 since nobody reports the viewer's; XTVERSION names Farhelm and its version, because Claude Code asks nothing further,
 synchronized output included, without an answer; and color queries are answered from Farhelm's terminal theme (Ghostty's
-palette, as the browser's) or the colors the program set. Known limitations, accepted: a few queries `vte` does not
-parse go unanswered, and a query inside an open synchronized update is answered when the update ends rather than at
-once. Keyboard input keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would
-change the Shift+Enter and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored
-while reads are never answered. The encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized
-update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the
-deadline on its own clock and draws the update, and also draws one left open when the child exits, when a replay ends
-and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the
-program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are
-examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws an open
-update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a gap,
-though it carries on to the same final state. The crate's own tests pin the answer table, the screen-text format and the
-modes as Farhelm's, and the supervisor's screen fixture tests paint every captured agent screen into the emulator and
-run its status reader on the emulator's text.
+default palette, `crates/farhelm-terminal-emulator/src/theme.rs`, which the desktop app's terminal theme in
+`crates/gui/farhelm-gui/src/theme.rs` repeats; no test holds the two copies equal since the old app's check went with
+it) or the colors the program set. Known limitations, accepted: a few queries `vte` does not parse go unanswered, and a
+query inside an open synchronized update is answered when the update ends rather than at once. Keyboard input keeps
+today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter and
+Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never
+answered. The encoding itself is the supervisor's (`grid_input.rs`). `vte` holds a synchronized update's bytes until the
+update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the deadline on its own clock and
+draws the update, and also draws one left open when the child exits, when a replay ends and before a resize; `vte`
+itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the program had not finished. The
+safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are examples of the deliberate
+exceptions to frames never being drawn half done; a recovering replay also draws an open update where it crosses from
+output an earlier supervisor was sent to output none was, and where it crosses a gap, though it carries on to the same
+final state. The crate's own tests pin the answer table, the screen-text format and the modes as Farhelm's, and the
+supervisor's screen fixture tests paint every captured agent screen into the emulator and run its status reader on the
+emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
 selectors after a combining mark are ignored, and text presentation can narrow a wide character. Two exceptions keep the
@@ -2621,45 +2623,40 @@ interprets its output, and it sends the screen as rows of styled runs. Protocol 
 that terminals in the supervisor's private tmux server sent, with a `grid` capability on `Attach`, a stream kind on
 `Attached` and a `{"type":"stream","kind":...}` notice from the helm that told the browser which terminal component to
 build. Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries
-a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no
-longer report a terminal kind. The removal is a bump rather than an additive change because an older peer of the same
-protocol would still send and expect what a newer one no longer reads (a supervisor streaming an old terminal as bytes,
-a helm refusing a grid answer it did not ask for); a helm and supervisor of different protocols refuse each other at the
-hello, so a remote host shows Needs update until it is updated. The helm keeps the last listing of each host in
-`helm.db` as `SessionInfo` JSON, whose decode ignores unknown fields, so rows cached before 77 still read. A page loaded
-from the previous helm and left open across the update must be reloaded; nothing keeps it working. Its terminals stop
-reconnecting on their own once the page sees the helm's new build (the build-mismatch latch, which can take a few
-seconds), and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old
-terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an
-older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as
-malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.
+a grid stream, so `Attach`, `Attached` and the client's terminal socket say nothing about it, and `SessionInfo` and
+`TabInfo` no longer report a terminal kind. The removal is a bump rather than an additive change because an older peer
+of the same protocol would still send and expect what a newer one no longer reads (a supervisor streaming an old
+terminal as bytes, a helm refusing a grid answer it did not ask for); a helm and supervisor of different protocols
+refuse each other at the hello, so a remote host shows Needs update until it is updated. The helm keeps the last listing
+of each host in `helm.db` as `SessionInfo` JSON, whose decode ignores unknown fields, so rows cached before 77 still
+read. When 77 shipped, a browser page left open across the update misdrew its terminals until reloaded, and keeping the
+stream notice for such pages was considered and not done. The desktop app has no such page ("Version and skew").
 
 An attachment carries one message per data frame in each direction, and the helm relays them without reading them
 (`crates/farhelm-helm/src/terminal.rs`, "Bounds and flow control"). It admits frames up to the grid bound of 1 MiB (one
 row of the widest grid with its links can run to hundreds of KiB), up to 4,096 of them, holding no more than 16 MiB per
-attachment; it forwards each browser message as one data frame and ends the attachment on a message over the 64 KiB
-input bound rather than forward it; and it pauses the supervisor itself. The grid client sends no pause or resume (the
-helm ignores one a page sends), and the helm reads its supervisor connection without waiting on any one terminal, so
-without that a browser slower than the supervisor's link would fill its attachment's queue at the first large catch-up
-(a full scrollback can be thousands of messages) and be detached as stalled. Instead the helm sends `PauseOutput` once
-an attachment's queue holds 2 MiB or 512 messages, and `ResumeOutput` once it has drained to 1.5 MiB and 384. A paused
-grid stream is sent nothing, history included, until the resume, then what it owes; it costs screen frames, never
-output.
+attachment; it forwards each client message as one data frame and ends the attachment on a message over the 64 KiB input
+bound rather than forward it; and it pauses the supervisor itself. The client sends no pause or resume (the helm ignores
+one a client sends), and the helm reads its supervisor connection without waiting on any one terminal, so without that a
+client slower than the supervisor's link would fill its attachment's queue at the first large catch-up (a full
+scrollback can be thousands of messages) and be detached as stalled. Instead the helm sends `PauseOutput` once an
+attachment's queue holds 2 MiB or 512 messages, and `ResumeOutput` once it has drained to 1.5 MiB and 384. A paused grid
+stream is sent nothing, history included, until the resume, then what it owes; it costs screen frames, never output.
 
 The supervisor ends an attachment that stays paused past its 60 second stall timeout, counted from the pause, which is
-what ends a browser that stopped reading. It also sets the slowest browser that still reads and is not ended: from the
+what ends a client that stopped reading. It also sets the slowest client that still reads and is not ended: from the
 pause it must drain the 512 KiB between the marks plus whatever was already on its way (up to the supervisor's writer
 queue, 64 messages of about 32 KiB, and what the link holds) within the 60 seconds. That is about 47 KB/s locally during
 a scrollback catch-up, the realistic case for a pause, since the sender then fills its writer queue; about 10 KB/s when
 little was in flight; and about 110 KB/s over ssh if its channel window and socket buffers hold about 4 MiB more, a
 figure that moves with however much the link actually holds. The resume's own wait in the helm's shared writer queue,
 behind other input, uploads and control messages, comes out of the same 60 seconds. Rearming the deadline while the
-browser keeps draining would remove the floor, but needs the helm to report progress and the supervisor to act on it, a
+client keeps draining would remove the floor, but needs the helm to report progress and the supervisor to act on it, a
 protocol and supervisor change; the marks keep the floor low enough without it. The pause leaves 14 MiB of the budget
 for what arrives after it, plenty at the sender's 32 KiB packing. Rows too large for that packing go alone in messages
 of up to 1 MiB, and a writer queue full of them (output that makes huge rows) can exceed the budget; that ends the
-attachment as stalled and the browser shows it as any stall until the user reconnects. The budget stays the hard bound;
-per-attachment credits that would avoid it are not built.
+attachment as stalled and the desktop app shows it as any stall, with Reconnect, until the user reconnects. The budget
+stays the hard bound; per-attachment credits that would avoid it are not built.
 
 The format is not permanent: it changes with ordinary protocol bumps, unlike the terminal host's protocol and snapshots.
 Protocol 72 replaces the JSON `rows`, `frame` and `history` messages with fixed-field little-endian binary records. The
@@ -2667,8 +2664,8 @@ JSON encoding repeated keys and style arrays through the full scrollback; the co
 workloads for measuring the replacement. A zero byte followed by the kind (1 rows, 2 frame, 3 history) distinguishes
 these records from JSON. Controls (`hello`, `state`, `history_reset`, `clipboard`) and all viewer input remain JSON. A
 peer never accepts the former row-bearing JSON as a fallback: it is an incompatible wire change, so the hello's protocol
-check must refuse mismatched helms and supervisors before an attachment starts. The page is already gated on the helm's
-build stamp.
+check must refuse mismatched helms and supervisors before an attachment starts. The desktop app needs no check of its
+own ("Version and skew").
 
 Binary rows carry a byte length, a wrap bit and runs with fixed-width columns, widths and metadata. Metadata holds
 twelve style flags and presence bits for nondefault foreground/background, an explicit underline color and a link index;
@@ -2682,11 +2679,10 @@ against the same 32 KiB target and 1 MiB hard bound; a whole row that exceeds th
 Its contract, bounds and golden fixtures are in `farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and
 `crates/farhelm-proto/grid-fixtures/`). Binary output fixtures pair bytes with JSON descriptions, including a fixed-seed
 varied-row corpus and malformed records; there is no tolerated binary category within the locked protocol version.
-`farhelm-proto`'s Rust tests validate every fixture and fail when checked-in bytes drift from the encoder. The grid
-client's node tests decode the same binary records, compare their content and model effects with the descriptions, and
-hold the test-only JavaScript feed encoder byte-equal to Rust. They also apply every JSON control fixture and compare
-the input builders with the valid input fixtures, some of which are allowed wire forms the client never sends (an empty
-last paste part, for one); they also hold the client's hand-copied input bounds to the invalid input fixtures.
+`farhelm-proto`'s Rust tests validate every fixture, input fixtures and refusals included, and fail when checked-in
+bytes drift from the encoder. The desktop app's grid model (`crates/gui/farhelm-grid-model`, `tests/fixtures.rs`)
+replays every accepted output fixture, read in place rather than copied so it can never be checked against a stale
+corpus; the old browser grid client's node tests over the same corpus went with that client.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent terminal change. It was added WITHIN protocol version 11 rather than bumping it, per the running
@@ -2705,16 +2701,18 @@ Protocol version 31 gives every terminal detach a code beside its reason. `Contr
 holds the terminal is `ErrorKind::TakenOver` rather than a `Conflict` recognized by its message, and the helm forwards
 the code in the terminal stream's `detached` notice. Clients decide behavior from the code only (the desktop app's
 terminal attaches again after `replaced` or `taken_over` and stops on a stall or a closed tab) and show the reason as
-text, so reason wording is free to change. Before 31 the helm and `terminal.js` compared English sentences they each
-kept a copy of, and only the disabled browser suite would have noticed a rewording.
+text, so reason wording is free to change. Before 31 the helm and the old browser app's `terminal.js` compared English
+sentences they each kept a copy of, and only that app's disabled browser suite would have noticed a rewording.
 
 The helm also uses `tab_closed` for a tab attach refused as `NotFound`. That refusal describes current state, not a
 passing condition: the supervisor looks the tab up among its live tabs, and a session or host that cannot be found has
-taken its tabs with it. Reported as `other`, it sent the browser's reconnect ladder through every attempt for every
-listed tab, rebuilding a terminal each time. The browser stops retrying on it, but paints the reason as a banner rather
-than hiding the pane, because silence is the reap's promise for a tab this view had working. The agent terminal's
-`NotFound` stays `other`: its reason is the supervisor's account of the session, such as a reboot and what restart would
-do.
+taken its tabs with it. Reported as `other`, it sent the old browser app's reconnect ladder through every attempt for
+every listed tab, rebuilding a terminal each time. The desktop app's helm client stops on it
+(`crates/farhelm-helm-client/src/terminal.rs`) and its terminal offers no Reconnect (`AttachedTerminal::status_line` in
+`crates/gui/farhelm-gui/src/terminal/attached.rs`). A tab it had attached says nothing and goes with the next pushed tab
+list, as SPEC.md has a tab whose shell exits disappear silently; a tab the helm never attached shows the reason, or its
+pane would stay blank. The agent terminal's `NotFound` stays `other`: its reason is the supervisor's account of the
+session, such as a reboot and what restart would do.
 
 ### TCP relay channels
 
@@ -2859,10 +2857,10 @@ reaches only a host's alias, icon and color, never its permissions or destinatio
 
 An error code or response at one level of abstraction is never, by default, equivalent to one at another level. The same
 name or number does not carry the same meaning once it crosses a layer: a supervisor's `ErrorKind::Unauthorized` says a
-session-scoped peer asked for something outside its slice, while the helm's HTTP 401 tells a browser it is signed out.
-Translating a code across levels is valid only through explicit, case-by-case reasoning, recorded where the translation
-happens. A blanket mapping from one layer's codes to another's is exactly the default equivalence this rule forbids,
-even when every current code happens to line up.
+session-scoped peer asked for something outside its slice, while the helm's HTTP 401 tells a client its device
+credential was not accepted. Translating a code across levels is valid only through explicit, case-by-case reasoning,
+recorded where the translation happens. A blanket mapping from one layer's codes to another's is exactly the default
+equivalence this rule forbids, even when every current code happens to line up.
 
 The helm applies this at its HTTP boundary. `SupervisorError` records whether the helm decided the kind itself or built
 it from a supervisor's `ControlMsg::Error` reply, and `http_error` translates a supervisor-decided kind through
@@ -3042,7 +3040,7 @@ since registry rows outlive the machines behind them. Version 14 replaced sessio
 whole-list reply, and version 15 carried helm-resolved launch bundles and upward profile resolution, which protocol 38
 removed with profiles. The historical paragraph below describes why 13 was current at the time; later released additions
 took the wire to 26. Version 16 introduced the durable optional structured launch snapshot carried with a create and
-`SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a browser-owned compiler
+`SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a client-owned compiler
 input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds `BrowseDirectory` and
 `DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to the chosen supervisor,
 which expands `~` from its own recorded home, canonicalizes the requested directory, and returns only a sorted bounded
@@ -3080,10 +3078,10 @@ actions"). The relay adds a doorway check of its own (`validate_agent_verb`) tha
 for, since only the relay puts an attacker-chosen target, title, directory and host name onto two byte-unbounded queues
 before anything downstream can look at them; its refusals are relay-specific by construction. The helm's agent doorway
 also accepts the exact asking session's bare ID on its requesting entry and points other bare or malformed targets to
-`farhelm agent sessions`; REST requires a full ID and tells stale browsers to reload. And the agent CLI escapes and caps
-a refusal before printing it, because the destination is a terminal rather than a browser — so a shared operation's
-WORDING is the UI's, while the bytes may be escaped and the tail cut. The relay's bounds can refuse a request before the
-shared operation; they do not relax that operation's checks.
+`farhelm agent sessions`; REST requires a full ID and its refusal says to reload Farhelm to refresh session references.
+And the agent CLI escapes and caps a refusal before printing it, because the destination is a terminal rather than the
+desktop app — so a shared operation's WORDING is the UI's, while the bytes may be escaped and the tail cut. The relay's
+bounds can refuse a request before the shared operation; they do not relax that operation's checks.
 
 `Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
@@ -3213,16 +3211,17 @@ The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/f
 GPUI app sends both as plain HTTP through the helm client, never as UI channel commands (see "The UI channel"). Their
 JSON bodies, and the attachment upload's answer, are `farhelm_proto::file_transfers` types that the helm and the helm
 client both use, so neither restates the other's (asked for by the migration's orchestrator on 2026-11-15). Both use
-session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is public.
-Stat returns the host display name alongside the protocol's resolved path, size and typed status. Download reopens
-independently and streams an octet body with an encoded basename attachment disposition. It promises no opening
-Content-Length: a file may change within the cap, and a later stream failure invalidates the whole body.
+session-owner routing and sit with attachments behind the same device-credential layer (`api_router` in
+`crates/farhelm-helm/src/lib.rs`); none of the three answers a preflight. Stat returns the host display name alongside
+the protocol's resolved path, size and typed status. Download reopens independently and streams an octet body with an
+encoded basename attachment disposition. It promises no opening Content-Length: a file may change within the cap, and a
+later stream failure invalidates the whole body.
 
 The desktop supplies its platform Downloads directory to the embedded helm. A download request with
 `save_to_downloads: true` stages privately on that filesystem and publishes only after successful EOF, returning the
 destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `report (1).pdf`, and so on, preserving the
 final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A standalone
-helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or webview fallback.
+helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or fallback.
 
 The desktop injects a separate file opener alongside its Downloads directory: macOS `open` receives the published path
 as one argument; Linux GIO dispatches its file URI without waiting for the default app to exit. Neither uses a shell or
@@ -3234,62 +3233,57 @@ file's final extension. The helm also reads the list for each stat hint, and re-
 or file can change after hover. The opener sees only that new local save. JSON always reports the saved path after
 successful publication, with `opened` and, on refusal or dispatch failure, `open_error`; opening cannot turn a
 successful save into a failed download. Stat includes `can_open` only with the native opener, from that same list. This
-is an authenticated desktop-helm capability: any signed-in device of that helm can request it, just as it can request a
-native save, rather than an extra origin gate. The ordinary server helm supplies no capability. No quarantine flag is
-added.
+is an authenticated desktop-helm capability: any caller holding that helm's device credential can request it, just as it
+can request a native save, rather than an extra origin gate. The ordinary server helm supplies no capability. No
+quarantine flag is added.
 
 The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
-without shortening either. All remote fragments still use textContent, peer isolation and visible format-character
-escapes. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and size color; refusals
-override size with red. Native mode alone advertises the platform modifier for `can_open` files. Printed paths and OSC
-file links forward their mouse event to the same transfer path; web modifiers always request a plain browser download.
+without shortening either. Every remote fragment goes through the host-text element: escaped, direction-isolated and
+with format characters made visible. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and
+size color; refusals override size with red (`crates/gui/farhelm-gui/src/terminal/files.rs`). The hover advertises the
+platform modifier only for `can_open` files. Printed paths and OSC file links go to the same check and transfer path.
 
-`terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the
-grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are
-offered. Link-line cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs. Logical lines
-over 8192 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary paths; filenames
-with spaces require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by a program
-rather than the terminal: the head's last token has no whitespace, quote or bracket after it apart from space padding,
-the tail's first token has only space indentation before it, and that token is longer in terminal columns than the
-head's unused columns minus a four-column right-margin allowance. The existing tokenizer must recognize a path at the
-head's final token and recognize the joined token; a plain word before an absolute path is not a cut. Both checks read
-the full line so URI chunk exclusions and diagnostic suffixes still apply. Both halves share its whole target and mapped
-range, with padding and indentation left out of the target. Consecutive possible hard cuts are left unchanged rather
-than reconstructing a three-row path. Terminal wrap handling and the 8192-character bound remain in force. Plain schemes
-and protocol-relative tokens are excluded. File URIs decode once; their path belongs to the session host regardless of
-URI authority. No shell directory tracking or hover cache is introduced.
+The grid model recognizes file links (`crates/gui/farhelm-grid-model/src/paths.rs`, ported from the old browser app's
+`terminal-files.js` at the reference commit), conservatively, after OSC 8 and printed web links in the order a line's
+links are offered. Recognition maps each byte of its text to the cell that owns it, preserving wide and combined glyphs.
+Logical lines over 8192 UTF-16 units (the old client's measure, kept so the same output reaches the same limit) or
+reaching more than 128 rows past their first are not linkified. Whitespace, quotes and brackets delimit ordinary paths;
+filenames with spaces require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by
+a program rather than the terminal: the head's last token has no whitespace, quote or bracket after it apart from space
+padding, the tail's first token has only space indentation before it, and that token is longer in terminal columns than
+the head's unused columns minus a four-column right-margin allowance. The existing tokenizer must recognize a path at
+the head's final token and recognize the joined token; a plain word before an absolute path is not a cut. Both checks
+read the full line so URI chunk exclusions and diagnostic suffixes still apply. Both halves share its whole target and
+mapped range, with padding and indentation left out of the target. Consecutive possible hard cuts are left unchanged
+rather than reconstructing a three-row path. Terminal wrap handling and the 8192-unit bound remain in force. Plain
+schemes and protocol-relative tokens are excluded. File URIs decode once; their path belongs to the session host
+regardless of URI authority. No shell directory tracking or hover cache is introduced.
 
-Grid printed-path hovers track the neighboring rows that can create or remove a cut. When only those outside rows
-change, the grid synchronously re-recognizes the path and range: an unchanged match keeps its hover and host check,
-without another asynchronous container-admission request. A changed match takes the ordinary leave/requery path.
-Covered-row changes always take that path too, preserving the existing display-text and provider-precedence checks.
+A hover is the link as the grid model finds it under the pointer: its file, its cells and, for a program's hyperlink,
+its label (`crates/gui/farhelm-gui/src/terminal/files.rs`). A redraw that finds the same link again is the same hover
+and keeps its host check; a changed link (a relabel, a path that grew, other cells) is a new hover and checks again.
+Leaving drops the check, and dropping its future abandons the request on the helm. Only a successful check admits a
+click, and only for the link it checked: the terminal finds the link again from the live text at the release, and the
+click counts only while that link's cells, file and label are still the checked one's. A click pressed while checking,
+or on a path the host refused, does nothing. A printed path shows the pointing hand only once its check succeeded; a
+program's hyperlink shows it at once. Click reopens the disclosed canonical path independently.
 
-The grid passes every OSC 8 target on, so the page's OSC link handling owns the explicit scheme boundary (`oscTarget`):
-parsed http/https targets go unchanged to the existing opener, valid file targets go to file lookup/download, and every
-other scheme does nothing. Fresh hover evidence owns an AbortController and click admission. Covers are declarative:
-every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own
-markup (today the approval region, the tunnel-error notice, the quick-launch pill, Farhelm's hover tooltip and the trash
-flight animation), and file and disclosed web-link activation alike check the live bounds of every rendered marked
-surface for any overlap with the hover. A hand-kept selector list was how the quick-launch pill went uncounted. Overlap
-is the whole test, so a tooltip refuses a click only while it actually overlaps the hover, and a link's own hover never
-shows one. Modal backdrops are not covers: they span the window and make every terminal inert, so no link under one can
-be clicked. A covered hover refuses the click before transfer or opening. Its explanation sits above every cover except
-the brief, unfilled trash flight until the pointer leaves the link, then returns to the ordinary failure layer.
-app.css's z-index ladder states the rule next to the hover's layer, and a browser test checks the explanation's layer
-against every marked surface it can render. The grid synchronously leaves and re-enters a link when its rows redraw
-(grid-terminal.js's `refreshHover`), so leaving withdraws click/cursor admission immediately but defers abort and
-tooltip removal to the next task. A re-hover in that interval keeps the evidence only for the same displayed text,
-target path and snapshotted start/end cell range; a real departure or replacement invalidates it, including raced
-replies. A kept ready cursor is restored in a microtask, once the hover callback has returned and the grid has settled
-which link is current, and only while that replacement link is still hovered. Teardown never writes cursor decorations:
-by then another link may be the hovered one, and the cursor is that link's to set. Plain links underline before lookup
-but gain a pointer only when ready. Click reopens the disclosed canonical path independently. Browser bodies become a
-bounded Blob only after successful EOF; an object URL is released after the save click. The desktop handoff secret
-identifies native mode, which requests `save_to_downloads` and adds `open` only for its platform modifier-click when
-that hover's stat reply offered opening; otherwise the modified click saves and explains that opening was not offered.
-It never falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode
-format escapes. `FileLinks` is disposed with its grid, cancelling pending work; a grid held across a reconnect or kept
-as a takeover snapshot keeps it.
+A click sorts a program's hyperlink by its parsed target: `TerminalLink::file_path`
+(`crates/gui/farhelm-grid-model/src/paths.rs`) sends a `file://` target without query or fragment to the host check;
+`web_target` (`crates/gui/farhelm-grid-model/src/links.rs`) admits only http and https, whose parsed serialization goes
+to the opener (or, for a Mac Cmd-click the display offered a tunnel for, through that tunnel); every other scheme opens
+nothing and says nothing (`link_released` in `crates/gui/farhelm-gui/src/terminal/attached.rs`). The hover's display is
+the click's safeguard: a click whose display was not fully visible inside the window is refused with an explanation,
+before any transfer or opening. SPEC.md also counts a display another Farhelm surface covers (an approval card, the
+tunnel-error notice) as not visible. The desktop app does not build that cover check yet: it waits for the layer manager
+to report what covers a popover, together with raising a refused link's explanation above the cards ("Overlays: the
+layer manager"); the old app marked every such surface after a hand-kept list let its quick-launch pill go uncounted.
+
+An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
+platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its
+status says that opening was not offered (`crates/gui/farhelm-gui/src/terminal/files/download.rs`). No GUI code touches
+the file. The file links live and die with their terminal: closing it abandons a check or an unfinished save, and the
+helm removes what that save staged.
 
 Container environments use these ordinary file rules against their in-container supervisor. The earlier
 checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are
@@ -3642,7 +3636,7 @@ host beyond that scale may be unlistable in the app; supporting such collections
 
 Protocol 44 adds `ListCheckoutTrash`/`CheckoutTrashListed` and `DeleteCheckoutTrash`/`CheckoutTrashDeleted`. The helm
 routes each HTTP request to one connected supervisor and checks the observed host incarnation before dispatch; it keeps
-no archive listing cache. IDs select records, never paths supplied by the browser. The session Delete reply includes
+no archive listing cache. IDs select records, never paths supplied by the client. The session Delete reply includes
 `archived: true` only when its completed last-reference teardown moved a checkout; bare successes and notice-only
 replies retain their existing JSON shapes.
 
@@ -3719,60 +3713,59 @@ recorded destination after its separately recorded original basename, accepting 
 collision suffix. Invalid historical dates have no time; directory modification times do not substitute for the rename's
 timestamp.
 
-The UI reads each connected host independently, without sizes for the sidebar count and with sizes for the open dialog.
-Load, connection changes, its own affirmative archive Delete, a managed row disappearing between complete fleet
-listings, dialog open and cleanup completion trigger reads. A host whose last successful same-incarnation listing says
-`removing` is re-read every three seconds until a successful listing says otherwise. Only that host is polled, with
-sizes while the dialog is open; an unavailable read retains its last removal report. Each host has one owner-scoped poll
-task, whose scheduled ticks share that host's single-flight reader and add no demand while a read or retry is already
-owed. Reads stay suspended during this page's delete requests. A same-connection count remains visible during
-measurement, but an old read generation cannot overwrite this client's deletion result. Host-local request ordering also
-prevents an older poll from replacing a newer measurement or completed removal, without invalidating unrelated hosts'
-reads. A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session Delete or Replace
-that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts listings carry it; only
-its change invalidates an idle host's Trash reader, so a cleanup the window did not start, such as a session Delete from
-the command line or an agent that archived a checkout, still starts the existing removal poll. Ordinary fleet events and
-fallback ticks do not themselves read Trash. Changes through another helm are noticed on reconnect, app load or dialog
-open. The page's existing feed/fallback owner requests shared notice reads too, with an explicit initial read and the
-existing SurfaceReader retry/coalescing policy. No additional timer or channel is mounted. Per-host read children are
-keyed by host and connection incarnation, retaining independent demand and retry lifetimes. An explicit delivery counter
-and the host epoch preserve pending causes across reactive batching; registry uncertainty retains the owner without
-dispatching RPCs, and a recovered registry supplies unattended news. Each attempt samples current measurement mode and
-mutation generation. A discarded pre-mutation reply is not an answer unless a replacement actually satisfies that
-demand. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
+The window reads each connected host's trash independently (`crates/gui/farhelm-gui/src/trash.rs`), without sizes for
+the button's count and with sizes while the dialog is open, which reads every connected host as it opens. A host whose
+last successful listing says `removing` is read again every three seconds until a successful listing says otherwise;
+only that host is rechecked, and not while a read of it is out. A failed read keeps the last removal report and ends the
+rechecks until the host's trash epoch moves, it reconnects or the dialog opens. A settled delete reads its host again
+(the exceptions are below). A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session
+Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts
+listings carry it; only its change makes the window read an idle host again, so a cleanup the window did not start, such
+as a session Delete from the command line or an agent that archived a checkout, is still read and its removal rechecked.
+Ordinary pushes do not themselves read Trash. Changes through another helm are noticed when the window first sees a
+host's connection, on reconnect, or when the dialog opens and measures every connected host (`sync` and `open` in
+`crates/gui/farhelm-gui/src/trash.rs`). Trash notices arrive in the helm's pushed `Notices` collection like every other
+notice, so no timer or channel of the trash's own is mounted. The window keeps each connected host's newest read, keyed
+by host and connection incarnation, and drops an answer to any older read, so a reply from a host's earlier connection,
+from before a delete or from an older recheck never replaces a newer one, and unrelated hosts' reads are unaffected
+(`crates/gui/farhelm-gui/src/trash/listing.rs` records the decision); while the registry cannot be read, nothing is read
+or dropped. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
 counts stay unknown; the global cleanup requires successful, settled listings from every reachable host, and refuses a
 host above the protocol's 10,000-ID batch limit rather than silently omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
-forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
-connection identity and checks the existing shared operation guard, without claiming it. Trash's own pending-host state
-rejects overlapping cleanup requests synchronously. An immediate single-entry delete freezes only that checkout's ID and
-its host incarnation at click time, requires the full host listing to be eligible, and uses the same dispatch and
-completion path without a confirmation. Each host receives one frozen batch, with independent host tasks. Confirmed bulk
-submission closes the modal before starting those requests; the persistent `TrashControl` owns their lifetime. An entry
-Delete leaves it open, and closing it does not cancel the accepted request. Connection identity is rechecked before
-dispatch. The helm bounds its wait for the delete's answer as it does for other host commands (see "The UI channel"):
-the helm only talks to supervisors of its own protocol, and those answer once the folders are moved aside; the ordinary
-mutation deadline is sixty seconds. A capable host's accepted IDs stay in the local listing, count and size totals as
-removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic removal on
-the receipt. A capable receipt starts the existing completion poll immediately, including for an accepted
-diagnostic-only ID, so a failed immediate refresh cannot lose its outcome. The row's Retry uses the same single-ID
-selection and guards as Delete; queued or running rows offer no second action. Failure text and time participate in the
-existing layout-settle fence because they can move other rows' destructive buttons. Only the persistent trash icon turns
+forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the window checks that
+the host's own key is free and that no other trash delete of this window's is running; a refused press sends nothing. An
+immediate single-entry delete freezes only that checkout's ID and its host incarnation at click time, requires the full
+host listing to be eligible, and uses the same dispatch and completion path without a confirmation. Each host receives
+one frozen batch, with independent host tasks. Confirmed bulk submission sends those requests and closes the modal at
+once; they run as work in the operation store under each host's trash key, so closing the dialog does not end them. An
+entry Delete leaves it open, and closing it does not cancel the accepted request. Connection identity is rechecked
+before dispatch. The helm bounds its wait for the delete's answer as it does for other host commands (see "The UI
+channel"): the helm only talks to supervisors of its own protocol, and those answer once the folders are moved aside;
+the ordinary mutation deadline is sixty seconds. A capable host's accepted IDs stay in the local listing, count and size
+totals as removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic
+removal on the receipt. A capable acceptance marks the host as removing, including for an accepted diagnostic-only ID,
+so a failed read right after cannot lose that report. A settled delete reads its host again unless a read has gone out
+since the delete did (`TrashButton::deleted` in `crates/gui/farhelm-gui/src/trash.rs`). A delete the helm answers with a
+host timeout (504) is followed by no read: the helm goes on with the cleanup while holding the host's trash gate, so a
+read would wait out the same bound, and the epoch the helm advances when a late answer accepts a checkout reads the host
+then (decided on 2026-11-15; recorded at `TrashButton::deleted`). The row's Retry uses the same single-ID selection and
+guards as Delete; queued or running rows offer no second action. A change in a row's failure text or time can move other
+rows' Deletes, so it starts the dialog's settle pause on every entry's Delete. Only the persistent trash icon turns
 upside down and bobs while requests are pending or a connected host's last listing reports removal, with stepped timing
 within the looping-indicator cap, the universal inactive-window pause, and no animation under Reduce Motion. Its tooltip
 names hosts freeing space and independently discloses retained cleanup issues. Opening the dialog does not clear issues.
 Later successful removals clear only their IDs' old issues; new per-ID diagnostics replace older diagnostics for those
-same IDs. Host-level uncertain outcomes retain their frozen unresolved IDs privately. A later reply resolves only
-selected IDs it confirms removed or answers with a per-ID diagnostic; unrelated successes leave uncertainty intact. A
-newer uncertain result replaces only its overlap with an earlier uncertain selection, preserving unrelated IDs and
-ID-specific refusals. A healthy host registry prunes notices only for hosts it omits, including while deletes are
-pending; disconnected hosts and uncertain registry reads retain them. A pending request remembers an observed removal
-until it finishes, so a late reply cannot recreate those notices even if a subsequent registry refresh fails. That fence
-ends with the request. A lost reply warns that some folders may already be deleted; other hosts continue, and the UI
-refetches after all requests settle. Close and Escape stay available. The archive cue stores row geometry on the
-persistent trash button, consumes it on the local Delete reply, and uses finite Web Animations with reduced-motion
-refusal. No global geometry cache or new asset file is introduced.
+same IDs. An answer that is not a cleanup report is one dialog notice naming the IDs its delete sent, and a later report
+shrinks it by the IDs it confirms removed or answers with a per-ID diagnostic; unrelated successes leave it intact. A
+newer unconfirmed result takes its IDs out of earlier unconfirmed notices and leaves refusals alone (`record_outcome` in
+`crates/gui/farhelm-gui/src/trash/listing.rs`). A successful registry read prunes notices only for hosts it no longer
+lists; disconnected hosts and an unreadable registry keep them, and a late answer for a host removed meanwhile leaves
+nothing behind. A lost reply warns that some folders may already be deleted; other hosts continue. Close and Escape stay
+available. The archive cue (`crates/gui/farhelm-gui/src/trash/cue.rs`) wiggles the can when this window's session Delete
+reports that it archived a checkout, through ticker steps, and never under reduced motion; the row outline's flight into
+the can is not built yet, waiting for an overlay above the sidebar that only the layer manager may draw.
 
 The helm keeps shared non-session condition notices in one host-cascading table. Each notice has a non-reused integer
 ID, its host/kind/checkout key, first raise time, read and resolved flags, and a tagged content snapshot. The initial
@@ -3816,9 +3809,10 @@ channel records these notices.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
   Restart is an unconfirmed normal action because no process remains; Replace starts as a normal trigger and keeps its
-  destructive confirmation inline. Replace reuses the existing create-then-delete endpoint and, on success, hands the
-  new session back to the page selection owner so the fresh conversation becomes visible immediately; refusal remains on
-  the card with the endpoint's actionable wording. An open Replace confirmation keeps its trigger visibly pressed.
+  destructive confirmation inline. Replace reuses the existing create-then-delete endpoint through the row's Replace
+  (`crates/gui/farhelm-gui/src/session_list/replace.rs`) and, on success, opens the new session if the source is still
+  the open one, so the fresh conversation becomes visible immediately; refusal remains on the card with the endpoint's
+  actionable wording. An open Replace confirmation keeps its trigger visibly pressed.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the session's invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different
@@ -4699,17 +4693,17 @@ parents using the ordinary umask, then re-resolves the configured spelling and r
 capturing the root identity. It may leave an empty root after a later refusal. Atomic mkdir remains the checkout
 collision authority. Known intent keys reconcile their original snapshot before current configuration or launch
 compilation; replacement identities additionally bind the source session and preserve its veto. The composer reads its
-checkout folder field from that accepted preview, or from the original binding while reconciling an ambiguous create. It
-leaves the field read-only until an explicit existing-folder action changes the destination draft; the old editable
-`cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty with an error state rather
-than displaying the old seed.
+checkout folder field from that accepted preview. It leaves the field read-only until an explicit existing-folder action
+changes the destination draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures
+leave the path empty with an error state rather than displaying the old seed.
 
 The serving future owns one serial three-second revision observer, initialized before readiness and HTTP serving.
 Changed revisions publish existing fleet invalidations; failed reads preserve the last observation. Launch history
-carries the authenticated revision. The composer's shared SurfaceReader retains refresh demand through read failures,
-obeys build-skew withdrawal, and applies replies only to the current target. While the feed is unavailable, a
-component-owned fallback uses the shared polling cadence and scheduled reader trigger; it cannot queue overlapping reads
-or interrupt backoff. Its highest observed revision cannot roll back while another history request is pending or fails.
+carries the authenticated revision. The launcher reads it for the chosen host when it opens and whenever the host or its
+connection changes, keeps an answer only while it still names the host and connection asked about, and does not follow
+later changes while open (`crates/gui/farhelm-gui/src/launcher/view/history.rs`); a rising revision asks the
+managed-checkout destination for a new preview, and the observed revision never goes back down, so an older read
+answering late cannot undo a newer one.
 
 `POST /api/github-repositories` merges installation-scoped recents with supervisor discovery. The scanner owns two
 subprocess permits independently of directory admission, considers at most 1024 immediate entries and returns at most
@@ -4719,7 +4713,7 @@ deadline and a five-second enclosing budget. Cancellation kills and reaps before
 discard ambient Git configuration/location overrides, without changing the ordinary credential environment used by
 clone. Only validated GitHub HTTPS/scp/SSH origins become canonical pairs; raw origin URLs never reach the UI.
 Recent-first deduplication, sorted discovered entries and explicit incomplete status keep a failed scan from disabling
-manual repository selection. Browser requests debounce for 150 ms and discard stale host/query generations.
+manual repository selection. The launcher's requests debounce for 150 ms and discard stale host/query generations.
 
 `GET`/`PUT /api/checkout-root` is an ordinary protected route with a required nullable `root` and no host or command
 fields. It calls the existing global setter/clearer; the revision watcher is the sole invalidation publisher for HTTP
@@ -4878,12 +4872,13 @@ on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO for admission
 than a positive bypass claim. Protocol 48 adds the closed `Guarded` permission variant; older supervisors cannot decode
 it, and older releases cannot read new stored guarded launches. `LaunchHarness::guarded_flags` supplies both the
 compiler's argv and the launcher's help, so the two cannot describe different flags. A resume copies these before its
-selector, including before Codex's subcommand. The helm's remembered permission and the browser's local mirror discard a
-permission equal to the harness's omitted mode. This prevents default or forced YOLO from becoming another harness's
-preselection while preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same
-boundary: passing through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects
-the real default. Preferences written before this change retain their value until the next structured launch; the stored
-word does not say which harness supplied it. No second default-mode table or preference provenance is kept.
+selector, including before Codex's subcommand. The helm's remembered permission discards a permission equal to the
+harness's omitted mode, as the old browser app's local mirror did; the desktop app keeps no mirror and starts New from
+the helm's remembered word. This prevents default or forced YOLO from becoming another harness's preselection while
+preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same boundary: passing
+through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects the real default.
+Preferences written before this change retain their value until the next structured launch; the stored word does not say
+which harness supplied it. No second default-mode table or preference provenance is kept.
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
@@ -4892,14 +4887,14 @@ including passive memory seeds. Before the first harness, only an explicit permi
 seed or displayed default cannot trigger the notice. Permissions are ordered as Chat/Approve, SmartApprove/Guarded, then
 YOLO/Custom/own-setting. The existing reconciliation and remembered-choice rules are unchanged. One transient notice
 retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection evidence or cache
-contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. An ambiguous
-managed-checkout attempt still reconciles through its retained key when the request binding matches; Undo does not
-rewind or discard that attempt. Notice generations fence queued Undo, dismiss and expiry callbacks. Undo also checks the
-live launcher opening generation, and a new opening or prefill clears the notice, so a mounted Clone/Replace reseed
-cannot receive another source's saved draft. CSS supplies the slide, permission outline and a separate visually constant
-eight-second lifetime animation; hover, focus within the banner and the existing inactive-window rule pause that
-lifetime. Reduced motion keeps only the lifetime animation and a static outline. Removing the notice's controls returns
-focus through the existing launcher helper.
+contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. Notice generations fence
+queued Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and a new opening or
+prefill clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved draft. The banner's
+slide and the permission outline's fade are the component layer's one-shot transitions, keyed on the banner's
+generation; its eight seconds are a ticker deadline counted only while it is neither hovered nor holding focus, and,
+unlike the old app's, they keep running while the window is inactive (a recorded deviation,
+`crates/gui/farhelm-gui/src/launcher/view/escalation.rs`). Reduced motion drops the slide and keeps the outline,
+unfaded, while the banner shows. Removing the notice's controls returns focus through the existing launcher helper.
 
 Protocol 49 adds the closed `Custom` permission and `LaunchSelection::permission_flags`, an optional vector present
 exactly with Custom. Older peers refuse the new protocol and older releases cannot read custom sessions or templates;
@@ -4950,38 +4945,40 @@ projection or guessing aliases. Frequency sorts descending and the newest retain
 model, or effort remains the saved harness default and is part of the complete selection identity, not a wildcard that
 merges explicit choices. Permission identity uses the effective mode, including an omitted YOLO default.
 
-The editable folder field offers its bounded history as a grouped combobox. Its optional active index stays empty until
-arrow navigation, preserving ordinary form submission on a typed path. Pointer and keyboard choices share one guarded
-callback; each recent choice carries the installation that offered it. Labels escape peer text before retaining the last
-35 characters with a start ellipsis; narrower layout clips the leading edge while retaining LTR direction and the full
-accessible name and tooltip. The list floats below its input like model/search suggestions, with its own bounded scroll
-region and keyboard scrolling of the active row. Removing an in-flow list on pointer blur would resize and recenter the
-dialog between mousedown and mouseup, moving Launch or another pressed control away before its click.
+The editable folder field offers the chosen host's recent folders and two resets in a dropdown
+(`crates/gui/farhelm-gui/src/launcher/view/folder_list.rs`) that floats under the field on the layer manager's
+non-focusing popover, so focus and every key stay in the field. No row is highlighted until an arrow moves to one, so
+Enter with nothing highlighted still launches a typed path. A recent folder stays bound to the installation whose
+history offered it. Labels escape peer text and run at most 36 characters, a leading ellipsis standing in for the rest
+and never cutting through an escape, with the full escaped path as the row's accessible name and hover help. The list
+floats rather than sitting in the dialog's flow because the old app found that an in-flow list removed as the field lost
+focus resized the dialog between press and release, moving Launch away before its click.
 
 The composer retains the installation claim when a recent setup or saved folder is applied, not only while offering the
-suggestion. A replacement under the same registry row disables Launch and requires an explicit host or folder choice.
-The same installation reconnecting keeps the claim valid. Captured history callbacks check the current destination
-before changing the draft; submission checks it before and after key minting. New carries the selected session's folder
-beside its installation snapshot from AppBody, independently of the filtered sidebar projection.
+suggestion. A replacement under the same registry row refuses Launch until the user chooses the host or folder again
+(`FOLDER_INSTALLATION_MOVED`, checked by `LaunchDraft::refusal` in `crates/gui/farhelm-gui/src/launcher/request.rs`).
+The same installation reconnecting keeps the claim valid. New takes the open session's folder from the store, beside the
+installation it is on, so it follows an open session the sidebar's filter hides
+(`crates/gui/farhelm-gui/src/launcher/entry.rs`).
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
-  aliases), last-known session cache (survives helm restarts per SPEC.md), recoverable web token, hashed browser device
-  sessions, and the one client preference (list order, last-selected session, compact rows, and host setup/removal
-  confirmation choices) every client shares. Its ordinary store opens share the supervisor's journal setup: owning opens
-  attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return
-  `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after
-  reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power
-  loss without weakening database consistency; process crashes preserve commits. Host removal, host command, YOLO and
-  both browser-link permission setters, and patches that set or clear tunnel consent, temporarily use FULL (EXTRA if the
-  file still uses a rollback journal) so a power loss cannot restore acknowledged trust revocations, and restore the
-  connection's prior sync setting afterwards. Unrelated preference patches remain NORMAL. On macOS, FULL and EXTRA make
-  these writes durable only up to the drive's cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this
-  limit, judging the additional protection marginal and expecting most Macs running Farhelm to have batteries.
-  First-contact identity recording can remain NORMAL: a forgotten consumer copy is learned again from the supervisor's
-  durable source identity. Schema and local-row setup are atomic or repeatable database-only work. The separate
-  checkout-config CLI opener is unchanged and keeps FULL. Backup and restore must keep each database with the `-wal` and
-  `-shm` files its backup includes and remove current sidecars absent from that backup before restoring, so unrelated
-  journal data is not replayed.
+  aliases), last-known session cache (survives helm restarts per SPEC.md), the old browser sign-in's web token and
+  device-session tables (left by older helms and never read), and the one client preference (list order, last-selected
+  session, compact rows, and host setup/removal confirmation choices) every client shares. Its ordinary store opens
+  share the supervisor's journal setup: owning opens attempt WAL before migrations, warning and continuing in the
+  current mode if conversion fails or does not return `wal`. Non-owning opens never convert; every ordinary read-write
+  connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts
+  losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve
+  commits. Host removal, host command, YOLO and both browser-link permission setters, and patches that set or clear
+  tunnel consent, temporarily use FULL (EXTRA if the file still uses a rollback journal) so a power loss cannot restore
+  acknowledged trust revocations, and restore the connection's prior sync setting afterwards. Unrelated preference
+  patches remain NORMAL. On macOS, FULL and EXTRA make these writes durable only up to the drive's cache: SQLite does
+  not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection marginal and
+  expecting most Macs running Farhelm to have batteries. First-contact identity recording can remain NORMAL: a forgotten
+  consumer copy is learned again from the supervisor's durable source identity. Schema and local-row setup are atomic or
+  repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup and restore
+  must keep each database with the `-wal` and `-shm` files its backup includes and remove current sidecars absent from
+  that backup before restoring, so unrelated journal data is not replayed.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one
@@ -5045,17 +5042,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   host/session pair alongside any independently supplied host filter.
 - A host alias is nullable display data: when set it replaces the derived SSH destination or local `this machine` label.
   Input is trimmed; an empty result clears the alias. Nonempty aliases reject control characters and are limited to 64
-  Unicode characters. The browser mirrors these syntax checks, while the helm owns collision checks and remains the
-  authority for accepting the write. Setting one is checked against every OTHER host's current display name, alias or
-  derived — a stored alias is arbitrary text with no uniqueness index of its own, so this is the only check that can
-  catch it colliding with anything. Every write that instead touches a DESTINATION (registering, retargeting, or
-  clearing an alias to restore the derived name) is checked only against other hosts' current ALIASES:
-  destination-versus-destination collisions are already the `hosts_ssh_destination` partial unique index's job, so
-  checking against every display name there would just re-detect what the index already refuses, under the wrong error.
-  Skipping the destination-side check entirely, though, would let a registration, a retarget, or a clear reintroduce the
-  exact ambiguous name an alias write had just been refused for. The alias rides the manager's host snapshot with the
-  destination and connection state, so session rows, single-session reads, and agent relay views derive one coherent
-  name without each joining the registry.
+  Unicode characters. The desktop app's Add host dialog mirrors these syntax checks (a host's settings dialog sends an
+  edited alias as typed, except that a blank one, empty or only whitespace, goes as `null`), while the helm owns
+  collision checks and remains the authority for accepting the write. Setting one is checked against every OTHER host's
+  current display name, alias or derived — a stored alias is arbitrary text with no uniqueness index of its own, so this
+  is the only check that can catch it colliding with anything. Every write that instead touches a DESTINATION
+  (registering, retargeting, or clearing an alias to restore the derived name) is checked only against other hosts'
+  current ALIASES: destination-versus-destination collisions are already the `hosts_ssh_destination` partial unique
+  index's job, so checking against every display name there would just re-detect what the index already refuses, under
+  the wrong error. Skipping the destination-side check entirely, though, would let a registration, a retarget, or a
+  clear reintroduce the exact ambiguous name an alias write had just been refused for. The alias rides the manager's
+  host snapshot with the destination and connection state, so session rows, single-session reads, and agent relay views
+  derive one coherent name without each joining the registry.
 - The add host dialog marks its `POST /api/hosts/probe` as a new entry (`new_entry`, carrying the optional alias); no
   other caller sends it. Without the marker the probe keeps converging onto an existing row for the destination, which
   is how a host row's "set up again", path repair, a confirmed add's own second registration and update confirmation
@@ -5340,12 +5338,11 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   `with.host` naming anything but the source's own host (compared against the `claim` `route_session` resolved for the
   source, not a fresh registry read) is refused with `Conflict` before either the create or the delete runs — the same
   refusal shape `precondition::incarnation_holds` already gives an ordinary create, applied here to `with`'s own
-  `expected_incarnation` too. The client's idempotency binding folds the replace-with source id in alongside the
-  ordinary create fields (`create_form.rs`'s `IntentBinding::replace_source`), so retrying a replace-with reuses its own
-  key and an ordinary create can never collide with one — and the wire body's own two `intent_key` fields (the
-  endpoint's own, and the one `with` carries because it is built from the identical create-body function) must agree, a
-  caller sending two different keys for what claims to be one intended create being refused as a 400 rather than
-  silently resolved by picking one.
+  `expected_incarnation` too. The desktop app sends no `intent_key` (its Replace with carries none, see
+  `crates/gui/farhelm-gui/src/session_list/replace.rs`). For a caller that does, the wire body's own two `intent_key`
+  fields (the endpoint's own, and the one `with` carries because it is built from the identical create-body function)
+  must agree, a caller sending two different keys for what claims to be one intended create being refused as a 400
+  rather than silently resolved by picking one.
 - Host management commits first and converges the live actors after; ordinary WAL/NORMAL commits survive process crashes
   but may be lost on an OS crash or power loss. Each verb states how it fails closed: add rolls its row back if no actor
   could be started (a registered host with no actor is invisible and un-dialed, while its destination is taken);
@@ -5537,28 +5534,20 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   disappearing IDs are removed, and new IDs append. Reconciliation adopts the displayed IDs without recapturing pin
   membership. Move neighbors come from the displayed leading run of original, still-pinned rows, excluding pins added
   during the hold even when contiguous. Missing or mixed pin positions retain the older stable partition with no Move
-  controls. Row menus use their existing action-identity focus reconciliation; accepting Move returns focus to the keyed
-  row's toggle before the request, then uses the ordinary row refusal and explicit listing refresh paths. The page's
-  menu-focus helper observes direct list-child mutations only while a session toggle owns focus. If its keyed row is
-  removed and reinserted, the helper restores focus lost to the document body after that actual DOM mutation, provided
-  the same node remains connected, the document still has focus, and no independent focus intervened. A later focus
-  choice or row removal retires that observer; focusout without replacement focus retires it at the next animation frame
-  if reinsertion has not restored focus. An old mutation or frame callback cannot affect its successor. No optimistic
-  order or client write queue is introduced. Pointer dragging uses `pin-order.js`, an unconditional asset on web and
-  desktop, with its eval bridge owned by the component that renders the actual list root. Listing error/recovery can
-  replace that root without replacing ListView; the bridge owner follows the root so late predecessor cleanup cannot
-  release its successor. Setup waits for the asynchronous asset while the root's mount marker remains current, and the
-  eval awaits its subscription lifetime. The grip shares the existing displayed eligibility projection and stays out of
-  sequential Tab order; menu moves supply keyboard reordering. An armed pointer owns temporary document capture and
-  Escape listeners, removed on drop, cancellation or teardown. Geometry is sampled from current eligible rows and
-  clipped to the visible pinned group. Only transient lift/drop-line paint changes before the ordinary relative move
-  callback; receipt rechecks current source admission and displayed membership without recapturing adjacency. Hiding the
-  list cancels its gesture. No HTML drag-and-drop, optimistic DOM order, separate rank or drag focus-retention mechanism
-  is introduced. Replace copies a source pin and its position to the new id before requesting the source's deletion, so
-  a pin write failure leaves the source intact; if deletion fails both surviving sessions can be pinned at the same
-  position. An already-pinned replacement keeps its position. Positions deliberately are not unique, and their total
-  order is `(position, host_id, session_id)`. Confirmed deletion clears the old pin best effort, like the other viewer
-  metadata.
+  controls. Move up and Move down close the row's menu at acceptance, returning focus to its menu button, go through the
+  operation store under the session's key, and show a refusal on the row
+  (`crates/gui/farhelm-gui/src/session_list/pins.rs`). Nothing is drawn in advance and there is no client write queue:
+  the helm pushes the new order before it replies. Dragging a movable pin by its grip
+  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs`) sends that same one move, naming the pin at the drop line and
+  a side. The grip is no Tab stop, since the row's menu is the keyboard way to reorder. From the press to the release
+  the drag follows the pointer across the window in the capture phase; where a drop would land is worked out afresh from
+  the movable rows as last drawn, and only the lift and the drop line are painted before the move is sent. Escape, a
+  release the window never saw, the row ceasing to be movable, the listing becoming unavailable or the Hosts panel
+  taking the rows' place cancels the drag with nothing sent. Replace copies a source pin and its position to the new id
+  before requesting the source's deletion, so a pin write failure leaves the source intact; if deletion fails both
+  surviving sessions can be pinned at the same position. An already-pinned replacement keeps its position. Positions
+  deliberately are not unique, and their total order is `(position, host_id, session_id)`. Confirmed deletion clears the
+  old pin best effort, like the other viewer metadata.
 
   `PUT /api/sessions/{id}/pin-order` requires `{neighbor: full_session_reference, placement: "before" | "after"}`. Both
   sessions must be known to the helm, including cached sessions on unreachable hosts, and both must still be pinned; a
@@ -5914,17 +5903,20 @@ sound: a seal happens only when no other row exists, and a tab of the deleted se
 claim, which the seal holds. A replay that only answers an existing session still answers. The seal is never cleared.
 `SessionList.sealed` carries it on every listing, since the hello is sent once per connection.
 
-On the helm, the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned
-host is still refused, so an older page cannot reach it, and `delete_sandbox=true` keeps meaning the whole-environment
+On the helm, the new path is opted into by a query only new clients send; a plain DELETE of a session on a session-owned
+host is still refused, so an older client cannot reach it, and `delete_sandbox=true` keeps meaning the whole-environment
 Delete. The helm denies the session's pending approval cards first (an unanswered spawn card would otherwise hold the
 agent fence), queues behind any other environment session Delete of the same host, then takes the host's provisioning
 lock without waiting (a setup, update, suspend or whole-environment removal answers "try again"), re-reads the row and
 requires it session-owned and machine-deleting, and sends the request only while the host is connected, with a reply
 deadline derived from the supervisor's wait bound and teardown's own bounds. Not connected, not sent, sent without an
-answer, or past the deadline: the helm answers with a marker that nothing was decided, and the page offers the warned
-whole-environment Delete. The route itself answers within the host reply bound ("The UI channel"), so only a marker
-decided within it reaches the page. `Deleted` runs the ordinary local forgetting and reports the supervisor's count;
-`Sealed` destroys the environment through the same removal path as host removal, under the lock already held.
+answer, or past the deadline: the helm answers with a marker that nothing was decided (`ENVIRONMENT_UNASKED_HEADER`),
+which the client answers by offering the warned whole-environment Delete. The route itself answers within the host reply
+bound ("The UI channel"), so only a marker decided within it reaches the client. The desktop app does not send this
+Delete yet: its environment session Delete comes with the environment sessions' port
+(`crates/gui/farhelm-gui/src/session_list/delete.rs`). `Deleted` runs the ordinary local forgetting and reports the
+supervisor's count; `Sealed` destroys the environment through the same removal path as host removal, under the lock
+already held.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is
@@ -6413,7 +6405,7 @@ inapplicable Host field. Shared template application treats them as one placemen
 to its recipe and creates a new sandbox. Restart/Replace retain the actual host internally; ordinary creates reject
 owned host destinations, except an agent create from that same environment. Agents cannot list, read or write recipe
 templates; agent template verbs naming one are refused, and only `farhelm agent create --template` from an ordinary host
-launches one. Changes to the shared template encoding must preserve the existing strict-decoder and old-page failure
+launches one. Changes to the shared template encoding must preserve the existing strict-decoder and older-client failure
 behavior; a protocol bump, if needed for that encoding, is separate from the removed supervisor policy and membership
 protocol.
 
@@ -6496,46 +6488,14 @@ the snapshot's attribution wins over the row's. The stored value remains the fal
 states succeed; conflicts are reconciled by reading status. An actual resume withdraws any pre-suspension connection and
 releases both masters before retrying, even if the actor has not yet detected an external suspension. Only an
 already-running sandbox with an already-connected actor skips recovery, preserving its viewers on repeated Resume. Every
-failure releases the hold. The launcher's existing-folder path binds the fresh connection token after resume. Fresh
-checkouts arm the form's one-shot pending submission, bound to the returned connection. The old connection is only a
-waiting state while the form's independent host read catches up; its preview never authorizes creation. The form's own
-Ready preview on the returned connection submits once, spending the pending submission before dispatch. Draft or opening
-changes cancel it. That waiting state ends after 60 seconds (`WOKEN_CONNECTION_WAIT_MS` in `list/create_form.rs`): a
-press still short of the returned connection then is discarded through the same path as a draft change, with its own
-error, while a press already waiting for its preview is left alone. A per-press counter keeps an earlier attempt's timer
-from discarding a later attempt in the same opening. Automatic template/Clone name candidates may advance under the
-unchanged naming policy, while typed and fixed names remain exact. Resumed auto-allocation does not pin the old checkout
-configuration epoch, which the host's history may not have revealed when a shortcut pressed; the current Ready preview
-still matches the full live authority and the server validates its configuration. Ordinary guarded answers keep their
-exact epoch comparison. A lost create race refreshes the preview but never submits again automatically.
-
-`resume_host_connected` tolerates the Suspend and Resume other surfaces may run beside a launch. The helm marks the one
-lifecycle refusal that waiting can clear, another operation holding the host's provisioning lock, with the helm-only
-`x-farhelm-host-busy` header, the same for every provider; the helper sends Resume again each second while it gets that
-refusal, stops as soon as the host connects through another Resume, and fails at once on any other refusal. All its
-waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a
-slow resume is never cut off. It reads the host's phase before the request, and a suspension stamped later than that one
-(`observed_at` or `suspended_by_farhelm_at`), any suspension when it did not start suspended, or a suspension after the
-connection published a phase of its own fails the wake at once. A suspension with the starting marks is not one: it is
-the starting reading, which keeps showing while the wake's Resume is refused as busy behind an operation that publishes
-no hold of its own (an update run, an edit), and which comes back after the hold of another Suspend of a host Farhelm
-had already suspended, since that republishes the stored marks. A failed-resume mark that reading already carried
-belongs to an earlier Resume, so only one that appears later fails the wake.
-
-The launcher's preparation signal belongs to its own submit and names the host being resumed. It surrounds
-`resume_host_connected`, including that helper's bounded reconnection wait; only that form treats its own pending host
-as available and replaces the unavailable note with preparation progress. Both destination paths say the session starts
-when the host is ready. Quick launch renders the same preparation in its existing progress surface. Preparation failure
-sends no create and has its own refusal wording; session-create progress and uncertain-outcome recovery begin only at
-their existing dispatch boundary. The attention classifier treats a routine lifecycle transition as neither a Problem
-nor an Update, while independent provisioning progress and unseen setup warnings keep their existing precedence. Tunnel
-failures retain their connected-host eligibility; stopped forwards during a lifecycle hold do not report a live tunnel
-failure.
-
-A successful helper read can precede the form's independent host read. A display-only receipt suppresses the obsolete
-unavailable note for that exact pending target and connection token until the displayed snapshot changes. It grants no
-launch or checkout-preview authority, and retires on a changed token, target, or settled state, so it cannot hide a
-later connection failure.
+failure releases the hold. The helm marks the one lifecycle refusal that waiting can clear, another operation holding
+the host's provisioning lock, with the helm-only `x-farhelm-host-busy` header, the same for every provider
+(`HOST_BUSY_HEADER` in `crates/farhelm-proto/src/http.rs`), so a launch waking its host can retry on it and on nothing
+else. The desktop launcher does not wake a suspended host yet: such a host is not launchable there until the launcher's
+environments work brings resume-before-create (`crates/gui/farhelm-gui/src/launcher/request.rs`). The attention
+classifier treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning
+progress and unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host
+eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
 
 The Suspend question uses the shared framed-dialog header, scroll body and footer as direct siblings; its existing
 lifecycle callback still owns acceptance and dispatch. Dismissal releases that modal before returning focus to the
@@ -7698,50 +7658,41 @@ keeps no result for a deleted host, so the confirming client builds its success 
 Uninstall's host actions have only an SSH implementation: the local row is refused at planning, and the direct-local
 executor answers them with an error rather than an implementation nothing can reach.
 
-The Hosts header's `Update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
-request that each available SSH row's menu would send. The row's permanently mounted provisioning panel retains its own
-intent, one-use plan, submission claim, and progress. Rows with no current Update offer are skipped, so an ADD in flight
-cannot turn the header click into a delayed update after setup finishes. All eligible rows begin planning without
-waiting for one another; a failed plan or run stays on its own row and cannot suppress another host's result. There is
-no fleet endpoint or page-wide update result to reconcile against those host-scoped authorities.
+The Hosts heading's Update all (`start_all` in `crates/gui/farhelm-gui/src/hosts/update.rs`) sends the same request as
+each host's Update, for every listed host whose Update is available at the click: a remote host with nothing running or
+in flight on it that does not run a newer Farhelm. A busy host is skipped rather than queued, so an ADD in flight cannot
+turn the click into a delayed update after setup finishes. Each Update is the operation store's work under its host's
+key, so it goes on whatever view is open, and a failed plan or run stays on its own row and cannot suppress another
+host's result. There is no fleet endpoint or window-wide update result.
 
-The attention list's Update rows use the rail's narrower available-update classification, not the Hosts header's Update
-all list: an offered remote Update, no live provisioning work, and either a compatible older build or a lower peer
-protocol. The Hosts toggle still summarizes that update count and highest urgency. Each Update action sends the existing
-binding-captured request for its displayed host; the attention header's Update all uses exactly its displayed Update
-rows and appears only for more than one. No fleet endpoint or second provisioning owner is added. The header's Always
-update requests those same displayed rows, then saves automatic remote-host updating through the same shared preference
-queue and field identity as the Settings switch, so a later choice on either surface supersedes it. Its alert belongs to
-the session list rather than to the attention list, which unmounts while Hosts is open, and shows only while the
-preference still reads off.
+The attention list's Update rows use the rail's update badge (`update_badge` in
+`crates/gui/farhelm-gui/src/hosts/status.rs`), not the Hosts heading's Update all list: an available Update and either
+an older build (optional) or a lower peer protocol (required). Each Update action sends the same request for its
+displayed host; the attention header's Update all uses exactly its displayed Update rows and appears only for more than
+one. The header's Always update requests those same displayed rows, then saves automatic remote-host updating under the
+preference row's key as the Settings switch saves it, so a later choice on either surface supersedes it. A failed save
+shows under the header with its Try again while the preference still reads off, and never keeps an otherwise empty list
+visible.
 
-The pure `hosts::attention_list` classifier reads the retained host snapshot, that update classification, per-host
-`HostUpdateProgress`, `HostAttention::unseen()`, Tensorlake tunnel health, and the existing optional-update dismissal.
-Progress wins over a problem, which wins over an update; the resulting rows are grouped as Problems, Working, Updates,
-preserving registry order within each group. Pending and running setup/update/uninstall use their actual verb. Problems
-cover the phases SPEC.md names, protocol skew without a usable update offer, resume and tunnel failures, and unseen
-setup/update outcomes. Connecting, usable current/newer connections and ordinarily suspended hosts do not contribute a
-row on their own. The classifier does not invent an unreachable-since time or change the attention owner's
-acknowledgement rules.
+`classify` in `crates/gui/farhelm-gui/src/session_list/attention.rs` reads each host's pushed entry and what
+`hosts/status.rs` derives for it: work going on, the update badge and the setup or Update warning. Work going on wins
+over a problem, which wins over an update; rows are grouped Problems, Working, Updates, in registry order within each
+group. Working rows use the run's actual verb. Problems (`problem_words`) cover the phases SPEC.md names, a protocol
+skew where the host is the newer side or no required Update is on offer, and an unacknowledged setup or Update warning.
+Connecting, connected hosts (a newer build included) and a skew whose required Update is on offer are not problems. A
+sandbox or container host's own problems (a failed resume, a stopped or failed-to-delete environment, undelivered
+credentials, failed tunnels) and its deletion as work going on are not classified yet: they wait for the environments
+work.
 
-ListView owns the progress and attention maps alongside the existing provisioning offer, request and busy maps. The
-permanently mounted host panels still publish progress, consume requests and reconcile warnings and initial Add
-receipts. Both visible surfaces read those same projections. Opening the attention row reveals the mounted Hosts panel,
-then uses one animation-frame handoff to focus its existing menu button without scrolling before bringing the row into
-view. It changes no host filter and adds no persistent scroll or highlight signal.
-
-The required-update banner and optional-update card, their components, display helpers and CSS are removed. Their
-page-local `UpdateDismissal` remains: it captures update host ids and the helm build, and applies only to optional
-Update rows. A host outside the dismissed set gaining an update or a changed build invalidates it; required, Problem and
-Working rows remain visible. Reminder identity uses the latest nonempty response build observation, separately from the
-first-mismatch skew verdict. A late old reply can renew a reminder but cannot clear that verdict or restore unattended
-reconnection.
-
-The attention region is a bounded sibling above the session-content scroller; only its row region scrolls, including
-from the keyboard, leaving its heading and header actions reachable. Hosts management conceals it without ending its
-owner's lifetime. Its layout key joins the existing pre-render movement capture for session anchors: row identities,
-groups, names and wrapped state copy retire only openings measured against the old layout. Progress counts, step text,
-run identity and elapsed time do not enter that key, so routine progress polls cannot close an open session menu.
+The attention list (`crates/gui/farhelm-gui/src/session_list/attention.rs`) reads every fact per frame from
+`crates/gui/farhelm-gui/src/hosts/status.rs`, which the host rail reads too. Details, or a press on a row outside its
+button, shows Hosts and asks the panel to bring that host's row into view with its menu toggle focused; the session
+filter stays as it is. Dismissal hides the optional Update rows only, until a host outside the set that had an update at
+the dismissal gains one; Problem, Working and required rows stay visible. It belongs to the UI session, so a reset shows
+the reminders again. The rows scroll inside the list, which is at most 280 pixels or 45% of the column high, leaving its
+heading and header actions reachable. A change in what the list draws (rows coming or going, their visible words, the
+header's buttons or failure line) closes the rows' menus and the marked menu, since it moves everything under it; a
+run's step and step count are not in that key, so a progress tick keeps an open menu open.
 
 A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
 failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing
@@ -7998,8 +7949,8 @@ constraint (see the GUI section's motivation), not an afterthought:
   9's older glibc — and it is also the point, since it makes this the one test of the artifacts users actually receive
   on a machine that is not the one that built them. Known limit: the container runs under the host's SELinux, and the
   host is an Ubuntu runner where it is not enforcing, so RHEL-family hosts with SELinux enforcing remain untested.
-- The desktop shell's native glue is the acknowledged manual-test gap (see GUI risks); everything else must be coverable
-  without a human.
+- The desktop shell's native glue is the acknowledged manual-test gap; everything else must be coverable without a
+  human.
 
 **Development tooling assumes a single-user machine.** Decided 2026-10-10. The test harnesses, the capture and recording
 scripts, deflake and the docs preview run on a development machine with no hostile other local accounts, and need not
@@ -8011,7 +7962,7 @@ or the demo recorder's still-image names, and may act on whatever matches. The a
 author-name parts shorter than three characters to avoid false matches, with the documented manual read of the diff as
 backstop.
 
-**A checkout runs one harness or tooling command at a time.** Decided 2026-10-11. This includes browser tests,
+**A checkout runs one harness or tooling command at a time.** Decided 2026-10-11. This includes the test harnesses,
 screenshot and video capture and publishing, deflake and similar tooling. The docs preview server, which one agent
 leaves running beside its own commands, is not a second run in this sense. Keeping concurrent agents in separate
 checkouts is the maintainer's responsibility; tooling need not tolerate overlapping runs in one checkout.
@@ -8019,18 +7970,18 @@ checkouts is the maintainer's responsibility; tooling need not tolerate overlapp
 ## Version and skew
 
 One version number across the workspace; the protocol hello carries protocol and build versions; incompatibility refuses
-with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Once a hello is compatible, the
-helm compares the peer and its own build strings as semantic versions for an advisory age signal: prerelease ordering
-applies, build metadata does not change precedence, and an unparsable value leaves age unknown and false. That signal
-adds `old_version` and `newer_version` to the connected REST state, without changing the `connected` phase or
-operational routing; the incompatible protocol case is displayed as `Needs update`, or `Too new` when the peer's
-protocol is the higher one. A development helm (version `0.0.0` with a prerelease, what every build from source reports)
-never calls a connected peer newer and never refuses Update as a downgrade, since it sorts below every release; a skew
-is judged by protocol versions alone, so a skewed host with the higher protocol reads `Too new` there too. Protocol
-version bumps with any incompatible change — which includes a field whose omission changes what the receiver DOES, not
-only changes to frames and message sets. A serde-additive field can still be semantically load-bearing: the
-non-displacing attach is the worked example (a peer that ignores it displaces a client it was asked to leave alone,
-silently, on both ends), and decode tolerance is why such a bump is required rather than why it is unnecessary.
+with a clear error at the helm↔supervisor connect per SPEC.md. Once a hello is compatible, the helm compares the peer
+and its own build strings as semantic versions for an advisory age signal: prerelease ordering applies, build metadata
+does not change precedence, and an unparsable value leaves age unknown and false. That signal adds `old_version` and
+`newer_version` to the connected REST state, without changing the `connected` phase or operational routing; the
+incompatible protocol case is displayed as `Needs update`, or `Too new` when the peer's protocol is the higher one. A
+development helm (version `0.0.0` with a prerelease, what every build from source reports) never calls a connected peer
+newer and never refuses Update as a downgrade, since it sorts below every release; a skew is judged by protocol versions
+alone, so a skewed host with the higher protocol reads `Too new` there too. Protocol version bumps with any incompatible
+change — which includes a field whose omission changes what the receiver DOES, not only changes to frames and message
+sets. A serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked example (a
+peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is
+why such a bump is required rather than why it is unnecessary.
 
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a
@@ -8038,50 +7989,42 @@ release-shaped build refuses its default payload download before any request ins
 real release's binaries. The refusal says it is an unreleased build and to pass `--payload-dir` with payloads built from
 the same commit, because a 404 for a release that will never exist would tell the user to retry. Any `0.0.0` version
 with a prerelease counts as such a build. `--release-base-url` is still honored on these builds (D18), since it names a
-source explicitly rather than this build's own release. The cost is that two untagged builds carry the same build stamp,
-so the client↔helm check below cannot tell them apart; installs come from tags, which always differ.
+source explicitly rather than this build's own release.
 
-The client↔helm edge has no hello to refuse at, so the helm stamps its build on every reply and the UI compares it
-against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload
-prompt and, more importantly, withdraws every UNATTENDED behavior that depends on the helm honoring this milestone's
-vocabulary: the terminal heartbeat and automatic reconnect both stop, while anything the user explicitly asks for keeps
-working. The sidebar's app bar shows the helm's build at all times: the client's own compiled build until a mismatching
-stamp is reported (agreement means the two are the same string), and the reported stamp from then on. The bar leads with
-the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
-use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
-without a desktop asset-parity entry. Settings and help live at the host rail's foot, while AppBar retains their state
-and dialogs. The top band spans the full sidebar and preserves macOS traffic-light clearance and drag handling; the rail
-starts below it. Its avatars read the existing retained host snapshot and provisioning progress, and send context
-requests with the actual opener to the existing keyed HostRow menu. No second action set or host reader is mounted. The
-content column scrolls independently of the rail and footer. Long versions ellipsize before the wordmark shrinks. In a
-desktop app whose updater is active, the version is also the update marker: grey as always, or red with a one-character
-up-arrow before it while Installed is newer than the running version, and then a button that opens the update menu
-(Restart to update, What's new). Otherwise the active updater's readout is a native keyboard-reachable check button
-calling the same `check_now` as the help menu and host row. Its dim refresh glyph brightens with the version and turns a
-quarter on hover or keyboard focus; during a visible check that glyph owns the spin, so the inline status suppresses its
-separate ring. The web/no-updater branch stays a plain span. A verification warning keeps its leading mark and check
-action. Its hover text carries the updater's state, so a check the user started ends visibly there. The update menu and
-the `?` menu are one bar-menu component given different items.
+The client↔helm edge has no hello to refuse at, and needs none: the desktop app talks only to the helm it embeds, its
+own build. The helm still stamps its build on every reply, failures included (`stamp_build` in
+`crates/farhelm-helm/src/middleware.rs`), but no client reads the stamp today. The old browser app compared the stamp
+against the build compiled into its bundle, and on a mismatch prompted a reload and stopped its unattended terminal
+heartbeat and automatic reconnect; the desktop app has no counterpart. The sidebar's app bar shows the window's own
+build (`crates/gui/farhelm-gui/src/sidebar/header.rs`). The bar leads with the Farhelm wordmark, embedded byte for byte
+from `packaging/farhelm-desktop/wordmark-dark.svg` and `wordmark-light.svg` (the brand files every use of the name as a
+mark shares), drawn in the file for the current appearance's ground. Long versions ellipsize before the wordmark
+shrinks. In the macOS window the bar is half of the title band, keeping the traffic lights clear and the window
+draggable. Settings and help live at the host rail's foot. Where the desktop updater is active, the version is also the
+update control (`crates/gui/farhelm-gui/src/update_readout/view.rs`). While no update waits, it is a keyboard-reachable
+check button running the same check as the Help menu's Check for updates. Its dim refresh glyph brightens with the
+version and turns a quarter on hover or keyboard focus, and spins during a visible check. Once Installed is newer than
+the running version, the version turns red with a one-character up-arrow before it and becomes a toggle that opens the
+update menu (Restart to update, What's new), with a ring of its own for progress since the toggle has no glyph to spin.
+A verification warning keeps its leading mark, and a press still retries. Without an updater the version is plain text.
+The update menu and the `?` menu are drawn from the same menu pieces as the session row's menu.
 
-The rail's shared notification bell occupies one 40px row above Hosts; footer height and the rail's bottom offset are
-both 208px. It reuses BellIcon at 16px and the existing danger-strong token for unread fill and count. ListView owns its
-notice reader and close-time exact shown IDs. Toggle and panel render through separate AppBar slots so the panel sits
-outside the footer's stacking context and rail-button styles. Existing popover registration, measured placement, outside
-dismissal and guarded focus handback own its opening. Successful read marks fence older GETs before updating only
-acknowledged IDs; failure leaves shared read state unchanged until another explicit close. Clear re-reads actual server
-history instead of hiding rows optimistically. A narrow callback published by permanently mounted TrashControl opens
-that same dialog or freezes a current stuck single-ID Retry through its existing dispatch. It supplies no second cleanup
-owner or generic command bus. Open Trash first reveals session content and remembers the visible bell for modal return
-focus, including while marking conceals the ordinary Trash trigger. Retry callbacks outlive the panel because ListView
-owns them; acceptance is not notice resolution. A helm-only notice-save warning is displayed separately from archive
-rows and selectable diagnostics, preserving known totals and ordinary completion polling.
+The rail's notices bell sits at the top of the rail's foot, above Hosts (`crates/gui/farhelm-gui/src/rail_notices.rs`).
+The bell and its panel draw the helm's pushed notices straight from the store. Every close of the panel sends one read
+mark for the unread notices the last frame drew, so a notice that arrived after that frame stays unread; a failed mark
+is only logged and leaves the bell loud until the next close. Clear resolved removes only the resolved notices the panel
+showed. The trash cleanup notice's Retry now and Open Trash go through the Trash dialog's own command, guards and entry
+point, so the bell adds no second cleanup owner.
 
-The bar's hover is selected by a pure function of the window build, any reported helm build and the updater's readout. A
-mismatch names both builds; a development window identifies itself as a development build rather than a release. Without
-an updater a release window only names its version. A check button's hover leads with its action before the updater's
-status, so a reinstall command still ends the text. An idle installed app also explains that the readout turns red once
-a newer version is installed and offers the restart menu then. The development-build predicate lives in `farhelm-proto`,
-shared by web wording and the helm's native release decisions, so their classification cannot drift.
+The version's hover help comes from pure functions of the window's build and the updater's state: `version_help` in
+`crates/gui/farhelm-gui/src/sidebar/header.rs` without an updater, the updater's `readout` in
+`crates/farhelm-desktop/src/updater.rs` (through `idle_tooltip` in `crates/gui/farhelm-gui/src/update_readout.rs` when
+idle) with one, and `check_help` in `crates/gui/farhelm-gui/src/update_readout/view.rs` for the check button. A
+development window identifies itself as a development build rather than a release. Without an updater a release window
+only names its version. A check button's hover leads with its action before the updater's status, so a reinstall command
+still ends the text. An idle installed app also explains that the readout turns red once a newer version is installed
+and offers the restart menu then. The development-build predicate lives in `farhelm-proto`, shared by the window's
+wording and the helm's native release decisions, so their classification cannot drift.
 
 Terminal hosts add version surfaces that the protocol version above does not govern, because a running host outlives
 every release: the host's own protocol, which only grows and which every later supervisor must speak with every host
@@ -8298,7 +8241,7 @@ the saved launch, or the old one if the write failed, as it would after a crash 
 only exception to the ordinary create-time immutability of a session's launch.
 
 Protocol 50 adds a transient `NamedConversationStart { conversation, argv }` beside `with` and ordinary create inputs.
-The browser's raw `conversation` stays outside `LaunchSelection`, history and templates. The helm validates it with the
+The client's raw `conversation` stays outside `LaunchSelection`, history and templates. The helm validates it with the
 supervisor's existing id/token checks and fills the six existing ordinary resume templates through `fill_slots`, without
 parsing captured locator provenance. Muse now uses its ordinary `resume <uuid>` template too. Cursor and OpenCode get
 one-time suffixes in the helm only (`--resume` and `--session` respectively); their ordinary `resume` stays absent. A
@@ -8628,15 +8571,15 @@ unavailable, or before its first snapshot, a new name cannot be proven free and 
 stored snapshot, not the unsaved draft, against the existing template shape rules. If it fails, the control says "Delete
 permanently" and deletion clears any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete
 retains the stored template client-side for about ten seconds; undo freshly reads the names before restoring and refuses
-a taken name. The two delete kinds have separate, always-mounted buttons, switched with `hidden`, whose handlers each
-carry a fixed kind. Native listener updates can precede a webview paint, so reusing one button could change the Undo
-promise before its new label appears. A Delete with no usable reply reports that deletion may have happened, clears
-Undo, and refreshes only the template list; helm refusals retain their existing error. This is a local stopgap, not
-lost-reply reconciliation. The notice and its timer belong to this mounted dialog, with a generation guarding against an
-earlier timer expiring a later deletion. Writes are serialized and disable navigation until their outcome is known. API
-last-write-wins semantics remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher
-reads templates when it opens and again whenever the Templates dialog closes, using the existing revision bump and focus
-return.
+a taken name. The Delete button's handler holds the kind its drawn label said (`DeleteKind` in
+`crates/gui/farhelm-gui/src/templates/editor.rs`), since a GPUI handler belongs to the frame that drew it, so a press
+can never carry out a kind whose label the user did not see. A Delete with no usable reply reports that deletion may
+have happened, clears Undo, and refreshes only the template list; helm refusals retain their existing error. This is a
+local stopgap, not lost-reply reconciliation. The notice and its timer belong to this mounted dialog, with a generation
+guarding against an earlier timer expiring a later deletion. Writes are serialized and disable navigation until their
+outcome is known. API last-write-wins semantics remain unchanged; name checks do not acquire an atomic cross-client
+reservation. The launcher reads templates when it opens and again whenever the Templates dialog closes, using the
+existing revision bump and focus return.
 
 ### Agent launches from the CLI
 
@@ -8708,10 +8651,10 @@ recovery, and its approval bit does not change the identity of the original crea
 recorded result without a card. Agent fresh dispatch does not perform another launch-capable lookup after approval;
 supervisor create admission compares the complete checkout fingerprint when concurrent requests reach it. It revalidates
 configuration and the accepted installation, and uses `CreateOrigin::Agent`, including the dispatch-time YOLO guard and
-no remembered GUI selection. A local failure leaves an agent's key for an exact guarded retry instead of using the
-browser's launch-capable durable refusal settlement. A template that flips between a folder and checkout encounters an
-incompatible reservation and is refused as key reuse. Agent template writes store managed destinations through the same
-editor path as folder destinations.
+no remembered GUI selection. A local failure leaves an agent's key for an exact guarded retry instead of using a keyed
+user-origin create's launch-capable durable refusal settlement. A template that flips between a folder and checkout
+encounters an incompatible reservation and is refused as key reuse. Agent template writes store managed destinations
+through the same editor path as folder destinations.
 
 ### Permission prompts for agent actions
 
@@ -8903,11 +8846,9 @@ the live connection and identity preconditions of command grants; adoption clear
 Only `run_embedded` receives `LinkOpener`, registered by the desktop shell through `webbrowser::open`; no HTTP route
 exposes that callback. The helm validates and approves before calling it on a blocking worker, then returns the native
 opener's result without exposing its error details. A matching grant skips the card only with this native capability. A
-standalone helm instead offers a preapproved Open/Dismiss card, because a browser needs a click. The web Rust click
-handler checks the live arm state and answer-in-flight guard, then calls the shared `isPlainWebUrl` and
-`window.open(url, '_blank', 'noopener')` synchronously through wasm bindings, before spawning the answer request.
-`noopener` can return null even on success, so that return value cannot establish whether a pop-up was blocked. A native
-UI answers the card without opening in its page. The approval region installs the shared URL predicate when mounted.
+standalone helm, which has no opener, instead raises a preapproved Open/Dismiss card. That branch dates from the browser
+UI, which needed the user's click to open a window itself; no UI attaches to a standalone helm today. The desktop app's
+cards never open a link themselves: an Open answer goes to the helm, which opens it through the native opener.
 
 Protocol 47 adds `SetBrowserForwarding` and its operation-specific `BrowserForwardingSet` acknowledgement. The
 connection manager sends true for SSH rows and false for Local rows only after identity acceptance, including accepted
@@ -9005,44 +8946,37 @@ words are refused at the HTTP boundary. An untouched local row keeps the red lap
 `POST /api/hosts/{id}/appearance` requires both words and refuses extra fields and an unknown host. A helm-owned task
 serializes the atomic write on the ordinary host write lock and bumps the existing feed only when the stored choice
 changes. No actor reconcile is needed: connection actors do not consume decorative identity. The hosts listing carries
-both choices; the existing UI hosts read supplies session-row state as well as the hosts panel, so a feed refresh
-redraws memoized rows without adding another fetch.
+both choices, and every surface draws them from the store as the helm pushes it, so a change redraws session rows
+without another read.
 
-`HostMark` draws the sixteen Farhelm-owned paths in the existing 16-unit box at stroke weight 1.3; `data-glyph` carries
-the icon word (`laptop` for an untouched local host, `cloud` for an untouched SSH host). The seven `--host-icon-*` CSS
-tokens are identity colors with no state meaning, and the contrast harness binds them to the chrome, selected, dialog
-and picker surfaces. Red has its own identity token with the same value as `--danger`. Only the SVG receives the tint,
-apart from the optional terminal frame; its hover text still describes the host's locality even when a remote host
-chooses a red laptop. The unknown-locality slot stays blank.
+Every host mark goes through `host_mark` (`crates/gui/farhelm-gui/src/hosts/identity.rs`), which draws one of the
+sixteen Farhelm-owned shapes tinted with the host's color (`laptop` for an untouched local host, `cloud` for an
+untouched SSH host). The seven `--host-icon-*` theme tokens are identity colors with no state meaning. Red has its own
+identity token with the same value as `--danger`. Only the SVG receives the tint, apart from the optional terminal
+frame; its hover text still describes the host's locality even when a remote host chooses a red laptop. The
+unknown-locality slot stays blank.
 
-Appearance controls live for both known host kinds in the host settings dialog's own refresh classes, between Connection
-and Permissions. Each choice is a named button with `aria-pressed`, in a labelled icon or color group, and saves through
-the panel's existing operation token and per-section outcome. They are disabled while a field editor or any write holds
-that token. Buttons keep arrow navigation from triggering intermediate saves, as a radio group would; the existing focus
-recovery returns to the chosen control after its save. The panel submits only the explicitly changed word from an event
-and reads the other word from the live hosts snapshot at handler entry. A successful appearance write installs its known
-pair behind the existing read-generation barrier before releasing the write token; an older in-flight GET cannot restore
-the preceding pair, and the next explicit choice cannot undo it while the refresh is pending. The ordinary refresh still
-supplies connection facts and later changes an agent or the command line makes. A sidebar-surface preview shows the icon
-without changing a session.
+Appearance controls live in the host settings dialog of every host kind the app recognizes (`supports_appearance` in
+`crates/gui/farhelm-gui/src/hosts/offers.rs`), between Connection and Checkouts
+(`crates/gui/farhelm-gui/src/hosts/settings/appearance.rs`). Each choice is a button that says whether it is the one in
+force, not a radio, because a click saves at once and arrow navigation through a radio group would save at each
+intermediate choice. A click saves icon and color together through the operation store under the host's key, which
+admits one save on that host at a time. A preview shows the mark as the session list draws it.
 
-The quick switcher reuses ListView's existing hosts signal for marks, while retaining its independent fleet session
-listing. The launcher reduces the same host snapshot to `HostOption` display facts, including identity words. Its host
-field is a launcher-only button combobox with one listbox, active-descendant navigation and non-tabbable options,
-following the model picker's focus ownership. Arrow keys, Home and End browse without committing; Enter or Space commits
-an open option, Escape or blur discards browsing, and closed Enter retains `enter_choice` launch behavior. Typeahead
-uses a case-insensitive prefix, restarting after a one-second pause and cycling repeated letters. The menu closes during
-busy work and unmounts with its launcher; an outside pointer press blurs the button so even a click on unfocusable
-padding closes the menu without changing the committed host. The committed id stays empty until hosts arrive. The parent
-retains the old native select's synchronous destination/history fence, browse invalidation, clone takeover and intent
-reset. Picking the already committed host does not reset the draft. Template editing retains its native host select.
+The quick switcher draws each session's host mark from the registry the store holds, while keeping its own session
+listing. The launcher's host picker (`crates/gui/farhelm-gui/src/launcher/view/host_picker.rs`) is a button with a
+single-choice list on the layer manager's non-focusing popover, so focus and every key stay on the button. Up, Down,
+Home and End browse without committing; Enter or Space picks, Escape, a press outside or focus leaving closes without a
+choice, and closed Enter presses the main action under the choice controls' Enter rule. Typeahead uses a
+case-insensitive prefix, restarting after a one-second pause and cycling repeated letters. Browsing never changes the
+draft; only a pick does, re-seeding a folder the user has not typed or picked. Picking the host already chosen re-seeds
+nothing, so it cannot re-seed a Clone's folder (`LaunchDraft::choose_host`).
 
-`SessionView` reuses `AppBody`'s `Signal<HostsRead>` context that the sidebar refreshes from the hosts feed; its
-separate stale-only host read remains limited to outage details. The shared preferences signal controls whether a
-colored frame is drawn. The host color word becomes one CSS custom property on the terminal panes container, inherited
-by each terminal, using `--fg-0` for `default` and the matching `--host-icon-*` token otherwise. The current web and
-WebKit render has no distinct dark margin: pane, terminal and the terminal's own surface (the grid) all paint the
-terminal theme's background (`--terminal-bg`) by default. With coloring enabled, a 4px inset shadow fills the terminal
-element's existing padding. The shadow leaves the terminal background and the terminal theme unchanged and adds no
-layout space; the setting-off render has no shadow. A host appearance refresh recolors an open session without fetching
-hosts from the session view, and a Settings write updates this client's preference signal immediately.
+A session's terminal re-reads its frame color whenever the pushed state changes (`frame_color` in
+`crates/gui/farhelm-gui/src/terminal/attached.rs`): its host's identity color while the shared preference to color
+frames is on, and no frame while it is off or unset, or while the session or its host is not listed. The frame
+(`host_frame`) is a 4-pixel band inside the pane's padding in the host's tint (the ordinary foreground for `default`,
+the matching `--host-icon-*` token otherwise), drawn under the grid's content, so the grid neither moves nor shrinks and
+the terminal's background and palette stay as they are. Since both the preference and the host's color come from the
+helm's pushes, a host appearance change or a Settings write recolors an open session at once, with no read of the
+session view's own.
