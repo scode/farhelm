@@ -27,7 +27,8 @@ mod card_tests;
 mod host_add_tests;
 #[cfg(test)]
 mod model_tests;
+/// Its window fixtures are used by another module's tests (`templates::save_tests`), so it is `pub(crate)`.
 #[cfg(test)]
-mod region_tests;
+pub(crate) mod region_tests;
 #[cfg(test)]
 mod tunnel_tests;

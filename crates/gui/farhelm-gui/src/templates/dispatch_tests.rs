@@ -578,19 +578,27 @@ fn a_draft_the_launcher_refuses_is_shown_with_its_reason(cx: &mut TestAppContext
 /// A quick launch being prepared holds the launch slot, and SPEC.md keeps the launcher busy then as during a launch:
 /// New must not open over it, another shortcut or the sequence prefix must not start a second one (the old app refused
 /// the prefix while a launch was pending, too), and a result the user moved on from must not open over what they went
-/// on to (SPEC.md, "Keyboard focus"). Specified: with `partial` marked and the chord pressed, before the catalog read
-/// answers, New refuses to open, a second chord opens nothing, and the prefix arms no sequence; after a key press, the
-/// read's answer opens nothing, sends no create, and the "launch not started" notice offers the launcher.
+/// on to (SPEC.md, "Keyboard focus"). Replace with is refused the same way: the GPUI page is not blocked during the
+/// preparation (the parity file's deviation "Hidden quick-launch preparation does not block the page"), so its entry
+/// must refuse rather than put Replace with's draft in the launcher the preparation holds. Specified: with session `a`
+/// listed, `partial` marked and the chord pressed, before the catalog read answers, New and Replace with of `a` refuse
+/// to open, a second chord opens nothing, and the prefix arms no sequence; after a key press, the read's answer opens
+/// nothing, sends no create, and the "launch not started" notice offers the launcher.
 #[gpui::test]
 fn presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule(
     cx: &mut TestAppContext,
 ) {
     let (mut helm, cx) = window(cx, Some("partial"));
+    push(&mut helm, cx, listing(&["a"], &[session("a")]));
     chord(cx);
     assert!(!any_open(cx), "the premise: the preparation draws nothing");
     assert!(
         !cx.update(launcher::entry::open_new),
         "New waits for the preparation"
+    );
+    assert!(
+        !cx.update(|window, cx| launcher::entry::open_replace_with("a", window, cx)),
+        "Replace with waits for the preparation"
     );
     chord(cx);
     assert!(!any_open(cx), "a second chord opened nothing");

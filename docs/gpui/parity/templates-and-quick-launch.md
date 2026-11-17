@@ -8,11 +8,11 @@ sections: Creation (the Templates dialog, quick launch, number keys, launcher se
 
 Tests: 48. Covers: template bolts use a fixed outline or filled drawing for their mark.
 
-partly, with some cases or parts of them not yet ported and some superseded (both after the bullets): the list,
-summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the
-editor, its fields, Save, rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving and
-deleting (`templates::leave_tests`); Save as template from New and Clone, its checklist's defaults, Enter, Escape, the
-name refusals, a refused save and the saved template opening in the editor (`templates::save_tests`), focus back in the
+replaced, with some cases or parts of them superseded (after the bullets): the list, summaries, ⚡ and number keys
+(`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields, Save,
+rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving and deleting
+(`templates::leave_tests`); Save as template from New and Clone, its checklist's defaults, Enter, Escape, the name
+refusals, a refused save and the saved template opening in the editor (`templates::save_tests`), focus back in the
 search box after Escape or Cancel and left where the user put it by a refusal
 (`escape_or_cancel_puts_focus_back_in_the_search_box`, `a_refused_save_leaves_focus_where_the_user_put_it`), its GitHub
 repository row (`a_chosen_repository_is_offered_checked_and_the_folder_is_not`), and a template's repository destination
@@ -189,10 +189,10 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
   keyboard-scrollable", what is left of its scrolling: with a save out, Shift+Tab back to the name field scrolls the
   body until the field shows; its Home back to the top is the deviation "Home and the page keys do not scroll the
   Templates editor")
-
-Not yet ported: the approval-card half of "save as template refusal respects ${focusOwner} focus" (a refusal leaving
-focus on an approval card the user moved to while the save was out); its other halves are above, and its lost-focus half
-is superseded.
+- `templates::save_tests::a_refused_save_leaves_focus_on_an_approval_card` ("save as template refusal respects
+  ${focusOwner} focus", its approval-card half: with a real approval card beside the open launcher, a refusal leaves
+  focus on the card the user moved to while the save was out; its other halves are above, and its lost-focus half is
+  superseded)
 
 Superseded: "save as template leaves composing Enter with the name editor" and "save as template keeps the draft on
 composing Escape", by the terminal file's `tests/ime-composition.spec.ts` entry, which supersedes that spec whole: these
@@ -210,9 +210,8 @@ wait and the phone draft's retry were settled on 2026-11-16 by the GPUI migratio
 
 Tests: 32. Covers: quick launch submits the wrapper prefix saved in its agent template.
 
-partly, with part of one case not yet ported (after the bullets): the ⚡ chord's direct launch through New's prefill,
-the catalog and the launcher's submit path, unseen, the mark kept to success and cleared by a reveal, a slow one showing
-the launcher's progress pill until its reply
+replaced: the ⚡ chord's direct launch through New's prefill, the catalog and the launcher's submit path, unseen, the
+mark kept to success and cleared by a reveal, a slow one showing the launcher's progress pill until its reply
 (`templates::dispatch_tests::the_chord_launches_the_marked_template_unseen`,
 `a_revealed_quick_launch_is_no_longer_unseen`, `actions_tests::the_launch_chords_run_once_per_press_from_a_terminal`),
 an incomplete mark opening New with its choices and the needs-more-choices banner, which an edit takes away
@@ -329,10 +328,11 @@ naming (`templates::naming_tests::escape_and_cancel_on_a_changed_name_send_no_re
   prepare quick launch:" and the helm's words, on the helm's own host; and its host-binding half: the error survives
   New's folder default and installation settling from the host's launch history after it is shown, the counterpart of
   the old first binding; New's host itself is bound as it opens)
-
-Not yet ported: the Replace with half of "hidden preparation isolates keys and a queued Replace with requires Launch"
-(Replace with opened while a quick launch is being prepared out of sight, leaving Launch to the user); its key half is
-`templates::dispatch_tests::presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule`, above.
+- `templates::dispatch_tests::presses_during_a_preparation_wait_and_its_result_respects_the_moved_on_rule` ("hidden
+  preparation isolates keys and a queued Replace with requires Launch", its Replace with half: the page is not blocked
+  during the preparation, so Replace with reaches the launcher's entry, which refuses it as it refuses New, where the
+  old app opened Replace with over the preparation and left Launch to the user; the deviation "Hidden quick-launch
+  preparation does not block the page" covers both; the same test is its key half, above)
 
 ### `tests/launcher-template-shortcuts.spec.ts`
 
@@ -571,34 +571,34 @@ Template cases: "restart with applies an allowed partial agent template", "resta
 command template", "restart with applies a template's matching held ${field}" (the launch kind, agent type, host,
 destination and name), "restart with refuses a template's held ${field} atomically" (the same fields and the initial
 prompt), "restart with refuses held shortcut batches and bolt templates" and "restart with applies matching bolt and
-shortcut templates without restarting". The launcher's entry lists the spec's other cases, and also lists the partial
-command template and the two shortcut cases as not yet ported there.
+shortcut templates without restarting". The launcher's entry lists the spec's other cases.
 
 partly: the two held-field cases are replaced by the template rules' unit tests, with no port through the open dialog
-(decided 2026-11-16 by the GPUI migration's coordinator), as far as those tests reach: the matching case whole, and of
-the refused case the agent type, the initial prompt and the host through a container placement. Restart with's refusal
-is one check in the template application (`restart_refusal` in `templates/apply.rs`) that names the first held field a
-template would change, and these tests run it without a window.
+(decided 2026-11-16 by the GPUI migration's coordinator), each whole, and the two partial-template cases by tests that
+apply the template to Restart with's draft, also without a window, and check the restart its main action would send.
+Restart with's refusal is one check in the template application (`restart_refusal` in `templates/apply.rs`) that names
+the first held field a template would change, and these tests run it without a window.
 
 - `templates::apply_tests::restart_with_applies_equal_held_values_as_nothing` ("applies a template's matching held
   ${field}": a template repeating the launch kind, agent type, host, folder, with a trailing slash, and name applies as
   nothing for those fields and its other edits land, and the repeated name brings no name kind)
 - `templates::apply_tests::restart_with_refuses_a_change_to_a_held_field` ("refuses a template's held ${field}
-  atomically", through a changed agent type and an initial prompt, each refused naming the field with nothing applied)
+  atomically": the launch kind, the agent type, a plain host naming another installation, the destination, the session
+  name and an initial prompt, each beside a Low effort, refused naming the field with nothing applied)
 - `templates::apply_tests::restart_with_refuses_a_placement` (the same rule for a container template, refused as a held
   host)
 - `templates::apply_tests::restart_with_refuses_clearing_a_commands_resume` (the same rule for a command restart's
   resume choice, which no old case named)
 - `templates::apply_tests::restart_with_resets_permissions_to_todays_default` (the permission reset the partial agent
-  template carries, as a rule; the case itself is not yet ported)
+  template carries, as a rule)
+- `templates::apply_tests::restart_with_applies_a_partial_agent_template_and_sends_its_choices` ("restart with applies
+  an allowed partial agent template")
+- `templates::apply_tests::restart_with_applies_a_partial_command_template_and_sends_it` ("restart with applies an
+  allowed partial command template")
 
-Not yet ported:
-
-- of "restart with refuses a template's held ${field} atomically", the launch kind, a plain host (one naming another
-  installation, not a placement), the destination and the session name: `restart_refusal` checks each, but no test makes
-  a Restart with template change them
-- the two partial-template cases and the two shortcut cases: no test applies `tl:`, ⚡, a number key or a sequence to an
-  open Restart with, or checks what its main action then sends
+Not yet ported: the two shortcut cases ("restart with refuses held shortcut batches and bolt templates" and "restart
+with applies matching bolt and shortcut templates without restarting"): no test applies ⚡, a number key or a sequence
+to an open Restart with.
 
 ### `tests/interface-fonts.spec.ts`
 
@@ -866,7 +866,8 @@ orchestrator.
   launcher as busy. SPEC.md has hidden preparation "block page input without focusing its hidden fields"; pointer input
   on the page is not blocked, and a click or key during either read counts as moving on, so the completion falls back as
   SPEC.md says (the session appears without being opened, or New is offered by a notice). This is the templates goal's
-  default for a hidden preparation; blocking the page would need a layer that draws nothing and takes no focus.
+  default for a hidden preparation; blocking the page would need a layer that draws nothing and takes no focus. The old
+  app opened Replace with over the preparation, leaving Launch to the user; the GPUI app refuses it, as it refuses New.
 
 - **A switcher template pick shows no loading state.** SPEC.md has New show "a cancellable loading state until the
   template inputs are ready". The GPUI launcher has no loading state: a pick opens New on its prefill at once, as the

@@ -20,6 +20,8 @@ use serde_json::json;
 use super::dialog_tests::{painted, push, template, templates_state};
 use super::fields::Field;
 use super::save::{Candidate, choice_text};
+use crate::approvals::answers::ARM_DELAY;
+use crate::approvals::region_tests as approvals;
 use crate::components::EditCommand;
 use crate::focus::Mark;
 use crate::launcher::draft::{LaunchDraft, Tab};
@@ -28,7 +30,7 @@ use crate::launcher::view_tests::search_focused;
 use crate::layers;
 use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences, session};
-use crate::test_support::{self, click, keys, settle};
+use crate::test_support::{self, click, focused_id, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -75,10 +77,10 @@ fn clone_draft() -> LaunchDraft {
     LaunchDraft::clone_of(&info, Some(1))
 }
 
-/// The real main view over the fake helm holding `templates`, with the launcher opened on `draft` in a window tall
-/// enough for the whole panel, and the launcher's catalog read answered with an empty catalog. A managed checkout's
-/// preview, if the draft asks for one, is refused with [`PREVIEW_REFUSAL`] for every test that uses this. Every command
-/// sent so far is taken, so a test's later commands are its own.
+/// The real main view over the fake helm holding `templates` and no approval requests (so a test can push one), with
+/// the launcher opened on `draft` in a window tall enough for the whole panel, and the launcher's catalog read answered
+/// with an empty catalog. A managed checkout's preview, if the draft asks for one, is refused with [`PREVIEW_REFUSAL`]
+/// for every test that uses this. Every command sent so far is taken, so a test's later commands are its own.
 pub(super) fn launcher_on<'a>(
     cx: &'a mut TestAppContext,
     draft: LaunchDraft,
@@ -100,6 +102,7 @@ fn launcher_with_hosts<'a>(
         crate::launcher::view_tests::fixture_hosts(hosts),
         preferences(&[], None),
         templates_state(templates, Availability::Available),
+        approvals::waiting(&[]),
     ]);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, MainView::new);
@@ -723,6 +726,65 @@ fn a_refused_save_leaves_focus_where_the_user_put_it(cx: &mut TestAppContext) {
         "the refusal left focus where the user put it"
     );
     assert!(drawn(cx, "save-template-panel"), "the panel stays");
+}
+
+/// SPEC.md keeps agent approval cards usable over a dialog, so an approval card is the one place outside the launcher
+/// that can take focus while Save as template's save is out, and "Who may move focus" says the save's refusal must
+/// leave it there; pulling focus back into the panel would put the user's next key on the launcher instead of the
+/// card (the old spec's approval case of "save as template refusal respects … focus"). Specified: with the launcher
+/// open on a Codex draft and a stop request waiting, the save of `my-codex` is out; a click on the card's Deny sends
+/// that answer and focuses Deny; with the answer still out, the helm's refusal of the save is shown in the panel with
+/// focus still on Deny, the launcher and its panel stay, and nothing more is sent.
+#[gpui::test]
+fn a_refused_save_leaves_focus_on_an_approval_card(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, codex_draft(), &[]);
+    // A click focuses the button it presses, as it does on Linux; pinned so the premise holds on every platform.
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    approvals::push(&mut helm, &[approvals::stop("a", "box")], &[]);
+    settle(cx);
+    // Past the answer bar's pause, which starts again whenever the waiting list changes, so the press answers.
+    test_support::advance(cx, ARM_DELAY);
+    // Moving the clock also lets the launcher's folder check go out; answered plainly, as `launcher_on` answers the
+    // launcher's start-up commands, so the save's PUT is the next command.
+    for sent in helm.commands() {
+        helm.reply(sent.id, 200, None);
+    }
+    settle(cx);
+    assert!(
+        test_support::label(cx, "approval-a-answer-deny").is_some() && drawn(cx, "launcher"),
+        "the premise: the card waits beside the open launcher"
+    );
+    click(cx, "launcher-save-template");
+    let (id, _) = save_as(&mut helm, "my-codex", cx);
+    click(cx, "approval-a-answer-deny");
+    let (answer, method, path, body) = one(&mut helm);
+    assert_eq!(
+        (method, path.as_str(), body),
+        (
+            Method::Post,
+            "/api/approvals/a",
+            json!({ "answer": "deny" })
+        ),
+        "the press answered the card"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("approval-a-answer-deny"),
+        "the premise: the user's press put focus on the card"
+    );
+    // The fake helm answers in command order, so the save, sent first, is refused while the answer is still out.
+    helm.reply(id, 409, Some(json!("fixture template save refused")));
+    settle(cx);
+    assert!(painted(cx).contains("fixture template save refused"));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("approval-a-answer-deny"),
+        "the refusal left focus on the card"
+    );
+    assert!(drawn(cx, "launcher") && drawn(cx, "save-template-panel"));
+    helm.reply(answer, 200, None);
+    settle(cx);
+    assert!(helm.commands().is_empty(), "nothing more was sent");
 }
 
 /// What [`launcher_with_hosts`] answers a managed checkout's preview with: the helm's refusal when a fixed name's
