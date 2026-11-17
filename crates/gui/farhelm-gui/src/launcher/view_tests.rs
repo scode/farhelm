@@ -166,7 +166,18 @@ pub(crate) enum Field {
     Folder,
     Wrapper,
     Prompt,
+    /// The Custom permission flags.
+    Flags,
+    /// The model field.
+    Model,
 }
+
+/// The platform's Select All chord, for a test that replaces a field's whole text.
+pub(super) const SELECT_ALL: &str = if cfg!(target_os = "macos") {
+    "cmd-a"
+} else {
+    "ctrl-a"
+};
 
 /// Whether `field` holds focus.
 pub(crate) fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
@@ -175,6 +186,8 @@ pub(crate) fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
             Field::Folder => &launcher.folder,
             Field::Wrapper => &launcher.wrapper,
             Field::Prompt => &launcher.prompt,
+            Field::Flags => &launcher.flags,
+            Field::Model => &launcher.model_input,
         };
         state.focus_handle(cx).is_focused(window)
     })
@@ -186,7 +199,7 @@ fn folder_focused(cx: &mut VisualTestContext) -> bool {
 }
 
 /// Whether an element was drawn under `id` in a fresh frame.
-fn has_node(cx: &mut VisualTestContext, id: &str) -> bool {
+pub(super) fn has_node(cx: &mut VisualTestContext, id: &str) -> bool {
     test_support::frame(cx)
         .into_iter()
         .any(|node| node.element_id.as_deref() == Some(id))
@@ -355,11 +368,21 @@ fn the_footer_reads_an_agent_launchs_choices(cx: &mut TestAppContext) {
 }
 
 /// A press of Launch on an incomplete draft says why beside it, "Not launched." first (SPEC.md, "Creation": "an
-/// incomplete attempt says why beside Launch"); the reason is not shown before the press, and an edit takes it away
-/// until the next press.
+/// incomplete attempt says why beside Launch"); before the press the reason is Launch's hover help only, and an edit
+/// takes the line away until the next press (launcher-enter.spec's "launcher ${attempt} explains an incomplete setup
+/// beside Launch"). Why: Launch stays pressable while refused, so that a press can say why (`Button::refused`), and its
+/// hover help is how a user learns the reason without trying, as the old `aria-disabled` button's tooltip was. The
+/// refused look follows the same refusal and is not read here. Specified: New with no agent type gives "Choose a
+/// structured harness before launching" as Launch's help and says nothing beside it; a press says it after "Not
+/// launched."; an edit of the folder takes it away and Enter there says it again; once Codex completes the draft,
+/// Launch's help is its own, "Launch: start the session".
 #[gpui::test]
 fn a_refused_press_says_why_beside_the_main_action(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("Choose a structured harness before launching")
+    );
     assert_eq!(shown_refusal(cx), None, "nothing is said before a press");
     test_support::click(cx, "launcher-launch");
     assert_eq!(
@@ -378,6 +401,27 @@ fn a_refused_press_says_why_beside_the_main_action(cx: &mut TestAppContext) {
         shown_refusal(cx).is_some(),
         "Enter in a single-line field presses the main action"
     );
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(
+        draft(cx).agent.harness,
+        Some(LaunchHarness::Codex),
+        "the premise: the click chose Codex"
+    );
+    assert_eq!(
+        launch_help(cx).as_deref(),
+        Some("Launch: start the session"),
+        "a complete draft gets Launch's own help back"
+    );
+}
+
+/// The hover help Launch shows once the pointer has rested on it for the hover delay, which for a draft Launch would
+/// refuse is the refusal's reason. The pointer stays on Launch afterwards; a later click elsewhere moves it.
+pub(super) fn launch_help(cx: &mut VisualTestContext) -> Option<String> {
+    let launch = test_support::center(cx, "launcher-launch");
+    cx.simulate_mouse_move(launch, None, gpui::Modifiers::none());
+    test_support::advance(cx, layers::HOVER_DELAY);
+    cx.update(|window, cx| layers::shown_tooltip(window, cx))
+        .map(|shown| shown.text.to_string())
 }
 
 /// Typing in a field is the draft's edit: the folder typed is the user's, so a host change would keep it.
@@ -916,9 +960,14 @@ fn five_effort_options_are_still_segments(cx: &mut TestAppContext) {
 }
 
 /// An effort the launch already carries stays offered, in its place, when the model does not offer it (old
-/// `displayed_efforts`), so a Clone of an older launch shows what it will send and can keep it. Specified: a Clone of
-/// a Codex launch with Max effort, against a catalog whose Codex model offers only low, medium and high, offers Max
-/// after High, chosen.
+/// `displayed_efforts`), so a Clone of an older launch shows what it carries; but it refuses the press, and once the
+/// user picks another effort it is no longer offered, since a Clone has no stored launch to go back to, unlike Restart
+/// with ([`restart_with_keeps_its_stored_effort_offered`]). Ported from launcher-enter.spec's "launcher effort dropdown
+/// preserves an unsupported inherited choice until a native edit". Why: showing Max chosen while quietly sending another
+/// effort would launch something other than what the launcher shows. Specified: a Clone of a Codex launch with Max,
+/// against a catalog whose Codex model offers only low, medium and high, offers Max after High, chosen; Launch says
+/// "Not launched. This saved choice is no longer supported by the current catalog; choose a compatible model or
+/// effort" and sends nothing; after a click on High, Max is gone and Launch sends effort high.
 #[gpui::test]
 fn a_carried_effort_the_model_does_not_offer_stays_offered(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(None, Some(LaunchEffort::Max), None));
@@ -947,6 +996,27 @@ fn a_carried_effort_the_model_does_not_offer_stays_offered(cx: &mut TestAppConte
             "launcher-effort-Max"
         ]
     );
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some(
+            "Not launched. This saved choice is no longer supported by the current catalog; choose a compatible \
+             model or effort"
+        )
+    );
+    assert!(
+        super::launch_tests::creates(&mut helm, cx).is_empty(),
+        "the refused press sent nothing"
+    );
+    test_support::click(cx, "launcher-effort-High");
+    assert_eq!(draft(cx).agent.effort, Some(LaunchEffort::High));
+    assert!(
+        !has_node(cx, "launcher-effort-Max"),
+        "with no stored launch to keep it for, Max is no longer offered"
+    );
+    let create = super::launch_tests::press(&mut helm, cx, "/api/sessions");
+    let body = create.body.expect("a create carries a body");
+    assert_eq!(body["launch"]["effort"], serde_json::json!("high"));
 }
 
 /// The old launcher kept a flat 24 pixels above and below itself in windows at least 1000 pixels wide, where other
@@ -1055,7 +1125,7 @@ fn restart_with_keeps_its_stored_effort_offered(cx: &mut TestAppContext) {
 // ---- The model field -----------------------------------------------------------------------------------------------
 
 /// A catalog with two Codex models and one Claude model.
-fn model_catalog() -> serde_json::Value {
+pub(super) fn model_catalog() -> serde_json::Value {
     serde_json::json!([
         { "id": "gpt-5", "harness": "codex", "efforts": ["high"] },
         { "id": "gpt-5-mini", "harness": "codex", "efforts": ["high"] },
@@ -1088,7 +1158,7 @@ fn model_field_open(
 }
 
 /// The text the model field shows.
-fn model_text(cx: &mut VisualTestContext) -> String {
+pub(super) fn model_text(cx: &mut VisualTestContext) -> String {
     read(cx, |launcher, _, cx| {
         launcher.model_input.text(cx).to_string()
     })
@@ -2199,12 +2269,7 @@ fn the_prefix_in_a_launcher_field_begins_a_sequence_only_with_nothing_selected(
     keys(cx, "escape");
     assert!(!sequence_armed(cx), "the premise: Escape ended it");
 
-    let select_all = if cfg!(target_os = "macos") {
-        "cmd-a"
-    } else {
-        "ctrl-a"
-    };
-    keys(cx, select_all);
+    keys(cx, SELECT_ALL);
     assert!(
         read(cx, |launcher, _, cx| !launcher.folder.selection_empty(cx)),
         "the premise: Select All selected the folder"

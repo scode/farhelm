@@ -27,7 +27,7 @@ fn results_shown(cx: &mut VisualTestContext) -> bool {
 }
 
 /// Type `text` into the focused field, as one input, and let it settle.
-fn type_in(cx: &mut VisualTestContext, text: &str) {
+pub(super) fn type_in(cx: &mut VisualTestContext, text: &str) {
     cx.simulate_input(text);
     settle(cx);
 }
