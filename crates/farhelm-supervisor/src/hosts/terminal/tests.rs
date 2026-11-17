@@ -321,9 +321,10 @@ fn seed_record(text: &[u8]) -> HostMessage {
 /// those: not those in output an earlier supervisor was sent, and those in
 /// live output as ever, splitting a read across the three.
 ///
-/// Why: this is the replay policy (D-7). An earlier supervisor answered the
-/// queries in output it was sent; answering them again would type the
-/// answers into the program (a shell shows them as garbage at its prompt).
+/// Why: this is the replay policy, decided during the terminal host's
+/// design (2026-11-02). An earlier supervisor answered the queries in
+/// output it was sent; answering them again would type the answers into
+/// the program (a shell shows them as garbage at its prompt).
 /// A query written while no supervisor was attached was never answered,
 /// and the program may still be waiting for it. Spec: with `Info` saying 8
 /// bytes were journaled and 4 of them sent to a client (`delivered_end`),
@@ -521,7 +522,8 @@ async fn an_update_straddling_delivered_end_answers_its_seen_part_never() {
 /// earlier supervisor was sent after it, and in output written while none
 /// was attached, then live ones.
 ///
-/// Why: this is the goal's replay test (D-7). An answer delivered twice
+/// Why: this is the goal's replay test, of the replay policy decided during
+/// the terminal host's design (2026-11-02). An answer delivered twice
 /// reaches the program as typed garbage, and a bell or clipboard write
 /// delivered again, maybe minutes later, surprises the user; a query no
 /// supervisor saw must still be answered. Spec: with a notice sink, a
@@ -904,11 +906,12 @@ async fn checkpoints_are_taken_at_clean_reads_once_due() {
 /// A read whose split candidate comes before enough output is not
 /// snapshotted there, but at its end, once the threshold is passed.
 ///
-/// Why: checkpoints are due only after enough output (the plan's D-8,
-/// revised); checking the threshold at the read's end alone would encode
-/// up to a whole read early. Spec: with checkpoints due after 10 bytes,
-/// `abc`, a status request and `0123456789` (17 bytes, split candidate at
-/// 3, before the request) bring a `Snapshot` at (17, 0), not at (3, 0).
+/// Why: checkpoints are due only after enough output (as revised during
+/// the terminal host's design on 2026-11-02); checking the threshold at
+/// the read's end alone would encode up to a whole read early. Spec: with
+/// checkpoints due after 10 bytes, `abc`, a status request and
+/// `0123456789` (17 bytes, split candidate at 3, before the request) bring
+/// a `Snapshot` at (17, 0), not at (3, 0).
 #[farhelm_testtrace::test]
 async fn a_split_before_the_threshold_waits_for_the_read_end() {
     let clock = ManualClock::new();
@@ -1075,11 +1078,12 @@ async fn a_replay_ending_with_a_due_checkpoint_takes_it() {
 /// Why: a time trigger re-encodes the whole scrollback of every terminal
 /// that changed at all (a spinner, a clock) once per period, which made it
 /// the largest steady cost of checkpoints, to spare a recovery a tail that
-/// replays in milliseconds; checkpoints are due by output alone (the
-/// plan's D-8, revised). Spec: with checkpoints due after 1 KiB, `quiet`
-/// and a status request bring the answer and no snapshot; with the
-/// runtime's clock then advanced by a day, two more status requests each
-/// bring their answer as the next frame, never a snapshot.
+/// replays in milliseconds; checkpoints are due by output alone (as
+/// revised during the terminal host's design on 2026-11-02). Spec: with
+/// checkpoints due after 1 KiB, `quiet` and a status request bring the
+/// answer and no snapshot; with the runtime's clock then advanced by a
+/// day, two more status requests each bring their answer as the next
+/// frame, never a snapshot.
 #[farhelm_testtrace::test]
 async fn time_alone_never_makes_a_checkpoint_due() {
     let clock = ManualClock::new();

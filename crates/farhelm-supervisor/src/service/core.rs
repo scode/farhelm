@@ -7088,8 +7088,9 @@ impl Supervisor {
             }
             old_terminals::record_ended(store, &ended).await;
         }
-        // Agent hosts a Restart replaced, which a crash left running (the
-        // plan's D-25, `host_handover`'s "Superseded agent hosts"): judged on
+        // Agent hosts a Restart replaced, which a crash left running (ended at
+        // every reload, as decided during the terminal host's design on
+        // 2026-11-02; `host_handover`'s "Superseded agent hosts"): judged on
         // the rows as just committed, so a restart this pass confirmed by its
         // new host's tag supersedes its old host now. Only a supervisor that
         // may write ends anything; one that may not leaves them as they are.

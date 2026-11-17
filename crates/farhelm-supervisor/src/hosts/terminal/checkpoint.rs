@@ -9,14 +9,15 @@
 //! while no supervisor is attached before anything is lost to a gap.
 //!
 //! A checkpoint is due once enough output has passed since the previous
-//! attempt ([`CheckpointPolicy`]; the plan's D-8, revised): four times the
-//! latest snapshot's size, at least [`CHECKPOINT_MIN_BYTES`] and at most a
-//! quarter of the journal cap. Scaling with the snapshot keeps the encoding
-//! cost a fixed share of the output, whatever the terminal holds; the floor
-//! keeps a nearly empty terminal from encoding every few kilobytes; the
-//! ceiling keeps a connected supervisor's tail far below the cap. Nothing
-//! makes a checkpoint due by time: a terminal that writes a little now and
-//! then has a short tail that replays in milliseconds, and a timer would
+//! attempt ([`CheckpointPolicy`]; as revised during the terminal host's
+//! design on 2026-11-02): four times the latest snapshot's size, at least
+//! [`CHECKPOINT_MIN_BYTES`] and at most a quarter of the journal cap.
+//! Scaling with the snapshot keeps the encoding cost a fixed share of the
+//! output, whatever the terminal holds; the floor keeps a nearly empty
+//! terminal from encoding every few kilobytes; the ceiling keeps a
+//! connected supervisor's tail far below the cap. Nothing makes a
+//! checkpoint due by time: a terminal that writes a little now and then
+//! has a short tail that replays in milliseconds, and a timer would
 //! re-encode its whole scrollback for it.
 //!
 //! A due checkpoint is taken only where the emulator is clean

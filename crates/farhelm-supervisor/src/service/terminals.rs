@@ -151,17 +151,23 @@ enum TabResolution {
 /// The refusal for a session whose terminal no longer exists on this host,
 /// worded from what the supervisor actually knows.
 ///
-/// This string travels a long way: the helm relays it verbatim as the
-/// terminal socket's `detached` reason, and the browser paints it under a
-/// banner, so it is the sentence a user reads when they open such a
-/// session. SPEC.md's reboot contract forbids inferring whether the agent
-/// exited before the machine went down or was killed by it, and
-/// "interrupted" exists to say exactly that, so no wording orders the
-/// agent's end against the event that ended its terminal. The wording
-/// follows the durable outcome first, in the same precedence the UI's own
-/// terminal-absence decision uses (`terminal_absence` in the session view),
-/// so a refusal never contradicts the band on screen, and then the row's
-/// terminal kind:
+/// It is worded as the sentence a user reads when they open such a
+/// session, though today no client shows it. The helm relays it verbatim
+/// as the terminal socket's `detached` reason under the code `other`, and
+/// the desktop app's stream, like the old browser client before it, treats
+/// an `other` detach as transport trouble and keeps reconnecting: an
+/// exited session whose terminal host died shows the reconnect card
+/// indefinitely, and this sentence reaches only logs (the helm's error log
+/// and the app's debug log). (A missing tab is refused with
+/// [`no_such_tab`] and the code `tab_closed`, which does stop the stream.)
+/// SPEC.md's reboot contract forbids inferring whether the agent exited
+/// before the machine went down or was killed by it, and "interrupted"
+/// exists to say exactly that, so no wording orders the agent's end
+/// against the event that ended its terminal. The wording follows the
+/// durable outcome first, in the same precedence the desktop app uses to
+/// decide that an interrupted session gets its card instead of a terminal
+/// (`session_pane/card.rs` in `farhelm-gui`), so a refusal never
+/// contradicts the card on screen, and then the row's terminal kind:
 ///
 /// - An entry marked [`LastOutcome::Interrupted`] (a host reboot, or an
 ///   update that ended an old terminal) is told it ended while no

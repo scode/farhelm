@@ -867,7 +867,9 @@ async fn assert_converged(interrupted: Interrupted) {
 /// hosts running, the row launching with no `terminal_address`, and nothing in memory;
 /// the next supervisor must adopt the new host by its tag rather than
 /// relaunch or call the session gone, and then end the old host, which is
-/// no orphan (its session exists) and would otherwise run for good (D-25).
+/// no orphan (its session exists) and would otherwise run for good; ending
+/// superseded agent hosts at every reload was decided during the terminal
+/// host's design (2026-11-02).
 /// Spec: with the crash seam firing at `ReplacementStarted`, the restart
 /// fails; the row is launching at generation 1 with no `terminal_address`, both hosts
 /// run and both launch records exist, also once the supervisor is dropped.

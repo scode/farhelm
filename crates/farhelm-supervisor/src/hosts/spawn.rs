@@ -88,7 +88,8 @@ const STDERR_CAP: usize = 4 * 1024;
 const NAME_ATTEMPTS: usize = 8;
 
 /// The journal cap a terminal's host gets unless its creator says otherwise
-/// (the plan's D-8): 32 MiB of output since the latest snapshot, per host.
+/// (decided during the terminal host's design on 2026-11-02): 32 MiB of
+/// output since the latest snapshot, per host.
 ///
 /// The cap is what output written while no supervisor reads it may reach
 /// before the oldest of it is trimmed into a gap. A connected supervisor

@@ -49,8 +49,9 @@
 //! [`HostRegistry::is_complete`] says every socket was attributed.
 //!
 //! What a scan does to the hosts it finds: it takes over each one's
-//! connection (the plan's D-11), which cuts off any other client the host
-//! had. It sends nothing else but `Info`, never input, and dropping a
+//! connection (the supervisor always takes over, as decided during the
+//! terminal host's design on 2026-10-31), which cuts off any other client
+//! the host had. It sends nothing else but `Info`, never input, and dropping a
 //! registry closes every connection it still holds, which leaves the hosts
 //! as they were. Taking over is right only because the scanning process is
 //! the one that owns the state directory, so two preconditions bind every
