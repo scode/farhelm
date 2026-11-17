@@ -8,6 +8,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
                                        [--templates] [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
+                                       [--remote-host DEST ...]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
@@ -32,8 +33,10 @@ provisioning backend
 (SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. `--payload-dir DIR` hands the app's embedded
 helm a directory of staged `farhelm` payloads to install on and update real remote hosts from (PAYLOAD_DIR_ENV), which
 a debug build otherwise has no release to download from; it is the one way to pass that setting in, since the caller's
-own `FARHELM_*` variables never reach the app. Any other verb goes to the vendored
-`gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
+own `FARHELM_*` variables never reach the app. `--remote-host DEST` (repeatable) makes the run a staged one: it starts
+one more supervisor per destination, each in the run's own `r<N>` state directory, and has the app's helm register
+each as an SSH host reached at DEST, which must be this machine under a spelling of its own. Any other verb goes to the
+vendored `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
 vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
 
 Why Mutter rather than the bridge's own Xvfb: the shipped app is built for Wayland only (the root Cargo.toml's
@@ -44,6 +47,11 @@ exercises the client-side decoration path a GNOME user gets.
 Names that could collide with another run (the Wayland display, the bridge socket, the runtime directory) all derive
 from the run directory, so parallel runs from different directories never share anything (AGENTS.md, "Sharing the
 machine with other agents"). The bridge socket is unauthenticated, so it sits in a 0700 directory.
+
+Staged runs (docs/gui-agent.md, "Staged runs", has the whole arrangement and why). A staged run launches its sessions
+by an agent harness's bare name, so it always runs the app, its supervisor and every remote supervisor with a private
+HOME and PATH inside the run, where every harness name is a wrapper around the fake agent, and with the scripted
+provisioning backend on, since a staged remote host is this machine. `staged_start` says which runs are staged.
 """
 
 from __future__ import annotations
@@ -76,6 +84,7 @@ SESSION = "app"
 # bridge's, the supervisor's, and one per terminal host (named by 8 characters, `NAME_LEN` in the supervisor's
 # hosts/names.rs). The longest suffix decides how deep a run directory may be; a socket that does not fit fails deep
 # inside the app instead of as a usage error.
+# A staged run's remote supervisors' sockets (`<run>/r<N>/...`, `remote_state_dir`) are shorter than `state`'s.
 SOCKET_SUFFIXES = (f"/agent/{SESSION}/app.sock", "/state/supervisor.sock", "/state/hosts/" + "x" * 8)
 LONGEST_SOCKET_SUFFIX = max(SOCKET_SUFFIXES, key=len)
 # sun_path is 108 bytes on Linux and 104 on macOS, each including the terminating NUL.
@@ -190,6 +199,231 @@ def parse_size(text: str) -> tuple[int, int]:
     return int(width), int(height)
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Staged runs: the private HOME and PATH, and the remote hosts
+
+
+# The variable naming the ensure-hosts file an agent build's embedded helm registers at startup (`ENSURE_HOSTS_ENV`,
+# defined in crates/farhelm-desktop/src/agent.rs and read by `DesktopBootstrap::start` in lib.rs). Must match exactly.
+ENSURE_HOSTS_ENV = "FARHELM_DESKTOP_AGENT_ENSURE_HOSTS"
+
+# Every program the app launches an agent harness as, by bare name (`program` in crates/farhelm-helm/src/launches.rs,
+# which test-gui-agent.py checks this against), each shadowed by a wrapper of the run's in a staged run. A launch the
+# launcher or a template composes names one of these, and a staged scenario's sessions do too.
+STAGED_AGENTS = ("codex", "claude", "muse", "cursor-agent", "opencode", "goose", "pi", "omp", "grok")
+
+# The file a wrapper runs, with `sh`, from the session's working directory when it is there: a scenario writes one into
+# each session's scratch directory to give it its own replay (`exec <fixtures> fake-agent --script replay ... "$@"`).
+# The wrapper passes it every argument the session's command line and the supervisor gave the agent.
+STAGED_AGENT_SCRIPT = ".staged-agent"
+
+# The login shell a staged run's sessions start in, and the system directories its PATH holds after the wrappers.
+# Fixed rather than the caller's because the private HOME carries only the profiles bash and sh read: a login bash reads
+# its `.bash_profile`, which is what puts the wrappers first again after the system's profile (macOS's path_helper
+# rebuilds PATH with the system's directories first), while a caller's zsh would read files nothing here writes.
+STAGED_SHELL = "/bin/bash"
+STAGED_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Variables that point a program at the caller's own configuration rather than at HOME, dropped from a staged run's
+# environment so that nothing the app starts can find the caller's shell startup files or an agent's configuration.
+STAGED_DROPPED_ENV = (
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "ZDOTDIR", "BASH_ENV", "ENV"
+)
+
+# Credentials and vendor settings, dropped from a staged run's environment by name pattern (`staged_drops`): a vendor's
+# own variables (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_HOME`, and under `AWS_` the cloud credentials
+# Claude Code's Bedrock mode uses, `AWS_BEARER_TOKEN_BEDROCK` and `AWS_PROFILE` among them) and anything named like a
+# key or a token (`OPENROUTER_API_KEY`, `GITHUB_TOKEN`, ...). A pattern rather than a list, because no list keeps up
+# with every harness's variables; a staged run needs none of them, since nothing in it talks to a vendor.
+STAGED_DROPPED_PREFIXES = (
+    "ANTHROPIC_", "CLAUDE_", "OPENAI_", "CODEX_", "GEMINI_", "GOOGLE_", "XAI_", "GROK_", "AWS_"
+)
+STAGED_DROPPED_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+
+# How long a remote supervisor gets to bind its socket.
+SUPERVISOR_SOCKET_SECONDS = 30
+
+
+def staged_start(options) -> bool:
+    """Whether a `start` with these options is a staged run, which always has the private HOME and PATH and the
+    scripted provisioning backend: one with remote hosts. A scenario front end adds its own option here, so that a
+    scenario with only the local host is staged as well; a plain `start` stays unstaged until the private environment
+    has been checked on a Mac."""
+    return bool(options.remote_host)
+
+
+def staged_record(record: dict) -> bool:
+    """Whether the run `record` describes is a staged one: `start` records its staging only for a staged run, and every
+    later launch (a relaunch included) decides from this, never from options it no longer has."""
+    return bool(record.get("staging"))
+
+
+def wrapper_script(name: str, fixtures: str) -> str:
+    """The wrapper that stands in for the real `name` (a harness's program) in a staged run: it runs the session's
+    STAGED_AGENT_SCRIPT when its working directory has one, and the fake agent's basic script otherwise, passing every
+    argument on. It never looks for another program of that name."""
+    return (
+        "#!/bin/sh\n"
+        f"# A staged run's stand-in for `{name}` (scripts/gui-agent.py, \"Staged runs\"). It never runs the real one.\n"
+        f'if [ -f "$PWD/{STAGED_AGENT_SCRIPT}" ]; then\n'
+        f'  exec /bin/sh "$PWD/{STAGED_AGENT_SCRIPT}" "$@"\n'
+        "fi\n"
+        f'exec {shlex.quote(fixtures)} fake-agent --script basic "$@"\n'
+    )
+
+
+def prepare_staging(run: Path, fixtures: str) -> dict:
+    """Create a staged run's private HOME and wrapper directory and return what the run records of them (`home`,
+    `bin`, `shell`, `path`): the environment `staged_env` builds from it.
+
+    The private HOME holds only a login profile (`.bash_profile`, and `.profile` for a shell that reads that) that puts
+    the wrappers first on PATH. The supervisor starts every session through the login shell, which runs the system's
+    profile before this one, so whatever the system adds to PATH lands behind the wrappers."""
+    home, bin_dir = run / "staging" / "home", run / "staging" / "bin"
+    home.mkdir(mode=0o700, parents=True)
+    bin_dir.mkdir(mode=0o700)
+    for name in STAGED_AGENTS:
+        wrapper = bin_dir / name
+        wrapper.write_text(wrapper_script(name, fixtures))
+        wrapper.chmod(0o700)
+    profile = (
+        "# A staged run's private login profile (scripts/gui-agent.py, \"Staged runs\"): its wrappers first on PATH.\n"
+        f'export PATH={shlex.quote(str(bin_dir))}:"$PATH"\n'
+    )
+    for name in (".bash_profile", ".profile"):
+        (home / name).write_text(profile)
+    return {"home": str(home), "bin": str(bin_dir), "shell": STAGED_SHELL, "path": f"{bin_dir}:{STAGED_SYSTEM_PATH}"}
+
+
+def staged_drops(name: str) -> bool:
+    """Whether a staged run's environment drops the variable `name`: one of STAGED_DROPPED_ENV, or a credential or
+    vendor setting by the patterns STAGED_DROPPED_PREFIXES and STAGED_DROPPED_SUFFIXES."""
+    return (
+        name in STAGED_DROPPED_ENV
+        or name.startswith(STAGED_DROPPED_PREFIXES)
+        or name.endswith(STAGED_DROPPED_SUFFIXES)
+    )
+
+
+def staged_env(base: dict[str, str], staging: dict) -> dict[str, str]:
+    """`base` with the staged run's private HOME, PATH and login shell in place of the caller's, and without the
+    variables `staged_drops` names: those that would point a program back at the caller's configuration, and
+    credentials."""
+    env = {key: value for key, value in base.items() if not staged_drops(key)}
+    env.update({"HOME": staging["home"], "PATH": staging["path"], "SHELL": staging["shell"]})
+    return env
+
+
+def shadowing_agents(directory: Path) -> list[str]:
+    """The STAGED_AGENTS names a file in `directory` has.
+
+    The launch shim puts the directory of the supervisor's `farhelm` first on a session's PATH, ahead of everything the
+    login shell set (crates/farhelm-supervisor/src/launch.rs, `farhelm_bin_dir`), so a harness's program there would
+    win over the wrappers. A staged run refuses to start when this finds one."""
+    return [name for name in STAGED_AGENTS if (directory / name).exists()]
+
+
+def parse_remote_hosts(destinations: list[str]) -> list[str]:
+    """`--remote-host`'s destinations, in order; a UsageError for an empty one, one ssh would read as an option or that
+    holds whitespace, or one listed twice (the helm keys a host on its destination)."""
+    for destination in destinations:
+        if not destination or destination.startswith("-") or any(c.isspace() for c in destination):
+            raise UsageError(f"--remote-host takes an ssh destination such as localhost, not {destination!r}")
+    if len(set(destinations)) != len(destinations):
+        raise UsageError(f"each --remote-host must be a different spelling: {', '.join(destinations)}")
+    return destinations
+
+
+def check_ssh(destination: str) -> None:
+    """Refuse a destination this machine cannot ssh to without a password, so a missing key fails `start` naming the
+    destination instead of leaving the host unreachable in the window. The options are the old browser staging's probe,
+    at least as strict as the helm's own dial (which sets `BatchMode` too)."""
+    result = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", destination,
+         "true"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise UsageError(
+            f"passwordless ssh to {destination!r} failed; a staged remote host is this machine reached over ssh: "
+            f"{result.stderr.strip()}"
+        )
+
+
+def remote_state_dir(run: Path, index: int) -> Path:
+    """The state directory of the run's `index`th remote supervisor (from 0, in `--remote-host` order)."""
+    return run / f"r{index}"
+
+
+def ensure_hosts_body(run: Path, destinations: list[str], farhelm: str) -> dict:
+    """The ensure-hosts file's contents (the helm's `--ensure-hosts` format): each destination as an SSH host whose
+    supervisor is this run's `farhelm` serving `remote_state_dir`. Both paths are given, and absolute, so the helm dials
+    exactly the supervisor the run started, never an installation at that destination's default place."""
+    return {
+        "hosts": [
+            {"ssh": destination, "remote_farhelm": farhelm, "remote_state_dir": str(remote_state_dir(run, index))}
+            for index, destination in enumerate(destinations)
+        ]
+    }
+
+
+def start_remote_supervisors(
+    run: Path,
+    destinations: list[str],
+    farhelm: str,
+    env: dict[str, str],
+    on_started,
+    socket_wait: float = SUPERVISOR_SOCKET_SECONDS,
+) -> list[dict]:
+    """Start one supervisor per destination, `farhelm supervisor run` in `remote_state_dir`, each in a session of its
+    own with `env` and its log in `logs/r<N>.log`, and wait until each has bound its socket; return the run's record of
+    them (`destination`, `state`, `pid`, `start`).
+
+    `on_started` receives the record after every start, before any wait, so `stop` can find a supervisor that `start`
+    left behind by failing or being killed later. A supervisor that exits, or binds no socket within `socket_wait`
+    seconds, fails the start naming its log; the ones already started are left for `stop`."""
+    remotes: list[dict] = []
+    for index, destination in enumerate(destinations):
+        state = remote_state_dir(run, index)
+        state.mkdir(mode=0o700)
+        with (run / "logs" / f"r{index}.log").open("wb") as log:
+            child = subprocess.Popen(
+                [farhelm, "supervisor", "run", "--state-dir", str(state)],
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        remotes.append({"destination": destination, "state": str(state), "pid": child.pid,
+                        "start": proc_start(child.pid)})
+        on_started(remotes)
+    for index, remote in enumerate(remotes):
+        wait_for(
+            Path(remote["state"]) / "supervisor.sock",
+            socket_wait,
+            f"the supervisor for {remote['destination']} (log {run}/logs/r{index}.log)",
+            alive=lambda: running(remote["pid"], remote["start"]),
+        )
+    return remotes
+
+
+def remote_supervisor_to_stop(remote: dict) -> tuple[int, str] | None:
+    """A recorded remote supervisor as `(pid, start)` while it is still the process `start` started (`claim`), else
+    None."""
+    return claim(remote.get("pid"), remote.get("start"), remote["state"])
+
+
+def stop_terminal_hosts(farhelm: str | None, state: Path) -> bool:
+    """End every terminal host whose socket is in `state` with the command an uninstall runs; True when none may still
+    run (also when the state directory never had any)."""
+    if not farhelm or not (state / "hosts").exists():
+        return True
+    return subprocess.run([farhelm, "internal", "stop-terminal-hosts", "--state-dir", str(state)]).returncode == 0
+
+
 # The scripted provisioning backend's switch, read by debug builds of the helm (`ProductionProvisioning::new` in
 # crates/farhelm-helm/src/provisioning/service.rs), and the marker its directory must hold (`E2E_BACKEND_MARKER` in
 # provisioning/e2e.rs). Both must match the helm's exactly.
@@ -257,14 +491,18 @@ def app_env_args(
     scripted_hosts: Path | None = None,
     start_dialogs: bool = False,
     payload_dir: Path | None = None,
+    ensure_hosts: Path | None = None,
+    staged: bool = False,
 ) -> list[str]:
     """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
-    first window's size, a forced appearance, the scripted provisioning backend's directory and the payload directory
-    when the run asks for them (unset otherwise, so the app starts at its own default size in the system's appearance,
-    sets up hosts for real and has no payloads to push). The start dialogs are off unless `start_dialogs` asks for
-    them, because every run's helm is fresh and would otherwise open the Welcome card over the app.
-    `scripts/gui-lifecycle.py` relaunches with the defaults, so its relaunched app keeps them off too, as it must: the
-    first launch marked nothing seen."""
+    first window's size, a forced appearance, the scripted provisioning backend's directory, the payload directory and
+    a staged run's ensure-hosts file when the run asks for them (unset otherwise, so the app starts at its own default
+    size in the system's appearance, sets up hosts for real, has no payloads to push and registers no hosts).
+    `staged` forces the scripted backend on whatever `scripted_hosts` says: a staged remote host is this machine, so a
+    real setup, Update or uninstall of it would act on its own Farhelm installation. The start dialogs are off unless
+    `start_dialogs` asks for them, because every run's helm is fresh and would otherwise open the Welcome card over the
+    app. `scripts/gui-lifecycle.py` relaunches through `launch_env_args` with the defaults, so its relaunched app keeps
+    them off too, as it must: the first launch marked nothing seen."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -281,14 +519,25 @@ def app_env_args(
         pairs["FARHELM_DESKTOP_AGENT_APPEARANCE"] = appearance
     if not start_dialogs:
         pairs["FARHELM_DESKTOP_AGENT_START_DIALOGS"] = "off"
+    if staged:
+        scripted_hosts = scripted_hosts_dir(run)
     if scripted_hosts is not None:
         pairs[SCRIPTED_HOSTS_ENV] = str(scripted_hosts)
     if payload_dir is not None:
         pairs[PAYLOAD_DIR_ENV] = str(payload_dir)
+    if ensure_hosts is not None:
+        pairs[ENSURE_HOSTS_ENV] = str(ensure_hosts)
     args: list[str] = []
     for key, value in pairs.items():
         args += ["--env", f"{key}={value}"]
     return args
+
+
+def launch_env_args(run: Path, record: dict, **options) -> list[str]:
+    """`app_env_args` for a launch of the app the run `record` describes, `start`'s and every relaunch's: whether the
+    run is staged comes from the record (`staged_record`), so no launch of a staged run can leave the scripted backend
+    off. `options` are `app_env_args`'s other keyword arguments."""
+    return app_env_args(run, record["binaries"], staged=staged_record(record), **options)
 
 
 # What `start --fleet` can seed. `basic` is the prompt-and-echo fake agent `--sessions` seeds, the one to type into; the
@@ -539,17 +788,25 @@ def supervisor_to_stop(state: Path) -> tuple[int, str] | None:
         pid = json.loads((state / "desktop-supervisor.json").read_text())["pid"]
     except (FileNotFoundError, KeyError, ValueError):
         return None
-    ticks = proc_start(pid)
-    if not ticks:
+    return claim(pid, proc_start(pid), str(state))
+
+
+def claim(pid: int | None, start: str | None, state: str) -> tuple[int, str] | None:
+    """A supervisor as `(pid, start)` while that pid is still running with that start time and its command line names
+    the state directory `state`; None otherwise, so a pid reused by an unrelated process is never claimed."""
+    if not pid or not start or not running(pid, start):
         return None
     argv = command_line(pid)
-    return (pid, ticks) if argv and str(state) in argv else None
+    return (pid, start) if argv and state in argv else None
 
 
-def wait_for(path: Path, seconds: float, what: str) -> None:
-    """Wait until `path` exists, or fail naming `what`."""
+def wait_for(path: Path, seconds: float, what: str, alive=None) -> None:
+    """Wait until `path` exists, or fail naming `what`: after `seconds`, or at once when `alive()` (the process that
+    would create it is still running) turns false."""
     deadline = time.monotonic() + seconds
     while not path.exists():
+        if alive is not None and not alive():
+            raise RuntimeError(f"{what} exited before {path} appeared")
         if time.monotonic() > deadline:
             raise RuntimeError(f"{what} did not appear at {path} within {seconds:.0f} s")
         time.sleep(0.1)  # sleep-ok: polling for a file another process creates
@@ -834,9 +1091,21 @@ def wait_for_statuses(
         time.sleep(interval)  # sleep-ok: polling the helm's listing; the harness subscribes to no status events
 
 
+def run_env(run: Path, record: dict, base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment of everything the run starts after its compositor: the bridge's command line, the app it
+    launches (and through the app its supervisor and every session), and a staged run's remote supervisors.
+
+    That is `bridge_env` over the caller's environment (`base`, `os.environ` by default), and in a staged run (the
+    record holds `staging`) over `staged_env` of it, so the private HOME and PATH reach all of them."""
+    base = dict(os.environ) if base is None else base
+    if record.get("staging"):
+        base = staged_env(base, record["staging"])
+    return bridge_env(base, run, record.get("runtime"), record.get("display"), record.get("dbus"))
+
+
 def cli(run: Path, record: dict, args: list[str], capture: bool = False) -> subprocess.CompletedProcess:
     """Run the bridge's command line against this run's app."""
-    env = bridge_env(dict(os.environ), run, record.get("runtime"), record.get("display"), record.get("dbus"))
+    env = run_env(run, record)
     return subprocess.run([record["binaries"]["cli"], *args], env=env, capture_output=capture, text=True)
 
 
@@ -885,11 +1154,24 @@ def start(run: Path, args: list[str]) -> int:
         metavar="DIR",
         help="an absolute directory of staged farhelm payloads the app's helm installs and updates remote hosts from",
     )
+    parser.add_argument(
+        "--remote-host",
+        action="append",
+        default=[],
+        metavar="DEST",
+        help="stage a remote host: this machine over ssh at DEST, served by a supervisor of the run's own (repeatable; "
+        "makes the run a staged one, see docs/gui-agent.md)",
+    )
     options = parser.parse_args(args)
     if options.window_size:
         parse_size(options.window_size)
     if options.payload_dir is not None:
         check_payload_dir(options.payload_dir)
+    remote_hosts = parse_remote_hosts(options.remote_host)
+    # A staged run always has the private HOME and PATH and the scripted provisioning backend; nothing turns either off.
+    staged = staged_start(options)
+    for destination in remote_hosts:
+        check_ssh(destination)
     mac = sys.platform == "darwin"
     if mac:
         # The window opens in the console's GUI session, so this must run as the user logged in there (SSH is fine:
@@ -942,6 +1224,15 @@ def start(run: Path, args: list[str]) -> int:
     }
     record["binaries"] = binaries
     save()
+    if staged:
+        shadows = shadowing_agents(Path(binaries["farhelm"]).parent)
+        if shadows:
+            raise RuntimeError(
+                f"{Path(binaries['farhelm']).parent} holds {', '.join(shadows)}, which a staged session would run "
+                "instead of the run's wrappers; remove them. Run `stop` to clean up."
+            )
+        record["staging"] = prepare_staging(run, binaries["fixtures"])
+        save()
     if not mac:
         display = display_name(uuid.uuid4().hex[:8])
         record.update({"runtime": str(run / "runtime"), "display": display})
@@ -949,7 +1240,18 @@ def start(run: Path, args: list[str]) -> int:
         mutter = start_mutter(run, run / "runtime", display, mutter_command(display, size), dict(os.environ))
         record.update({"mutter": {"pid": mutter["pid"], "start": mutter["start"]}, "dbus": mutter["dbus"]})
     save()
-    scripted_hosts = prepare_scripted_hosts(run) if options.scripted_hosts else None
+    ensure_hosts = None
+    if remote_hosts:
+
+        def record_remotes(remotes: list[dict]) -> None:
+            record["remotes"] = remotes
+            save()
+
+        start_remote_supervisors(run, remote_hosts, binaries["farhelm"], run_env(run, record), record_remotes)
+        ensure_hosts = run / "ensure-hosts.json5"
+        ensure_hosts.write_text(json.dumps(ensure_hosts_body(run, remote_hosts, binaries["farhelm"]), indent=2) + "\n")
+    if options.scripted_hosts or staged:
+        prepare_scripted_hosts(run)
     launched = cli(
         run,
         record,
@@ -957,14 +1259,15 @@ def start(run: Path, args: list[str]) -> int:
             "launch",
             "--timeout",
             str(LAUNCH_TIMEOUT_SECONDS),
-            *app_env_args(
+            *launch_env_args(
                 run,
-                binaries,
+                record,
                 window_size=options.window_size,
                 appearance=options.appearance,
-                scripted_hosts=scripted_hosts,
+                scripted_hosts=scripted_hosts_dir(run) if options.scripted_hosts else None,
                 start_dialogs=options.start_dialogs,
                 payload_dir=options.payload_dir,
+                ensure_hosts=ensure_hosts,
             ),
             "--",
             binaries["desktop"],
@@ -1042,14 +1345,16 @@ def probe_text(stdout: str) -> str:
 
 
 def stop(run: Path, record: dict) -> int:
-    """Take down everything `start` started: the app, its supervisor and terminal hosts, then Mutter and its bus (on
-    Linux), and last the lock holder. The shared lock is released only when every earlier step succeeded: if part of
-    the run may still be running, the lock is kept (the message says so) and a second `stop` retries everything.
+    """Take down everything `start` started: the app, its supervisor and terminal hosts, a staged run's remote
+    supervisors and their terminal hosts, then Mutter and its bus (on Linux), and last the lock holder. The shared lock
+    is released only when every earlier step succeeded: if part of the run may still be running, the lock is kept (the
+    message says so) and a second `stop` retries everything.
 
     Each step runs even if an earlier one failed, and each acts only on processes it can tie to this run: the app
     through the pid and start time recorded after launch, the supervisor through the app's record of it plus the state
-    directory on its command line, Mutter through the pid and start time recorded when it started. A pid that has since
-    been reused by another process is never signalled.
+    directory on its command line, a remote supervisor through its recorded pid and start time plus its state directory
+    on its command line, Mutter through the pid and start time recorded when it started. A pid that has since been
+    reused by another process is never signalled.
     """
     problems = []
     # The app first, the ordinary way: SIGTERM, which the app turns into a quit (it then waits for its helm to stop),
@@ -1065,10 +1370,14 @@ def stop(run: Path, record: dict) -> int:
     if supervisor and not stop_process(supervisor[0], supervisor[1], 20):
         problems.append(f"the supervisor (pid {supervisor[0]}) did not stop")
     farhelm = record.get("binaries", {}).get("farhelm")
-    if farhelm and (state / "hosts").exists():
-        hosts = subprocess.run([farhelm, "internal", "stop-terminal-hosts", "--state-dir", str(state)])
-        if hosts.returncode != 0:
-            problems.append("stop-terminal-hosts could not confirm every terminal host stopped")
+    if not stop_terminal_hosts(farhelm, state):
+        problems.append("stop-terminal-hosts could not confirm every terminal host stopped")
+    for remote in record.get("remotes", []):
+        found = remote_supervisor_to_stop(remote)
+        if found and not stop_process(found[0], found[1], 20):
+            problems.append(f"the supervisor for {remote['destination']} (pid {found[0]}) did not stop")
+        elif not stop_terminal_hosts(farhelm, Path(remote["state"])):
+            problems.append(f"stop-terminal-hosts could not confirm every terminal host of {remote['state']} stopped")
     mutter = record.get("mutter")
     if mutter:
         for pid in stop_tree(mutter["pid"], mutter["start"], 10):

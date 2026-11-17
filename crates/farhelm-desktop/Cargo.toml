@@ -22,7 +22,9 @@ path = "src/main.rs"
 # The GPUI app's test-automation bridge, for development runs driven by `scripts/gui-agent.py` (docs/gui-agent.md).
 # Debug builds only: farhelm-gui refuses to compile it into an optimized build, so a release or devbuild cannot carry
 # it. It also makes the app write its helm's address and a credential for this process into the file named by
-# `FARHELM_DESKTOP_AGENT_HELM_FILE`, which is how that script seeds sessions through the real helm API.
+# `FARHELM_DESKTOP_AGENT_HELM_FILE`, which is how that script seeds sessions through the real helm API, and hand its
+# embedded helm the ensure-hosts file named by `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, which is how a staged run gets a
+# fleet of several hosts.
 agent = ["farhelm-gui/agent"]
 
 [dependencies]
