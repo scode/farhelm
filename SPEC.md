@@ -3425,15 +3425,19 @@ prefix. In the launcher's own fields, selected text keeps that normal action and
 Cmd+K on macOS, Ctrl+Shift+K on Linux, opens a quick switcher, including from a focused terminal. It works during a
 pending launch, whose hidden launcher is no longer modal. It does nothing while another modal is open or before
 preferences finish loading. Type a case-insensitive subsequence to find sessions across all hosts, independent of the
-sidebar's host selector: title matches come before matches only in host name or directory, with most recent activity
-first within each group. With nothing typed, sessions appear in most recent activity order. Every match is reachable by
-scrolling; if the helm's listing cap cut the snapshot, the switcher says only the most recently active sessions were
-searched. Rows show status, agent, host (with its chosen mark) and directory, with matching characters marked. Arrow
-keys choose and Enter opens the selected session, including while a session action is pending; the first match is
-initially selected. Opening a session hidden by the host choice or status filter resets both to All after the open is
-accepted; a refused pick keeps both choices. A pick already visible through both leaves them in place. Escape or a click
-outside closes and restores the previous focus. A loading list says loading, rather than no matches, and Enter picks
-nothing until a reply arrives; a failed read says so.
+sidebar's host selector: title matches come before matches only in host name or directory. Within each group, sessions
+where the typed text appears unbroken at a word start (the start of the value, or right after a character that is not a
+letter or digit; camelCase does not start a word) come first, then those where it appears unbroken anywhere, then those
+where its characters are scattered; in the second group the better of host name and directory counts. Most recent
+activity comes first among equally good matches. With nothing typed, sessions appear in most recent activity order.
+Every match is reachable by scrolling; if the helm's listing cap cut the snapshot, the switcher says only the most
+recently active sessions were searched. Rows show status, agent, host (with its chosen mark) and directory, with
+matching characters marked: in each matching value, the first word-start occurrence, otherwise the first unbroken one,
+otherwise the leftmost scattered characters. Arrow keys choose and Enter opens the selected session, including while a
+session action is pending; the first match is initially selected. Opening a session hidden by the host choice or status
+filter resets both to All after the open is accepted; a refused pick keeps both choices. A pick already visible through
+both leaves them in place. Escape or a click outside closes and restores the previous focus. A loading list says
+loading, rather than no matches, and Enter picks nothing until a reply arrives; a failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "New session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,
