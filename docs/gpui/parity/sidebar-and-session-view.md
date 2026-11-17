@@ -1114,10 +1114,18 @@ Replace unavailable while suspended, the row's Suspended badge, and "dev sandbox
 Delete helped by "… whole sandbox and everything in it, after you confirm (…)", its question with the warning (every
 session, sessions Farhelm does not list, the Resume hint, snapshots) and the sandbox's name, nothing sent before the
 answer, and "Delete session and sandbox" sending one `?delete_sandbox=true` and no session-lane Delete. The rail leaving
-the host out is the host rail's existing rule.
+the host out is the host rail's existing rule. A container Farhelm paused itself reads "Suspension noticed at …", never
+"Suspended from Farhelm", as in the old app: neither helm records when Farhelm's own pause of a container finished (the
+helm sends no `suspended_by_farhelm_at` for one), and the old card's container wording said a missing time names no
+outside actor. While the whole Delete runs, the row, the header and the scrim say the words the row's status chooses,
+"Stopping agent…" for a running agent even over a paused container, as the old app's `delete_progress_label` did for an
+environment Delete too. A real container run on 2026-11-16 reported both lines, and the old code at the reference commit
+confirmed each is the ported behavior.
 
 - crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
   `a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete`
+- crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs
+  `a_whole_container_delete_says_what_the_row_showed_running`
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_suspended_card_says_so_and_resumes`
 - crates/gui/farhelm-gui/src/session_list/environment_tests.rs `the_suspended_detail_and_the_names_are_the_providers`
 - crates/gui/farhelm-gui/src/session_pane/environment_tests.rs `the_header_suspends_and_resumes_beside_stop`
@@ -1230,6 +1238,12 @@ Where the port does not match the old app, and why. Each stays until the work na
   so a helm on another build is a restarted helm, whose new UI session shows the reminders again anyway.
 - An attention row's open control fills the row up to its button and draws the list rows' hover fill under the pointer;
   the old one had no fill. The row's open control is the one component the session rows use as well.
+- An unaliased sandbox's or container's short name (its attention row, its host progress card, and the session list's
+  one short-name rule, which now calls the same function) is the host's name as Hosts shows it (`farhelm-sess-…`), where
+  the old app derived it from the helm's registry coordinate and read `podman:farhelm-sess-…` for a container. SPEC.md
+  derives a short name only from an SSH hostname, and a real container run on 2026-11-16 reported the prefix
+  (`hosts/identity/tests.rs` `an_environment_hosts_short_name_is_its_name_not_its_coordinate`,
+  `session_list/attention/tests.rs` `an_environment_row_names_its_host_as_hosts_does`).
 - While a session launch is in flight, the attention list's Update, Update all and Always update are drawn unavailable
   (still focusable) with "Wait for the pending launch to finish" as their hover help, and a press sends nothing; the old
   app queued such an Update until the launch was done. The port refuses it visibly instead, as the area's owner decided,
@@ -1355,6 +1369,21 @@ Where the port does not match the old app, and why. Each stays until the work na
   or `Remote` with its locality's explanation as hover help, and the agent track is one image named by the pair's whole
   description, the old hidden text exactly, so a screen reader hears it once per row as before. The quick switcher's
   rows draw the same host mark, where the old switcher's had a tooltip but nothing for assistive technology.
+- A host mark whose host is a sandbox or container is named by the provider's word, `Sandbox` or `Container`, with the
+  environment mark's hover help, where the old app called it `Remote` ("on another machine, reached over SSH"), in the
+  session list, the quick switcher's rows, the details bar and the summary card. This matches the Hosts row's mark,
+  which settings-and-hosts is changing to name the same way (on main it still reads `Remote`), and was decided by the
+  GPUI migration's orchestrator on 2026-11-16 (`session_list/row_marks_tests.rs`
+  `an_environment_hosts_mark_is_named_by_its_provider`, `session_list/quick_switcher/tests.rs`
+  `an_environment_sessions_host_mark_names_its_provider`).
+- While a stopped container starts again, the unavailable card and Resume's help say "Starting the container again;
+  sessions that were running come back ended, or interrupted if its host restarted, with Restart where a conversation
+  was captured.", where the old app said its sessions "return as interrupted, with Restart available", true only after a
+  reboot. SPEC.md ("Container sessions") has both cases: "A host reboot interrupts sessions last known live", and a
+  container stopped and started on the same host boot returns ended sessions through ordinary exit classification, which
+  the helm does (they come back exited, exit code unknown). The card cannot tell which case it is in, so it names both;
+  the wording follows SPEC.md, decided by the GPUI migration's orchestrator on 2026-11-16
+  (`session_pane/environment_tests.rs` `the_cards_words_and_resume_follow_the_host`).
 - The age column is at least four characters of the age's own 12-pixel monospace face wide (28.8 pixels), where the old
   grid's `minmax(4ch, max-content)` counted four characters of the row's interface font. Every age under a thousand days
   still fits inside it, so the ages and the titles' ends line up as before.

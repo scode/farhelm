@@ -50,7 +50,8 @@
 //! reports no helm build (the desktop app runs the helm it embeds), so a dismissal lasts its UI session instead, and a
 //! helm restarted on another build starts a new UI session anyway. A row's open control fills the row up to its button
 //! and draws the list rows' hover fill, where the old one had no fill. The update actions wait visibly for a launch in
-//! flight (above), where the old ones queued the Update.
+//! flight (above), where the old ones queued the Update. An unaliased container's row reads its name, as Hosts does,
+//! where the old row read the helm's registry coordinate for it, `podman:<container>` ([`short_name`] says why).
 //!
 //! Keyboard focus on a working row's open control shows the same card (SPEC.md), since the layer manager shows a
 //! control's help on keyboard focus as well as on hover, beside the sidebar where the help sits there.

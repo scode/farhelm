@@ -1909,6 +1909,34 @@ fn a_row_draws_its_hosts_chosen_mark_before_the_hosts_name(cx: &mut TestAppConte
     );
 }
 
+/// The switcher draws a session's host mark even for a session in a container, and the old switcher named that mark
+/// `Remote`, though a container is not reached over SSH; it now names the provider, as the Hosts row and the session
+/// row do (decided by the GPUI migration's orchestrator on 2026-11-16). `Remote` stays for an SSH host, which
+/// [`a_row_draws_its_hosts_chosen_mark_before_the_hosts_name`] pins. Specified: over the local host and host 2
+/// described as a container, a reply of c on host 2 draws c's host mark as an image named `Container`.
+#[gpui::test]
+fn an_environment_sessions_host_mark_names_its_provider(cx: &mut TestAppContext) {
+    use crate::session_list::environment_tests::{Provider, connected, environment_host, registry};
+    let mut fleet = fleet();
+    fleet.push(registry(&environment_host(
+        Provider::Container,
+        connected(),
+    )));
+    let mut main = open_main(cx, fleet);
+    let read = main.open_switcher();
+    main.answer(
+        read,
+        &[session("c").host(2).host_name("owned-environment")],
+        false,
+    );
+    let nodes = frame(main.cx);
+    let image = node(&nodes, "quick-switcher-session-c-host").expect("c's mark is a node");
+    assert_eq!(
+        (image.role, image.label.as_deref()),
+        (Some(gpui::Role::Image), Some("Container"))
+    );
+}
+
 /// The unplaced case drawn: the row keeps the host's name without a mark, as the sidebar keeps its, so a session is
 /// never shown without where it runs. Specified: with no host list in the store (checked first), a's row draws no host
 /// mark and still paints its host's name, `buildbox`.

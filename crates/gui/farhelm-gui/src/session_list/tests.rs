@@ -1324,8 +1324,8 @@ fn only_a_running_mark_on_a_connected_host_dims_and_less_when_selected() {
     }
 }
 
-/// The host part of a row names the host as the old app did. A sandbox or container host has no destination, so its
-/// short name is empty, and drawing that gave rows a bare `:/path`; such a host shows its registry name instead.
+/// The host part of a row names the host as the old app did. A host with neither a destination nor an alias has an
+/// empty derived short name, and drawing that gave rows a bare `:/path`; such a host shows its registry name instead.
 /// Specified, over the helm's pinned host list: an aliased host shows its alias, the local host `Local`, a host with
 /// neither destination nor alias its registry name, a host the registry does not list the name the helm sent with the
 /// row, and with no name anywhere the label is empty (the line then shows the directory alone).

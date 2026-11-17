@@ -16,7 +16,8 @@
 //! session pane's details bar and the quick switcher's rows draw the same host mark beside the session's host
 //! ([`HostMark::of`] and [`host_mark`]), so none of them disagrees about where a session runs. A session in a disposable
 //! environment of its own draws its provider's mark in the locality slot instead ([`environment_mark`]), in its row and
-//! the details bar; the quick switcher keeps the host mark there, as the old switcher drew no environment mark.
+//! the details bar; the quick switcher keeps the host mark there, as the old switcher drew no environment mark, though
+//! named by the provider's word ([`Locality::Environment`]) where the old one said `Remote`.
 //!
 //! The agent mark and the shield describe the pair together, the way the old row did: one description names the
 //! agent, what the launch's permission means and the stored command, since the shield alone cannot say which of
@@ -74,39 +75,50 @@ const AGENT_TRACK_GAP: f32 = 2.;
 pub(crate) enum Locality {
     /// On the helm's own machine: the session's host is the registry's local host.
     Local,
-    /// On another machine: the registry was read, and the session's host is not its local host.
+    /// On another machine: the registry was read, and the session's host is not its local host or a disposable
+    /// environment (a host the registry does not list reads as this too).
     Remote,
+    /// In a sandbox or container: the registry describes the session's host as the environment the provider made.
+    ///
+    /// NOTE: The old app called such a host `Remote` ("reached over SSH", which a container is not). The GPUI migration's
+    /// orchestrator decided on 2026-11-16 to use the provider's word instead, matching the Hosts row's mark.
+    Environment(ProviderUi),
 }
 
 impl Locality {
-    /// The word assistive technology reads for the mark (the old hidden `Local` / `Remote`).
-    pub(super) const fn word(self) -> &'static str {
+    /// The word assistive technology reads for the mark (the old hidden `Local` / `Remote`), or the provider's word
+    /// for an environment host ([`ProviderUi::locality_label`]: `Sandbox`, `Container`).
+    pub(super) fn word(self) -> &'static str {
         match self {
             Locality::Local => "Local",
             Locality::Remote => "Remote",
+            Locality::Environment(ui) => ui.locality_label(),
         }
     }
 
-    /// What the word means, as the mark's hover help says it.
-    pub(super) const fn help(self) -> &'static str {
+    /// What the word means, as the mark's hover help says it; for an environment host, its provider's mark help
+    /// ([`ProviderUi::mark_help`]), the same words the environment mark gives.
+    pub(super) fn help(self) -> &'static str {
         match self {
             Locality::Local => "Local: on this machine, where the helm runs",
             Locality::Remote => "Remote: on another machine, reached over SSH",
+            Locality::Environment(ui) => ui.mark_help(),
         }
     }
 }
 
-/// Where `row`'s session runs: local when the registry lists its host as the local one, remote when the registry was
-/// read and its host is another (listed or not: the registry always lists its own local host), and `None` when the
-/// registry was never read (the host list has not arrived, or its first read failed), the same test the host rail
-/// makes. SPEC.md, "Session list": "A session whose host cannot yet be placed either way marks neither, rather than
-/// guessing." The row's host name is shown either way; only the mark waits.
+/// Where `row`'s session runs: local when the registry lists its host as the local one, an environment when the
+/// registry describes its host as a sandbox or container (the provider read from that description, never compared
+/// here), remote when the registry was read and its host is another (listed or not: the registry always lists its own
+/// local host), and `None` when the registry was never read (the host list has not arrived, or its first read failed),
+/// the same test the host rail makes. SPEC.md, "Session list": "A session whose host cannot yet be placed either way
+/// marks neither, rather than guessing." The row's host name is shown either way; only the mark waits.
 pub(super) fn locality(row: &SessionRow, collections: &Collections) -> Option<Locality> {
     if let Some(host) = collections.get::<HostView>(&HostView::key(row.host)) {
-        return Some(if host.is_local() {
-            Locality::Local
-        } else {
-            Locality::Remote
+        return Some(match &host.environment {
+            Some(environment) => Locality::Environment(ProviderUi(environment.target.provider())),
+            None if host.is_local() => Locality::Local,
+            None => Locality::Remote,
         });
     }
     collections
@@ -374,8 +386,9 @@ pub(super) fn picture_selector(mark_id: &str, picture: &str) -> String {
     format!("{mark_id}:{picture}")
 }
 
-/// The locality slot's mark: the host's shape at the slot's size, named `Local` or `Remote` with what that means as
-/// its hover help, shown where `place` says (beside the sidebar in a session row).
+/// The locality slot's mark: the host's shape at the slot's size, named by its [`Locality`] (`Local`, `Remote`, or an
+/// environment host's provider word) with what that means as its hover help, shown where `place` says (beside the
+/// sidebar in a session row).
 pub(crate) fn host_mark(
     row_id: &str,
     mark: HostMark,

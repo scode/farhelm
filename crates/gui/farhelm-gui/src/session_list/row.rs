@@ -842,30 +842,21 @@ pub(super) fn meta_parts(
 }
 
 /// The host part of a row's `host:~/path` line, as the old app named it: the host's short name when the registry lists
-/// the host (its alias, `Local`, or the name derived from its destination), else the registry's own name for a host
-/// with none of those (a sandbox or container host has no destination), else the name the helm sent with the row. Empty
-/// only when all of those are, and the line then shows the directory alone.
+/// the host ([`short_name`]), else the name the helm sent with the row. Empty only when both are, and the line then
+/// shows the directory alone.
 pub(crate) fn host_label(row: &SessionRow, host: Option<&HostView>) -> String {
     host.map(short_name)
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| row.host_name.clone())
 }
 
-/// A registered host's short name, the one rule every place that names a host briefly shares (a row's host, the host
-/// rail's caption, the filter chip): its alias, `Local`, or the name derived from its destination, else the registry's
-/// own name for a host with none of those (a sandbox or container host has no destination). Raw host text: the caller
-/// escapes it.
+/// A registered host's short name for a row's host, the host rail's caption and the filter chip, as raw host text the
+/// caller escapes: [`crate::hosts::identity::short_name`], the rule the attention list and the host progress card use
+/// too, so no two surfaces name one host differently. That is its alias, `Local`, or the name derived from an SSH
+/// destination, else the registry's own name, which is what a sandbox or container host without an alias reads (that
+/// function's docs say why its destination is not used).
 pub(crate) fn short_name(host: &HostView) -> String {
-    let short = farhelm_proto::host_name::host_short_name(
-        host.is_local(),
-        host.destination.as_deref(),
-        host.alias.as_deref(),
-    );
-    if short.is_empty() {
-        host.name.clone()
-    } else {
-        short
-    }
+    crate::hosts::identity::short_name(host).raw().to_owned()
 }
 
 /// `cwd` with a personal home folded to `~` (`/home/alice/src` becomes `~/src`), or unchanged. A path operation on the

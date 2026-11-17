@@ -47,7 +47,9 @@
 //! task: pending row, progress, private artifact, durable admission, credentials,
 //! attachment and ordinary session creation. ProviderHandle's exhaustive
 //! registration/admission methods preserve each provider's durable facts.
-//! Public wording and marks remain the UI's exhaustive provider home.
+//! Public wording and marks remain the UI's exhaustive provider home. The
+//! helm's own refusal of work on a suspended host words it per provider in
+//! [`suspended_refusal`], beside the binding's provisioning refusals.
 
 pub(crate) mod lifecycle;
 pub(crate) mod podman;
@@ -237,6 +239,31 @@ impl ProviderHandle {
             }
             Self::Podman(_) => "initial container setup has not passed the supervisor state check",
         }
+    }
+}
+
+/// Why a session operation or create on a suspended host is refused, with its
+/// provider's failed resume (`resume_failed`) when it has one: the detail of the
+/// routing refusal (`sessions::refusal_text`), which the GUI shows as it is.
+///
+/// Worded here, per provider, because a paused container is not a Tensorlake
+/// sandbox: until 2026-11-16 the routing refusal called every suspended host a
+/// "Tensorlake sandbox", and a real container run read that for a paused
+/// container. `None` is a host no provider made; only an environment is ever
+/// observed suspended, so that wording names no machine.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn suspended_refusal(
+    provider: Option<ProviderKind>,
+    resume_failed: Option<&str>,
+) -> String {
+    let what = match provider {
+        Some(ProviderKind::Tensorlake) => "the host's Tensorlake sandbox is suspended",
+        Some(ProviderKind::Podman) => "the host's container is paused",
+        None => "the host's environment is suspended",
+    };
+    match resume_failed {
+        None => format!("{what}; it runs again once it is resumed"),
+        Some(details) => format!("{what} and its last resume failed: {details}"),
     }
 }
 

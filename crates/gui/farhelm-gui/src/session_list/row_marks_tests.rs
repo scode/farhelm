@@ -127,6 +127,49 @@ fn a_rows_locality_is_local_remote_or_unplaced() {
     assert_eq!(locality(2, false), None);
 }
 
+/// A sandbox or container is not "on another machine, reached over SSH", so its host mark names its provider, as the
+/// Hosts row's mark does (a deviation from the old app's `Remote`, decided by the GPUI migration's orchestrator on
+/// 2026-11-16). Every surface drawing [`HostMark::of`] (the row's slot for a host-mark row, the quick switcher's rows,
+/// the details bar and the summary card) reads this one decision. Specified: a session on host 2 described as a
+/// container is `Locality::Environment` with the word `Container` and the help "Container: runs in its own disposable
+/// container on one of your hosts"; described as a sandbox, the word `Sandbox` and "Sandbox: runs in its own disposable
+/// Tensorlake sandbox".
+#[test]
+fn an_environment_hosts_mark_is_named_by_its_provider() {
+    use super::environment_tests::{Provider, connected, environment_host, registry};
+    for (provider, word, help) in [
+        (
+            Provider::Container,
+            "Container",
+            "Container: runs in its own disposable container on one of your hosts",
+        ),
+        (
+            Provider::Sandbox,
+            "Sandbox",
+            "Sandbox: runs in its own disposable Tensorlake sandbox",
+        ),
+    ] {
+        let fixture = session("a").host(2);
+        let host = environment_host(provider, connected());
+        let snapshot = vec![
+            listing(&[fixture.key], std::slice::from_ref(&fixture)),
+            registry(&host),
+        ];
+        let locality = HostMark::of(&fixture.row(), &collections(snapshot), None)
+            .expect("the registry was read")
+            .locality;
+        assert!(
+            matches!(locality, Locality::Environment(_)),
+            "{provider:?}: {locality:?}"
+        );
+        assert_eq!(
+            (locality.word(), locality.help()),
+            (word, help),
+            "{provider:?}"
+        );
+    }
+}
+
 /// SPEC.md: a local row defaults to "the red laptop" and a remote row to "the cloud in the ordinary foreground", and
 /// either carries its host's chosen icon and color instead; the shape is identity only, so the locality word decides
 /// the hover. "On a solid selected row, host, agent and permission marks use the inverse foreground while retaining
