@@ -22,8 +22,8 @@ use gpui::{
 };
 
 use super::{
-    AfterDrawn, SceneState, defer_after, fleet, session_list_scene, session_list_scene_opening,
-    session_list_scene_preferring, session_list_then, session_lists_at,
+    AfterDrawn, SceneState, defer_after, fleet, rest_pointer_at, session_list_scene,
+    session_list_scene_opening, session_list_scene_preferring, session_list_then, session_lists_at,
 };
 
 /// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
@@ -287,10 +287,8 @@ fn rest_on_idle_row(
     );
 }
 
-/// Move the pointer to `at` of the bounds of the element the last frame drew under `id`, as a pointer coming to rest
-/// there, so its hover help shows through the row's own wiring rather than a copy of it. A scene's frames do not wait
-/// out the hover delay, so a tooltip of the scene's own is shown first: help shows at once while another shows, and
-/// the control's then replaces it. Until a frame has drawn the element (the store's first snapshot reaches the list a
+/// [`rest_pointer_at`] `at` of the bounds of the element the last frame drew under `id`, so its hover help shows
+/// through the row's own wiring. Until a frame has drawn the element (the store's first snapshot reaches the list a
 /// frame or more after the list first draws, see [`press_bell_b`]), this waits for the next frame as `retry`.
 fn rest_pointer_on(
     state: &SceneState,
@@ -309,21 +307,7 @@ fn rest_pointer_on(
         state.after.set(Some(retry));
         return;
     };
-    layers::show_tooltip_at(
-        &state.tooltip_owner,
-        "Warming".into(),
-        point(px(0.), px(0.)),
-        window,
-        cx,
-    );
-    window.dispatch_event(
-        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
-            position: target,
-            pressed_button: None,
-            modifiers: gpui::Modifiers::default(),
-        }),
-        cx,
-    );
+    rest_pointer_at(state, target, window, cx);
 }
 
 /// The waiting row's actions menu, open beside its button with Rename, its first command, highlighted (reference

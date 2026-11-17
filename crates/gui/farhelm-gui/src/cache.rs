@@ -29,6 +29,13 @@
 //! the source, so `compute` cannot see it change, and a cached row would replay its old age for as long as nothing else
 //! about it changed, however often its list's `ticker::Clock` fires. Caching such a view needs the time (rounded to
 //! what the age shows) as one of its inputs, which is a change to this wrapper, not a workaround in the view.
+//!
+//! NOTE: A cached view does not re-render when one of its controls' hover help shows (this file's own test pins that
+//! showing a tooltip redraws no cached row), and a control draws the bounds tracker its help is placed against only in
+//! a render while that help waits or shows (`layers::help_drawn`). So a control with help in a cached view has no
+//! bounds when its help shows, or stale ones: its help lands at the pointer, without the beside cues, or against where
+//! the control used to be. Whoever caches a view holding controls with hover help solves that first, for instance by
+//! making "one of my controls' help is in play" one of the view's inputs, so the view re-renders when it changes.
 
 use gpui::{
     AnyElement, App, Context, Entity, IntoElement, Render, StyleRefinement, Subscription, Window,
@@ -237,7 +244,7 @@ mod tests {
             None,
             "the premise: the pointer is over no control with help"
         );
-        let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+        let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
         cx.update(|_, cx| render_count::reset(cx));
 
         cx.update(|window, cx| layers::hover_began(&owner, "What this list is".into(), window, cx));

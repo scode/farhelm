@@ -21,7 +21,7 @@ use gpui::{
     Styled, Window, div, point, px,
 };
 
-use super::{SceneState, press_tab};
+use super::{SceneState, press_tab, rest_pointer_on_control};
 
 /// The checkbox, off, on, and on but unavailable: the old app's native checkbox tinted with the accent.
 pub(super) fn checkboxes(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
@@ -431,15 +431,10 @@ pub(super) fn tooltip(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement
         .into_any_element()
 }
 
-/// Show a long tooltip as if the pointer had come to rest over the button.
+/// Rest the pointer on the button, so its long tooltip shows placed against it: below it with the old 28-pixel gap, as
+/// the button sits at the scene's top with no room above.
 pub(super) fn tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    layers::show_tooltip_at(
-        &state.tooltip_owner,
-        RESTART_HELP.into(),
-        point(px(40.), px(30.)),
-        window,
-        cx,
-    );
+    rest_pointer_on_control(state, "restart", window, cx);
 }
 
 /// The paragraph tooltip scene's help: a guarded Codex launch's agent-mark help, as the old app worded it (the mode
@@ -485,15 +480,9 @@ pub(super) fn tooltip_paragraphs(_: &SceneState, _: &mut Window, _: &mut App) ->
         .into_any_element()
 }
 
-/// Show the paragraph help as if the pointer had come to rest over the button.
+/// Rest the pointer on the button, so its paragraph help shows placed against it, as for [`tooltip_setup`].
 pub(super) fn tooltip_paragraphs_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    layers::show_tooltip_at(
-        &state.tooltip_owner,
-        layers::Help::Paragraphs(guarded_codex_help()).into(),
-        point(px(40.), px(30.)),
-        window,
-        cx,
-    );
+    rest_pointer_on_control(state, "agent", window, cx);
 }
 
 /// The beside tooltip scene's help: a session row's status, the short help a row's marks show beside the sidebar.
@@ -501,11 +490,10 @@ const BESIDE_HELP: &str = "Idle since 10:42. Click the dot to mark it read.";
 
 /// A sidebar column holding one session-row-like control, which the setup shows beside help for: the card 6 pixels
 /// past the column's edge, the notch pointing back at the control and the accent ring just inside it. The control
-/// tracks its own bounds through a tracker the scene keeps, as a control's hover help does for itself.
+/// draws the bounds tracker of the scene's owner token, whose help the setup shows, as a control draws its own while
+/// its help shows.
 pub(super) fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
-    let target = layers::BesideTarget::for_control("beside-target", window, cx);
-    state.beside.replace(Some(target.clone()));
     let row = div()
         .relative()
         .mx(px(8.))
@@ -515,7 +503,7 @@ pub(super) fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut A
         .items_center()
         .rounded(theme::metrics::RADIUS_MD)
         .child("Fixture 1")
-        .child(target.track());
+        .child(state.tooltip_owner.read(cx).track());
     let sidebar = div()
         .w(px(200.))
         .h_full()
@@ -544,14 +532,11 @@ pub(super) fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut A
 
 /// Show the row's help beside the sidebar as if the pointer had come to rest on it.
 pub(super) fn tooltip_beside_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    let Some(target) = state.beside.borrow().clone() else {
-        return;
-    };
     let cues = layers::BesideCues {
         on_fill: false,
         radius: theme::metrics::RADIUS_MD,
     };
-    let hint = layers::Hint::beside(BESIDE_HELP.into(), cues, &target);
+    let hint = layers::Hint::beside(BESIDE_HELP.into(), cues);
     layers::show_tooltip_at(
         &state.tooltip_owner,
         hint,

@@ -679,11 +679,11 @@ impl Render for BesideProbe {
 }
 
 /// SPEC.md puts the session rows' help and the host progress card "just right of the sidebar", and that placement
-/// needs the sidebar to draw the edge the help sits against; without it, such help shows at the pointer. The old app
-/// measured the 6-pixel gap from outside the column's 1-pixel right border, which a tracker on the bordered column
-/// itself would miss by that pixel. Specified, in a 1200 by 800 window over the default width: help asking for beside
-/// placement, on a control over the sidebar's column, shows beside the sidebar, its card's left edge 6 pixels past the
-/// column's outer right edge.
+/// needs the sidebar to draw the edge the help sits against; without it, such help is placed as ordinary help is,
+/// against its control. The old app measured the 6-pixel gap from outside the column's 1-pixel right border, which a
+/// tracker on the bordered column itself would miss by that pixel. Specified, in a 1200 by 800 window over the default
+/// width: help asking for beside placement, on a control over the sidebar's column, shows beside the sidebar, its
+/// card's left edge 6 pixels past the column's outer right edge.
 #[gpui::test]
 fn help_beside_the_sidebar_sits_six_pixels_past_the_columns_outer_edge(cx: &mut TestAppContext) {
     let (mut fake, _connection) = started(cx);

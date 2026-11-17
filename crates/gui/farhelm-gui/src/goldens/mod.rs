@@ -73,7 +73,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::CollectionState;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement,
-    Pixels, Render, Styled, Window, WindowAppearance, div, px, size,
+    Pixels, Render, Styled, Window, WindowAppearance, div, point, px, size,
 };
 use gpui_component::Root;
 use std::cell::{Cell, RefCell};
@@ -119,8 +119,6 @@ struct SceneState {
     growing: [TextInputState; 2],
     tooltip_owner: Entity<TooltipOwner>,
     anchor: Rc<RefCell<Option<Anchor>>>,
-    /// The tracker of the control the beside tooltip scene shows its help for, recorded when the scene draws.
-    beside: Rc<RefCell<Option<layers::BesideTarget>>>,
     ring: FocusHandle,
     terminals: Rc<RefCell<Vec<Entity<TerminalView>>>>,
     attached: Rc<RefCell<Vec<Entity<AttachedTerminal>>>>,
@@ -172,6 +170,44 @@ fn press_tab(window: &mut Window, cx: &mut App) {
         }),
         cx,
     );
+}
+
+/// Move the pointer to `at`, as a pointer coming to rest there, so the hover help under it shows through the control's
+/// own wiring, placed against the control as a real hover's is, rather than a copy of its words shown at a fixed point.
+/// A scene's frames do not wait out the hover delay, so a tooltip of the scene's own is shown first: help shows at once
+/// while another shows, and the control's then replaces it.
+fn rest_pointer_at(state: &SceneState, at: gpui::Point<Pixels>, window: &mut Window, cx: &mut App) {
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        "Warming".into(),
+        point(px(0.), px(0.)),
+        window,
+        cx,
+    );
+    window.dispatch_event(
+        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+            position: at,
+            pressed_button: None,
+            modifiers: gpui::Modifiers::default(),
+        }),
+        cx,
+    );
+}
+
+/// [`rest_pointer_at`] the center of the control drawn under the element id `id`, for a scene whose setup runs once its
+/// first frame is drawn: it turns on GPUI's driver record and draws a frame to find the control. Nothing happens when
+/// no such control was drawn, and the scene's picture then shows no tooltip, which its comparison catches.
+fn rest_pointer_on_control(state: &SceneState, id: &str, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    window.draw(cx).clear(cx);
+    let center = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| node.bounds.center());
+    if let Some(center) = center {
+        rest_pointer_at(state, center, window, cx);
+    }
 }
 
 /// Nothing on the page: the prompt scene draws everything through the layer manager.
@@ -1203,9 +1239,8 @@ fn component_goldens() -> anyhow::Result<()> {
                             TextInputState::new_keeping_line_breaks(window, cx),
                             TextInputState::new_keeping_line_breaks(window, cx),
                         ],
-                        tooltip_owner: cx.new(|_| TooltipOwner),
+                        tooltip_owner: cx.new(|_| TooltipOwner::default()),
                         anchor: Rc::new(RefCell::new(None)),
-                        beside: Rc::new(RefCell::new(None)),
                         ring: cx.focus_handle().tab_stop(true),
                         terminals: Rc::new(RefCell::new(Vec::new())),
                         attached: Rc::new(RefCell::new(Vec::new())),

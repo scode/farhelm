@@ -3,19 +3,17 @@
 
 use crate::desktop::updates;
 use crate::focus::{self, Mark};
-use crate::host_text;
 use crate::layers;
 use crate::theme;
 use crate::ticker;
 use crate::update_readout::view::VersionReadout;
 use crate::update_readout::{self, Activity, Readout};
 use gpui::{
-    AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement, Styled, Window, div,
-    point, px,
+    AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement, Styled, Window, div, px,
 };
 use std::rc::Rc;
 
-use super::{SceneState, press_tab};
+use super::{SceneState, press_tab, rest_pointer_on_control};
 
 /// The width the Linux title bar scene draws its bars at: the window width of the screenshot batch's narrow app variant,
 /// a typical small window.
@@ -416,18 +414,11 @@ pub(super) fn version_readout_tooltip(
     ))
 }
 
-/// The check button's hover help for the reinstall readout, as if the pointer had come to rest over its version: the
-/// short tooltip, cut at eight lines in its 280-pixel card, as the old app's was. With this notice the cut hides the
-/// reinstall command at the end of the words, a known risk the parity file records (the coordinator kept the old
-/// app's cut on 2026-11-14). The words come from the check button's own help function, shown here directly because
-/// the button hands them to the layer manager only on a real hover, which a golden has no time for.
+/// The check button's hover help for the reinstall readout, with the pointer come to rest over its version: the short
+/// tooltip, cut at eight lines in its 280-pixel card, as the old app's was, and placed as the old app placed the
+/// version's help at the window's top edge, centered below the button with the 28-pixel gap that clears the pointer.
+/// With this notice the cut hides the reinstall command at the end of the words, a known risk the parity file records
+/// (the coordinator kept the old app's cut on 2026-11-14).
 pub(super) fn version_readout_tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    let words = update_readout::view::check_help(&reinstall_tooltip());
-    layers::show_tooltip_at(
-        &state.tooltip_owner,
-        layers::Help::Line(host_text::Line::App(words.into())).into(),
-        point(px(330.), px(32.)),
-        window,
-        cx,
-    );
+    rest_pointer_on_control(state, "app-version-check", window, cx);
 }

@@ -25,19 +25,23 @@
 //!   the control is clipped: app.css line 1900 drew it inset so that the sidebar's clipping kept it inside the list,
 //!   so a row half scrolled out of the list has its ring only on the half in view.
 //!
-//! With no edge drawn, the help shows at the pointer as ordinary help does ([`PlacedBeside::at_pointer`]), or, when
-//! keyboard focus owns it, against its control by the fallback's rule alone ([`PlacedBeside::around`];
-//! [`super::overlay`] decides). The place is decided while each frame is laid out, after every tracker has recorded
-//! this frame's bounds, so help follows a control that moves (a re-sorted row) in the same frame, cues included.
+//! The fallback's rule is also the old app's ordinary placement, and every other help is placed by it alone, with no
+//! notch or ring: ordinary help against its control ([`PlacedBeside::ordinary`]), beside help while no edge is drawn,
+//! and help keyboard focus owns against the focused control ([`PlacedBeside::around`]); [`super::overlay`] decides
+//! which. Help whose control has no recorded bounds, ordinary or beside, shows at the pointer instead ([`at_pointer`]):
+//! a probe a test or golden shows, or a control in a cached view (`cache.rs`, NOTE). The place is decided while each
+//! frame is laid out, after every tracker has recorded this frame's bounds, so help follows a control that
+//! moves (a re-sorted row) in the same frame, cues included.
 //!
 //! The old app's window was its page, so "the window" in these rules is the window's content area
 //! ([`crate::desktop::linux_title_bar::content_area`]).
 //!
-//! A control's bounds come from the tracker its hover help adds ([`super::BesideTarget`]), which covers the box inside
-//! the control's border and records the clip in force there. The ring is drawn in that box, as the old inset-shadow
+//! A control's bounds come from the tracker its hover help adds while the help waits or shows
+//! ([`super::TooltipOwner::track`]), which covers the box inside the control's border and records the clip in force
+//! there. The ring is drawn in that box, as the old inset-shadow
 //! ring sat inside the border. The old placement measured the border box instead, so for a control with a border the
-//! fallback's gaps above and below are measured from inside it (a pixel further for a 1-pixel border); centering is the
-//! same either way.
+//! ordinary rule's gaps above and below are measured from inside it (a pixel further for a 1-pixel border); centering
+//! is the same either way.
 //!
 //! The old app placed help beside the sidebar only for a control inside the sidebar (`closest(".app-sidebar")`,
 //! tooltip.js lines 419-421 and 468-472); anything else got the ordinary placement. Here any control whose help asks
@@ -61,7 +65,9 @@ use gpui::{
     canvas, div, point, px,
 };
 
-use super::tooltip::{Beside, Drawn, DrawnRing, POINTER_OFFSET, ShownTooltip, TooltipSide};
+use super::tooltip::{
+    BesideCues, DrawnRing, HelpTarget, POINTER_OFFSET, ShownTooltip, TooltipSide,
+};
 use super::{Anchor, stack};
 use crate::theme;
 
@@ -98,7 +104,7 @@ const NOTCH_SIDE: f32 = 10.;
 /// ```
 ///
 /// The help uses the column's right edge, so every control whose help asks for beside placement must be drawn inside
-/// this column. While no edge is drawn, such help shows at the pointer, as ordinary help. Like an anchor, the edge is
+/// this column. While no edge is drawn, such help is placed as ordinary help is. Like an anchor, the edge is
 /// still known in the one frame that stops drawing it. A second edge drawn in the same window replaces the first.
 pub fn beside_edge(window: &mut Window, cx: &mut App) -> impl IntoElement {
     let edge = Anchor::for_element("farhelm-beside-edge", window, cx);
@@ -156,8 +162,8 @@ fn beside_sidebar(
     })
 }
 
-/// `placeTooltip`: the old ordinary tooltip's place against `target` inside `area`, which beside placement falls back
-/// to.
+/// `placeTooltip`: the old ordinary tooltip's place against `target` inside `area`: ordinary help's, focus help's, and
+/// the one beside placement falls back to.
 fn around_target(target: Bounds<Pixels>, size: Size<Pixels>, area: Bounds<Pixels>) -> Placed {
     let left = (target.center().x - size.width / 2.)
         .min(area.right() - EDGE - size.width)
@@ -187,9 +193,10 @@ fn around_target(target: Bounds<Pixels>, size: Size<Pixels>, area: Bounds<Pixels
     }
 }
 
-/// Ordinary help's place: offset from the pointer at `at` like a native tooltip, so the pointer never covers the text,
-/// and shifted back inside `area` where it would run past it, flush with the edge it overflows and pinned to the left
-/// or top when it is wider or taller than the area, as GPUI's `snap_to_window` kept it inside the whole window before.
+/// The place of help with no drawn control to sit against: offset from the pointer at `at` like a native tooltip, so
+/// the pointer never covers the text, and shifted back inside `area` where it would run past it, flush with the edge
+/// it overflows and pinned to the left or top when it is wider or taller than the area, as GPUI's `snap_to_window`
+/// kept it inside the whole window before.
 pub(super) fn at_pointer(at: Point<Pixels>, size: Size<Pixels>, area: Bounds<Pixels>) -> Placed {
     let origin = at + POINTER_OFFSET;
     Placed {
@@ -202,13 +209,15 @@ pub(super) fn at_pointer(at: Point<Pixels>, size: Size<Pixels>, area: Bounds<Pix
     }
 }
 
-/// The tooltip's card for help beside the sidebar, placed by [`place`] as the frame is laid out (for the reason
-/// `PlacedPopover` is: trackers record this frame's bounds before overlays are prepared), with the notch under it and
-/// the ring around its control while it sits beside the sidebar; or, for help keyboard focus owns away from the
-/// sidebar, placed against the focused control by the old ordinary rule ([`PlacedBeside::around`]); or, for every other
-/// help, at the pointer ([`PlacedBeside::at_pointer`]); each inside the window's content area. It writes the side it
-/// chose, and the ring it paints, to the shown tooltip ([`ShownTooltip::side`], [`ShownTooltip::ring`]). Nothing in it
-/// asks for the pointer, so a press goes through it as through any tooltip.
+/// The tooltip's card, placed as the frame is laid out (for the reason `PlacedPopover` is: trackers record this
+/// frame's bounds before overlays are prepared): for help beside the sidebar by [`place`], with the notch under it and
+/// the ring around its control while it sits beside the sidebar; for help keyboard focus owns away from the sidebar,
+/// against the focused control by the old ordinary rule ([`PlacedBeside::around`]); and for every other help, against
+/// its control by the same rule ([`PlacedBeside::ordinary`]); each inside the window's content area. Help whose control
+/// has no recorded bounds goes at the pointer instead, ordinary or beside: a probe a test or golden shows, or a control
+/// in a cached view ([`at_pointer`]). It writes the side it chose, and the ring it paints, to the shown tooltip
+/// ([`ShownTooltip::side`], [`ShownTooltip::ring`]). Nothing in it asks for the pointer, so a press goes through it as
+/// through any tooltip.
 pub(super) struct PlacedBeside {
     against: Against,
     side: Rc<Cell<TooltipSide>>,
@@ -223,36 +232,43 @@ enum Against {
     /// The sidebar's edge, centered on the control its tracker records (with the clip around it), with the notch and
     /// the ring while it fits there.
     Beside {
-        target: Rc<Cell<Option<Drawn>>>,
+        target: HelpTarget,
         edge: Anchor,
         notch: AnyElement,
         ring: AnyElement,
+        /// Where the pointer was when the help began, for a control with no recorded bounds ([`at_pointer`]).
+        at: Point<Pixels>,
     },
     /// The control holding focus, as the focus coordinator records its stop, for help keyboard focus owns.
     Focused(FocusHandle),
-    /// The pointer where the help began, in window coordinates, for ordinary help ([`at_pointer`]).
-    Pointer(Point<Pixels>),
+    /// Ordinary help's control, as its tracker records it, or, while the tracker has never been drawn, the pointer
+    /// where the help began, in window coordinates ([`at_pointer`]).
+    Ordinary {
+        control: HelpTarget,
+        at: Point<Pixels>,
+    },
 }
 
 impl PlacedBeside {
-    /// The card of `shown`, whose control asked for `beside`, to be placed against `edge`.
+    /// The card of `shown`, whose control asked for beside help with `cues`, to be placed against `edge`.
     pub(super) fn new(
         shown: &ShownTooltip,
-        beside: &Beside,
+        cues: BesideCues,
         edge: Anchor,
         card: gpui::Div,
         palette: &theme::Palette,
     ) -> Self {
         let notch = notch(theme::color(palette.bg_2), theme::color(palette.border));
-        let color = theme::color(if beside.cues.on_fill {
+        let color = theme::color(if cues.on_fill {
             palette.on_fill
         } else {
             palette.accent
         });
-        let ring = ring(color, beside.cues.radius, shown.ring.clone());
+        let ring = ring(color, cues.radius, shown.ring.clone());
         PlacedBeside {
             against: Against::Beside {
-                target: beside.target.clone(),
+                target: shown.target.clone(),
+                at: shown.at,
                 edge,
                 notch,
                 ring,
@@ -275,11 +291,16 @@ impl PlacedBeside {
         }
     }
 
-    /// The card of `shown`, ordinary help, placed at the pointer where it began ([`ShownTooltip::at`]) by
-    /// [`at_pointer`]. Help that asks for beside placement comes here too while no sidebar edge is drawn.
-    pub(super) fn at_pointer(shown: &ShownTooltip, card: gpui::Div) -> Self {
+    /// The card of `shown`, ordinary help, placed against its control by the old ordinary rule ([`around_target`]), as
+    /// the old app placed it; or, for help whose control has no recorded bounds (a test's or golden's probe, or a
+    /// control in a cached view), at the pointer where it began ([`ShownTooltip::at`], [`at_pointer`]). Help that asks
+    /// for beside placement comes here too while no sidebar edge is drawn.
+    pub(super) fn ordinary(shown: &ShownTooltip, card: gpui::Div) -> Self {
         PlacedBeside {
-            against: Against::Pointer(shown.at),
+            against: Against::Ordinary {
+                control: shown.target.clone(),
+                at: shown.at,
+            },
             side: shown.side.clone(),
             painted: shown.ring.clone(),
             card: card.into_any_element(),
@@ -289,10 +310,10 @@ impl PlacedBeside {
 
 /// What a frame of [`PlacedBeside`] paints, as its prepaint decided.
 pub(super) enum Painting {
-    /// Nothing: the control or the edge has no bounds yet (help shown at once before its control's first frame, which
-    /// only a golden's `show_tooltip_at` does), so there is nowhere to put the help.
+    /// Nothing: the sidebar's edge is no longer drawn, or the focus coordinator has no bounds for the focused stop,
+    /// so there is nowhere to put the help.
     Nothing,
-    /// The card alone: the fallback placement, help keyboard focus owns, or help at the pointer.
+    /// The card alone: the fallback placement, ordinary help, or help keyboard focus owns.
     Card,
     /// The card with its notch and its ring, the ring inside `clip`, the clip in force where the control is drawn.
     Cues { clip: Bounds<Pixels> },
@@ -348,11 +369,18 @@ impl Element for PlacedBeside {
         let area = crate::desktop::linux_title_bar::content_area(window);
         // The place, and for beside help the control as its tracker drew it, which the cues need.
         let (placed, tracked) = match &self.against {
-            Against::Beside { target, edge, .. } => {
-                let (Some(target), Some(edge)) = (target.get(), edge.drawn_bounds()) else {
+            Against::Beside {
+                target, edge, at, ..
+            } => {
+                let Some(edge) = edge.drawn_bounds() else {
                     return Painting::Nothing;
                 };
-                (place(edge.right(), target.bounds, size, area), Some(target))
+                // A control that did not draw its tracker when its help showed (in a cached view, `cache.rs`) has
+                // no bounds: its card goes at the pointer, misplaced and without cues rather than invisible.
+                match target.drawn() {
+                    Some(target) => (place(edge.right(), target.bounds, size, area), Some(target)),
+                    None => (at_pointer(*at, size, area), None),
+                }
             }
             Against::Focused(focus) => {
                 let Some(target) = crate::focus::control_bounds(focus, window, cx) else {
@@ -360,7 +388,10 @@ impl Element for PlacedBeside {
                 };
                 (around_target(target, size, area), None)
             }
-            Against::Pointer(at) => (at_pointer(*at, size, area), None),
+            Against::Ordinary { control, at } => match control.drawn() {
+                Some(control) => (around_target(control.bounds, size, area), None),
+                None => (at_pointer(*at, size, area), None),
+            },
         };
         self.side.set(placed.side);
         let offset = placed.origin - bounds.origin;
