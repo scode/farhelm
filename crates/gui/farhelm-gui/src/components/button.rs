@@ -242,6 +242,13 @@ const HEADING_WORDS_PAD: (f32, f32) = (2., 0.);
 const TOOLBAR_PAD: (f32, f32) = (3., 7.);
 const TOOLBAR_HEIGHT: f32 = 26.;
 
+/// Every button's line height but where a tier or look sets its own: `.btn`'s `line-height: 1.4` at its 12-pixel text,
+/// 16.8 pixels rounded to 17.
+const LINE: f32 = 17.;
+/// The edge every tier but `Tier::Link` and `Tier::Readout` draws, transparent where the tier has no edge color (`.btn`'s
+/// `border: 1px solid`). The render draws it with `border_1`; this names it for [`Button::compact_height`].
+const EDGE: f32 = 1.;
+
 /// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
 /// header's actions.
 const COMPACT_PAD: (f32, f32) = (2., 8.);
@@ -472,6 +479,22 @@ impl Button {
     pub fn condensed(mut self, condensed: Option<Condensed>) -> Self {
         self.compact = Some(condensed.map_or(Compact::Ordinary, Compact::Condensed));
         self
+    }
+
+    /// The outer height, edge included, of a session header button with words in the compact geometry, condensed as
+    /// `condensed` says or ordinary for `None`: 23 pixels ordinary and with [`Condensed::Padding`], 21 with
+    /// [`Condensed::Words`]. It is computed from the same line, padding and edge the render draws, for a control drawn
+    /// beside the header's buttons that must be exactly as tall as they are (the terminal text size group). It repeats
+    /// the render's choice of padding and edge rather than reading them from it, so the session header's tests check it
+    /// against a drawn Stop button in both looks. It does not hold for an icon-only button, whose box follows its 13-pixel icon instead (19
+    /// pixels) unless something stretches it, as a split button's caret is stretched to its main part.
+    pub fn compact_height(condensed: Option<Condensed>) -> Pixels {
+        let (line, pad) = match condensed {
+            None => (LINE, COMPACT_PAD.0),
+            Some(Condensed::Padding) => (LINE, CONDENSED_PAD),
+            Some(Condensed::Words) => (CONDENSED_LINE, CONDENSED_PAD),
+        };
+        px(line + 2. * pad + 2. * EDGE)
     }
 
     /// The session list heading band's padding for a button that shows words or other content (the order title,
@@ -1013,7 +1036,7 @@ impl RenderOnce for Button {
             )
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
-            .line_height(px(17.))
+            .line_height(px(LINE))
             .when(words, |button| {
                 button
                     .text_size(px(CONDENSED_TEXT))
