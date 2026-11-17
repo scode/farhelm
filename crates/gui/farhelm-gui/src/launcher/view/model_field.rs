@@ -16,7 +16,8 @@
 //!   instead, until the next completed choice. In every mode, Restart with included, Enter only chooses, with the
 //!   list open or closed: a typed model is never launched by the key that entered it, and Launch (or Restart) is a
 //!   separate press (the old launcher's "choosing a model must not submit the launcher"; SPEC.md gives the model field
-//!   its own Enter rule). Restart with holds the agent type, so its list offers no other agent's models.
+//!   its own Enter rule). A held Enter (an auto-repeat) applies nothing, as the old field's did. Restart with holds the
+//!   agent type, so its list offers no other agent's models.
 //! - **Leaving the field**, Escape or a press outside closes the list and puts the chosen model back in the field.
 //!
 //! The rows are drawn from the launcher's own state by the launcher's shared floating-list view (`field_list`); the
