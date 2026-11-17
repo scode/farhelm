@@ -162,6 +162,18 @@ mod ssh_help;
 /// than keeping a second comparison that could drift from this one.
 pub use hosts::{build_is_newer, is_development_build};
 
+/// Whether this build carries the release mark (D13), which `build.rs` turns into the `farhelm_release_build` cfg
+/// and whose module doc says where it comes from.
+///
+/// The mark picks the helm's default host payload source (`provisioning/payloads.rs`): a marked build of a release
+/// version downloads from its own release on get.farhelm.io, a marked build of a development version refuses
+/// (`UnreleasedPayloads`), and an unmarked build has none (`NoPayloads`).
+///
+/// Public because a cfg a build script sets applies to this crate alone: the `farhelm` binary cannot test
+/// `farhelm_release_build` itself, and reading it here reports exactly the value the helm linked into the same binary
+/// acts on.
+pub const RELEASE_BUILD: bool = cfg!(farhelm_release_build);
+
 /// Release-owned structured launch catalog and argv compiler.
 mod launches;
 
@@ -1542,7 +1554,7 @@ async fn serve_with_ready(
         store.clone(),
         &state_dir,
         args.payload_selection(),
-        cfg!(farhelm_release_build),
+        RELEASE_BUILD,
     )?;
     let tensorlake = tensorlake::Tensorlake::production_with_delivery(
         store.clone(),

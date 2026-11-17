@@ -70,8 +70,8 @@
 # - `publish-jobs = ["./sign-sums"]` (skill: `["homebrew"]`) — our own reusable
 #   workflow, which despite its name signs nothing: CI never sees a signing
 #   key (D3). It validates the published payloads (static linkage,
-#   architecture, archive shape, a `farhelm` that runs its own version) and
-#   the release's complete asset inventory, rejecting any name it does not
+#   architecture, archive shape, a release-shaped `farhelm`) and the
+#   release's complete asset inventory, rejecting any name it does not
 #   recognize, including a `SHA256SUMS` or signature, which belong on
 #   get.farhelm.io only. It is the only custom publish job, and the point
 #   where the complete inventory and the payload bytes are both in hand. The
