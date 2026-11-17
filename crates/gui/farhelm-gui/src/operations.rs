@@ -184,13 +184,16 @@ pub enum Work {
     /// the session's own key. Apart from [`Work::Pin`] because the old app named the two refusals differently ("Pin:"
     /// and "Move pin:"). Not supersedable: each press names the neighbor it was drawn with.
     MovePin,
-    /// The Suspend of an environment session's host (`POST /api/hosts/{id}/suspend`), from the session's row menu or
-    /// header, on the session's own key, so its other lifecycle actions wait for it as the old app's session claim
-    /// made them wait (`session_list::environment`). Not supersedable. It changes no registry entry: SPEC.md says
-    /// Suspend and Resume are not changes to the host registry, so host changes and launches elsewhere go on beside it.
+    /// The Suspend of an environment session's host (`POST /api/hosts/{id}/suspend`). A session's Suspend, from its
+    /// row menu or header, runs on the session's own key, so its other lifecycle actions wait for it as the old app's
+    /// session claim made them wait (`session_list::environment`); the Hosts panel's Suspend runs on the host's key
+    /// (`OpKey::host`). The two surfaces hold separate requests, as in the old app, and the helm's provisioning lock
+    /// answers an overlap as busy. Not supersedable. It changes no registry entry: SPEC.md says Suspend and Resume are
+    /// not changes to the host registry, so host changes and launches elsewhere go on beside it.
     Suspend,
     /// The Resume of an environment session's host, or of an ordinary host a session's card offers to resume
-    /// (`POST /api/hosts/{id}/resume`), on the session's own key, like [`Work::Suspend`]. Not supersedable.
+    /// (`POST /api/hosts/{id}/resume`). A session's runs on the session's own key and the Hosts panel's on the host's
+    /// key, like [`Work::Suspend`]. Not supersedable.
     Resume,
     /// An environment session's Stop and suspend (`POST /api/sessions/{id}/stop-and-suspend`): its ordinary Stop, then
     /// its host's Suspend, as one helm operation, on the session's own key. Not supersedable. The Stop half ends an

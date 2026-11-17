@@ -1476,16 +1476,16 @@ impl Render for CaretMenu {
     }
 }
 
-/// Tab or Shift+Tab in `pane`'s open caret menu: dismiss it, as Escape does, which returns focus to its caret. A
-/// dismissal rather than a plain close, because the focus coordinator then swallows only the key's held repeats: a
-/// plain close would also swallow a second Tab pressed within half a second, which SPEC.md's caret rule means to go on
-/// from the caret to the next control.
+/// Tab or Shift+Tab in `pane`'s open caret menu: close it, which returns focus to its caret, through the layer
+/// manager's Tab close ([`layers::close_on_tab`]) rather than a plain close or a dismissal, because the focus
+/// coordinator then swallows only the key's held repeats: either of the others would also swallow a second Tab pressed
+/// within half a second, which SPEC.md's caret rule means to go on from the caret to the next control.
 fn tab_out(pane: &WeakEntity<SessionPane>, window: &mut Window, cx: &mut App) {
     let open = pane
         .upgrade()
         .and_then(|pane| pane.read(cx).header.menu.map(|(_, layer)| layer));
     if let Some(layer) = open {
-        layers::dismiss(layer, window, cx);
+        layers::close_on_tab(layer, window, cx);
     }
 }
 
