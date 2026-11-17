@@ -1034,26 +1034,9 @@ row shows its folder and hides its host" among them), which are below the minimu
 launch and cancel inside the initial viewport at default and narrow width" and "composer keeps labeled rows and a
 bounded body once a harness and model are chosen" are layout, the first shown in the `app-launcher-agent` and
 `app-launcher-scrolled-end` scenes and the second in the `app-launcher-codex-choices` scene, with a harness chosen (the
-scene picks no model); not yet ported: a catalog model picked before any agent type choosing its agent ("composer keeps
-arbitrary model-first choices reviewable"), a defaults-only recent clearing explicit choices ("composer saved defaults
-clear explicit choices without posting"), a restored model holding a hidden character sent as its raw bytes ("composer
-escapes a restored custom model while submitting its raw bytes"; the field and the row show it escaped), Local home
-taken in a Clone ("composer local-home reset takes over a remote clone destination"), Local home counting as a hand pick
-of the host ("composer destination block keeps host, browse, folder, and grouped choices together"), a press on the
-folder list's heading keeping the list and focus ("composer folder history tracks edited destinations at narrow width"),
-a cut recent folder's full path as its hover help and a press on Launch with the list open launching the typed folder
-once ("composer folder dropdown preserves keyboard launch and grouped history"; the Reset rows' words are shown in the
-`app-launcher-folder-list` scene), taking a recent replacing a shown notice ("composer reset notices follow every
-restored-choice transition"), Enter again on the closed model field after a pick ("composer model combobox filters the
-chosen harness's catalog and applies with Enter"), the search's highlighted row kept in view and a query with no results
-clearing the highlight ("composer search keeps active results visible and focus contained"; a hovered row's look is
-layout, not separately tested, since no scene hovers a search row and the highlight a hover must not mimic is
-`launcher::search_view_tests::arrows_move_the_highlight_and_enter_or_a_click_takes_a_row`'s), Tab and Shift+Tab wrapping
-to targets kept in view ("composer focus-trap wraps reveal their targets at narrow width"), the Tab order through the
-launch groups and the footer ("composer menu-closed Tab order follows the displayed launch groups", "composer footer
-names the chosen harness, host, and folder"; the placement segments' stops come with the environments work), and the
-launcher opened by a click on New while a row menu is open, or by Enter or Space on New, with focus in search and typing
-landing there (5566; a plain opening is tested, in the bullets below)
+scene picks no model). A hovered search row's color is layout. The arrow highlight itself is checked in
+`launcher::search_view_tests::arrows_move_the_highlight_and_enter_or_a_click_takes_a_row`. The Reset rows' words are
+shown in the `app-launcher-folder-list` scene.
 
 - "model picks discard another harness's default YOLO" (9150): a Codex model picked from the full list under Pi,
   OpenCode or Goose's default YOLO ending on Codex's Guarded, in
@@ -1066,15 +1049,42 @@ landing there (5566; a plain opening is tested, in the bullets below)
 - "opening New focuses search and immediate typing lands there, with or without a prior menu" (5566), a plain opening:
   focus in search in `launcher::view_tests::new_opens_on_the_agent_tab_with_focus_in_the_search_box`, and text typed
   with no click first reaching the box in `launcher::search_view_tests::a_word_and_enter_choose_it_and_empty_the_box`.
+- The same case with a row menu open in
+  `session_list::menu_tests::new_with_a_row_menu_open_closes_it_and_typing_reaches_the_search_box`, and with Enter or
+  Space on New in `session_list::order::tests::new_opens_the_launcher_and_closing_returns_focus_to_the_button`.
+- "composer keeps arbitrary model-first choices reviewable":
+  `launcher::view_tests::a_catalog_model_picked_first_chooses_its_agent`.
+- "composer saved defaults clear explicit choices without posting":
+  `launcher::search_view_tests::a_defaults_only_setup_clears_explicit_choices_without_launching`.
+- "composer local-home reset takes over a remote clone destination":
+  `launcher::folder_list_tests::local_home_moves_to_the_local_host`. Local home checks the template's Host box even when
+  the host was already local in
+  `launcher::folder_list_tests::local_home_checks_the_template_host_even_when_already_local`.
+- The folder heading keeping focus and the cut folder's full path on hover:
+  `launcher::folder_list_tests::a_folder_heading_keeps_focus_and_a_cut_row_shows_its_full_path`. Launch with the list
+  open sends the typed folder once in
+  `launcher::folder_list_tests::a_press_on_launch_uses_the_typed_folder_with_its_list_open`.
+- A recent replacing the old choice notice in `launcher::recents_view_tests::a_retired_container_setup_is_refused`.
+- A second Enter on the model field after a pick leaves the chosen model alone in
+  `launcher::view_tests::the_model_list_filters_and_enter_picks_the_highlighted_row`.
+- The arrow highlight brought into view, then the first result selected again after a miss:
+  `launcher::search_view_tests::navigation_reveals_the_highlight_and_a_miss_clears_it`.
+- Tab and Shift+Tab reaching the visible endpoints with the body scrolled or at its top at the desktop minimum size, the
+  footer's action order, and the Launch name carrying Codex, host and folder:
+  `launcher::view_tests::the_footer_actions_follow_reading_order_and_wrap_to_close`.
+- "composer menu-closed Tab order follows the displayed launch groups": Tab through recents, destination and all three
+  placement segments, host, Browse, folder, name, the Agent tab and the first harness choice in
+  `launcher::view_tests::tab_follows_the_launch_groups_when_all_placements_are_offered`.
 - "composer search reconciles a custom model like a harness button": the chip and the search's harness row take one
   path, whose reconciliation is
   `launcher::draft_tests::{model_choices_follow_their_owning_agent, a_switch_clears_what_the_new_agent_cannot_use_and_says_so}`,
   the notice drawn in `launcher::view_tests::a_switch_that_clears_a_choice_says_so`.
 - "composer keeps a deliberate structured choice through a late catalog": a catalog answer never edits the draft, in
   `launcher::view_tests::{a_carried_effort_the_model_does_not_offer_stays_offered, a_clone_launches_while_the_catalog_read_is_out, a_clone_launches_after_a_failed_catalog_read}`.
-- "composer escapes a restored custom model while submitting its raw bytes", the display: the field in
+- "composer escapes a restored custom model while submitting its raw bytes": the field in
   `launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped` (the draft keeps the raw id), the
-  strip's row in `launcher::recents_view_tests::a_row_names_a_custom_model_escaped`.
+  strip's row, the model field after the pick, and the create in
+  `launcher::recents_view_tests::a_row_names_a_custom_model_escaped`.
 - "composer isolates strong RTL destination and model summary values": the footer draws them as host text, whose
   isolation is
   `host_text::tests::{a_right_to_left_host_part_reorders_only_within_its_isolate, on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated}`;
@@ -1089,7 +1099,8 @@ landing there (5566; a plain opening is tested, in the bullets below)
 - "composer recent slots appear only with matches" and "composer reserves no space for recents when launch history is
   empty": `launcher::recents_view_tests::{the_strip_shows_matching_setups_only, an_empty_history_shows_no_strip}`.
 - "composer destination block keeps host, browse, folder, and grouped choices together", Browse under the host:
-  `launcher::view_tests::the_host_button_is_as_wide_as_its_host_with_browse_under_it`.
+  `launcher::view_tests::the_host_button_is_as_wide_as_its_host_with_browse_under_it`. The host, Browse and folder are
+  in that order with Tab in `launcher::view_tests::cancel_and_the_host_button_are_tab_stops`.
 
 ### `tests/session-action-completion.spec.ts` (sidebar)
 

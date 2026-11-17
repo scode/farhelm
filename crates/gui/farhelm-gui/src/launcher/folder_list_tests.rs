@@ -7,7 +7,9 @@
 //! the oracle for the pure rules; the view cases port the composer cases of `sidebar.spec.ts` that need no Browse.
 
 use farhelm_helm_client::fake::FakeHelm;
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext, VisualTestContext,
+};
 use serde_json::json;
 
 use super::draft::LaunchDraft;
@@ -155,6 +157,86 @@ fn focusing_the_folder_lists_recent_folders_and_resets(cx: &mut TestAppContext) 
     );
 }
 
+/// Group headings do no picking. Clicking one leaves the folder field and its list alone, and a cut row still
+/// offers the full path on hover.
+#[gpui::test]
+fn a_folder_heading_keeps_focus_and_a_cut_row_shows_its_full_path(cx: &mut TestAppContext) {
+    let long = "/src/a-long-parent-directory-that-will-be-cut/saved-project";
+    let (_helm, cx) = launcher_with_history(cx, &[long]);
+    focus_folder(cx);
+    assert!(list_shown(cx));
+    let nodes = test_support::frame(cx);
+    let heading = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-folder-recent"))
+        .expect("the Recent heading is drawn");
+    cx.simulate_click(heading.bounds.center(), gpui::Modifiers::none());
+    settle(cx);
+    assert!(list_shown(cx), "the heading keeps the list open");
+    assert!(
+        super::view_tests::focused(cx, super::view_tests::Field::Folder),
+        "the keyboard stays in the field"
+    );
+    assert!(
+        crate::session_list::tests::painted(&test_support::frame(cx))
+            .iter()
+            .any(|text| text.starts_with('…') && text.ends_with("/saved-project"))
+    );
+    let full = crate::session_list::host_rail::tests::hover_help(cx, "launcher-folder-0");
+    assert_eq!(full.as_deref(), Some(long));
+}
+
+/// Launch is a separate pointer action even while the folder popup is open. Closing it at the press cannot
+/// move the action away from the release, and its highlighted history does not replace the typed folder.
+#[gpui::test]
+fn a_press_on_launch_uses_the_typed_folder_with_its_list_open(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_with_history(cx, &["/src/recent"]);
+    super::folder_default_tests::edit_draft(cx, |draft| {
+        draft.choose_tab(super::draft::Tab::Command);
+        draft.edit_command("true".into());
+        draft.choose_command_yolo(false);
+    });
+    focus_folder(cx);
+    keys(cx, super::view_tests::SELECT_ALL);
+    cx.simulate_input("/src");
+    settle(cx);
+    keys(cx, "down");
+    assert_eq!(
+        super::view_tests::selected_state(cx, "launcher-folder-0"),
+        Some(true)
+    );
+    assert_eq!(
+        draft(cx).folder.value(),
+        "/src",
+        "the selected row is still only offered"
+    );
+    assert!(list_shown(cx), "the list is open at mouse-down");
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    let at = test_support::center(cx, "launcher-launch");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(MouseDownEvent {
+        button: MouseButton::Left,
+        position: at,
+        modifiers: Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    settle(cx);
+    assert!(!list_shown(cx), "mouse-down closed the list");
+    assert!(test_support::bounds(cx, "launcher-launch").contains(&at));
+    cx.simulate_event(MouseUpEvent {
+        button: MouseButton::Left,
+        position: at,
+        modifiers: Modifiers::none(),
+        click_count: 1,
+    });
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [create] = sent.as_slice() else {
+        panic!("one launch at the same pointer position: {sent:?}");
+    };
+    assert_eq!(create.body.as_ref().unwrap()["cwd"], "/src");
+}
+
 /// An arrow highlights a row and Enter takes it without launching; with the list open and nothing highlighted, Enter
 /// launches as from any field (here an incomplete draft says why) and closes the list, so the refused launch's controls
 /// below the field are not left under it. Why: SPEC.md: "In the editable folder field, Enter chooses an
@@ -255,17 +337,26 @@ fn a_picked_folder_does_not_filter_the_next_list(cx: &mut TestAppContext) {
 }
 
 /// Local home makes the local host the target with `~` as its folder, as the old Reset row did; Home keeps the host.
-/// Why: Local home is a deliberate choice of this machine, not just a folder.
+/// Why: Local home is a deliberate choice of this machine, not just a folder. A Clone's inherited host starts
+/// unchecked for Save as template. Local home counts as a hand pick so the user can carry the local host in a template.
 #[gpui::test]
 fn local_home_moves_to_the_local_host(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_with_hosts(
         cx,
-        LaunchDraft::new(Some(2), "/srv".into(), None),
+        LaunchDraft::clone_of(
+            &super::draft_tests::session(super::view_tests::codex(None, None, None)),
+            Some(2),
+        ),
         fixture_hosts(&[0, 1]),
     );
     assert!(
         history_reads(&mut helm, cx).is_empty(),
         "the premise: host2 is not connected, so its history is not read"
+    );
+    assert_eq!(draft(cx).host, Some(2));
+    assert!(
+        !draft(cx).host_chosen,
+        "the premise: the remote host was inherited"
     );
     focus_folder(cx);
     assert!(list_shown(cx));
@@ -278,6 +369,37 @@ fn local_home_moves_to_the_local_host(cx: &mut TestAppContext) {
     let moved = draft(cx);
     assert_eq!(moved.host, Some(1));
     assert_eq!(moved.folder.value(), "~");
+    assert!(moved.host_chosen, "Local home counts as choosing the host");
+}
+
+/// Local home explicitly picks the host even when the local host was already shown. Save as template is where
+/// that otherwise invisible change matters: its Host checkbox becomes checked.
+#[gpui::test]
+fn local_home_checks_the_template_host_even_when_already_local(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_with_history(cx, &[]);
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(draft(cx).host, Some(1));
+    let host_checkbox = |cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("save-template-field-host"))
+            .and_then(|node| node.toggled)
+    };
+
+    test_support::click(cx, "launcher-save-template");
+    assert_eq!(host_checkbox(cx), Some(gpui::Toggled::False));
+    keys(cx, "escape");
+    assert!(host_checkbox(cx).is_none(), "Escape closed the panel");
+
+    focus_folder(cx);
+    assert_eq!(
+        name_of(cx, "launcher-folder-1").as_deref(),
+        Some("Reset destination to local home")
+    );
+    keys(cx, "down down enter");
+    assert_eq!(draft(cx).host, Some(1), "the visible host is unchanged");
+    test_support::click(cx, "launcher-save-template");
+    assert_eq!(host_checkbox(cx), Some(gpui::Toggled::True));
 }
 
 /// host1 and host2 from the helm's fixture, both connected (the fixture's host2 is connecting).
