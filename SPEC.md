@@ -2591,8 +2591,10 @@ accessible status keeps its words. Hover names both builds (and both protocols f
 optional or required, and explains that clicking updates the host to the helm's version. Clicking starts the menu's
 Update without confirmation; inline progress replaces the button. Local hosts, hosts with update options still loading,
 and hosts occupied by setup or another run retain the plain words. The helm's own machine is not updated from the panel:
-its row menu shows Update greyed out wherever it would otherwise be offered, saying to run the installer again, and
-choosing it sends nothing. The installed desktop app is the exception: there the local row always offers Update, and
+its row menu shows Update greyed out wherever it would otherwise be offered, saying how that machine is updated instead,
+and choosing it sends nothing. The words differ by platform: on macOS they say to run the installer again, and on Linux,
+which has no desktop installer, "Install a newer Farhelm on this machine to update it" (decided by the migration's
+orchestrator on 2026-11-17). The installed desktop app is the exception: there the local row always offers Update, and
 choosing it checks for a newer release and installs it (see [Installation and updates](#installation-and-updates)). A
 host whose supervisor is newer than the helm (a newer build on the same protocol, or a higher protocol version) says
 `Too new` instead, is not offered Update, and its hover names the host's version, the helm's, and their protocol
