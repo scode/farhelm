@@ -1462,10 +1462,11 @@ updates include it under their ordinary rules. No separate session-only host-man
 
 The launcher's **New sandbox** segment lists recipes with a cube mark and CPU and memory size. A recipe without a built
 snapshot is disabled with **No snapshot yet**. A missing API key or absent or unreadable local Farhelm SSH key also
-disables it. The selected recipe shows the existing copyable SSH-key registration command and explains that Farhelm
-cannot check account registration. If SSH later refuses the key, launch fails with that remedy and attempts to delete
-the new sandbox and snapshots. Brief billing and visible failed cleanup are accepted. Other failures retain their own
-reason. Launch never starts a missing software snapshot build; Add host keeps its existing build-if-missing behavior.
+disables it. Once Farhelm's SSH key exists, New sandbox shows the existing copyable SSH-key registration command,
+whether or not a recipe is chosen, and explains that Farhelm cannot check account registration. If SSH later refuses the
+key, launch fails with that remedy and attempts to delete the new sandbox and snapshots. Brief billing and visible
+failed cleanup are accepted. Other failures retain their own reason. Launch never starts a missing software snapshot
+build; Add host keeps its existing build-if-missing behavior.
 
 The footer names **new &lt;recipe&gt; sandbox**. Its note explains that the sandbox is for this session, bills while
 running, Suspend stops CPU and memory billing, and deleting its last session removes the sandbox and its files. Managed
