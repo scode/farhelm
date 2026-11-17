@@ -259,7 +259,7 @@ impl VersionReadout {
         cx: &App,
     ) -> Button {
         let palette = theme::palette(cx);
-        let lit = hovered || focus::shows_ring(&self.focus, window);
+        let lit = hovered || focus::shows_ring(&self.focus, window, cx);
         let warning = readout.needs_reinstall || readout.withdrawn;
         let step = spinning.then(|| self.step(cx));
         let look = check_look(palette, lit, step, warning);

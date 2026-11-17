@@ -183,7 +183,7 @@ impl RenderOnce for CopyField {
             window,
             cx,
         );
-        let ring = focus::shows_ring(&focus, window);
+        let ring = focus::shows_ring(&focus, window, cx);
         // `.header-copy.copied` comes after `:hover` and `:focus-visible` in the old sheet, so its bright ink wins over
         // theirs.
         let ink = if confirming {

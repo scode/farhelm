@@ -94,7 +94,7 @@ impl RenderOnce for ListRow {
             window,
             cx,
         );
-        let ring = focus::shows_ring(&focus, window);
+        let ring = focus::shows_ring(&focus, window, cx);
         let (hover_fill, ring_color) = if self.selected {
             (palette.accent_fill_hover, palette.on_fill)
         } else {

@@ -251,7 +251,7 @@ use gpui::{
 use crate::actions::Dismiss;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, Spinner, StatusMark, Tier};
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::help_menu::HelpButton;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::HostsPanel;
@@ -681,11 +681,10 @@ impl SessionList {
     /// Shift+Tab finds a painted neighbor to move to (GPUI's Tab order holds only what was painted). Rows already fully
     /// in view never move: GPUI's reveal would scroll even those.
     ///
-    /// Only for the keyboard (`last_input_was_keyboard`, which GPUI sets to false on a mouse press before dispatching
-    /// it): a click that focuses a row's control must not scroll the list before the click's release, which would then
-    /// land on another element and be lost. The once-per-move check also keeps a wheel scroll after a Tab from being
-    /// fought, since a wheel does not change the input mode. Accepted edge cases: a pointer move between a key and the
-    /// next frame can skip a reveal, and Escape out of a menu opened at an edge row may scroll the list by up to a row.
+    /// Only for the keyboard ([`focus::last_input_was_keyboard`]): a click that focuses a row's control must not scroll
+    /// the list before the click's release, which would then land on another element and be lost. The once-per-move
+    /// check also keeps a wheel scroll after a Tab from being fought, since a wheel does not change the flag. Accepted
+    /// edge case: Escape out of a menu opened at an edge row may scroll the list by up to a row.
     fn reveal_focused(&mut self, window: &Window, cx: &App) {
         let focused = window.focused(cx);
         let seen = self.focus_seen.as_ref().and_then(WeakFocusHandle::upgrade);
@@ -693,7 +692,7 @@ impl SessionList {
             return;
         }
         self.focus_seen = focused.as_ref().map(FocusHandle::downgrade);
-        if !window.last_input_was_keyboard() {
+        if !focus::last_input_was_keyboard(window, cx) {
             return;
         }
         let Some(ix) = self

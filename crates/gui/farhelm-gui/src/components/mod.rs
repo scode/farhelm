@@ -537,7 +537,7 @@ pub(crate) fn focus_stop(
 ) -> Stateful<Div> {
     debug_assert!(focus.tab_stop, "a focus stop's handle must be a tab stop");
     let palette = theme::palette(cx);
-    let ringed = focus::shows_ring(focus, window);
+    let ringed = focus::shows_ring(focus, window, cx);
     let stop = stop
         .relative()
         .role(role)

@@ -235,7 +235,7 @@ impl RenderOnce for DividerGrip {
             window.use_keyed_state(ElementId::Name(format!("{id}-drag").into()), cx, |_, _| {
                 Dragging::default()
             });
-        let ring = focus::shows_ring(&strip, window);
+        let ring = focus::shows_ring(&strip, window, cx);
         let grip = div()
             .id(ElementId::Name(id.clone()))
             .size_full()
