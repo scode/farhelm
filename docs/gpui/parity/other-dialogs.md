@@ -373,15 +373,16 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 - **The Send feedback dialog.** Its message box has no resize corner: it grows with its text to the growing box's cap
   and then scrolls (decided by the maintainer on 2026-11-13). While a send is out the fields are read-only rather than
-  disabled and Send draws busy, so focus stays where it was; after a failed send it stays on Send rather than moving to
-  the message as the old dialog's did, which only moved it because disabling the fields had dropped it. A disabled Send
-  takes the shared button's retired look (the `--bg-2` fill and `--border-dim` edge) rather than the old dialog's own
-  (`--bg-1` and `--border`), with the same `--fg-2` text. The old app announced a successful send once more in a status
-  region outside the dialog after it closed; here the thank-you line is itself a status, announced while it shows. Its
-  failure wording for a helm it could not reach at all is not ported: a lost connection resets the window, which closes
-  the dialog. Re-use's hover help no longer says "for the desktop app and web UI", since there is no web UI. The
-  attached box's term column is 104 pixels wide where the old grid's `max-content` came to about 99: GPUI draws Inter a
-  few pixels wider, and at 100 the "Operating system" term wrapped onto a second line.
+  disabled and Send draws busy, so focus stays where it was. After a failed send, focus on a control (Send, or a field
+  the user moved to) stays there; focus that a click on Send left on the dialog itself (macOS) goes to the message, as
+  the old dialog's refusal did, unless the user moved on since the press. A disabled Send takes the shared button's
+  retired look (the `--bg-2` fill and `--border-dim` edge) rather than the old dialog's own (`--bg-1` and `--border`),
+  with the same `--fg-2` text. The old app announced a successful send once more in a status region outside the dialog
+  after it closed; here the thank-you line is itself a status, announced while it shows. Its failure wording for a helm
+  it could not reach at all is not ported: a lost connection resets the window, which closes the dialog. Re-use's hover
+  help no longer says "for the desktop app and web UI", since there is no web UI. The attached box's term column is 104
+  pixels wide where the old grid's `max-content` came to about 99: GPUI draws Inter a few pixels wider, and at 100 the
+  "Operating system" term wrapped onto a second line.
 
 ### Welcome
 
