@@ -497,6 +497,38 @@ fn a_refused_send_leaves_focus_on_the_send_that_holds_it(cx: &mut TestAppContext
     );
 }
 
+/// The old `feedback.spec.ts` case "failed feedback and cancel preserve remembered contact without a preference
+/// write". The remembered contact is shared by every client, and only a successful send may change it (SPEC.md: "A
+/// failed send changes nothing"), so neither a failure nor a Cancel may act on the choices the user made in the fields.
+/// `a_failed_send_says_so_and_keeps_the_text_for_a_retry` leaves the fields as they opened and never cancels; here the
+/// contact and Re-use both differ from what is remembered, so a write made from them would clear or change it, and
+/// Cancel is pressed after the failure. Specified: from a dialog opened on "remembered", with the contact typed over as
+/// "new" and Re-use unchecked, a refused send shows its failure, keeps "new" in the field and writes no preference;
+/// Cancel then closes the dialog and writes none either; the next dialog opens on "remembered" with Re-use checked.
+#[gpui::test]
+fn a_failed_send_and_cancel_leave_an_edited_contact_unremembered(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle) = open_bar(cx, Some("remembered"));
+    open_dialog(cx);
+    keys(cx, "k e e p");
+    type_contact(cx, "n e w");
+    click(cx, "feedback-reuse");
+    assert_eq!(contact(cx), "new", "the premise: the contact was edited");
+    assert_eq!(reuse(cx), Some(false), "the premise: Re-use is unchecked");
+    let (id, body) = send(&mut helm, cx);
+    assert_eq!(body, submission("keep", Some("new")));
+    answer(&mut helm, cx, id, 502, json!(UNREACHABLE));
+    assert!(label(cx, "feedback-failure").is_some(), "the send failed");
+    assert_eq!(contact(cx), "new", "the field keeps the edit");
+    assert_eq!(helm.commands(), [], "the failure wrote no preference");
+
+    click(cx, "feedback-cancel");
+    assert!(!any_open(cx), "Cancel closed the dialog");
+    assert_eq!(helm.commands(), [], "Cancel wrote no preference");
+    open_dialog(cx);
+    assert_eq!(contact(cx), "remembered");
+    assert_eq!(reuse(cx), Some(true));
+}
+
 /// The old app's `may_close`, and the stay-open rule of the operation's busy state: closing while the send is out
 /// would drop its outcome and lose the text, and a second send would file a second issue. The dialog reads whether a
 /// send is out from the operation store, never a copy of its own, so the first part starts feedback work on the

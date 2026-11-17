@@ -32,6 +32,7 @@ use crate::hosts::tests::{connected, host, hosts};
 use crate::local_time;
 use crate::session_list::COUNT_ID;
 use crate::session_list::menu_tests::{self, drawn, ended, label_of};
+use crate::session_list::row_tests::texts_within;
 use crate::session_list::tests::{
     Fixture, TEST_NOW, change, listing, listing_meta, open_main, painted, preferences,
     preferences_state, row_order, selected, session,
@@ -343,17 +344,7 @@ fn only_a_row_with_notifications_draws_a_bell_before_its_age(cx: &mut TestAppCon
     assert_eq!(bell.role, Some(Role::Button));
     assert_eq!(bell.label.as_deref(), Some("Notifications for a: 2 unread"));
     assert!(node(&nodes, "session-bell-b").is_none(), "b has no bell");
-    let agent = node(&nodes, "session-row-a-agent")
-        .expect("a's agent track")
-        .bounds;
-    let age = node(&nodes, "session-row-a-age").expect("a's age").bounds;
-    assert!(bell.bounds.left() >= agent.right(), "after the agent marks");
-    assert!(bell.bounds.right() <= age.left(), "before the age");
-    let middle = |bounds: gpui::Bounds<gpui::Pixels>| bounds.center().y;
-    assert!(
-        (middle(bell.bounds) - middle(age)).abs() <= px(2.),
-        "on the age's line"
-    );
+    assert_bell_before_age(&nodes);
     let at = test_support::center(cx, BELL_A);
     cx.simulate_mouse_move(at, None, Modifiers::none());
     test_support::advance(cx, crate::layers::HOVER_DELAY);
@@ -369,6 +360,49 @@ fn only_a_row_with_notifications_draws_a_bell_before_its_age(cx: &mut TestAppCon
         bell_name(cx).as_deref(),
         Some("Notifications for a: none unread")
     );
+}
+
+/// Assert that `a`'s bell is drawn wholly between its agent track and its age and centred on the age's line: the slot
+/// the old row kept for it (`.session-bell-slot`), in either density.
+fn assert_bell_before_age(nodes: &[DriverNode]) {
+    let bell = node(nodes, BELL_A).expect("a's bell is drawn").bounds;
+    let agent = node(nodes, "session-row-a-agent")
+        .expect("a's agent track")
+        .bounds;
+    let age = node(nodes, "session-row-a-age").expect("a's age").bounds;
+    assert!(bell.left() >= agent.right(), "after the agent marks");
+    assert!(bell.right() <= age.left(), "before the age");
+    assert!(
+        (bell.center().y - age.center().y).abs() <= px(2.),
+        "on the age's line"
+    );
+}
+
+/// The old bell case checked the bell's place in both densities. A compact row drops its last line (SPEC.md,
+/// "Session list"), and the bell must stay on the one line left, in the age's slot, rather than go with the hidden line
+/// or push the age out. Specified: with the helm-wide compact preference on, `a`'s row, active a minute ago, paints
+/// exactly its title and its age (`a`, `1m`), as `session_list::compact_tests` pins for every compact row, and its bell
+/// is drawn between its agent track and its age, on the age's line.
+#[gpui::test]
+fn a_compact_row_keeps_its_bell_before_its_age(cx: &mut TestAppContext) {
+    let compact = preferences_state(Preferences {
+        compact: Some(true),
+        visit_history: vec!["b".into()],
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    });
+    let a = belled(json!([note(1, 60, "one")]), 0)
+        .activity(TEST_NOW - 60)
+        .seen(Some(TEST_NOW - 60));
+    let (_fake, cx) = open_main(cx, vec![listing(&["a", "b"], &[a, session("b")]), compact]);
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    let texts: Vec<String> = texts_within(&nodes, "session-item-a")
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect();
+    assert_eq!(texts, ["a", "1m"], "the premise: a's row is compact");
+    assert_bell_before_age(&nodes);
 }
 
 // ---- Opening the list ------------------------------------------------------------------------------------------------
