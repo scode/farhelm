@@ -177,6 +177,75 @@ fn an_interrupted_session_opens_on_its_card_with_no_terminal(cx: &mut TestAppCon
     assert_eq!(focused_id(main.cx).as_deref(), Some(CARD));
 }
 
+/// SPEC.md, "Durability and resume": "Nothing respawns unattended", so looking at an interrupted session is never a
+/// request to bring it back, and leaving it is no request to clean it up. The old `terminal-multihost.spec.ts` case
+/// "reboot-already-interrupted" (reference commit `24bc0580`) pinned that opening such a session mounts no terminal and
+/// leaving it changes nothing; the card's other tests drain what opening sends without looking at it. Specified: with
+/// an interrupted a open at startup, the window has sent no Restart, Replace, Stop or Delete; opening b and then a
+/// again each send exactly what any open of a seen session sends, its `last_selected` preference and the session query
+/// naming it, and nothing else; b's one stream opens and none for a, and a is on its card again.
+#[gpui::test]
+fn opening_and_leaving_an_interrupted_session_asks_the_helm_for_nothing(cx: &mut TestAppContext) {
+    /// Every command the window sent since the last call, as (method, path, body), each answered with success so
+    /// nothing waits behind it.
+    fn everything(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
+        let mut found = Vec::new();
+        for command in fake.commands() {
+            fake.reply(command.id, 200, None);
+            found.push((
+                command.method,
+                command.path,
+                command.body.unwrap_or_default(),
+            ));
+        }
+        found
+    }
+
+    let mut main = open_main(
+        cx,
+        snapshot(&[(interrupted("a"), 0), (session("b"), 0)], false),
+    );
+    assert!(drawn(main.cx, CARD), "the premise: a opens on its card");
+    // What the startup sends besides is the selection rules' business; a change to a session is not among it.
+    let changes: Vec<String> = everything(&mut main.helm)
+        .into_iter()
+        .filter(|(method, path, _)| {
+            *method == Method::Delete
+                || (*method == Method::Post
+                    && ["/stop", "/restart", "/replace"]
+                        .iter()
+                        .any(|verb| path.ends_with(verb)))
+        })
+        .map(|(_, path, _)| path)
+        .collect();
+    assert_eq!(changes, Vec::<String>::new(), "opening a at startup");
+
+    for (row, opened) in [("session-row-b", "b"), ("session-row-a", "a")] {
+        test_support::click(main.cx, row);
+        assert_eq!(selected(main.cx).as_deref(), Some(opened), "the premise");
+        let sent: Vec<(String, Value)> = everything(&mut main.helm)
+            .into_iter()
+            .map(|(_, path, body)| (path, body))
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                (
+                    "/api/preferences".to_owned(),
+                    json!({ "last_selected": opened })
+                ),
+                (
+                    farhelm_proto::ui_channel::SESSION_QUERY_PATH.to_owned(),
+                    json!({ "selected": opened })
+                ),
+            ],
+            "opening {opened} sends only the open itself"
+        );
+    }
+    assert!(drawn(main.cx, CARD), "a is on its card again");
+    assert_eq!(streams(&main).len(), 1, "b's stream alone; none for a");
+}
+
 /// The old app dropped an open session's terminal the moment the listing said it was interrupted, and mounted a fresh
 /// one once it was not (`header.spec.ts`, "header pressure follows tab strips added and replaced after interruption";
 /// `terminal-multihost.spec.ts`, "reboot-while-open" and "reboot-restart"). A terminal kept across the interruption

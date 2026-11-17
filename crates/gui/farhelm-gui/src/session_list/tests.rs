@@ -475,6 +475,51 @@ fn a_click_opens_a_session_remembers_it_and_marks_it_seen_once(cx: &mut TestAppC
     );
 }
 
+/// A keyboard user opens a session from its row's open control, and that must be the very open a click is, or the
+/// helm's visit history and the unseen marks would depend on the input device. The old `terminal.spec.ts` case
+/// "keyboard activation opens the session, matching a real click" (reference commit `24bc0580`) pinned it; the
+/// shared Enter and Space rule is tested on a plain button (`components/tests/button.rs`), and this pins the row's
+/// wiring to it. Run under Linux's click rule, set here, so the click and Escape on a menu button leave focus on that
+/// button. Specified: with a open and focus on a's actions button, Tab reaches b's open control and Enter opens b,
+/// sending its `last_selected` preference, the query naming it and its seen mark at its latest activity, as a click
+/// does; with focus on b's actions button, Tab reaches c's open control and Space opens c the same way.
+#[gpui::test]
+fn enter_or_space_on_a_rows_open_control_opens_it_as_a_click_does(cx: &mut TestAppContext) {
+    let rows = [
+        session("a"),
+        session("b").activity(250).seen(Some(100)),
+        session("c").activity(300).seen(Some(100)),
+    ];
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![listing(&["a", "b", "c"], &rows), preferences(&["a"], None)],
+    );
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    for (button, control, key, opened, activity) in [
+        ("session-menu-a", "session-row-b", "enter", "b", 250),
+        ("session-menu-b", "session-row-c", "space", "c", 300),
+    ] {
+        test_support::click(cx, button);
+        test_support::keys(cx, "escape tab");
+        assert_eq!(
+            test_support::focused_id(cx).as_deref(),
+            Some(control),
+            "the premise: Tab from {button} reached {control}"
+        );
+        sent(&mut fake);
+
+        test_support::keys(cx, key);
+        cx.run_until_parked();
+        assert_eq!(selected(cx).as_deref(), Some(opened), "{key} opened it");
+        assert_eq!(
+            sent(&mut fake),
+            [remembered(opened), named(opened), seen(opened, activity)],
+            "{key} sends what a click sends"
+        );
+    }
+}
+
 /// The open session's row is how assistive technology tells which session the pane shows. The old app marked the open
 /// row's button `aria-current`, which GPUI cannot express, so the port marks the row's list item selected instead (a
 /// recorded deviation in the parity file), and nothing checked that mark until the frame record carried selection.
@@ -1288,6 +1333,30 @@ fn a_mark_on_a_disconnected_host_is_grey_whatever_its_status() {
         );
     }
     assert_eq!(Live::Running.mark_color(palette, false, false), palette.ok);
+}
+
+/// An idle session's mark says by its ink whether it has output nobody has looked at: the old `terminal.spec.ts` cases
+/// "an idle session already seen uses its row's status foreground with the plain word" and "an idle session with
+/// unseen output uses its row's new-output foreground and accessible words" (reference commit `24bc0580`). GPUI's
+/// driver record carries no colors, so this pins the ink table; that the row draws with it is the `session-list`
+/// golden's. Specified, in both palettes, on a connected row: plain idle is `--fg-1` and worded `Idle`, idle with
+/// unseen output `--info` and worded `Idle — new output`, and on the selected row both are `--on-fill`.
+#[test]
+fn an_idle_mark_inks_by_whether_its_output_was_seen() {
+    for palette in [&theme::DARK, &theme::LIGHT] {
+        for (live, ink, word) in [
+            (Live::Idle, palette.fg_1, "Idle"),
+            (Live::IdleUnseen, palette.info, "Idle — new output"),
+        ] {
+            assert_eq!(live.mark_color(palette, false, false), ink, "{live:?}");
+            assert_eq!(
+                live.mark_color(palette, true, false),
+                palette.on_fill,
+                "{live:?} selected"
+            );
+            assert_eq!(live.word(), word);
+        }
+    }
 }
 
 /// The pulse's look is the old `farhelm-status-pulse`: a linear dip to the minimum and back, held at each quarter's
