@@ -2,36 +2,36 @@
 kind: breaking
 ---
 
-Farhelm no longer has a browser interface. `farhelm helm run` serves no page and offers no browser sign-in, and the
-`farhelm helm token show` and `farhelm helm token rotate` commands are removed. A Linux helm installed with
-`farhelm helm setup` keeps running, but nothing can connect a GUI to it.
+Farhelm's GUI is now a native desktop app for macOS and Linux, which replaces both the browser interface and the old Mac
+app. `farhelm helm run` serves no page and offers no browser sign-in, and the `farhelm helm token show` and
+`farhelm helm token rotate` commands are removed. On Linux the desktop app needs a Wayland session: started without one,
+it exits with a message saying so.
 
-The GUI is being rebuilt as a native desktop app for macOS and Linux, which replaces both the browser interface and the
-old Mac app. The old Mac app's window is already gone: until the new app lands, the desktop app starts its helm and
-local supervisor and opens a window that lists your sessions in your chosen order, with their status (a running
-session's dot pulses, as in the old app), shows the terminal of the one you pick, live, for you to type into, and lets
-you rename or delete a session from the ⋯ menu on its row (the open one also with Cmd+L to rename and Cmd+W to delete
-on a Mac, or Ctrl+Shift+L and Ctrl+Shift+Backspace on Linux). While the open session is being deleted, its terminal
-says so, and shows the agent's exit and the lost connection only if the delete fails. It has no terminal tabs, text
-size control or other session controls yet. That window does connect to its helm, says when the connection is lost or
-another window has taken over, and offers to take the helm back. This draft is written while that migration is under
-way, so builds from the development branch in this period have a GUI that still lacks most of what the old app could
-do, and the entry is revised as the new app lands. Agents and the command line keep working as before, except that
-agent requests that need your approval are refused while the new app is open (below).
+(Curator: this draft is written while the migration is under way and was last revised at its second milestone, on
+2026-11-16. The new app now covers the old app's daily work: the session list with pinning, marking and bulk Stop and
+Delete, the session launcher, templates and quick launch, the terminal with tabs, file links and attachments, Settings,
+the Hosts panel, approval cards, Trash, notices and status sounds. What is still being ported is tracked in
+`docs/gpui/parity/`. The paragraphs below are candidates for their own entries; most belong under Changed.)
 
 Five settings the old app kept per device reset to their defaults when you switch to the new app: the appearance
 (System, Dark or Light), the sidebar width, whether the host rail is open, the status sounds on or off, and the terminal
-text size. The new app will keep them with your other settings in Farhelm itself instead of in the old app's window.
-(Curator: none of the five exists in the new app yet; say "keeps" once they have moved into the helm's preferences.)
+text size. The new app keeps them with your other settings in Farhelm itself instead of in the window.
 
-Until the new app shows approval cards, an agent request that needs your approval is refused at once while the desktop
-app is open, with a message saying the window cannot show approval requests yet. Requests a host's "without asking"
-settings already allow still run, but the new app cannot change those settings yet, so only what a host already has
-from the old app applies. Some requests no setting allows, so they are always refused for now: adding, editing or
-removing a host, launches with a wrapper prefix the agent chose, new disposable environments, and template changes that
-leave a wrapper prefix in the template. (Curator: interim, decided by the maintainer on 2026-11-13; drop this paragraph
-once the app's approval cards land, or, if it has shipped, say they are back. "Already has from the old app" assumes
-the host settings carry over unchanged in the helm's database, which nothing in the switch resets.)
+The window reopens where you left it. The first launch after the switch ignores the old app's saved window position and
+opens at the default size, centered, and on a Mac a window left on a second display reopens on the main one.
+
+The number-key, Keyboard shortcuts and text size shortcuts (Cmd+digit, Cmd+/ and Cmd+Shift with = or − on a Mac;
+Ctrl+Shift with the same keys on Linux) now go by the key's position on the keyboard, whatever its layout, and never reach
+the program in a focused terminal. On Linux, Ctrl+Shift+− used to reach the terminal, where it is readline's undo.
+
+Pasting into a terminal is Cmd+V on a Mac and Ctrl+Shift+V or Shift+Insert on Linux, so on Linux Shift+Insert no longer
+reaches the program.
+
+The prompt boxes in the session launcher and the template editor grow with their text up to a limit and then scroll;
+you can no longer drag them to resize.
+
+On Linux, when the desktop does not draw window title bars (GNOME, for example), the app draws its own, with the title
+and the minimize, maximize and close buttons. (Curator: KDE, which draws its own title bars, has not been tried yet.)
 
 The new `farhelm licenses` command prints the license notices for the open-source code Farhelm is built from: the
 crates its binaries depend on, and code it ported from xterm.js or derived from Unicode data, whose notices used to ship
