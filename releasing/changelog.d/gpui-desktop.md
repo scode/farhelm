@@ -3,7 +3,7 @@ kind: breaking
 ---
 
 Farhelm's GUI is now a native desktop app for macOS and Linux, which replaces both the browser interface and the old Mac
-app. `farhelm helm run` serves no page and offers no browser sign-in, and the `farhelm helm token show` and
+app. Farhelm no longer serves a page or offers a browser sign-in, and the `farhelm helm token show` and
 `farhelm helm token rotate` commands are removed. On Linux the desktop app needs a Wayland session: started without one,
 it exits with a message saying so.
 

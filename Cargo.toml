@@ -222,8 +222,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = { version = "0.27.1", default-features = false, features = ["std"] }
 tree-sitter-bash = "0.25.1"
-# Parses/validates `--release-base-url` (D2/D18) and builds the asset URLs
-# the download payload source fetches from it.
+# Builds the asset URLs the download payload source fetches from its
+# release base URL (D2).
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 

@@ -227,9 +227,9 @@ impl Transport for HttpTransport {
 /// Wrap a `reqwest::Error` for rendering, with its URL stripped.
 ///
 /// `reqwest::Error`'s `Display` includes the URL of the request that failed,
-/// and after a redirect that is no longer the base URL an operator supplied
-/// — it is wherever the release server sent us, which for an object store or
-/// a mirror is routinely a signed URL carrying a token in its query string.
+/// and after a redirect that is no longer the base URL — it is wherever the
+/// release server sent us, which for an object store is routinely a signed
+/// URL carrying a token in its query string.
 /// These errors are rendered into provisioning progress that reaches the
 /// browser, so a redirect target must not ride along. Nothing is lost: every
 /// message built from these already names the validated base URL separately.
@@ -238,7 +238,7 @@ fn transport_error(error: reqwest::Error) -> anyhow::Error {
 }
 
 /// Downloads, verifies, caches, and unpacks release payloads for a
-/// release-shaped helm (D13) or an explicit `--release-base-url`.
+/// release-shaped helm (D13), or for a test's fixture release.
 ///
 /// One instance serves the whole process. State it holds is exactly the
 /// state that must not be duplicated: the once-per-process `SHA256SUMS`
@@ -332,17 +332,17 @@ impl ReleasePayloadSource {
     /// The directory is `v{version}-<first 12 hex of sha256(base_url)>`.
     /// Both halves matter: the version because a helm only ever wants its
     /// own release's payloads and an upgraded helm must not inherit the old
-    /// one's binaries, and the URL hash because a test or mirror pointed at
-    /// some other server must be physically unable to poison — or be
+    /// one's binaries, and the URL hash because a test pointed at some
+    /// other server must be physically unable to poison — or be
     /// confused by — the cache the real release origin wrote.
     ///
-    /// `base_url` is normalised to end in `/`, so an operator passing
-    /// `--release-base-url https://example.invalid/farhelm/v1` gets asset
-    /// URLs under that path rather than beside it. Queries, fragments and
-    /// embedded credentials are rejected earlier, at the flag
-    /// (`HelmArgs::release_base_url`), because a base URL carrying them
-    /// cannot survive [`Url::join`] intact and would silently address a
-    /// different endpoint than every error message names.
+    /// `base_url` is normalised to end in `/`, so a base of
+    /// `https://example.invalid/farhelm/v1` gets asset URLs under that path
+    /// rather than beside it. A base URL carrying a query, fragment or
+    /// embedded credentials cannot survive [`Url::join`] intact and would
+    /// silently address a different endpoint than every error message
+    /// names; none reaches here, because production passes only the default
+    /// release URL and tests their own fixtures'.
     ///
     /// `version` is the release this source will accept (see the field's
     /// docstring); production passes [`VERSION`], tests pass
@@ -514,7 +514,7 @@ impl ReleasePayloadSource {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             bail!(
                 "no SHA256SUMS for v{version} at {} (HTTP 404): the release is not published or \
-                 is still publishing; retry in a few minutes, or pass --payload-dir",
+                 is still publishing; retry in a few minutes",
                 self.base_url
             );
         }
@@ -2281,7 +2281,7 @@ mod tests {
             format!("{error:#}"),
             format!(
                 "no SHA256SUMS for v{FIXTURE_VERSION} at {} (HTTP 404): the release is not \
-                 published or is still publishing; retry in a few minutes, or pass --payload-dir",
+                 published or is still publishing; retry in a few minutes",
                 release.base_url
             )
         );
@@ -3093,7 +3093,7 @@ mod tests {
     /// Spec: a base URL without a trailing slash still addresses assets
     /// BELOW it, not beside it.
     ///
-    /// `--release-base-url` is typed by hand, and `Url::join` would
+    /// A base URL may be written without one, and `Url::join` would
     /// otherwise silently replace the last path segment — turning
     /// `…/download/v1.2.3` into `…/download/farhelm-….tar.gz` and fetching
     /// from the wrong place with no error to explain it.
@@ -3823,8 +3823,8 @@ mod tests {
             RedirectDecision::TooManyHops
         );
         // A loopback or private destination is deliberately NOT refused:
-        // `--release-base-url` exists so a helm can be pointed at an internal
-        // mirror, and its response still has to hash to a signed entry.
+        // tests point a helm at a fixture release on loopback, and its
+        // response still has to hash to a signed entry.
         assert_eq!(
             release_redirect_decision(Some(&mirror), &mirror, 0),
             RedirectDecision::Follow

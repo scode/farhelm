@@ -416,9 +416,9 @@ fn quit_on_signal() -> anyhow::Result<tokio::sync::oneshot::Receiver<()>> {
 /// embedded helm's included, reaches the default no-op dispatcher and simply
 /// vanishes.
 /// `crates/farhelm`'s CLI installs its own subscriber (`init_tracing` there)
-/// for `farhelm helm run` and `farhelm supervisor run`, but those are that
-/// OTHER binary's subcommands, running in a spawned subprocess; this desktop
-/// app embeds a helm directly in ITS OWN process ([`DesktopBootstrap::start`])
+/// for `farhelm supervisor run` and `farhelm helm checkout-config`, but those
+/// are that OTHER binary's, running in a spawned subprocess; this desktop app
+/// embeds a helm directly in ITS OWN process ([`DesktopBootstrap::start`])
 /// and never goes through that code path, so it needs the same setup
 /// independently. Mirrors that function's filter default (`RUST_LOG`, else
 /// `info`) and its choice of stderr.
@@ -439,24 +439,22 @@ fn init_tracing() {
         .init();
 }
 
-/// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port (`port` is 0 in the
-/// app), the payload directory a development launch hands in, and the hosts an agent build's staged run registers.
+/// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port, the payload directory a
+/// development launch hands in, and the hosts an agent build's staged run registers.
 ///
 /// `ensure_hosts` is `None` in every build but an agent build given `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`
 /// (`agent::ENSURE_HOSTS_ENV`), so an installed app never registers a host the user did not add. Split out of
 /// [`DesktopBootstrap::start`] so a test can start a helm from exactly the arguments the app passes.
-fn embedded_helm_args(
-    port: u16,
-    state_dir: PathBuf,
-    ensure_hosts: Option<PathBuf>,
-) -> farhelm_helm::HelmArgs {
+fn embedded_helm_args(state_dir: PathBuf, ensure_hosts: Option<PathBuf>) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
-        port,
-        state_dir: Some(state_dir),
-        test_credential_file: None,
+        // The embedded helm is an internal implementation detail of this
+        // process. Port 0 lets the kernel choose a fresh loopback port for
+        // each launch, so another local process cannot predict or reserve a
+        // stable endpoint before the desktop starts.
+        port: 0,
+        state_dir,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
-        release_base_url: None,
         backstop_refresh_secs: None,
     }
 }
@@ -613,11 +611,6 @@ impl DesktopBootstrap {
         }
         drop(app_lock);
 
-        // The embedded helm is an internal implementation detail of this
-        // process. Port 0 lets the kernel choose a fresh loopback port for
-        // each launch, so another local process cannot predict or reserve a
-        // stable endpoint before the desktop starts.
-        let port = 0;
         let (ready_tx, ready_rx) = mpsc::channel::<farhelm_helm::EmbeddedReady>();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm_state = state_dir.clone();
@@ -625,7 +618,7 @@ impl DesktopBootstrap {
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
                 farhelm_helm::run_embedded(
-                    embedded_helm_args(port, helm_state, ensure_hosts),
+                    embedded_helm_args(helm_state, ensure_hosts),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
                     })),
@@ -1277,8 +1270,8 @@ impl SpawnInputs<'_> {
             .stderr(log)
             // The payload directory is this app's embedded helm's setting
             // alone. Inherited, it would reach every session shell the
-            // supervisor starts, so a `farhelm helm run` typed
-            // in a session would silently push this launch's payloads,
+            // supervisor starts, so a desktop binary started directly
+            // from one would silently push this launch's payloads,
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
             // The scripted provisioning backend's switch, which an agent
@@ -1733,7 +1726,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(0, dir.path().join("state"), Some(file));
+        let args = embedded_helm_args(dir.path().join("state"), Some(file));
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

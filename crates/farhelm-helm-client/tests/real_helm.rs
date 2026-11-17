@@ -47,12 +47,10 @@ impl Helm {
         let state = tempfile::tempdir().unwrap();
         let args = farhelm_helm::HelmArgs {
             port: 0,
-            state_dir: Some(state.path().join("state")),
+            state_dir: state.path().join("state"),
             ensure_hosts: None,
             payload_dir: None,
-            release_base_url: None,
             backstop_refresh_secs: None,
-            test_credential_file: None,
         };
         let (ready_tx, ready) = std::sync::mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
