@@ -303,9 +303,9 @@ always uses this option. Without it the README hero's terminal settling stays as
 `--park id:TARGET` hovers the named spot instead of searching, fails if it is covered, and keeps the idle wait.
 
 Any failure stops with the step and the reason, writes nothing to OUT, and leaves the shot in the run directory to look
-at. A size failure quotes the window's points and scale: a window smaller than the viewport means the display is too
-small (see "On a Mac"), and scale 1 means a Linux run, which renders on headless Mutter and so is for developing the
-staging and checking the picture's content, never for the picture.
+at. A size failure quotes the window's points and scale: a window smaller than the viewport means the screen's usable
+area is too small for it (see "On a Mac"), and scale 1 means a Linux run, which renders on headless Mutter and so is for
+developing the staging and checking the picture's content, never for the picture.
 
 ## User-session runs
 
@@ -438,5 +438,10 @@ Things that differ from a headless run:
 - The app fits its first window to the screen, so a display smaller than a scenario's viewport shrinks the window and
   every picture with it. At 1024x768 points the README hero's 1280x800 window opens at 1024x680 and its picture comes
   out 2048x1360 instead of 2560x1600; `capture` stops at its size check. The test Mac's display was that small in two
-  runs on 2026-11-16 and large enough in one between them; why it changes is not known, so until it reliably fits, a
-  README hero refresh may stop there. This is the one place that story is kept; the hero's other documents point here.
+  runs on 2026-11-16 and large enough in one between them, for reasons never found. On 2026-11-17 it moved to a 4K
+  display, 1920x1080 points at scale 2. What the window is fitted to is the screen's usable area, which leaves out the
+  menu bar and a Dock that does not hide itself: there the Dock took 78 points and the menu bar 30, so the docs
+  scenario's 1600x1000 window opened at 1600x972. With the Dock set to hide itself
+  (`defaults write com.apple.dock autohide -bool true`, then `killall cfprefsd` and `killall Dock`; over SSH the setting
+  did not take until `cfprefsd` was restarted) the usable area is 1920x1050 and the window fits. This is the one place
+  that story is kept; the hero's and the docs screenshots' other documents point here.

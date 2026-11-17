@@ -90,9 +90,9 @@ the alt text explains what the image shows.
 ## Refreshing
 
 Run `scripts/docs-screenshots.sh --mac <destination>` to capture at 2x, on a Mac whose display fits the scenario's
-window (the test Mac's did not on 2026-11-17; `.agents/docs-media.md`, "Docs screenshots"). The command shares the
-README hero's SSH settings, preflight and Mac-wide lock. It checks Git provenance in the originating checkout and
-records the fetched images there. Use `--only <page>` to work on one page.
+window (the test Mac's fits only with the Dock hidden; `docs/gui-agent.md`, "On a Mac"). The command shares the README
+hero's SSH settings, preflight and Mac-wide lock. It checks Git provenance in the originating checkout and records the
+fetched images there. Use `--only <page>` to work on one page.
 
 For a bulk refresh, read UI changes since the manifest's `captured_from`, update the affected modules and page wording,
 capture every page, inspect the pictures, then publish and commit the manifest with the page changes. Published release
