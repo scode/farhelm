@@ -59,6 +59,8 @@ mod browse_tests;
 #[cfg(test)]
 mod checkout_tests;
 #[cfg(test)]
+mod custom_flags_tests;
+#[cfg(test)]
 mod draft_tests;
 #[cfg(test)]
 mod entry_tests;
