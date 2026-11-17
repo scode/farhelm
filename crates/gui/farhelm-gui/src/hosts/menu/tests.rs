@@ -1,14 +1,16 @@
 //! Tests of a host's actions menu as the Hosts panel opens it: what it offers on a remote host and on the helm's own
 //! machine, what its greyed Update does (nothing) and what that Update does in the installed desktop app (asks the
 //! app's updater to check), the header of a host that reports no build, Settings and Remove
-//! waiting for the host's own work, which hosts offer Remove, where focus goes, and an open menu following its row
-//! through what the helm pushes until its host goes.
+//! waiting for the host's own work, which hosts offer Remove, where focus goes, also when Down or Up on the closed
+//! toggle opens the menu, and an open menu following its row through what the helm pushes until its host goes.
 //!
 //! The panel runs over the helm client's fake, most tests with the reference screens' three hosts (the local host as
 //! 1, `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of
 //! the shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
-//! One test runs the real main view instead, since it needs the host rail's Settings gear beside an open menu.
+//! The last section runs the real main view instead ([`main_view`]), for what the menu does beside the session list
+//! and the host rail: Add host and the rail's Settings gear opened over an open menu, and the dialogs an avatar's
+//! menu opens.
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
@@ -364,65 +366,46 @@ fn a_sandbox_hosts_menu_offers_delete_sandbox_and_no_remove(cx: &mut TestAppCont
     );
 }
 
-/// Why this matters: the host menu is a popover with no veil, so the page around it stays live, and the gear on the
-/// host rail's foot must still open Settings in one press while a row's menu is open; a menu left up under Settings, or
-/// keeping focus from it, would leave the user with two layers to dismiss and focus outside the dialog they opened. The
-/// old spec `settings.spec.ts`, "settings dismisses a row menu, isolates the page and returns focus on Escape", opened
-/// Settings over an open Hosts row menu and pinned that the menu went, focus started on Settings' first switch, and
-/// Escape returned it to the gear. This runs the real main view, since only it draws both the Hosts panel and the gear.
-/// Specified: with Hosts shown and `build-box`'s row menu open from its toggle, focus on Retry, a click on the gear
-/// closes the menu and opens Settings with focus on Skip session confirmations; Escape closes Settings with focus on
-/// the gear and nothing open.
+/// Why this matters: the old toggle opened its menu from the keyboard with Down on the first command and Up on the
+/// last, as every menu toggle in the app does (`components::menu_keys`), so a keyboard user reaches a host's Remove or
+/// Delete in one key rather than walking past every other command. The last command differs by host kind, which is
+/// why both are checked. Specified: with focus on the closed toggle of `build-box` (a remote host), Down opens its
+/// menu with focus on Retry, and after Escape, Up opens it with focus on Remove; on a connected Tensorlake host, Up
+/// opens it on Delete sandbox. Escape returns focus to the toggle each time.
 #[gpui::test]
-fn the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch(
+fn down_and_up_on_a_closed_toggle_open_the_menu_on_its_first_or_last_command(
     cx: &mut TestAppContext,
 ) {
-    use crate::session_list::host_rail::tests::answer_everything;
-    use crate::session_list::tests::{listing, open_main, preferences_state, session};
-
-    let snapshot = vec![
-        listing(&["a"], &[session("a")]),
-        preferences_state(farhelm_proto::ui_channel::Preferences {
-            visit_history: vec!["a".to_owned()],
-            welcome_seen: Some(true),
-            ..Default::default()
-        }),
-        hosts(&[host(1, "local", connected()), host(2, "ssh", connected())]),
-    ];
-    let (mut fake, cx) = open_main(cx, snapshot);
-    cx.simulate_resize(size(px(1200.), px(700.)));
-    answer_everything(&mut fake);
+    let mut listed = reference_hosts();
+    listed.push(host(4, "tensorlake", connected()));
+    let (_helm, _, cx) = open_panel_in_column(cx, vec![hosts(&listed)]);
+    cx.simulate_resize(size(px(1600.), px(1000.)));
     test_support::settle(cx);
-    click(cx, "hosts-panel-toggle");
-    click(cx, "host-menu-toggle-2");
-    assert!(
-        node(&frame(cx), "host-menu").is_some(),
-        "the premise: the row's menu is open"
-    );
-    assert_eq!(
-        focused_id(cx).as_deref(),
-        Some("host-menu-retry"),
-        "the premise: focus is in the menu"
-    );
+    for (toggle, last) in [
+        ("host-menu-toggle-2", "host-menu-remove"),
+        ("host-menu-toggle-4", "host-menu-delete"),
+    ] {
+        // A click and Escape leave focus on the closed toggle on every platform, since Escape returns it there.
+        click(cx, toggle);
+        keys(cx, "escape");
+        assert!(!any_open(cx), "the premise: the menu is closed");
+        assert_eq!(focused_id(cx).as_deref(), Some(toggle), "the premise");
 
-    click(cx, "app-settings-toggle");
-    let nodes = frame(cx);
-    assert!(node(&nodes, "host-menu").is_none(), "the menu went");
-    assert!(
-        node(&nodes, "settings-sections").is_some(),
-        "the gear opened Settings"
-    );
-    assert_eq!(
-        focused_id(cx).as_deref(),
-        Some("settings-skip-session-confirmations"),
-        "focus starts on Settings' first switch"
-    );
-    keys(cx, "escape");
-    assert!(
-        !any_open(cx),
-        "Escape closed Settings and nothing is left open"
-    );
-    assert_eq!(focused_id(cx).as_deref(), Some("app-settings-toggle"));
+        keys(cx, "down");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("host-menu-retry"),
+            "Down on {toggle}"
+        );
+        keys(cx, "escape");
+        assert_eq!(focused_id(cx).as_deref(), Some(toggle));
+
+        keys(cx, "up");
+        assert!(any_open(cx), "Up on {toggle} opened the menu");
+        assert_eq!(focused_id(cx).as_deref(), Some(last), "Up on {toggle}");
+        keys(cx, "escape");
+        assert_eq!(focused_id(cx).as_deref(), Some(toggle));
+    }
 }
 
 // ---- The menu through changes underneath ---------------------------------------------------------------------------
@@ -743,4 +726,253 @@ fn an_open_menu_follows_its_row_and_closes_when_its_host_goes(cx: &mut TestAppCo
         // Closed for the next case, which may click this toggle again.
         keys(cx, "escape");
     }
+}
+
+// ---- The menu in the real main view --------------------------------------------------------------------------------
+
+/// The real main view over the reference hosts, `build-box` (2) with a failed setup run, so it offers Re-run; one
+/// session, `a`, open; the Welcome card seen; in a 1200 by 700 window with every command sent at startup answered. The
+/// tests here need what only the main view draws together: the Hosts panel or the session list, beside the host rail
+/// and its foot.
+fn main_view(
+    cx: &mut TestAppContext,
+) -> (farhelm_helm_client::fake::FakeHelm, &mut VisualTestContext) {
+    use crate::hosts::tests::{progress, run};
+    use crate::session_list::host_rail::tests::answer_everything;
+    use crate::session_list::tests::{listing, open_main, preferences_state, session};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
+    let snapshot = vec![
+        listing(&["a"], &[session("a")]),
+        preferences_state(farhelm_proto::ui_channel::Preferences {
+            visit_history: vec!["a".to_owned()],
+            welcome_seen: Some(true),
+            ..Default::default()
+        }),
+        hosts(&reference_hosts()),
+        progress(&[run(2, ProvisioningOperation::Add, RunStatus::Failed)]),
+    ];
+    let (mut fake, cx) = open_main(cx, snapshot);
+    cx.simulate_resize(size(px(1200.), px(700.)));
+    answer_everything(&mut fake);
+    test_support::settle(cx);
+    (fake, cx)
+}
+
+/// Answer the one command the window sent to `path` since the last look with `status` and `body`, and any other it
+/// sent meanwhile (the list's own bookkeeping) as done; fails if none went to `path`. It checks nothing about those
+/// others, so a stray request among them goes unnoticed: a test that must show something was not sent looks itself.
+fn answer(
+    fake: &mut farhelm_helm_client::fake::FakeHelm,
+    path: &str,
+    status: u16,
+    body: Option<serde_json::Value>,
+) {
+    let mut found = false;
+    for command in fake.commands() {
+        if command.path == path && !found {
+            fake.reply(command.id, status, body.clone());
+            found = true;
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    assert!(found, "a command went to {path}");
+}
+
+/// Open a host's menu from its rail avatar, drawn under `avatar` (`host-rail-host-<id>`), with a right press, as a
+/// secondary click delivers it, and check that it opened.
+fn open_from_avatar(cx: &mut VisualTestContext, avatar: &'static str) {
+    let avatar = bounds(cx, avatar);
+    cx.simulate_mouse_down(
+        avatar.center(),
+        gpui::MouseButton::Right,
+        gpui::Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        avatar.center(),
+        gpui::MouseButton::Right,
+        gpui::Modifiers::none(),
+    );
+    test_support::settle(cx);
+    assert!(
+        node(&frame(cx), "host-menu").is_some(),
+        "the premise: the avatar opened its host's menu"
+    );
+}
+
+/// Whether the Hosts panel shows in the list's place; fails unless exactly one of the panel and the session list is
+/// drawn, so `!hosts_shown` also says the list is.
+fn hosts_shown(cx: &mut VisualTestContext) -> bool {
+    let nodes = frame(cx);
+    let panel = node(&nodes, "hosts-panel").is_some();
+    assert_ne!(
+        panel,
+        node(&nodes, "session-list").is_some(),
+        "exactly one of the panel and the list is drawn"
+    );
+    panel
+}
+
+/// Why this matters: the host menu is a popover with no veil, so the page around it stays live, and the gear on the
+/// host rail's foot must still open Settings in one press while a row's menu is open; a menu left up under Settings, or
+/// keeping focus from it, would leave the user with two layers to dismiss and focus outside the dialog they opened. The
+/// old spec `settings.spec.ts`, "settings dismisses a row menu, isolates the page and returns focus on Escape", opened
+/// Settings over an open Hosts row menu and pinned that the menu went, focus started on Settings' first switch, and
+/// Escape returned it to the gear.
+/// Specified: with Hosts shown and `build-box`'s row menu open from its toggle, focus on Retry, a click on the gear
+/// closes the menu and opens Settings with focus on Skip session confirmations; Escape closes Settings with focus on
+/// the gear and nothing open.
+#[gpui::test]
+fn the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch(
+    cx: &mut TestAppContext,
+) {
+    let (_fake, cx) = main_view(cx);
+    click(cx, "hosts-panel-toggle");
+    click(cx, "host-menu-toggle-2");
+    assert!(
+        node(&frame(cx), "host-menu").is_some(),
+        "the premise: the row's menu is open"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-menu-retry"),
+        "the premise: focus is in the menu"
+    );
+
+    click(cx, "app-settings-toggle");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu").is_none(), "the menu went");
+    assert!(
+        node(&nodes, "settings-sections").is_some(),
+        "the gear opened Settings"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("settings-skip-session-confirmations"),
+        "focus starts on Settings' first switch"
+    );
+    keys(cx, "escape");
+    assert!(
+        !any_open(cx),
+        "Escape closed Settings and nothing is left open"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("app-settings-toggle"));
+}
+
+/// Why this matters: a row's menu is a popover with no veil, so the controls around it stay live, and Add host must
+/// open in one press with a host's or a session's menu open, taking that menu away rather than leaving it up under the
+/// dialog or pointing at a row the dialog covers (the old "add-host-form-closes-a-stray-host-menu" and
+/// "add-host-form-closes-a-stray-session-menu"). Specified: with Hosts shown and `build-box`'s menu open, a click on
+/// the heading's Add host closes the menu and opens Add host, and Escape returns focus to that button; back on
+/// Sessions with session `a`'s menu open, a click on the rail's Add host does the same, Escape returning focus there.
+#[gpui::test]
+fn add_host_takes_an_open_host_or_session_menu_away(cx: &mut TestAppContext) {
+    let (_fake, cx) = main_view(cx);
+    click(cx, "hosts-panel-toggle");
+    click(cx, "host-menu-toggle-2");
+    assert!(
+        node(&frame(cx), "host-menu").is_some(),
+        "the premise: the host's menu is open"
+    );
+    click(cx, "hosts-add");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu").is_none(), "the host's menu went");
+    assert!(node(&nodes, "add-host").is_some(), "Add host opened");
+    keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("hosts-add"));
+
+    click(cx, "hosts-panel-toggle");
+    assert!(!hosts_shown(cx), "the premise: Sessions shows");
+    click(cx, "session-menu-a");
+    assert!(
+        node(&frame(cx), "session-menu").is_some(),
+        "the premise: the session's menu is open"
+    );
+    click(cx, "host-rail-add");
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "session-menu").is_none(),
+        "the session's menu went"
+    );
+    assert!(node(&nodes, "add-host").is_some(), "Add host opened");
+    keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-add"));
+}
+
+/// Why this matters: the avatar's menu is how the rail reaches a host's actions while Sessions shows, and what they
+/// open must not swap the list for the Hosts panel under the user, and closing it must bring focus back to the avatar
+/// the user started from, not to a row toggle that is not drawn (the old "rail ${action} modal stays visible over
+/// Sessions and returns to its avatar", for setup, uninstall and a refused update). Specified, with Sessions shown:
+/// from `build-box`'s avatar, Re-run's probe answered with a plan opens the setup question, and its Cancel; from
+/// `gpu-1`'s, Uninstall's plan opens the uninstall question, and its Cancel; and Update's plan refused opens the host
+/// refusal dialog, and its Close: each leaves Sessions shown while open and after, and returns focus to the avatar. The
+/// same holds for Cancel on a removal asked from `gpu-1`'s avatar, which sends nothing at the ask or at the Cancel (the
+/// old "rail removal returns to its avatar on cancel and Hosts on success", its Cancel half; focus after a removal that
+/// went through is a recorded deviation).
+#[gpui::test]
+fn dialogs_from_an_avatars_menu_keep_sessions_and_return_to_the_avatar(cx: &mut TestAppContext) {
+    let (mut fake, cx) = main_view(cx);
+    assert!(!hosts_shown(cx), "the premise: Sessions shows");
+    let plan = |uninstall: bool| {
+        let mut plan = serde_json::json!({
+            "probe_id": "plan-1",
+            "plan": { "state_dir": "/home/dev/.local/state/farhelm" },
+            "confirmation": "Farhelm will change this host:\n",
+            "steps": { "lead": "Farhelm will change this host:", "steps": [], "kept": null },
+        });
+        if !uninstall {
+            plan["result"] = serde_json::json!("provisionable");
+        }
+        plan
+    };
+    let refused = serde_json::json!("this host cannot be updated from here");
+    for (avatar, item) in [
+        ("host-rail-host-2", "host-menu-rerun"),
+        ("host-rail-host-3", "host-menu-uninstall"),
+        ("host-rail-host-3", "host-menu-update"),
+    ] {
+        let (path, status, body, close) = match item {
+            "host-menu-rerun" => ("/api/hosts/probe", 200, plan(false), "prompt-cancel"),
+            "host-menu-uninstall" => ("/api/hosts/3/uninstall", 200, plan(true), "prompt-cancel"),
+            "host-menu-update" => (
+                "/api/hosts/3/update",
+                409,
+                refused.clone(),
+                "host-refusal-done",
+            ),
+            other => unreachable!("no case for {other}"),
+        };
+        open_from_avatar(cx, avatar);
+        click(cx, item);
+        answer(&mut fake, path, status, Some(body));
+        test_support::settle(cx);
+        assert!(any_open(cx), "{item}: its dialog opened");
+        assert!(!hosts_shown(cx), "{item}: Sessions still shows");
+        click(cx, close);
+        assert!(!any_open(cx), "{item}: {close} closed it");
+        assert!(!hosts_shown(cx), "{item}: Sessions still shows after");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(avatar),
+            "{item}: focus is back on the avatar"
+        );
+    }
+
+    open_from_avatar(cx, "host-rail-host-3");
+    click(cx, "host-menu-remove");
+    assert!(any_open(cx), "the premise: the removal question opened");
+    assert!(!hosts_shown(cx), "Sessions still shows while it asks");
+    click(cx, "prompt-cancel");
+    let sent = fake.commands();
+    assert!(
+        sent.iter().all(|command| command.path != "/api/hosts/3"),
+        "no removal was sent: {sent:?}"
+    );
+    assert!(
+        !any_open(cx) && !hosts_shown(cx),
+        "Cancel closed it over Sessions"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-host-3"));
 }

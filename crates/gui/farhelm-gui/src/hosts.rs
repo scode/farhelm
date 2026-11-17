@@ -150,7 +150,9 @@ use gpui::{
 };
 
 use crate::assets::Icon;
-use crate::components::{Button, Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
+use crate::components::{
+    Button, Checkbox, HoverHelp, IconButton, MenuStart, StatusMark, Tier, pulse_opacity,
+};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
@@ -383,9 +385,9 @@ impl HostsPanel {
     /// host's open menu has already closed by then, since the press was outside it. Visible to the crate for the
     /// screenshot goldens, which open a menu without a click.
     pub(crate) fn toggle_menu(&mut self, host: i64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((anchor, opener)) = self.toggles.get(&host).cloned() else {
+        if !self.toggles.contains_key(&host) {
             return;
-        };
+        }
         if let Some((open, layer)) = self.menu.take()
             && open == host
             && layers::is_open(layer, window, cx)
@@ -394,8 +396,25 @@ impl HostsPanel {
             cx.notify();
             return;
         }
+        self.open_row_menu(host, MenuStart::First, window, cx);
+    }
+
+    /// Open `host`'s menu beside its row toggle with focus on the command `start` names: a click's or Down's first, or
+    /// Up's last ([`open_menu`]). Does nothing for a row not drawn last frame. Down and Up reach the toggle only while
+    /// its menu is closed, since the open menu holds focus.
+    fn open_row_menu(
+        &mut self,
+        host: i64,
+        start: MenuStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((anchor, opener)) = self.toggles.get(&host).cloned() else {
+            return;
+        };
         let mark = Mark::take(cx);
-        self.menu = open_menu(host, anchor, &opener, &mark, window, cx).map(|layer| (host, layer));
+        self.menu =
+            open_menu(host, start, anchor, &opener, &mark, window, cx).map(|layer| (host, layer));
         cx.notify();
     }
 
@@ -746,11 +765,20 @@ impl HostsPanel {
             .into_iter()
             .map(|(id, name)| {
                 let parts = menu::toggle_parts(id, window, cx);
-                let panel = cx.weak_entity();
-                let toggle =
-                    menu::toggle(id, &name, open == Some(id), &parts, move |window, cx| {
-                        let _ = panel.update(cx, |panel, cx| panel.toggle_menu(id, window, cx));
-                    });
+                let (for_click, for_arrow) = (cx.weak_entity(), cx.weak_entity());
+                let toggle = menu::toggle(
+                    id,
+                    &name,
+                    open == Some(id),
+                    &parts,
+                    move |window, cx| {
+                        let _ = for_click.update(cx, |panel, cx| panel.toggle_menu(id, window, cx));
+                    },
+                    move |start, window, cx| {
+                        let _ = for_arrow
+                            .update(cx, |panel, cx| panel.open_row_menu(id, start, window, cx));
+                    },
+                );
                 self.toggles.insert(id, parts);
                 (id, toggle)
             })

@@ -145,7 +145,7 @@ replaced (below)
 
 Tests: 73. Covers: rail ${action} modal stays visible over Sessions and returns to its avatar.
 
-partly (the Hosts panel's rows, a host's menu with Settings and Remove, the host settings dialog and Remove host; see
+replaced (the Hosts panel's rows, a host's menu with Settings and Remove, the host settings dialog and Remove host; see
 "The host menu and host settings" and "Remove host" below): crates/gui/farhelm-gui/src/hosts/offers/tests.rs
 `the_local_hosts_update_is_greyed_and_points_at_the_installer` and crates/gui/farhelm-gui/src/hosts/menu/tests.rs
 `the_local_hosts_greyed_update_says_why_and_sends_nothing` ("the local row's update is greyed out, points at the
@@ -177,11 +177,11 @@ automatically" (Deviations, "The Hosts panel").
   held back while a setup request is out").
 - "agent host add asks before setup despite preference and after refusal reopen" is the approvals area's, recorded in
   [Approvals and agent-spawned sessions](approvals-and-agent-spawned-sessions.md).
-- Not yet ported: "rail ${action} modal stays visible over Sessions and returns to its avatar" (setup, uninstall and a
-  refused update), which opens the setup rerun's question, the uninstall confirmation and the update's refusal dialog
-  from an avatar's menu with Hosts closed, checks that Hosts stays closed, and that Cancel or Close returns focus to the
-  avatar. The avatar opening the menu as its opener is `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`;
-  no test opens one of these dialogs from there.
+- "rail ${action} modal stays visible over Sessions and returns to its avatar" (setup, uninstall and a refused update):
+  crates/gui/farhelm-gui/src/hosts/menu/tests.rs `dialogs_from_an_avatars_menu_keep_sessions_and_return_to_the_avatar`,
+  in the real main view with Sessions shown: the setup rerun's question, the uninstall confirmation and the Update's
+  refusal dialog, each opened from an avatar's menu, leave Sessions shown while open and after, and Cancel or Close
+  returns focus to the avatar.
 
 ### `tests/ssh-help.spec.ts`
 
@@ -744,10 +744,16 @@ menu offers Re-run once a setup failed (`hosts::setup::rerun`). Replacing tests,
   `the_panel_keeps_a_runs_first_sight_and_fold_until_the_run_changes` (a new run starts open), and end to end, step 43
   of `scripts/gui-e2e-smoke.py`. Its layout checks (the verb and clock inside the sidebar, before the toggle) are the
   goldens below; the status sits on its own line under the name, as the old one did.
-- "accepted ADD registers before execution and releases the page lock while running", its row half: the running row's
-  status and steps above; Settings unavailable and no Update or Re-run while it runs are `offers`'
-  `a_running_run_holds_the_host_until_it_ends`. Its rail half (the avatar's progress mark) belongs to
-  [Sidebar and session view](sidebar-and-session-view.md) (routed there by the migration's orchestrator on 2026-11-16).
+- "accepted ADD registers before execution and releases the page lock while running", its row half:
+  `an_accepted_setups_host_appears_with_its_run_and_its_menu_waits_for_it` (a pushed new host with its running setup
+  gets a row showing the run, whose menu offers no Update or Re-run and whose Settings does nothing); what the menu
+  offers once the run ends is `offers`' `a_running_run_holds_the_host_until_it_ends`. Its rail half (the avatar's
+  progress mark) belongs to [Sidebar and session view](sidebar-and-session-view.md) (routed there by the migration's
+  orchestrator on 2026-11-16).
+- The Tensorlake snapshot preparation step's explanation ("Only the first time, and then at most once every 24 hours or
+  after Farhelm updates.") under its name and above its message, and no other step's, which belongs to the setup's
+  confirmation, as the old panel drew only that step's (`progress_step_explanation`):
+  `the_step_list_explains_snapshot_preparation_and_no_other_step`.
 - The failed run's step and reason (the drive of part 2 found the helm's "disk full" shown nowhere), as the old specs'
   `.provisioning-run-message` checks read them: `a_failed_setup_opens_its_row_with_the_step_and_the_reason`, also when
   the user folded the run first; end to end, step 43.
@@ -830,9 +836,11 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
   `remove_sends_the_delete_under_the_hosts_key` (the question stays up until the helm forgets the host; focus after the
   removal recovers, see Deviations). The avatar opening the menu as its opener is
   `crates/gui/farhelm-gui/src/session_list/host_rail/avatar_menu_tests.rs`
-  `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`. Not yet ported: the avatar half, Cancel on a removal
-  question asked from the avatar's menu returning focus to the avatar; no test opens the question there. Its success
-  half differs on purpose: focus after a removal is a recorded deviation (Deviations, "Remove host").
+  `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`; the avatar half, Cancel on a removal question asked
+  from the avatar's menu sending nothing, keeping Sessions shown and returning focus to the avatar, is
+  `crates/gui/farhelm-gui/src/hosts/menu/tests.rs`
+  `dialogs_from_an_avatars_menu_keep_sessions_and_return_to_the_avatar`. Its success half differs on purpose: focus
+  after a removal is a recorded deviation (Deviations, "Remove host").
 - "host retirement releases before removal and preserves approval focus: Remove success", the removal's half:
   `remove_asks_naming_the_host_its_destination_and_what_removal_keeps` (focus on Remove) and
   `remove_sends_the_delete_under_the_hosts_key` (Remove sends the removal); the question closing when its host goes,
@@ -951,10 +959,10 @@ panel menu opens" (same host and another host), since opening another menu is mo
 dialog and shows under its row (`a_refused_plan_after_the_user_moved_on_opens_nothing`; "No refusal queue" under
 Deviations); the avatar as the menu's opener is `session_list/host_rail/avatar_menu_tests.rs`
 `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`. "An open Update card follows the new current step in a
-short viewport" is ported: the card keeps its current step whole however short the window
-(crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs `a_short_window_previews_only_diagnostics_that_cannot_fit`, and
-`the_current_step_stays_whole_as_the_run_moves_it` as the step moves), and the running status opens it from the Hosts
-row (`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
+short viewport" is ported: the card keeps its current step whole however short the window, and again each time the
+current step moves (crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs
+`a_short_window_previews_only_diagnostics_that_cannot_fit` and `the_current_step_stays_whole_as_the_run_moves_it`), and
+the running status opens it from the Hosts row (`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
 
 ## `tests/provisioning.spec.ts` and `tests/terminal-multihost.spec.ts`, Uninstall
 
@@ -1181,7 +1189,12 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
   `in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check` (the local row's Update asks the app's updater
   for a check and sends the helm nothing). What it offers is `offers::menu_offers`, whose tests are listed in the
   `tests/provisioning.spec.ts` row, with `in_the_desktop_app_the_local_hosts_update_checks_for_a_release` in
-  `hosts/offers/tests.rs`.
+  `hosts/offers/tests.rs`. Down and Up on the closed toggle open the menu on its first or last command, as the old
+  toggle did: `down_and_up_on_a_closed_toggle_open_the_menu_on_its_first_or_last_command`.
+- Beside the rest of the window, in the real main view: Add host and the rail's Settings gear each closing an open menu
+  and opening in one press, `add_host_takes_an_open_host_or_session_menu_away` and
+  `the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch`; the dialogs an avatar's menu opens,
+  `dialogs_from_an_avatars_menu_keep_sessions_and_return_to_the_avatar`.
 - Opening and closing (`terminal-multihost.spec.ts`, "host-settings-dialog-lifecycle", in that spec's section below):
   `focus_starts_on_the_first_edit`, `escape_and_both_close_controls_return_focus_to_the_toggle`,
   `the_dialog_closes_when_the_registry_no_longer_lists_its_host`,
@@ -1192,7 +1205,9 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
   `the_destination_saves_as_typed_and_a_refusal_stays_in_place` (a refusal, and the helm's answer that the change waits
   for a setup or Update on the host, kept in place), `the_alias_saves_and_clears_and_escape_closes_only_its_field`,
   `escape_while_a_save_is_in_flight_keeps_the_field_open`, `an_appearance_choice_saves_icon_and_color_together`,
-  `the_picker_is_reached_and_used_by_keyboard`.
+  `the_picker_is_reached_and_used_by_keyboard`; each permission's help following its switch,
+  `each_permissions_help_follows_its_switch`; a long name leaving the body its room,
+  `a_long_name_leaves_the_settings_body_its_room`.
 - The Checkouts section: the tests listed under `tests/host-checkout-folder.spec.ts` above.
 - The look: the goldens `host-menu`, `host-settings-dialog` and `host-settings-dialog-end`
   (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
@@ -1330,8 +1345,7 @@ cases in [Sidebar and session view](sidebar-and-session-view.md)'s `tests/termin
 host list, menu and settings cases are this area's, each listed by its title at reference commit `24bc0580`, in
 `crates/gui/farhelm-gui/src/hosts/` unless named otherwise.
 
-partly: the cases below marked "Not yet ported" wait for their tests; every other case is replaced, superseded or
-dropped, as its entry says.
+replaced: every case is replaced, superseded or dropped, as its entry says.
 
 - "host-list-states: both harness hosts render connected statuses with identities": the rows' names, marks and phase
   words, `tests.rs` `every_row_shows_its_name_mark_and_phase_words`; the local host named as itself, `identity/tests.rs`
@@ -1348,29 +1362,34 @@ dropped, as its entry says.
   its answers kept visible and the whole card scrolls in a short window, the dialog frame's
   (`components/tests/dialog.rs` `a_long_dialog_body_scrolls_and_the_answers_stay_visible` and
   `a_frame_too_tall_for_the_window_scrolls_as_a_whole`), and the body is a stop Tab reaches, `remove/tests.rs`
-  `the_removal_questions_body_has_a_stop_that_tab_reaches`. Not yet ported: a long destination in the question's title
-  keeping the title from taking the card's height.
+  `the_removal_questions_body_has_a_stop_that_tab_reaches`; a long name and destination in a short window keeping both
+  answers on screen and the destination whole in the body, `remove/tests.rs`
+  `a_long_name_leaves_the_removal_questions_answers_on_screen`.
 - "a failed removal stays visible with details collapsed": `remove/tests.rs`
-  `a_refused_removal_keeps_the_question_up_with_the_reason`. Not yet ported: that the Details switch stays as it was
-  across the refusal, which no removal test reads.
+  `a_refused_removal_keeps_the_question_up_with_the_reason`, the Details switch staying off and the row closed across
+  the refusal.
 - "host-menu-survives-the-longest-phase-word: the header never wraps its toggle off-screen": the name gives way before
-  the phase words in the sidebar's column, `tests.rs` `a_long_name_gives_way_before_the_phase_words`. Not yet ported:
-  the row's menu toggle staying on the header's line inside the sidebar with "Unreachable, retrying" as the phase words.
+  the phase words in the sidebar's column, `tests.rs` `a_long_name_gives_way_before_the_phase_words`; the row's menu
+  toggle staying on the header's line inside the sidebar at its narrowest with "Unreachable, retrying" as the phase
+  words, `tests.rs` `an_unreachable_hosts_toggle_stays_on_its_line_in_the_narrowest_sidebar`.
 - "add-host-form-closes-a-stray-host-menu: the add form's own layout shift is covered" and
   "add-host-form-closes-a-stray-session-menu": a menu here is anchored to its element, so no layout shift strands it
   (the setup progress section's "Not ported", the menu geometry cases), and a press outside an open menu closes it and
   reaches the control pressed, `menu/tests.rs`
   `the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch`; Add host opening and giving focus back to
   its opener when it closes, `tests.rs` `the_headings_add_button_opens_add_host_and_gets_focus_back` and the rail's
-  `session_list/host_rail/tests.rs` `add_host_opens_the_dialog_and_escape_returns_focus_to_it`. Not yet ported: a test
-  that opens Add host while a host's or a session's menu is open.
+  `session_list/host_rail/tests.rs` `add_host_opens_the_dialog_and_escape_returns_focus_to_it`; Add host opened in one
+  press while a host's or a session's menu is open, taking the menu away, `menu/tests.rs`
+  `add_host_takes_an_open_host_or_session_menu_away`.
 - "host-menu-keyboard-contract: role=menu, every item reachable, wraps, Escape/Tab restore focus": the items' menu-item
   role and the first item's focus, `menu/tests.rs` `a_remote_hosts_toggle_opens_a_menu_starting_on_retry`; the arrows
   walking every item and wrapping, `layers_tests.rs`
   `arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight`; Escape back to the toggle,
   `menu/tests.rs` `escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule`. Tab differs: it stays
-  inside an open menu here (`layers_tests.rs` `tab_stays_inside_an_open_menu`). Not yet ported: opening the menu from
-  its closed toggle with the arrow keys onto the first or last item.
+  inside an open menu here (`layers_tests.rs` `tab_stays_inside_an_open_menu`). Down and Up on the closed toggle open
+  the menu on its first or last command, `menu/tests.rs`
+  `down_and_up_on_a_closed_toggle_open_the_menu_on_its_first_or_last_command`. The old flyout's pointer notch is not
+  drawn (Deviations, "The host menu and host settings").
 - "automatic-setup-menu-order: keyboard navigation includes the conditional setup command" and "automatic setup refuses
   forced activation while another host operation is busy": dropped, along with the local row's "Set up automatically"
   (decided by the migration's orchestrator on 2026-11-16; Deviations, "The Hosts panel").
@@ -1390,8 +1409,9 @@ dropped, as its entry says.
   fleet-wide commands": each switch saves only its own field on its own route, `settings/tests.rs`
   `each_permission_saves_its_own_route_and_field`; Space on a switch, `components/tests/checkbox.rs`
   `a_checkbox_toggles_on_a_click_or_space_and_not_on_enter`; the local host's dialog with no destination,
-  `focus_starts_on_the_first_edit`. Not yet ported: the switches' help changing with their state (the YOLO switch's last
-  sentence, and the own-sessions switch's note on whether the fleet-wide switch already covers it), which no test reads.
+  `focus_starts_on_the_first_edit`; the switches' help changing with their state (the YOLO switch's last sentence, and
+  the own-sessions switch's note on whether the fleet-wide switch already covers it), `settings/tests.rs`
+  `each_permissions_help_follows_its_switch`.
 - "host-settings-dialog-lifecycle: opens modal, edits in place, closes back to the toggle": `settings/tests.rs`
   `focus_starts_on_the_first_edit` and `escape_and_both_close_controls_return_focus_to_the_toggle`; the page behind
   taking no input is the layer manager's invariant, checked after every step; the header and the whole destination, the
@@ -1400,16 +1420,18 @@ dropped, as its entry says.
   exposed": the dialog frame's pinned header and footer over a scrolling body (`components/tests/dialog.rs`
   `a_long_dialog_body_scrolls_and_the_answers_stay_visible` and `a_frame_too_tall_for_the_window_scrolls_as_a_whole`),
   and Shift+Tab revealing a control below the fold, `focus_tests.rs`
-  `tab_to_a_field_below_the_fold_scrolls_it_into_view_and_shift_tab_scrolls_back`. Not yet ported: a long destination in
-  the dialog's title keeping the header from taking the body's height.
+  `tab_to_a_field_below_the_fold_scrolls_it_into_view_and_shift_tab_scrolls_back`; a long name in the dialog's heading
+  cut short, the body keeping its room and the long destination whole, `settings/tests.rs`
+  `a_long_name_leaves_the_settings_body_its_room`.
 - "host-settings-refused-save: keeps the draft and shows the refusal under its field": `settings/tests.rs`
   `the_destination_saves_as_typed_and_a_refusal_stays_in_place`; the refusal also shows under the host's row here
   (Deviations, "The host menu and host settings", "A refused save also shows under the host's row"); Escape in the open
   field closing only the field, `the_alias_saves_and_clears_and_escape_closes_only_its_field`.
 - "host-settings-backdrop-escape: Escape after a backdrop click cancels the edit, not the dialog": a press on the veil
   leaves the dialog open, `layers_tests.rs` `a_press_outside_an_ordinary_dialog_leaves_it_open`, and Escape in an open
-  field closes only the field, `the_alias_saves_and_clears_and_escape_closes_only_its_field`. Not yet ported: the two
-  together, a veil press with a field open followed by Escape.
+  field closes only the field; the two together, a veil press over a live control with the alias field open, then
+  Escape, `settings/tests.rs` `the_alias_saves_and_clears_and_escape_closes_only_its_field`. The press leaves focus in
+  the field, where the old backdrop took it out of the dialog (Deviations, "The host menu and host settings").
 - "host-menu-busy-guards: aria-disabled items refuse activation but stay reachable": `menu/tests.rs`
   `settings_waits_for_the_hosts_own_work_in_flight` and `offers/tests.rs`
   `work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_remove`; another host's work holds none of
@@ -1436,20 +1458,20 @@ dropped, as its entry says.
 - "host-inline-update: ${activation} starts progress and keeps the header on one line": `update/tests.rs`
   `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update` (the pointer press, "Updating…" in its place
   and focus on the row's toggle) and `the_hover_names_both_builds_the_urgency_and_the_action`; Enter on the button is
-  the shared button's. Not yet ported: the header staying on one line with the button, and then with the progress.
+  the shared button's; the header staying on one line with the button, and then with the progress, a long name cut short
+  beside both, `tests.rs` `the_inline_update_and_its_progress_keep_the_header_on_one_line`.
 - "host-retry-click: the control posts the retry verb for its own host": `remedies/tests.rs`
   `retry_sends_one_attempt_under_the_hosts_key`; Retry on the local host, `offers/tests.rs`
   `each_kind_decides_its_own_offers`.
-- Not yet ported: "a refused Retry opens a host dialog", which checks that the helm's refusal of a Retry opens the host
-  refusal dialog with its reason and Close focused, the Details switch unchanged and nothing under the row. The code
-  shares Adopt's path (`hosts/remedies.rs`), whose refusal
-  `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog` tests; no test refuses a Retry.
+- "a refused Retry opens a host dialog": `remedies/tests.rs` `retry_sends_one_attempt_under_the_hosts_key` (the helm's
+  refusal opens the host refusal dialog with its reason and Close focused, nothing under the row and the Details switch
+  unchanged).
 - "remove-cancel: backing out of the prompt forgets nothing": `remove/tests.rs`
   `remove_asks_naming_the_host_its_destination_and_what_removal_keeps` (focus on Remove) and
   `cancel_sends_nothing_and_returns_focus_to_the_rows_toggle`; there is no header close (Deviations, "Remove host").
 - "Remove keeps its dialog open through a refused request: ${dismissal}": `remove/tests.rs`
-  `a_refused_removal_keeps_the_question_up_with_the_reason`. Not yet ported: Cancel, Escape or the header close pressed
-  while the removal's request is out, which the old dialog ignored.
+  `a_refused_removal_keeps_the_question_up_with_the_reason`, with Escape and Cancel pressed while the removal's request
+  is out leaving the question open and sending nothing; there is no header close (Deviations, "Remove host").
 - "a refused Remove without confirmation opens a host dialog": the refusal shows under the host's row instead,
   `remove/tests.rs` `without_asking_a_refused_removal_shows_under_the_hosts_row` (Deviations, "Remove host").
 - "remove-skip-confirmation: a saved answer removes directly": `remove/tests.rs`
@@ -1471,19 +1493,27 @@ Other areas' cases of this spec, routed to those areas by the migration's orches
   "op-refused-on-unreachable: the helm's own 409 words, and nothing queued", "a refused Stop leaves the remote agent
   live after reconnect", "reboot-while-open: an attached session settles on the interrupted surface",
   "reboot-already-interrupted: opening mounts no terminal, and leaving changes nothing" and "reboot-restart: restart
-  from the interrupted surface attaches the new terminal".
+  from the interrupted surface attaches the new terminal". The first one's Hosts row half, the row reaching
+  "Unreachable, retrying" with the transport's words under Details, is this area's: the words and the evidence,
+  `identity/phase/tests.rs` `every_phase_has_its_words_and_tone` and the unreachable cases of
+  `the_local_hosts_missing_supervisor_says_to_reopen_the_app`; the row drawing them from a push, `tests.rs`
+  `the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do` and `details_open_and_close_every_row`.
 
 ## `tests/ui-plan-regressions.spec.ts`, host cases
 
 The spec's entry sits in [Sidebar and session view](sidebar-and-session-view.md), which leaves its host-menu and
 host-permission cases to other areas. They are this area's.
 
-partly: the first case's toggle half waits for its test; the second is replaced.
+replaced:
 
 - "an unreachable host keeps its menu inside the minimum sidebar": the name gives way before the phase words in the
-  sidebar's column, `crates/gui/farhelm-gui/src/hosts/tests.rs` `a_long_name_gives_way_before_the_phase_words`. Not yet
-  ported: the row's menu toggle staying inside the sidebar at its minimum width with "Unreachable, retrying", and its
-  menu opening there.
+  sidebar's column, `crates/gui/farhelm-gui/src/hosts/tests.rs` `a_long_name_gives_way_before_the_phase_words`; the
+  row's menu toggle staying inside the sidebar at its minimum width on the header's line with "Unreachable, retrying",
+  `an_unreachable_hosts_toggle_stays_on_its_line_in_the_narrowest_sidebar`. At that width the name and the phase words
+  may be cut short with "…", as the old `.host-name` and `.host-status-label` were (`overflow: hidden` with an ellipsis,
+  the name keeping a 4em floor); the status keeps the whole words as its name. The menu opening there is the layer
+  manager's placement, which keeps a popover beside its anchor inside the window, `layers_tests.rs`
+  `a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips`.
 - "refused host permission switches restore their stored values": `crates/gui/farhelm-gui/src/hosts/settings/tests.rs`
   `a_refused_permission_shows_the_stored_value_and_the_helms_words` (the YOLO switch; the commands switch saves and
   refuses through the same code, `each_permission_saves_its_own_route_and_field` for its save).
@@ -1497,10 +1527,27 @@ reference commit `24bc0580`.
 
 Case: a card follows only its marked step list after every clone.
 
-Not yet ported. In the GPUI app this is the host progress card keeping its current step whole as the run moves on
-([Foundations (M1)](foundations.md) gives it to this area). It needs a test in
-crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs that pushes a run whose current step moves, in a window too
-short for the whole list, and checks that each new current step is drawn whole.
+replaced: in the GPUI app this is the host progress card keeping its current step whole as the run moves on
+([Foundations (M1)](foundations.md) gives it to this area), crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs
+`the_current_step_stays_whole_as_the_run_moves_it` (in a window too short for the whole list, the running step is drawn
+whole, and so is the new one once the run is pushed with an earlier step running). The old case's unmarked list was the
+old tooltip's own markup, with nothing here to port.
+
+### `tests/sidebar.spec.ts` (sidebar and session view)
+
+Case: "opening host details closes an open host-row menu" and "aliasing the local host shows it in the host panel"
+(routed here by the sidebar area's audit on 2026-11-16).
+
+replaced:
+
+- "opening host details closes an open host-row menu": a host's menu is a popover with no veil, so a press outside it
+  closes it and still reaches the control pressed, the layer manager's rule, shown for the Hosts panel by
+  crates/gui/farhelm-gui/src/hosts/menu/tests.rs `add_host_takes_an_open_host_or_session_menu_away` and
+  `the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch`. The Details switch is such a control.
+- "aliasing the local host shows it in the host panel": crates/gui/farhelm-gui/src/hosts/settings/tests.rs
+  `a_local_host_pushed_with_an_alias_is_named_by_it` (the row named by the pushed alias, and no destination line under
+  Details); the local host's settings opening on Edit alias, `focus_starts_on_the_first_edit`; the alias's save,
+  `the_alias_saves_and_clears_and_escape_closes_only_its_field`.
 
 ### `tests/tensorlake-sandbox-sessions.spec.ts` (launcher)
 
@@ -2027,6 +2074,13 @@ Where the port does not match the old app, and why. Each stays until the work na
   further apart than in the reference.
 - **The header is about 10 pixels taller** than the reference's, as Settings' and Rename's are: the frame lays out the
   title on GPUI's default line height.
+- **A press on the veil beside the host settings dialog leaves focus where it was.** The old backdrop took focus out of
+  the dialog, so the Escape after it cancelled the open field from outside it. Here the veil only takes the press
+  (SPEC_impl.md, "Overlays: the layer manager": "Any other dialog's veil only takes the press"), focus stays in the open
+  field, and Escape closes the field all the same. Covered by
+  `the_alias_saves_and_clears_and_escape_closes_only_its_field` (`hosts/settings/tests.rs`).
+- **The menu has no pointer notch.** The old flyout drew a notch toward its row; the layer manager draws none for a
+  popover, only for hover help beside the sidebar, as for the session row's menu.
 
 ### Remove host
 
@@ -2168,6 +2222,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   reports; the status itself is still named for its count and current step ("Setting up: 1 of 9 steps done, now Install
   the farhelm binary"). While only a run's requests are out ("Setting up…"), the hover is those words, as the old label
   had no card then.
+- **The progress card shows every step's explanation.** The old card, like the old row, drew only the snapshot
+  preparation step's. SPEC.md describes the card as showing "every step with its status and explanation", so the card
+  follows SPEC (`the_card_shows_the_host_its_count_time_and_every_step`); the row keeps the old rule
+  (`the_step_list_explains_snapshot_preparation_and_no_other_step`).
 - **The card's connection detail sets host values as the row's details do.** Builds and identities are monospace and an
   error is in the interface face, where the old card set every host value monospace.
 - **A shrunk card shows the steps around its current one in proportion.** In a short window the card keeps its current
@@ -2176,9 +2234,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **The elapsed time counts from when this window first saw the run running**, as the old page counted from when it
   first saw it: the helm's progress has no timestamps. A reset starts it over, as a reload did. The goldens read "0:00",
   since their clock does not move; the reference caught "0:06".
-- **A step's explanation is not drawn under it in the row's step list.** The old panel drew one, the Tensorlake snapshot
-  preparation step's. The row's step list draws each step's message only (`hosts/progress.rs`, `Surface::Panel`), so a
-  sandbox's preparation step shows no explanation in the row; the progress card draws every step's, as the old card did.
 - **A rerun's refusals show under the row.** A refused probe, a "manual" answer, a reply that cannot be read and a
   refused submission show under the host's row, like any refused work on the host, where the old app opened its
   host-keyed refusal dialog for a refused or manual probe. The refusal dialog that Update and Adopt open

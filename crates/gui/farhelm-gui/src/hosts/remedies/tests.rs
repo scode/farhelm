@@ -14,10 +14,14 @@ use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
 use crate::hosts::LAUNCH_IN_FLIGHT;
-use crate::hosts::tests::{hosts, open_panel_in_column, reference_hosts, start_work};
+use crate::hosts::tests::{
+    details_switch, hosts, open_panel_in_column, reference_hosts, start_work,
+};
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{any_open, click, focused_id, keys, label, meta, one_command, settle};
+use crate::test_support::{
+    any_open, click, focused_id, frame, keys, label, meta, one_command, settle,
+};
 
 /// The identity a mismatched `build-box` reports, as the menu shows it.
 const REPORTED: &str = "c0ffee00-0000-4000-8000-000000000002";
@@ -61,7 +65,10 @@ fn work(cx: &mut VisualTestContext) -> Option<Work> {
 /// change this one's destination "and then press Retry"; the old menu offered Retry in every phase, first, as the
 /// button it replaced. Specified: a duplicate `build-box`'s menu starts on Retry ("Try the connection again"); choosing
 /// it closes the menu and sends `POST /api/hosts/2/retry` without a body under the host's key; the helm's empty answer
-/// opens nothing and leaves focus on the row's toggle.
+/// opens nothing and leaves focus on the row's toggle. A refusal belongs in the host refusal dialog, focused, as
+/// Adopt's does, not in a row line the user may not see, and it leaves their Details choice alone (the old "a refused
+/// Retry opens a host dialog"): a second Retry refused with a 409 opens "Retry host · build-box" with the helm's words
+/// and Close focused, nothing under the row, and Details still off.
 #[gpui::test]
 fn retry_sends_one_attempt_under_the_hosts_key(cx: &mut TestAppContext) {
     let duplicate = HostStateView::Duplicate {
@@ -85,6 +92,22 @@ fn retry_sends_one_attempt_under_the_hosts_key(cx: &mut TestAppContext) {
         "nothing to show: the pushed host list carries the outcome"
     );
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-2"));
+
+    assert!(!details_switch(&frame(cx)), "the premise: Details is off");
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-retry");
+    let (sent, _) = one_command(&mut helm, Method::Post, "/api/hosts/2/retry");
+    let words = "host 2 is busy with another operation; try again after it finishes";
+    helm.reply(sent, 409, Some(json!(words)));
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-refusal-title").as_deref(),
+        Some("Retry host · build-box")
+    );
+    assert_eq!(label(cx, "host-refusal-reason").as_deref(), Some(words));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-refusal-done"));
+    assert_eq!(label(cx, "host-error-2"), None, "nothing under the row");
+    assert!(!details_switch(&frame(cx)), "Details is still off");
 }
 
 /// The old "identity-mismatch-surfaced" and "adopt-requires-current-identity": the decision is between the two
