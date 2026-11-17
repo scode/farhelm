@@ -133,7 +133,7 @@ fn preferences_state(preferences: &Preferences) -> CollectionState {
 }
 
 /// The helm pushes `preferences` as its row, as it does before replying to a save that changed it.
-fn push(helm: &mut FakeHelm, preferences: &Preferences, cx: &mut VisualTestContext) {
+pub(super) fn push(helm: &mut FakeHelm, preferences: &Preferences, cx: &mut VisualTestContext) {
     let state = preferences_state(preferences);
     helm.push(CollectionChanges {
         collection: state.collection,
@@ -200,7 +200,7 @@ pub(super) fn sent(helm: &mut FakeHelm) -> Vec<FakeCommand> {
 }
 
 /// The one command sent since the last call, which must be a preference save: its id and its body.
-fn one_save(helm: &mut FakeHelm) -> (u64, Value) {
+pub(super) fn one_save(helm: &mut FakeHelm) -> (u64, Value) {
     let sent = sent(helm);
     assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
     assert_eq!(
@@ -1070,11 +1070,11 @@ fn link_row(word: &str) -> Preferences {
 /// SPEC.md, "Session list": Terminal chooses between three link behaviors, and "The latter two choices explain the risk
 /// of a second browser tab and that a program without mouse reporting cannot act on a click". Assistive technology and
 /// the test bridge find the choice by the group's name and role, as the old browser test did ("terminal link segments
-/// keep native keys and descriptions"). The file-types field waits for file downloads, so it may not be drawn.
-/// Specified: Terminal shows a radio group named "Terminal web links" whose three options are radio buttons in the old
-/// order, Intercept chosen when the helm stores none, each risk sentence on screen, and no file-types field; below the
-/// group, the switch "Allow tunnels from remote sessions" (a switch, off while the helm stores no consent) with its old
-/// help under it. Decided for the Mac, the one platform that draws the switch.
+/// keep native keys and descriptions"). Specified: Terminal shows a radio group named "Terminal web links" whose three
+/// options are radio buttons in the old order, Intercept chosen when the helm stores none, and each risk sentence on
+/// screen; below the group, the switch "Allow tunnels from remote sessions" (a switch, off while the helm stores no
+/// consent) with its old help under it; below the switch, the file-types field (`super::file_types_tests` has its
+/// own). Decided for the Mac, the one platform that draws the switch.
 #[gpui::test]
 fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -1121,10 +1121,6 @@ fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAp
     ] {
         assert!(text.contains(risk), "the risk is explained: {risk}: {text}");
     }
-    assert!(
-        !text.contains("File types"),
-        "no file-types field yet: {text}"
-    );
     assert_eq!(
         role_and_name(super::terminal::TUNNEL_ID),
         Some((
@@ -1147,6 +1143,10 @@ fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAp
              The next tunnel asks again. This choice applies to this helm."
         ),
         "the switch's help is on screen: {text}"
+    );
+    assert!(
+        bounds(cx, super::file_types::ID).top() >= bounds(cx, super::terminal::TUNNEL_ID).bottom(),
+        "the file-types field is below the switch"
     );
 }
 

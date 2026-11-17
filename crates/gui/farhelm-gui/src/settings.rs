@@ -28,17 +28,18 @@
 //!   is in flight the control shows the value being saved (its draft); otherwise it shows what the helm stores, so a
 //!   refused save shows the stored value again, with the failure line under the control until its next save starts
 //!   (SPEC.md: "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic,
-//!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
-//!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
-//!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
-//!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key,
-//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Tensorlake draws a second copy
-//!   of that form over the same account, so a save in either shows in both, and saves its create-without-asking
-//!   switch through the account's route, showing only the choice the helm stored ([`tensorlake`]). Recipes lists the
-//!   helm's recipes, whose snapshot builds are accepted work under each recipe's own key, and edits one in place,
-//!   saving the whole recipe under that key ([`recipes`]); while Recipes shows an open editor, the dialog pins the
-//!   editor's Cancel and Save above its Close row, so they stay in view below a long form and go when another section
-//!   is shown.
+//!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field the
+//!   user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads its
+//!   route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
+//!   explicitly, a view of its own ([`ntfy`]). So is Terminal's file-types field, which saves its preference only when
+//!   the user presses Save, keeping a refused or malformed draft ([`file_types`]). So is Credentials, whose named
+//!   secrets each save under their own key, with the Tensorlake API key form above them ([`credentials`],
+//!   [`tensorlake_key`]). Tensorlake draws a second copy of that form over the same account, so a save in either shows
+//!   in both, and saves its create-without-asking switch through the account's route, showing only the choice the helm
+//!   stored ([`tensorlake`]). Recipes lists the helm's recipes, whose snapshot builds are accepted work under each
+//!   recipe's own key, and edits one in place, saving the whole recipe under that key ([`recipes`]); while Recipes
+//!   shows an open editor, the dialog pins the editor's Cancel and Save above its Close row, so they stay in view below
+//!   a long form and go when another section is shown.
 //!   Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the terminal's tunnel
 //!   warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it ([`terminal`]). App's
 //!   switch is not the helm's at all: it writes the desktop app's own setting through its updater, at once and with a
@@ -65,7 +66,7 @@
 //! taller than the dialog's body even at the dialog's full height, by about 30 pixels, so its body scrolls: unscrolled,
 //! its last control, the docs link, sits at the body's visible edge with its descenders and underline below it, and
 //! scrolled to the end it lies wholly above the footer. The header is taller than the old one, and the docs link has a
-//! line of its own. Terminal's file-types field waits for the terminal's file downloads, which it governs.
+//! line of its own.
 
 mod agent_trust;
 mod app;
@@ -80,6 +81,9 @@ mod containers_tests;
 #[cfg(test)]
 mod credential_tests;
 mod credentials;
+mod file_types;
+#[cfg(test)]
+mod file_types_tests;
 mod ntfy;
 #[cfg(test)]
 mod recipe_credential_tests;
@@ -178,10 +182,7 @@ const SUMMARY_WITH_APP: &str = "For every host on this helm, and for this device
 /// summary, so these are its words cut short rather than words of their own.
 const SUMMARY: &str = "For every host on this helm";
 
-/// The footer's note, the old desktop app's words.
-///
-/// NOTE: It names the dialog's explicit-save editors; of them, the file types field is not built yet (it comes with
-/// Terminal's file downloads).
+/// The footer's note, the old desktop app's words. It names the dialog's explicit-save editors.
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
@@ -545,6 +546,8 @@ pub(crate) struct SettingsDialog {
     /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
     /// reads the helm's settings (the pattern Agent trust follows).
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
+    /// Terminal's file-types field, made the first time the section is shown in this opening ([`file_types`]).
+    file_types: Option<Entity<file_types::FileTypes>>,
     /// The Containers section, made the first time it is shown in this opening, which is when it reads the helm's
     /// container hosts and leftovers (the pattern Agent trust follows).
     containers: Option<Entity<containers::Containers>>,
@@ -593,11 +596,15 @@ struct Handover {
 }
 
 impl SettingsDialog {
-    /// Decide the tunnel switch for `platform` instead of this build's: the test-only setter of [`Self::platform`], so
-    /// tests and goldens draw the Mac's Terminal section on any machine. Takes effect at the next draw.
+    /// Decide the tunnel switch, and the file-types field's modifier, for `platform` instead of this build's: the
+    /// test-only setter of [`Self::platform`], so tests and goldens draw the Mac's Terminal section on any machine.
+    /// Takes effect at the next draw.
     #[cfg(test)]
     pub(crate) fn decide_tunnels_for(&mut self, platform: Platform, cx: &mut Context<Self>) {
         self.platform = platform;
+        if let Some(field) = &self.file_types {
+            field.update(cx, |field, cx| field.set_platform(platform, cx));
+        }
         cx.notify();
     }
 
@@ -631,6 +638,7 @@ impl SettingsDialog {
             checkout_fields: None,
             spare: Configured::new(),
             ntfy: None,
+            file_types: None,
             containers: None,
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
             credentials: None,
@@ -679,6 +687,10 @@ impl SettingsDialog {
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
             self.containers = Some(cx.new(containers::Containers::new));
+        }
+        if section == Section::Terminal && self.file_types.is_none() {
+            let platform = self.platform;
+            self.file_types = Some(cx.new(|cx| file_types::FileTypes::new(platform, window, cx)));
         }
         if section == Section::Notifications && self.ntfy.is_none() {
             self.ntfy = Some(cx.new(|cx| ntfy::NtfyAlerts::new(window, cx)));
@@ -1131,6 +1143,8 @@ impl SettingsDialog {
                 if terminal::shown_on(self.platform) {
                     body.push(self.tunnel_switch(preferences, cx));
                 }
+                // Last, as in the old desktop app, and in every desktop app.
+                body.extend(self.file_types.clone().map(IntoElement::into_any_element));
                 body
             }
             Section::Checkouts => {
