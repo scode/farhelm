@@ -4,11 +4,13 @@
 //!
 //! These live here rather than in the supervisor's own tests because a host
 //! forks: started in-process, its second stage would be a fork of a
-//! multi-threaded test runner (D-19). What a real host only does under
-//! circumstances a test cannot arrange on cue (a read straddling the
-//! replay's end, a resumed stream, discarded input, an unrestorable
-//! snapshot) is tested against stand-ins in the supervisor's unit tests
-//! (`hosts::terminal::tests`).
+//! multi-threaded test runner. Tests start real hosts only from the real
+//! `farhelm` binary, and the supervisor's library tests use stand-ins, as
+//! decided during the terminal host's design (2026-11-01). What a real host
+//! only does under circumstances a test cannot arrange on cue (a read
+//! straddling the replay's end, a resumed stream, discarded input, an
+//! unrestorable snapshot) is tested against stand-ins in the supervisor's
+//! unit tests (`hosts::terminal::tests`).
 //!
 //! Every host a test starts lives in a test-state directory of its own,
 //! whose drop ends it through the test-state cleanup's own client
@@ -642,7 +644,8 @@ const FLOOD: &str = "i=0; while [ $i -lt 3000 ]; do \
 /// snapshot, nothing from output an earlier supervisor was sent after it,
 /// and of output written while no supervisor was attached, the query only.
 ///
-/// Why: this is the replay policy (D-7) end to end, the goal's three cases.
+/// Why: this is the replay policy end to end, the goal's three cases; the
+/// policy was decided during the terminal host's design (2026-11-02).
 /// A query answered twice arrives at the program as typed garbage, one
 /// never answered leaves it waiting, and a bell or clipboard write
 /// delivered again surprises the user. The program here reads each answer

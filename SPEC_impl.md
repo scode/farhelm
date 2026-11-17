@@ -2008,22 +2008,22 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   cannot be listed in full, leaves the row with none, and the next start tries again, so that an older host with older
   history is never taken while the newer one is merely unreadable. Its socket is recorded in `terminal_address` (the row
   lists the previous run's exit), so the next Restart seeds from it and ends it. After the new host started, the reload
-  finds it by its tag and confirms it, and the old host is superseded. **Superseded agent hosts** (the plan's D-25): an
-  old host left running is no orphan, since its session exists. So every reload, after its reconciliation has committed
-  (a restart whose new host it just confirmed by its tag counts), ends each live agent host no row claimed whose tag
-  names a host row at a later generation whose launch is confirmed (a `terminal_address` naming another socket), all at
-  once within one stop budget, over the scan's own connection (`Shutdown`, then the verified signal to its peer), and
-  removes its launch record. The current generation's host is never one, nor is a host the scan could not read, nor a
-  tab's host (its tag names a tab, not a launch generation). The old program was stopped by the restart; a descendant
-  that survives the host's hangup is left to the session's next marker sweep. **The residual**: the earlier host of a
-  restart whose replacement started but was never confirmed and is gone by the next start (its launch record names
-  nothing, so the fallback above does not apply) stays until the session's Delete, or a later restart is confirmed and a
-  supervisor starts. So does the old host of a restart that failed ambiguously in a running supervisor (a replacement
-  that could not be confirmed ended): the session holds no terminal, so the next Restart from that supervisor starts
-  empty while the old host, with the history, runs on until a later start supersedes it or Delete ends it. And a runtime
-  stopped while it encodes a checkpoint or a seed leaves its emulator away for good; a runtime is stopped only where its
-  host is given up (a stopping supervisor, or a create's, a Restart's or a reload's cleanup, or the end of a superseded
-  host), so nothing reads it afterwards.
+  finds it by its tag and confirms it, and the old host is superseded. **Superseded agent hosts** (decided during the
+  terminal host's design, 2026-11-02): an old host left running is no orphan, since its session exists. So every reload,
+  after its reconciliation has committed (a restart whose new host it just confirmed by its tag counts), ends each live
+  agent host no row claimed whose tag names a host row at a later generation whose launch is confirmed (a
+  `terminal_address` naming another socket), all at once within one stop budget, over the scan's own connection
+  (`Shutdown`, then the verified signal to its peer), and removes its launch record. The current generation's host is
+  never one, nor is a host the scan could not read, nor a tab's host (its tag names a tab, not a launch generation). The
+  old program was stopped by the restart; a descendant that survives the host's hangup is left to the session's next
+  marker sweep. **The residual**: the earlier host of a restart whose replacement started but was never confirmed and is
+  gone by the next start (its launch record names nothing, so the fallback above does not apply) stays until the
+  session's Delete, or a later restart is confirmed and a supervisor starts. So does the old host of a restart that
+  failed ambiguously in a running supervisor (a replacement that could not be confirmed ended): the session holds no
+  terminal, so the next Restart from that supervisor starts empty while the old host, with the history, runs on until a
+  later start supersedes it or Delete ends it. And a runtime stopped while it encodes a checkpoint or a seed leaves its
+  emulator away for good; a runtime is stopped only where its host is given up (a stopping supervisor, or a create's, a
+  Restart's or a reload's cleanup, or the end of a superseded host), so nothing reads it afterwards.
 - **Delete ends every terminal host of the session** (`service/session_hosts.rs`), since nothing else would: a host
   outlives its program and carries no session marker. Delete acts only on what the session records, never on a scan of
   the socket directory: the agent's host when its runtime holds one, the session's tab runtimes, and the session's

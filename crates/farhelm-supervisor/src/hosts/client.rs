@@ -37,7 +37,8 @@
 //!   gone. A caller that meets an unavailable
 //!   host should end it with that peer rather than keep reconnecting: each
 //!   attempt adds to the backlog.
-//! - **Always take over** (the plan's D-11). Every `Hello` sets `take_over`:
+//! - **Always take over**, as decided during the terminal host's design
+//!   (2026-10-31). Every `Hello` sets `take_over`:
 //!   the supervisor holds its state directory's lock, so any other client a
 //!   host has is a stale connection of an earlier supervisor (or of a
 //!   cleanup tool acting for it), and refusing would lock a restarted

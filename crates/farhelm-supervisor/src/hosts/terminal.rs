@@ -15,8 +15,9 @@
 //! a host startup found and cannot use, whose runtime never ran.
 //!
 //! - **One owner.** Every connection to a host takes it over (the client's
-//!   module docs, the plan's D-11), so a second runtime for the same host
-//!   would cut the first one off, and each would take it back in turn.
+//!   module docs; decided during the terminal host's design, 2026-10-31), so
+//!   a second runtime for the same host would cut the first one off, and
+//!   each would take it back in turn.
 //!   Exactly one runtime per host may exist in a supervisor. When its
 //!   connection ends anyway it connects again to learn what happened: a host
 //!   that is gone or
@@ -29,9 +30,10 @@
 //! - **Adoption** reads the host from the start (`Read(0,0)`): the stored
 //!   snapshot record, if any, restores the emulator (a restore has no side
 //!   effects), and the tail after it is fed. What of the tail is replay, and
-//!   what its side effects may do, is the replay policy (the plan's D-7,
-//!   `Replay`), driven by the host's `delivered_end`, the end of the output
-//!   it had written whole to some client:
+//!   what its side effects may do, is the replay policy (`Replay`, decided
+//!   during the terminal host's design on 2026-11-02), driven by the host's
+//!   `delivered_end`, the end of the output it had written whole to some
+//!   client:
 //!   - output below `delivered_end` was sent to an earlier supervisor, which
 //!     answered its queries and showed its bells and clipboard writes: it is
 //!     fed with no side effects at all ([`FeedMode::ReplaySeen`]);
@@ -197,23 +199,23 @@
 //!   (dead, exit code), which `service::status::TerminalEvidence` maps one
 //!   to one.
 //! - **Checkpoints** (`checkpoint`): once enough output has passed since
-//!   the previous attempt (the plan's D-8, revised), the runtime snapshots
-//!   its emulator at the next clean boundary and hands the host the
-//!   snapshot, which lets the host drop the output before it. Enough is
-//!   four times the latest snapshot's size, at least 1 MiB and at most a
-//!   quarter of the host's journal cap ([`CheckpointPolicy`]): a terminal
-//!   pays for a snapshot in proportion to what it costs, and a connected
-//!   supervisor keeps the host's tail far below the cap. Due-ness is
-//!   checked after each live read (at its split candidate and at its end),
-//!   after a synchronized update's deadline draws it, and when the replay
-//!   finishes; there is no time trigger, so a quiet terminal costs nothing.
-//!   [`HostTerminal::checkpoint_now`] asks for one on demand for an orderly
-//!   stop, within a deadline. A tail below the policy's stop threshold
-//!   (normally 1 MiB) is left for recovery to replay without an encode;
-//!   otherwise it snapshots at the current position if the emulator is
-//!   clean there, or leaves the host its last accepted snapshot and tail.
-//!   [`HostStatus::checkpoint`] is the latest the host
-//!   is known to hold.
+//!   the previous attempt (as revised during the terminal host's design on
+//!   2026-11-02), the runtime snapshots its emulator at the next clean
+//!   boundary and hands the host the snapshot, which lets the host drop the
+//!   output before it. Enough is four times the latest snapshot's size, at
+//!   least 1 MiB and at most a quarter of the host's journal cap
+//!   ([`CheckpointPolicy`]): a terminal pays for a snapshot in proportion
+//!   to what it costs, and a connected supervisor keeps the host's tail far
+//!   below the cap. Due-ness is checked after each live read (at its split
+//!   candidate and at its end), after a synchronized update's deadline
+//!   draws it, and when the replay finishes; there is no time trigger, so a
+//!   quiet terminal costs nothing. [`HostTerminal::checkpoint_now`] asks
+//!   for one on demand for an orderly stop, within a deadline. A tail below
+//!   the policy's stop threshold (normally 1 MiB) is left for recovery to
+//!   replay without an encode; otherwise it snapshots at the current
+//!   position if the emulator is clean there, or leaves the host its last
+//!   accepted snapshot and tail. [`HostStatus::checkpoint`] is the latest
+//!   the host is known to hold.
 //!
 //!   The release `encode_speed` benchmark in the terminal-emulator crate
 //!   measures 200 columns, 60 screen rows and 12,000 history lines at a
@@ -266,17 +268,17 @@
 //!   never resets the emulator: a healthy screen is worth more than the
 //!   bytes it missed. The runtime carries on after it, marks the history
 //!   trimmed ([`HostStatus::history_trimmed`]), and asks the program to
-//!   redraw by resizing the terminal one row smaller and back (the plan's
-//!   D-15: Linux sends no `SIGWINCH` for a resize to the size in force,
-//!   checked on Linux 6.8, and the BSD tty code macOS uses compares the
-//!   same way, read from its source and not tested; so one same-size
-//!   resize would do nothing). It does the
-//!   same after restoring a snapshot that left out the screens or was drawn
-//!   with another character width table. What a redraw cannot bring back
-//!   stays lost: the scrollback in the gap, and a mode or other terminal
-//!   setting the lost bytes made, until the program sets it again, which
-//!   nothing makes it do on a resize and which many programs do only at
-//!   startup (SPEC_impl.md, "Terminal host", the gap paragraph).
+//!   redraw by resizing the terminal one row smaller and back (decided
+//!   during the terminal host's design on 2026-11-02, because Linux sends
+//!   no `SIGWINCH` for a resize to the size in force, checked on Linux 6.8,
+//!   and the BSD tty code macOS uses compares the same way, read from its
+//!   source and not tested; so one same-size resize would do nothing). It
+//!   does the same after restoring a snapshot that left out the screens or
+//!   was drawn with another character width table. What a redraw cannot
+//!   bring back stays lost: the scrollback in the gap, and a mode or other
+//!   terminal setting the lost bytes made, until the program sets it again,
+//!   which nothing makes it do on a resize and which many programs do only
+//!   at startup (SPEC_impl.md, "Terminal host", the gap paragraph).
 //! - **Unavailable is final for a runtime, not for a host.** A runtime that
 //!   ends unavailable leaves its host alone and never tries it again. Some
 //!   reasons are lasting (a protocol or snapshot format this build does not
@@ -2692,10 +2694,11 @@ pub(crate) async fn pin_child(conn: &mut HostConnection) -> Result<(Child, Info)
 
 // ---- The runtime task ------------------------------------------------------------
 
-/// The replay policy (module docs, "Adoption"; the plan's D-7): everything
-/// before `end` is replay, until it has all been processed; of it, the
-/// output below `seen_end` (the host's `delivered_end`) was seen by an
-/// earlier supervisor, and the rest was not.
+/// The replay policy (module docs, "Adoption"; decided during the terminal
+/// host's design on 2026-11-02): everything before `end` is replay, until
+/// it has all been processed; of it, the output below `seen_end` (the
+/// host's `delivered_end`) was seen by an earlier supervisor, and the rest
+/// was not.
 #[derive(Debug, Clone, Copy)]
 struct Replay {
     seen_end: u64,

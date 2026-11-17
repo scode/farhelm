@@ -50,9 +50,10 @@
 //! stopping supervisor counts as delivered without acting on it to what the
 //! host had already written to the connection: that output is replayed by
 //! the next supervisor without side effects, so a query in it goes
-//! unanswered (the plan's D-7, the delivery ambiguity accepted at a stop as
-//! at a crash). Output written after the close is unseen, and its queries
-//! are answered.
+//! unanswered. That is the delivery ambiguity the replay policy accepted at
+//! a crash when it was decided during the terminal host's design
+//! (2026-11-02), accepted at a stop as well. Output written after the close
+//! is unseen, and its queries are answered.
 //!
 //! The runtimes are gathered from the session map, plus the host tabs of
 //! every session a Restart has taken off it for its window
@@ -148,19 +149,21 @@
 //! ## Superseded agent hosts
 //!
 //! A Restart of a host agent starts a new host and ends the old one once the
-//! new launch is confirmed (`host_restart`). A supervisor that dies in between
-//! leaves the old host running with nothing in memory to end it, and it is no
-//! orphan: its session exists. So the reload ends it, with the plan's D-25 rule
-//! ([`superseded`]): a live agent host that no row claimed, whose tag names a
-//! session whose row is a host row at a later launch generation, and whose
-//! row's later launch is confirmed (its `terminal_address` names a socket, and
-//! not this host's). The decision is taken after the reload's own
-//! reconciliation has committed, on the row as it then stands, so a restart
-//! interrupted before its confirmation converges in one start: the reload finds
-//! the new host by its tag and confirms it, and then the old host is
-//! superseded. Until a row's later launch is confirmed, its earlier host is
-//! kept (a definitive failure may still make it the session's terminal, and an
-//! unconfirmed launch may have started nothing).
+//! new launch is confirmed (`host_restart`). A supervisor that dies in
+//! between leaves the old host running with nothing in memory to end it, and
+//! it is no orphan: its session exists. So the reload ends it, by the rule
+//! for superseded agent hosts ([`superseded`], decided during the terminal
+//! host's design on 2026-11-02): a live agent host that no row claimed,
+//! whose tag names a session whose row is a host row at a later launch
+//! generation, and whose row's later launch is confirmed (its
+//! `terminal_address` names a socket, and not this host's). The decision is
+//! taken after the reload's own reconciliation has committed, on the row as
+//! it then stands, so a restart interrupted before its confirmation
+//! converges in one start: the reload finds the new host by its tag and
+//! confirms it, and then the old host is superseded. Until a row's later
+//! launch is confirmed, its earlier host is kept (a definitive failure may
+//! still make it the session's terminal, and an unconfirmed launch may have
+//! started nothing).
 //!
 //! It is ended over the scan's own connection (`Shutdown`, then the
 //! verified signal to the connection's peer), never by connecting to its
@@ -981,13 +984,14 @@ fn earlier_agent_of(tag: &HostTag, session_id: &str, generation: i64) -> bool {
 }
 
 /// Whether the live agent host tagged `tag`, at the socket called `name`, is
-/// superseded (the plan's D-25, module docs): `row` is its session's row as it
-/// stands after the reload, and it must be a host row at a later launch
-/// generation than the tag's whose launch is confirmed, which is what a
-/// non-empty `terminal_address` naming another socket says (only a confirmation
-/// writes `terminal_address`; a Restart empties it as it opens a generation,
-/// and one that failed definitively puts back the `terminal_address` of the
-/// host that stays the session's terminal). A session with no row is an orphan,
+/// superseded (module docs; a rule decided during the terminal host's
+/// design, 2026-11-02): `row` is its session's row as it stands after the
+/// reload, and it must be a host row at a later launch generation than the
+/// tag's whose launch is confirmed, which is what a non-empty
+/// `terminal_address` naming another socket says (only a confirmation writes
+/// `terminal_address`; a Restart empties it as it opens a generation, and
+/// one that failed definitively puts back the `terminal_address` of the host
+/// that stays the session's terminal). A session with no row is an orphan,
 /// which is not this rule's to end; a tab host is not an agent's.
 pub(super) fn superseded(
     tag: &HostTag,

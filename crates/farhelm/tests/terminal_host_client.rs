@@ -280,14 +280,15 @@ async fn acknowledged(connection: &mut HostConnection, end: u64) -> InputCounts 
 /// A client connects with take-over, knows its host's process, and a second
 /// client takes the host over from it.
 ///
-/// Why: the supervisor always takes over (D-11): after a restart its old
-/// connection may still be open, and refusing would lock it out of its own
-/// terminals. The peer process is what makes a later verified SIGTERM
-/// possible. Spec: the connection speaks version 1; its peer is the
-/// listening process, which `Info` names as the host, with the child
-/// running, the size given at spawn and the tag the spawn gave; a second
-/// connection succeeds while the first is open, the first then ends with
-/// `Closed`, and the second gets `Info`.
+/// Why: the supervisor always takes over, as decided during the terminal
+/// host's design (2026-10-31): after a restart its old connection may still
+/// be open, and refusing would lock it out of its own terminals. The peer
+/// process is what makes a later verified SIGTERM possible. Spec: the
+/// connection speaks version 1; its peer is the listening process, which
+/// `Info` names as the host, with the child running, the size given at
+/// spawn and the tag the spawn gave; a second connection succeeds while the
+/// first is open, the first then ends with `Closed`, and the second gets
+/// `Info`.
 #[farhelm_testtrace::test]
 async fn a_client_takes_over_and_knows_its_host() {
     let host = Host::start(shell("exec /bin/sleep 600")).await;
