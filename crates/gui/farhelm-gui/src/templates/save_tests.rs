@@ -23,6 +23,7 @@ use super::save::{Candidate, choice_text};
 use crate::components::EditCommand;
 use crate::focus::Mark;
 use crate::launcher::draft::{LaunchDraft, Tab};
+use crate::launcher::environment_launch_tests::container_draft;
 use crate::launcher::view_tests::search_focused;
 use crate::layers;
 use crate::main_view::MainView;
@@ -703,6 +704,21 @@ fn an_environments_host_offers_no_save_as_template(cx: &mut TestAppContext) {
     assert!(
         drawn(window, "launcher"),
         "the premise: the launcher is open"
+    );
+    assert!(!drawn(window, "launcher-save-template"));
+}
+
+/// SPEC.md, "Sandbox sessions", keeps Save as template from an environment launch deferred, and the old footer hid the
+/// action while a recipe was chosen; offered, it would say the host cannot be identified and save no placement.
+/// Specified: a launcher on host1 whose draft is in a new container of `web` there has no Save as template.
+#[gpui::test]
+fn a_launch_into_a_new_environment_offers_no_save_as_template(cx: &mut TestAppContext) {
+    let (_helm, window) = launcher_on(cx, container_draft(), &[]);
+    assert!(
+        crate::launcher::view_tests::shown_draft(window)
+            .target
+            .is_some(),
+        "the premise: the launcher's draft is in a new container"
     );
     assert!(!drawn(window, "launcher-save-template"));
 }

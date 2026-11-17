@@ -68,6 +68,7 @@ use super::{SEQUENCE_PREFIX_NAME, apply};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Catalog, LaunchDraft};
+use crate::launcher::request::Recipes;
 use crate::launcher::view::{BatchApplied, Launcher, Note, Prepared};
 use crate::launcher::{self, entry};
 use crate::{layers, local_state, session, session_list};
@@ -529,8 +530,8 @@ fn stored_templates(cx: &App) -> Vec<LaunchTemplate> {
 }
 
 /// Apply `templates` to `draft` with [`apply::apply`], against `catalog` and what the store holds now: the hosts, the
-/// remembered wrapper prefixes, and New's folder for a host a template switches to. All of them or, with its refusal
-/// sentence, none.
+/// remembered wrapper prefixes, New's folder for a host a template switches to, and the recipe catalog an environment
+/// placement is checked against. All of them or, with its refusal sentence, none.
 fn apply_from_store(
     draft: &mut LaunchDraft,
     templates: &[LaunchTemplate],
@@ -553,11 +554,18 @@ fn apply_from_store(
         .unwrap_or_default();
     let selected = local_state::selected(cx);
     let default_folder = |host| entry::default_folder(collections, selected.as_deref(), host);
+    // Every snapshot carries the recipe catalog, and a press needs a snapshot, so it is never still loading here; an
+    // unreadable one names no recipe.
+    let known_recipes: Vec<String> = match Recipes::of(collections) {
+        Recipes::Listed(recipes) => recipes.into_iter().map(|recipe| recipe.name).collect(),
+        Recipes::Loading | Recipes::Unreadable(_) => Vec::new(),
+    };
     let context = apply::Context {
         hosts: &hosts,
         catalog,
         remembered_wrappers: &remembered_wrappers,
         default_folder: &default_folder,
+        known_recipes: &known_recipes,
     };
     apply::apply(draft, templates, &context)
 }

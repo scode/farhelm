@@ -31,8 +31,13 @@
 //! reports the chosen repository as the destination (typed repository text that names no chosen repository is no
 //! destination, as in the old app).
 //!
-//! Not here yet: environment placements (recipe and place), which wait for the launcher's environments work; until
-//! then no recipe is known, so the shared fold refuses a template that names one.
+//! An environment placement (a recipe and place, or a legacy recipe alone, which means that recipe on the Tensorlake
+//! account) is checked against the store's recipe catalog ([`Context::known_recipes`]) and the registered hosts;
+//! SPEC.md, "Creation": "Missing recipes or removed place hosts make that placement inapplicable". It is replayed
+//! through the draft's Runs on edits (`LaunchDraft::choose_runs_on`, `choose_recipe` and `choose_container_host`), the
+//! ones the launcher's Runs on switch and its Recipe and Container host selects make, folder `~` included. The
+//! snapshot reports the draft's target and no host while one is set, as the old `launcher_snapshot` did, so the host
+//! the Host row keeps underneath a new environment is never captured.
 
 use std::collections::BTreeMap;
 
@@ -42,11 +47,14 @@ use farhelm_proto::launcher::{
 };
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use farhelm_proto::{
-    GithubRepo, LaunchHarness, LaunchPermission, RepoError, parse_github_repo,
+    GithubRepo, LaunchHarness, LaunchPermission, Place, RepoError, parse_github_repo,
     split_permission_flags, split_wrapper_prefix,
 };
 
-use crate::launcher::draft::{Catalog, Escalation, Field, LaunchDraft, Mode, Tab, repo_identifier};
+use crate::launcher::draft::{
+    Catalog, Escalation, Field, LaunchDraft, Mode, RunsOn, Tab, repo_identifier,
+};
+use crate::launcher::request::is_container_host;
 
 /// What templates are applied against besides the draft itself, as the launcher reads it from the store when the
 /// batch arrives.
@@ -64,6 +72,10 @@ pub struct Context<'a> {
     /// typed or picked ([`LaunchDraft::choose_host`]). The launcher owns that precedence (the open session's folder,
     /// the newest recent setup, `~`), so it is passed in rather than recomputed here.
     pub default_folder: &'a dyn Fn(i64) -> String,
+    /// The names of the recipes the store's catalog lists, which a template's recipe must be one of. Empty while the
+    /// catalog is unreadable, which refuses every placement as naming an unavailable recipe, as the old app's refusal
+    /// path did once its catalog read failed.
+    pub known_recipes: &'a [String],
 }
 
 /// The install identity a host row can be matched by, or `None` when it has no usable one.
@@ -80,8 +92,9 @@ pub fn install_identity(host: &HostView) -> Option<&str> {
 }
 
 /// The launcher as the shared template rules read it: the active tab's kind, both tabs' fields, the host by its install
-/// identity, the destination (the folder, or the chosen repository of a managed checkout, or none while the repository
-/// field holds only typed text), and the session name with the kind a template gave it.
+/// identity or, in its place, the new environment's target, the destination (the folder, or the chosen repository of a
+/// managed checkout, or none while the repository field holds only typed text), and the session name with the kind a
+/// template gave it.
 ///
 /// The name is the one a template saves: a name a template set (a base or a fixed name) as it was written, and any
 /// other name as the session would get it. So a template base is never the number a managed checkout moved it to
@@ -120,13 +133,17 @@ pub fn snapshot(draft: &LaunchDraft, hosts: &[HostView]) -> LauncherState {
         // The old app's snapshot carried the resume text whenever Resume was switched on, declared agent or not; the
         // request leaves it out without one, but a held-value comparison and Save as template read the field itself.
         resume_command: command.resume_on.then(|| command.resume.clone()),
+        // The Host row's host stays in the draft under a new environment, to give the row back when the user leaves
+        // it; the launch does not go there, so it is no part of the snapshot (the old `launcher_snapshot`).
         host: draft
             .host
+            .filter(|_| draft.target.is_none())
             .and_then(|id| hosts.iter().find(|host| host.id == id))
             .and_then(install_identity)
             .map(str::to_owned),
+        // A placement is always the complete target; the legacy recipe-only field is only ever read from a template.
         recipe: None,
-        target: None,
+        target: draft.target.clone(),
         // While a checkout is chosen the folder is set aside, kept for choosing Folder again; it is not the
         // destination. An unchosen repository query is an editor draft, not a reusable destination: saved, it would
         // make the template fail whenever it is applied (the old `launcher_snapshot`).
@@ -259,11 +276,29 @@ fn check(
         .filter_map(install_identity)
         .map(str::to_owned)
         .collect();
+    // The places the batch names that exist here: a place on a container host while the registry lists that host as
+    // one (the launcher's own test, `is_container_host`), and a place on no host at all. Whether the host can take a
+    // container right now (its Podman check) is the launcher's refusal, not this one: the old app's known places
+    // ignored transient availability too. The old app also counted a host that cannot hold containers, and its launcher
+    // then refused the launch; here the template is refused instead, since no launch could go there. The place's own
+    // methods decide which kind it is, so no provider is named.
+    let known_places: Vec<Place> = templates
+        .iter()
+        .filter_map(|template| template.fields.launch_target())
+        .map(|target| target.place())
+        .filter(|place| match place.container_host() {
+            Some(id) => context
+                .hosts
+                .iter()
+                .any(|host| host.id == id && is_container_host(host)),
+            None => place.host().is_none(),
+        })
+        .collect();
     let fold_context = TemplateContext {
         catalog: context.catalog.unwrap_or(&[]),
         known_hosts: &known_hosts,
-        known_recipes: &[],
-        known_places: &[],
+        known_recipes: context.known_recipes,
+        known_places: &known_places,
         host_fixed: draft.holds(Field::Host),
     };
     let mut cleaned = Vec::with_capacity(templates.len());
@@ -370,7 +405,9 @@ fn remove_held(fields: &mut TemplateFields, held: &LauncherState, draft: &Launch
 
 /// Restart with's refusal of a template that still sets a field the mode holds after [`remove_held`], naming the
 /// first such field in the old app's order. Clearing a command's resume choice is refused there too (SPEC.md,
-/// "Restart with": "Initial prompts and clearing a command's resume choice remain refused").
+/// "Restart with": "Initial prompts and clearing a command's resume choice remain refused"). An environment placement
+/// is not named here, as the old app's `restart_template_refusal` did not name it: the shared fold refuses it under
+/// "host", since the mode holds the host (`TemplateContext::host_fixed`).
 fn restart_refusal(draft: &LaunchDraft, template: &LaunchTemplate) -> Option<TemplateRefusal> {
     if !matches!(draft.mode, Mode::RestartWith(_)) {
         return None;
@@ -526,6 +563,20 @@ fn replay(
         })
     {
         draft.choose_host(host.id, (context.default_folder)(host.id));
+    }
+    // The placement after the host, as the fold takes them; the fold refuses both in one template, so at most one of
+    // the two applies here, and a later template's host leaves this placement (`choose_host` clears the target). A
+    // new environment is entered as the Runs on switch enters one, which also puts the folder at its home; on the
+    // segment already chosen the switch changes nothing, so the recipe and container host are then chosen as their own
+    // fields would be (on a newly entered segment they already hold these values). A provider's place is fixed by its
+    // container host, or it has one place only (the Tensorlake account); a provider with several places that are not
+    // on a host needs its own edit here.
+    if let Some(target) = fields.launch_target() {
+        draft.choose_runs_on(RunsOn::of(Some(&target)), Some(target.clone()));
+        draft.choose_recipe(target.recipe().to_owned());
+        if let Some(host) = target.place().container_host() {
+            draft.choose_container_host(host);
+        }
     }
     // A repository is chosen as the repository field's suggestion is, so the launcher's own effects follow (a new
     // checkout preview among them).

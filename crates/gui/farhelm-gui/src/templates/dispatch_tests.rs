@@ -15,12 +15,12 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::LaunchHarness;
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
-    Preferences,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
+    KeyedEntry, Preferences,
 };
+use farhelm_proto::{LaunchHarness, LaunchTarget, Place};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
@@ -31,7 +31,9 @@ use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
 use crate::actions::{QUICK_LAUNCH_CHORD, SEQUENCE_PREFIX_CHORD};
+use crate::launcher::environment_launch_tests::{self, answer_except};
 use crate::launcher::launch_tests::{creates_answering, creates_answering_with};
+use crate::launcher::request::container_reason;
 use crate::launcher::view::BANNER_SHOWS_FOR;
 use crate::launcher::view_tests::fixture_hosts;
 use crate::launcher::yolo_tests::refuse_for_yolo;
@@ -1073,6 +1075,86 @@ fn a_number_key_launches_its_template_unseen(cx: &mut TestAppContext) {
     );
     assert!(!any_open(cx), "the launcher was never shown");
     assert!(unseen(cx), "a quick launch New never showed");
+}
+
+/// The old app's "container template quick launch retains its saved place" (`podman-environments.spec.ts` at the
+/// reference commit): a number key bound to a container template launches it out of sight into a new container at the
+/// stored place, through the environment route only, since an ordinary create would start the session on the Host
+/// row's host instead. Specified: with the recipe catalog listing `web` and number key 1 on `container-go` (a command
+/// of `true`, not YOLO, in a container of `web` on host1), the key sends exactly one `POST /api/environment-sessions`
+/// and no ordinary create, with that recipe and place, while no layer opens; the helm's refusal brings the launcher back
+/// with the stored place still chosen and shown in its Recipe and Container host rows. Here host1's check has passed; the
+/// old test's wait for the place answer is the launcher's, tested in `environment_launch_tests`.
+#[gpui::test]
+fn a_container_template_on_a_number_key_launches_at_its_place(cx: &mut TestAppContext) {
+    let stored = LaunchTarget::Environment {
+        recipe: "web".into(),
+        place: Place::PodmanHost(1),
+    };
+    let hosts = fixture_hosts(&[0, 1]);
+    let host1: HostView = serde_json::from_value(hosts.entries[0].value.clone()).unwrap();
+    assert_eq!(
+        (host1.id, container_reason(&host1)),
+        (1, None),
+        "the premise: host1's Podman check passed"
+    );
+    // [`window`]'s snapshot with the recipe catalog added: a collection the snapshot did not install cannot be pushed
+    // later.
+    let (mut helm, _connection) = started(cx);
+    helm.connect(vec![
+        listing(&[], &[]),
+        hosts,
+        bound(None, &[("1", "container-go")]),
+        templates_with(template(
+            "container-go",
+            TemplateFields {
+                target: Some(stored.clone()),
+                ..runs_true()
+            },
+        )),
+        environment_launch_tests::catalog(),
+    ]);
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, MainView::new);
+    settle(cx);
+    number_key(cx, 1);
+    let sent = answer_except(&mut helm, cx, |command| {
+        command.path == "/api/environment-sessions" || command.path == "/api/sessions"
+    });
+    let [create] = &sent[..] else {
+        panic!("one press sent one create, not {sent:?}");
+    };
+    assert_eq!(
+        create.path, "/api/environment-sessions",
+        "not an ordinary create"
+    );
+    let body = create.body.clone().unwrap_or_default();
+    assert_eq!(body["recipe"], json!("web"), "{body}");
+    assert_eq!(
+        body["place"],
+        json!({ "kind": "podman_host", "host": 1 }),
+        "{body}"
+    );
+    assert_eq!(
+        body["request"]["command"]["command"],
+        json!("true"),
+        "the template's command"
+    );
+    assert!(!any_open(cx), "the launcher was never shown");
+
+    helm.reply(create.id, 409, Some(json!("container template refused")));
+    settle(cx);
+    assert!(any_open(cx), "the refusal brought the launcher back");
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx).target,
+        Some(stored),
+        "with the stored place still chosen"
+    );
+    assert!(
+        label(cx, "launcher-recipe").is_some() && label(cx, "launcher-container-host").is_some(),
+        "and shows it in its Recipe and Container host rows"
+    );
+    assert_eq!(label(cx, "launcher-host"), None, "in place of the Host row");
 }
 
 /// The templates collection of [`templates`], available, with `yolo-go` added last: a command launch of `true` asserted
