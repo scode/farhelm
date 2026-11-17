@@ -38,15 +38,10 @@ unchanged values", "unchanged launcher tab, harness, permissions and default mod
 reselection retains retries while real scalar changes replace them", "ordinary title no-ops preserve retries without
 trimming nonblank names", "valid ${editor} spacing preserves raw text and retry words", "effective Guarded reacceptance
 preserves a template-default request", "one native same-owned ${kind} replacement retains its retry"), since the GUI
-keeps no launch request keys (SPEC.md, "Losing the connection to the helm"); their non-key halves are in the last bullet
-below; not yet ported: Launch drawn refused, with its reason as its hover help, before any press (the first half of
-"launcher ${attempt} explains an incomplete setup beside Launch"; both press variants are tested), empty and blank
-custom flags refused ("launcher Enter names invalid custom permission flags"; an unclosed quote is tested), a carried
-effort the catalog does not offer refusing the press and going away once the user picks another ("launcher effort
-dropdown preserves an unsupported inherited choice until a native edit"; that it stays offered is
-`launcher::view_tests::a_carried_effort_the_model_does_not_offer_stays_offered`), and a held Enter on the closed host
-button, which keeps its own copy of the Enter rule ("launcher repeated Enter never launches"; text fields, buttons,
-segments, tabs, the search box and a closed select are tested)
+keeps no launch request keys (SPEC.md, "Losing the connection to the helm"); their non-key halves are in the retry-key
+bullet below; not yet ported: a held Enter on the closed host button, which keeps its own copy of the Enter rule
+("launcher repeated Enter never launches"; text fields, buttons, segments, tabs, the search box and a closed select are
+tested)
 
 - "launcher gap keeps focus and container Enter explains an incomplete draft": a click on the empty space of a dialog
   that keeps focus leaves focus on the control in use, in
@@ -100,10 +95,22 @@ segments, tabs, the search box and a closed select are tested)
   (`launcher::search_view_tests::a_tl_reset_of_codexs_permission_launches_guarded`), and the wrapper goes out as the
   words it parses to (`launcher::request_tests::an_agent_create_body_carries_the_draft`,
   `farhelm_proto::launch::tests::wrapper_prefix_preserves_raw_spelling_and_join_roundtrips`), with the Custom flags'
-  words shown in their editor (`launcher::view_tests::custom_opens_its_flags_editor_and_enter_there_only_chooses`); not
-  yet ported from "valid ${editor} spacing preserves raw text and retry words": a New create carrying typed Custom flags
-  as their words, a trailing space kept in the field while the words sent stay the same, and a further word changing
-  them.
+  words shown in their editor (`launcher::view_tests::custom_opens_its_flags_editor_and_enter_there_only_chooses`).
+- "valid ${editor} spacing preserves raw text and retry words", its custom flags variant: a New create carrying typed
+  Custom flags as their words, a trailing space kept in the field while the same create goes out again, and a further
+  word changing it, in `launcher::custom_flags_tests::a_trailing_space_keeps_the_words_and_a_new_word_changes_them`.
+- "launcher ${attempt} explains an incomplete setup beside Launch", its half before any press: the reason as Launch's
+  hover help, and Launch's own help back once the draft is complete, in
+  `launcher::view_tests::a_refused_press_says_why_beside_the_main_action`, which also presses. No test reads the refused
+  look, which the same refusal drives.
+- "launcher Enter names invalid custom permission flags", empty and blank flags: Launch's hover help and Enter in the
+  flags field naming the flags, with nothing sent, in
+  `launcher::custom_flags_tests::{empty_flags_refuse_launch_and_say_why, blank_flags_refuse_launch_and_say_why}`; the
+  unclosed quote's reason is `launcher::request_tests::refusals_name_the_first_thing_to_fix`.
+- "launcher effort dropdown preserves an unsupported inherited choice until a native edit": a Clone's carried Max
+  offered in its place, refusing the press, and no longer offered once High is picked, which then launches, in
+  `launcher::view_tests::a_carried_effort_the_model_does_not_offer_stays_offered`. The old case's efforts were a native
+  select; these are segments, whose choosing is the same draft edit.
 
 ### `tests/launcher-tabs.spec.ts`
 
@@ -321,18 +328,12 @@ keeping the Command tab is in the bullets below)
 
 Tests: 9. Covers: custom permission search focuses literal words and switching agents clears them.
 
-partly: `launcher::view_tests::custom_opens_its_flags_editor_and_enter_there_only_chooses`; "custom permission search
+replaced: `launcher::view_tests::custom_opens_its_flags_editor_and_enter_there_only_chooses`; "custom permission search
 focuses literal words" in `launcher::search_view_tests::custom_from_search_moves_focus_to_its_flags`; an agent switch
 clearing the flags in `launcher::draft_tests::custom_flags_stay_with_their_agent_and_their_choice`; the key half of
 "queued custom permission edits cannot change an in-flight launch" is superseded, since the GUI keeps no launch request
-keys (SPEC.md, "Losing the connection to the helm"); not yet ported: Reset choices then another agent's Custom starting
-empty ("reset then agent search cannot restore another agent's custom flags"), the same agent's model and chip keeping
-the flags byte for byte ("same-agent search and chips preserve custom permission drafts byte for byte"), a custom model
-keeping a compatible effort with incomplete flags ("custom model acceptance keeps compatible effort with incomplete
-permission flags"), Clone's and Replace with's bodies carrying the stored words and an edit's new ones ("${action}
-preserves custom words and shows the stored YOLO provenance"; the row's half is the session list's), and the YOLO
-question's custom-flags words with the refused create's Custom body ("custom permission words reach the real YOLO
-refusal with their own explanation")
+keys (SPEC.md, "Losing the connection to the helm"); the row's half of "${action} preserves custom words and shows the
+stored YOLO provenance" is the session list's
 
 - "queued custom permission edits cannot change an in-flight launch", its non-key half: nothing can edit the launcher
   while its create is out (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`), and a refusal
@@ -343,6 +344,25 @@ refusal with their own explanation")
   `templates::apply_tests::custom_words_are_cleared_by_a_later_templates_permission`, a later Custom starting empty in
   `launcher::draft_tests::custom_flags_stay_with_their_agent_and_their_choice`, and the template editor's half in
   `templates::editor_tests::{custom_approvals_carry_their_words, custom_words_that_do_not_parse_refuse_save_and_each_template_shows_its_own}`.
+- "reset then agent search cannot restore another agent's custom flags": Reset choices ending Claude's flags while the
+  remembered YOLO stays, and Codex's Custom then starting empty and launching only its own words, in
+  `launcher::custom_flags_tests::reset_then_another_agents_custom_starts_empty`.
+- "same-agent search and chips preserve custom permission drafts byte for byte": a model and the agent's own row from
+  search, its chip and Enter on the chip keeping unclosed and spaced flags as typed, in
+  `launcher::custom_flags_tests::{same_agent_choices_keep_unclosed_flags_as_typed, same_agent_choices_keep_spaced_flags_as_typed}`;
+  the closing switch to Codex is the draft test above.
+- "custom model acceptance keeps compatible effort with incomplete permission flags":
+  `launcher::custom_flags_tests::{a_custom_model_keeps_its_effort_beside_empty_flags, a_custom_model_keeps_its_effort_beside_unclosed_flags}`,
+  with High chosen from segments where the old case used the native select (the shared select's keys are its own
+  tests').
+- "${action} preserves custom words and shows the stored YOLO provenance", for clone and replace-with, the launcher's
+  half: the field's escaped spelling, the stored words sent raw in Clone's create and Replace with's replace, and an
+  edit's words after a refusal, in
+  `launcher::custom_flags_tests::{clone_sends_the_stored_words_then_an_edits, replace_with_sends_the_stored_words_then_an_edits}`.
+- "custom permission words reach the real YOLO refusal with their own explanation": the create's Custom words and the
+  question's custom-flags reason in
+  `launcher::custom_flags_tests::custom_flags_reach_the_yolo_question_with_their_own_reason`; its Cancel is
+  `launcher::yolo_tests::cancel_starts_nothing_and_keeps_the_launcher`.
 
 ### `tests/guarded-permissions.spec.ts`
 

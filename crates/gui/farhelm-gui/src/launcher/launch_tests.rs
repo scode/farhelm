@@ -61,13 +61,37 @@ pub(crate) fn creates_answering_with(
     catalog: &serde_json::Value,
     history: &serde_json::Value,
 ) -> (Vec<FakeCommand>, usize) {
-    let (mut creates, mut history_reads) = (Vec::new(), 0);
+    held_answering(helm, cx, "/api/sessions", catalog, history)
+}
+
+/// The commands to `path` (a create's `/api/sessions`, a Replace with's `/api/sessions/{id}/replace`) the window sent
+/// since the last call, left unanswered, with the catalog read answered with an empty catalog and every launch-history
+/// read with [`empty_history`], as [`creates`] answers them.
+pub(super) fn sent_to(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    path: &str,
+) -> Vec<FakeCommand> {
+    held_answering(helm, cx, path, &json!([]), &empty_history()).0
+}
+
+/// The one loop behind [`creates_answering_with`] and [`sent_to`]: hold back the commands to `path` and answer every
+/// other one as it arrives, round after round until a round answers nothing, so a request that waited for an answer is
+/// among those held. Returns them with the number of history reads answered.
+fn held_answering(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    path: &str,
+    catalog: &serde_json::Value,
+    history: &serde_json::Value,
+) -> (Vec<FakeCommand>, usize) {
+    let (mut held, mut history_reads) = (Vec::new(), 0);
     loop {
         cx.run_until_parked();
         let mut answered = false;
         for command in helm.commands() {
-            if command.path == "/api/sessions" {
-                creates.push(command);
+            if command.path == path {
+                held.push(command);
             } else if command.path.ends_with("launch-catalog") {
                 helm.reply(command.id, 200, Some(catalog.clone()));
                 answered = true;
@@ -83,7 +107,7 @@ pub(crate) fn creates_answering_with(
         }
         settle(cx);
         if !answered {
-            return (creates, history_reads);
+            return (held, history_reads);
         }
     }
 }
@@ -120,18 +144,24 @@ fn pressed(
     mut helm: FakeHelm,
     cx: &mut VisualTestContext,
 ) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
+    let create = press(&mut helm, cx, "/api/sessions");
+    (helm, cx, create)
+}
+
+/// Press Launch on the open launcher and return the one request to `path` it sent ([`sent_to`]), checking that nothing
+/// to `path` was waiting before the press, the press sent exactly one, and the launcher hid while it is out.
+pub(super) fn press(helm: &mut FakeHelm, cx: &mut VisualTestContext, path: &str) -> FakeCommand {
     assert!(
-        creates(&mut helm, cx).is_empty(),
-        "the premise: opening sends no create"
+        sent_to(helm, cx, path).is_empty(),
+        "the premise: nothing to {path} before the press"
     );
     test_support::click(cx, "launcher-launch");
-    let sent = creates(&mut helm, cx);
-    let [create] = &sent[..] else {
-        panic!("one press sent one create, not {}", sent.len());
+    let sent = sent_to(helm, cx, path);
+    let [request] = &sent[..] else {
+        panic!("one press sent one request to {path}, not {}", sent.len());
     };
-    assert!(!any_open(cx), "the launcher hid while its create is out");
-    let create = create.clone();
-    (helm, cx, create)
+    assert!(!any_open(cx), "the launcher hid while its request is out");
+    request.clone()
 }
 
 /// The helm lists session `key` beside `a` (as it does before answering the create that made it) and answers create
