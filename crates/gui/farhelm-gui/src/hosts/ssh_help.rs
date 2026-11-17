@@ -487,6 +487,11 @@ impl Render for SshHelpDialog {
                 palette,
             ))
             .width(px(WIDTH))
+            // SPEC.md, "Reaching everything by keyboard": while the read is out, after a refusal, and with no host or
+            // no command to copy, the body holds no Copy, so it needs a stop of its own to be scrolled from the
+            // keyboard. The frame draws it only then; once a Copy arrives the stop goes, and focus on it moves to the
+            // closest control left. The name is the old app's for the same region.
+            .scroll_stop("SSH connection help")
             .close(
                 "Close SSH help",
                 HoverHelp::tooltip("Close: return without adding a host or starting SSH"),

@@ -1,7 +1,8 @@
 //! Tests of removing a host from its menu over the helm client's fake: the confirmation (what it shows, its answers'
-//! order, where focus starts and returns), what each answer sends and under which key, the question staying up through
-//! its request, removal without asking, where a refused removal shows (inside the question, or under the row without
-//! one), and the two refusals before anything is sent (a session launch in flight, the host busy).
+//! order, where focus starts and returns, its body's keyboard stop), what each answer sends and under which key, the
+//! question staying up through its request, removal without asking, where a refused removal shows (inside the question,
+//! or under the row without one), and the two refusals before anything is sent (a session launch in flight, the host
+//! busy).
 //!
 //! The Hosts panel runs over the reference screens' three hosts (the local host as 1, `build-box` as 2 at
 //! `dev@build-box`, `gpu-1` as 3), in a sidebar-wide column so a menu opens beside its row, and Remove is reached by
@@ -16,6 +17,7 @@ use farhelm_proto::ui_channel::{
 use gpui::{DriverNode, TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
+use crate::components::Role;
 use crate::focus::Mark;
 use crate::host_text::tests::painted_words;
 use crate::hosts::tests::{hosts, open_panel_in_column, reference_hosts};
@@ -231,6 +233,34 @@ fn the_question_closes_when_its_host_is_gone(cx: &mut TestAppContext) {
     push_removed(&mut helm, cx);
     assert!(!any_open(cx));
     assert_eq!(sent(&mut helm), []);
+}
+
+/// SPEC.md, "Reaching everything by keyboard": "A region whose content holds nothing focusable gets its own tab stop
+/// with an accessible name." The removal question's body (the destination, what removing does, and a refusal's reason)
+/// is text, and a keyboard user must be able to scroll it into view before answering (the old app's "remove-host
+/// scrollports have keyboard entry points" and "the remove-host explanation is keyboard-scrollable"). Specified: the
+/// menu's Remove opens the question with focus on Remove, and Tab from there reaches the body's stop, a region named
+/// "Host removal details" as the old dialog's was.
+#[gpui::test]
+fn the_removal_questions_body_has_a_stop_that_tab_reaches(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_hosts(cx, vec![preferences(false)]);
+    press_remove(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: focus starts on Remove"
+    );
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-body-stop"),
+        "Tab reaches the body's stop"
+    );
+    let stop = node(&frame(cx), "prompt-body-stop").expect("the stop is drawn");
+    assert_eq!(
+        (stop.role, stop.label.as_deref()),
+        (Some(Role::Region), Some("Host removal details"))
+    );
 }
 
 // ---- The answers ---------------------------------------------------------------------------------------------------

@@ -58,10 +58,15 @@ not yet ported
 
 ### `tests/modal-layout.spec.ts`
 
-Tests: 6. Covers: overflowing ${family} keeps vertical margins at width ${width}.
+Tests: 22. Covers: overflowing ${family} keeps vertical margins at width ${width}.
 
 partly: crates/gui/farhelm-gui/src/components/tests/dialog.rs `a_long_dialog_body_scrolls_and_the_answers_stay_visible`,
 `a_frame_too_tall_for_the_window_scrolls_as_a_whole`
+
+- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `every_text_only_state_gives_the_body_a_stop_that_tab_reaches`
+  (text-only SSH help scrollports have keyboard entry points)
+- crates/gui/farhelm-gui/src/hosts/remove/tests.rs `the_removal_questions_body_has_a_stop_that_tab_reaches` (remove-host
+  scrollports have keyboard entry points)
 
 ### `tests/modal-trap.spec.ts`
 
@@ -80,9 +85,38 @@ case itself needs the rename dialog and the terminal
 
 ### `tests/keyboard-scroll.spec.ts`
 
-Tests: 13. Covers: help menu keeps keyboard focus through a late terminal reveal.
+Tests: 19. Covers: help menu keeps keyboard focus through a late terminal reveal.
 
-not yet ported
+partly
+
+- crates/gui/farhelm-gui/src/focus_tests.rs `focus_control_moves_focus_unless_the_user_moved_on_or_a_layer_is_open`,
+  `a_chosen_terminal_that_arrives_after_the_user_moved_on_only_becomes_home` (help menu keeps keyboard focus through a
+  late terminal reveal)
+- crates/gui/farhelm-gui/src/hosts/settings/tests.rs `the_destination_saves_as_typed_and_a_refusal_stays_in_place` (host
+  settings keep usable focus after a refused destination save)
+- crates/gui/farhelm-gui/src/layers_tests.rs
+  `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`,
+  `an_approval_card_stays_usable_over_a_dialog` (SSH command arrival preserves an independent approval owner)
+- crates/gui/farhelm-gui/src/feedback/tests.rs `after_a_send_the_thanks_has_a_body_stop_of_its_own`,
+  crates/gui/farhelm-gui/src/components/tests/dialog.rs
+  `a_dialog_body_has_its_own_stop_whenever_it_holds_nothing_to_focus` (sent feedback is keyboard-scrollable without
+  changing the editing Tab order)
+- crates/gui/farhelm-gui/src/components/tests/scroll_box.rs
+  `an_approvals_complete_initial_prompt_is_keyboard_scrollable` (an approval's complete initial prompt is
+  keyboard-scrollable)
+- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `every_text_only_state_gives_the_body_a_stop_that_tab_reaches` (SSH
+  help remains keyboard-scrollable with loading, error, no hosts and no commands)
+- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `a_long_command_wraps_inside_the_dialog` (long SSH commands wrap
+  while Copy preserves their exact bytes; the bytes are pinned by
+  `the_menu_entry_shows_each_hosts_two_commands_and_copies_their_exact_bytes`)
+- crates/gui/farhelm-gui/src/hosts/remove/tests.rs `the_removal_questions_body_has_a_stop_that_tab_reaches` (the
+  remove-host explanation is keyboard-scrollable)
+- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `the_commands_arriving_leave_focus_usable` (SSH command arrival
+  keeps usable focus from body, dismiss and backdrop; from the body, focus goes to the closest remaining control, the
+  Sessions Copy, where the old app went to the footer Close, and a veil press keeps Close focused, where the old
+  backdrop click left nothing focused, both as SPEC.md, "Opening and closing", has it)
+- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `a_reply_to_a_closed_opening_leaves_a_reopened_one_alone` (SSH help
+  closed before its reply leaves a reopened region independent)
 
 ### `tests/tooltip.spec.ts`
 
