@@ -194,8 +194,8 @@ linux/settings-recipes--dark.png 401be0c062497a49ed245fce1d9d5f1730112eaf
 linux/settings-recipes--light.png a86f3a3876a7d3ecf8c9df6b3e8dd2cecbd9b008
 linux/settings-recipes-places--dark.png ac7a2438f67dbcc83c13f7f6553e399ebeb2ce1b
 linux/settings-recipes-places--light.png 9356fcf6158cd740b02d58faa59768e60a9ba653
-linux/settings-recipes-rows--dark.png 483bfce58eb6467257e67c061d2a4471a1fdbb7e
-linux/settings-recipes-rows--light.png 8eb9c3714aaa647e327e397c0d383fd72a7690be
+linux/settings-recipes-rows--dark.png 98aa3cab4bd99fab310929609f92a10f8d956d42
+linux/settings-recipes-rows--light.png 2afaaf18b5ef57cd276c70d095ae7cc27fafd72a
 linux/settings-sessions--dark.png 1c4b800673bdbf596a8472b688bacf857ee67383
 linux/settings-sessions--light.png 12e0e96c350886a36536c62b62318bc4a3d62991
 linux/settings-tensorlake--dark.png 2b3959b86a6b0d965c3d73e8e947345620c638cf

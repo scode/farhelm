@@ -616,6 +616,121 @@ fn the_re_reads_after_a_carried_on_create_end_after_half_a_minute(cx: &mut TestA
     assert_eq!(sent(&mut helm), [], "the schedule has ended");
 }
 
+/// The refusal's words promise that Settings shows the key once it exists, which is false when the generation failed
+/// after the helm's reply (the helm only logs that), and the re-reads are the only way the group would learn of a key.
+/// So once they end with no key, the group must say to press Create SSH key again rather than leave the promise
+/// standing. Specified: after a carried-on create, no try-again line is drawn while re-reads remain; once the last one
+/// (at 30 seconds) is sent, "No key has appeared since. Press Create SSH key to try again." shows, and still does when
+/// it answers with no key; pressing Create SSH key again takes it away.
+#[gpui::test]
+fn re_reads_that_find_no_key_say_to_try_again(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    let not_created = || Some(account_with_ssh_key(json!({ "state": "not_created" })));
+    for wait in [5, 10] {
+        advance(cx, Duration::from_secs(wait));
+        let read = one_account_read(&mut helm);
+        helm.reply(read.id, 200, not_created());
+        settle(cx);
+        assert!(
+            !drawn(cx, "tensorlake-ssh-key-try-again"),
+            "a re-read remains"
+        );
+    }
+    advance(cx, Duration::from_secs(15));
+    let last = one_account_read(&mut helm);
+    assert!(
+        drawn(cx, "tensorlake-ssh-key-try-again"),
+        "the re-reads are over once the last is sent"
+    );
+    helm.reply(last.id, 200, not_created());
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "tensorlake-ssh-key-try-again").as_deref(),
+        Some("No key has appeared since. Press Create SSH key to try again.")
+    );
+    press(cx, "tensorlake-ssh-key-create");
+    assert!(
+        !drawn(cx, "tensorlake-ssh-key-try-again"),
+        "a new press takes it away"
+    );
+}
+
+/// A second press starts a new attempt, so the first refusal's re-reads must not decide the try-again line for it:
+/// left running, their last read would put "No key has appeared since" under a busy button, or straight under the
+/// second refusal's promise that the key shows once it exists. Specified: after a carried-on create and its re-reads at
+/// 5 and 15 seconds finding no key, Create SSH key pressed again at 25 seconds and left unanswered sends nothing more
+/// by 35 seconds (the first schedule's last read, due at 30, is cancelled) and draws no try-again line; the second
+/// refusal and the read it sends, answered with no key, draw none either.
+#[gpui::test]
+fn a_second_press_cancels_the_first_refusals_re_reads(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    let not_created = || Some(account_with_ssh_key(json!({ "state": "not_created" })));
+    for wait in [5, 10] {
+        advance(cx, Duration::from_secs(wait));
+        let read = one_account_read(&mut helm);
+        helm.reply(read.id, 200, not_created());
+        settle(cx);
+    }
+    advance(cx, Duration::from_secs(10));
+    press(cx, "tensorlake-ssh-key-create");
+    let create = sent(&mut helm);
+    assert_eq!(create.len(), 1, "the second create: {create:?}");
+    advance(cx, Duration::from_secs(10));
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the first schedule's last read is cancelled"
+    );
+    assert!(
+        !drawn(cx, "tensorlake-ssh-key-try-again"),
+        "not under the busy button"
+    );
+    helm.reply(create[0].id, 504, Some(json!(CARRIES_ON)));
+    settle(cx);
+    let read = one_account_read(&mut helm);
+    helm.reply(read.id, 200, not_created());
+    settle(cx);
+    assert!(
+        !drawn(cx, "tensorlake-ssh-key-try-again"),
+        "not under the second refusal's promise"
+    );
+}
+
+/// A last re-read that fails learned nothing about the key, so it must not claim that none has appeared; the API key
+/// forms already show its failure with Retry loading. Specified: after a carried-on create and its re-reads at 5 and 15
+/// seconds finding no key, the last one at 30 seconds answered with a refusal shows the key form's Retry loading and
+/// draws no try-again line.
+#[gpui::test]
+fn a_failed_last_re_read_says_nothing_about_the_key(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    refuse_create(&mut helm, cx);
+    for wait in [5, 10] {
+        advance(cx, Duration::from_secs(wait));
+        let read = one_account_read(&mut helm);
+        helm.reply(
+            read.id,
+            200,
+            Some(account_with_ssh_key(json!({ "state": "not_created" }))),
+        );
+        settle(cx);
+    }
+    advance(cx, Duration::from_secs(15));
+    let last = one_account_read(&mut helm);
+    helm.reply(
+        last.id,
+        500,
+        Some(json!("the helm could not read its settings")),
+    );
+    settle(cx);
+    assert!(
+        drawn(cx, "tensorlake-key-retry"),
+        "premise: the failed read reached the account"
+    );
+    assert!(!drawn(cx, "tensorlake-ssh-key-try-again"));
+}
+
 /// The re-reads belong to the open Settings: once it closes, a read would reach nobody and only ask the helm again.
 /// Specified: after a carried-on create, closing Settings with Escape and letting two minutes pass sends nothing. This
 /// passes with no re-reads at all; it guards against re-reads that outlive Settings, and
