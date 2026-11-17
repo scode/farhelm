@@ -103,7 +103,10 @@ and files if replacement fails or the outcome is uncertain.
 Containers appear in **Hosts**, the session list and the usual update and problem notices. The permanent icons in the
 [navigation rail](/docs/using/manage-hosts/), the column of icons at the sidebar's left edge, are reserved for ordinary
 hosts. A container session you start yourself always gets a fresh **New container** launch; an agent inside a container
-can start more sessions in that same container.
+can start more sessions in that same container. **Clone** of a container session opens the launcher on **New container**
+with the source's recipe and container host, for a new container with **Folder** at its home directory, or a fresh
+managed checkout of the same repository inside when the source was in one, and **+** (New session) opened while a
+container session is open preselects them the same way. A recipe deleted since stays chosen and shows as unavailable.
 
 An agent in a container **can ask Farhelm to act only within its own container**, as
 [Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers) explains.
