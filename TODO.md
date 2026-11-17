@@ -44,6 +44,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
+  about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
+  session. Frames are back to the old app's rate (3.0 changed frames a second, after the cursor blink was aligned with
+  the running pulse); the whole gap is cost per frame, about 4.4 ms against 1.8 ms, spread over the session list (+0.86
+  ms), the session header and tabs (+0.76 ms), whole-tree layout (+0.74 ms) and the shared buttons. Most of it is GPUI's
+  own per-element work. Levers looked at and not taken: lighter Button and IconButton (about 1% of a frame), repainting
+  only the pulsing dot (a vendored GPUI patch; helps only pulse frames), and caching the session list and header behind
+  the cache wrapper, the one large lever, which drops a cached view's screen-reader information unless GPUI is patched
+  to replay it. Look into caching with that patch, or another way to cut per-element cost.
+
+- **Rebuild the demo video's capture flow on the GPUI app.** Deferred past the GPUI migration on 2026-11-16. The README
+  hero and docs-screenshot capture run on the GPUI screenshot tooling; the demo video (`scripts/readme-video.sh`,
+  `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
+  real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
+
 - **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
   repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
