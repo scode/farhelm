@@ -24,7 +24,7 @@ use gpui::{Role, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::environment::needs_confirmation;
-use super::host_rail::tests::hover_help;
+use super::host_rail::tests::{hover_help, texts_within};
 use super::lifecycle_tests::node_bounds;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
 use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
@@ -440,6 +440,46 @@ fn up_opens_an_environment_menu_scrolled_to_its_delete(cx: &mut TestAppContext) 
         menu.top() <= delete.top() && delete.bottom() <= menu.bottom(),
         "Delete is in view: {delete:?} in {menu:?}"
     );
+}
+
+/// The old menu's Clone said where the new session goes, and a Clone of an environment session opens the launcher on
+/// a fresh environment, not the source's. Specified: Clone's description reads "New session in a new environment, keep
+/// this one" in the menu of a session on a sandbox, and again once its host is a container, and "New session, keep this
+/// one" in the menu of a session on the local host.
+#[gpui::test]
+fn clone_describes_a_new_environment_for_an_environment_session(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let rows = [(session("a"), 0), (session("b").host(1), 0)];
+    let (mut fake, cx) = open(cx, &rows, false, &host);
+    pending(&mut fake);
+    let describes = |button: &'static str, cx: &mut VisualTestContext| {
+        test_support::click(cx, button);
+        let texts = texts_within(&frame(cx), "session-menu-clone");
+        test_support::keys(cx, "escape");
+        texts
+            .into_iter()
+            .map(|text| text.text.to_string())
+            .collect::<Vec<_>>()
+    };
+    let environment = "New session in a new environment, keep this one".to_owned();
+    assert_eq!(
+        label_of(cx, "session-row-a-host").as_deref(),
+        Some("Sandbox"),
+        "the premise"
+    );
+    assert!(describes("session-menu-a", cx).contains(&environment));
+    push_host(
+        &mut fake,
+        &environment_host(Provider::Container, connected()),
+        cx,
+    );
+    assert_eq!(
+        label_of(cx, "session-row-a-host").as_deref(),
+        Some("Container"),
+        "the premise"
+    );
+    assert!(describes("session-menu-a", cx).contains(&environment));
+    assert!(describes("session-menu-b", cx).contains(&"New session, keep this one".to_owned()));
 }
 
 // ---- Suspend's activity read ----------------------------------------------------------------------------------------
