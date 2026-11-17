@@ -23,7 +23,8 @@
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
 //!   with). A press of a complete New, Clone, Replace with or Restart with launches it ([`super::launch`]): the
-//!   dialog closes, and the same launcher comes back with the helm's words in that alert if the helm refuses. Replace
+//!   dialog closes, and the same launcher comes back with the helm's words in that alert if the helm refuses. A new
+//!   sandbox asks "Create a sandbox for this session?" before it sends anything ([`sandbox_question`]). Replace
 //!   with also says beside it what replacing stops while the source has anything alive, and Restart with that it stops
 //!   a working agent first, its action then reading "Stop and restart"; Restart with marks each edited setting
 //!   ([`changed`]). Its accessible name keeps the
@@ -113,6 +114,7 @@ mod latest;
 mod model_field;
 mod placement;
 mod recents;
+mod sandbox_question;
 mod save;
 mod search;
 mod shown_text;
@@ -245,6 +247,8 @@ pub(super) fn show(
         launcher.layer = Some(layer);
         // A launch the helm refused for YOLO comes back with its question, asked now that it can open in place.
         launcher.ask_pending_yolo(mark, window, cx);
+        // So does a launch that waits for "Create a sandbox for this session?", a quick launch's out of sight included.
+        launcher.ask_pending_sandbox(mark, window, cx);
         launcher.quick_launch_unseen = false;
     });
     cx.set_global(Shown {
@@ -608,6 +612,12 @@ pub(crate) struct Launcher {
     /// The YOLO question for a launch the helm refused because its host asks first, from the refusal until it is
     /// answered or the draft changes (`yolo_question`).
     yolo: Option<yolo_question::YoloState>,
+    /// "Create a sandbox for this session?", from the press that needs it until it is answered or the draft changes
+    /// (`sandbox_question`).
+    sandbox: Option<sandbox_question::SandboxState>,
+    /// Whether this launcher has sent a create on the account's "Create Tensorlake sandboxes without asking", after
+    /// which it asks instead (`sandbox_question`).
+    sandbox_skip_spent: bool,
     /// Set while this launcher is a quick launch's that has never been drawn ([`prepare_unseen`]), and cleared for good
     /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
     /// launch": only "When New was never shown"; `launch::settle`).
@@ -873,6 +883,8 @@ impl Launcher {
             cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
             yolo: None,
+            sandbox: None,
+            sandbox_skip_spent: false,
             quick_launch_unseen: false,
             escalation: None,
             escalation_generation: 0,
@@ -921,6 +933,8 @@ impl Launcher {
         self.refused = None;
         // A YOLO question asks about the launch that was sent; once the draft changes, it would answer for another.
         self.yolo = None;
+        // So does the sandbox question, about the draft at its press.
+        self.sandbox = None;
         // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
         self.note = None;
         self.save_refusal = None;
@@ -1237,7 +1251,7 @@ impl Launcher {
         if self.yolo_in_flight(cx) {
             return;
         }
-        self.submit(false, Mark::take(cx), window, cx);
+        self.submit(false, false, Mark::take(cx), window, cx);
     }
 
     /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
@@ -1302,21 +1316,31 @@ impl Launcher {
     }
 
     /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
-    /// first (the YOLO question's answers, `yolo_question`); a plain press never consents. `mark` is the answer the
-    /// reply's moved-on check counts from ([`launch::start`]).
+    /// first (the YOLO question's answers, `yolo_question`), and `confirm_sandbox` whether they answered "Create a
+    /// sandbox for this session?" with Create and launch (`sandbox_question`), each for this one submit; a plain press
+    /// never consents. `mark` is the answer the reply's moved-on check counts from ([`launch::start`]).
     fn submit(
         &mut self,
         confirm_yolo: bool,
+        confirm_sandbox: bool,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.refused = None;
         self.yolo = None;
+        self.sandbox = None;
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
         let hosts = self.hosts(cx);
-        let request = self.request(confirm_yolo, cx);
+        let mut request = self.request(confirm_yolo, cx);
+        // A billed environment asks first ("Create a sandbox for this session?"), and its answer submits again.
+        let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
+        if let Some(Request::Environment(body)) = request.as_mut()
+            && self.hold_for_creation_question(body, &recipes, confirm_sandbox, &mark, window, cx)
+        {
+            return;
+        }
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
         // footer's phase, or the new environment's label (the old pill named its target the same way). A request exists
         // only for a host the refusal check found among `hosts`.
@@ -2416,27 +2440,32 @@ impl Render for Launcher {
         };
         let alert = alert.map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
         // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
-        // first (Replace with's, or Restart with's while the agent works), then the YOLO question while it is up, else
-        // the refusal. The warning comes first so that a tall question,
-        // which scrolls in the notices region, cannot push it out of sight: the question's answers launch with the
-        // warning's guard, so the warning must be on screen at that click. This launcher's banner (a quick launch's
-        // needs-more-choices or number-key banner) comes right after the warning, as its own element: it answers what
-        // the user did last, and the question or alert below it still shows. A refusal note is drawn above the search
-        // box instead (`view::search`).
+        // first (Replace with's, or Restart with's while the agent works), then the YOLO question or the sandbox
+        // question while one is up (a submit retires both before it can raise either), else the refusal. The warning
+        // comes first so that a tall question, which scrolls in the notices region, cannot push it out of sight: the
+        // question's answers launch with the warning's guard, so the warning must be on screen at that click. This
+        // launcher's banner (a quick launch's needs-more-choices or number-key banner) comes right after the warning,
+        // as its own element: it answers what the user did last, and the question or alert below it still shows. A
+        // refusal note is drawn above the search box instead (`view::search`).
         let warning = self.source_warning_line(palette, cx);
         let note = self.note_element(palette);
         let save_refusal = self.save_refusal_line(palette);
-        let question = self.yolo_inline().cloned();
+        let question = self
+            .yolo_inline()
+            .cloned()
+            .map(IntoElement::into_any_element)
+            .or_else(|| {
+                self.sandbox_inline()
+                    .cloned()
+                    .map(IntoElement::into_any_element)
+            });
         let notices = (warning.is_some()
             || note.is_some()
             || save_refusal.is_some()
             || question.is_some()
             || alert.is_some())
         .then(|| {
-            let last = match question {
-                Some(question) => Some(question.into_any_element()),
-                None => alert,
-            };
+            let last = question.or(alert);
             div()
                 .flex()
                 .flex_col()

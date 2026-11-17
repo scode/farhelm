@@ -545,17 +545,20 @@ Its file: launcher.
 Template cases: "template placement keeps Host editable after leaving an environment" and "a recipe template quick
 launch asks before one recipe request". The spec's other cases are the launcher's.
 
-partly: "template placement keeps Host editable after leaving an environment" is ported whole (a legacy recipe template
+ported: "template placement keeps Host editable after leaving an environment" is ported whole (a legacy recipe template
 opening on New sandbox, Existing host leaving an empty Host to choose, the chosen segment changing nothing, the save
 storing the host alone, and a Host added to another template starting empty), with the editor's other placement rules
-beside it. The quick launch's question waits for the launcher's New sandbox ("A sandbox template's quick launch is
-refused until New sandbox is ported", below).
+beside it. "A recipe template quick launch asks before one recipe request" is ported too: a number key on a sandbox
+template brings the launcher back with "Create a sandbox for this session?" rather than creating, and its "Create and
+launch" sends one confirmed create through the environment route alone, whose refusal comes back in the launcher.
 
 - `templates::editor_tests::leaving_an_environment_keeps_the_host_editable`
 - `templates::editor_tests::entering_an_environment_chooses_its_first_recipe_and_place` (the old authoring mode's
   starting recipe and place, an unusable host and an unbuilt recipe choosable, the target saved without a host)
 - `templates::editor_tests::retained_choices_and_an_unusable_only_host_stay_in_reach` (a recipe and host no longer
   listed kept as retained, and New container offered when its only host is unusable)
+- `templates::dispatch_tests::a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating` (the quick launch's
+  question)
 
 ### `tests/restart-with.spec.ts`
 
@@ -747,13 +750,6 @@ orchestrator.
   control just into view, so here the name field sits at the body's bottom edge with the checklist below the fold.
   Showing more needs the coordinator to reveal an area around a control, which it does not offer. Tested by
   `templates::save_tests::opening_the_panel_brings_its_name_field_into_view`.
-- **A sandbox template's quick launch is refused until New sandbox is ported.** The old app asked "Create a sandbox for
-  this session?" before a sandbox template's launch went out (`tensorlake-sandbox-sessions.spec.ts`, "a recipe template
-  quick launch asks before one recipe request"). The GPUI launcher does not ask yet, so a template that places sessions
-  on the Tensorlake account (a legacy recipe-only one included) applies, and its launch goes out unconfirmed and the
-  helm refuses it, unless "Create Tensorlake sandboxes without asking" is on. The question comes with the launcher's New
-  sandbox. Decided 2026-11-16 by the GPUI migration's coordinator: accept the interim refusal, with no stopgap in
-  templates.
 - **A refused deletion of a renamed template's old name.** As in the old app, the status line then shows only the helm's
   words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
   moved, and the old one is still there. Tested by

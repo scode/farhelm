@@ -199,7 +199,7 @@ pub(crate) fn answer_except(
 
 /// [`answer_except`], with the Tensorlake account read answered with `account`; with `None` it gets no body, so the
 /// launcher holds the account as unreadable and New sandbox stays hidden, as every container test here expects.
-pub(super) fn answer_with(
+pub(crate) fn answer_with(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
     account: Option<&Settings>,
