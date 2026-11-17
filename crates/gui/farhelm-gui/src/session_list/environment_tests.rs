@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use super::environment::needs_confirmation;
 use super::host_rail::tests::hover_help;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
-use super::tests::{Fixture, open_main, painted, session};
+use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::host_text::HostSentence;
 use crate::local_time::Zone;
@@ -485,6 +485,45 @@ fn a_suspend_answered_after_the_phase_changed_still_suspends(cx: &mut TestAppCon
     one(&mut fake, Method::Post, "/api/hosts/2/suspend");
 }
 
+/// SPEC.md, "Creation": "Suspend and Resume are not changes to the host registry … Launches on other hosts and host
+/// changes elsewhere proceed while one is pending" (the old `tensorlake-sandbox-sessions.spec.ts`, "a held sandbox
+/// Suspend and a launch on another host proceed side by side"). A provider can take a while to freeze a sandbox, and a
+/// Suspend counted as a launch-excluding change would grey New out for all of it. The launcher's Launch refuses on
+/// the same host-change check New does (`hosts::host_change_in_flight`); pressing it here would need the launcher's own
+/// reads answered, which the fake answers only after the Suspend in front of them. Specified: with a's Suspend sent,
+/// unanswered and held in the operation store as a Suspend, New is available, no host change counts as in flight, and
+/// the heading's New opens the launcher.
+#[gpui::test]
+fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
+    pending(&mut fake);
+    choose(cx, "session-menu-a", "session-menu-suspend");
+    let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
+    fake.reply(read, 200, Some(listing(&[idle("a")], false)));
+    test_support::settle(cx);
+    one(&mut fake, Method::Post, "/api/hosts/2/suspend");
+    let suspending = cx.update(|_, cx| {
+        crate::session::current_operations(cx).is_some_and(|operations| {
+            operations
+                .read(cx)
+                .any_in_flight(|work| matches!(work, crate::operations::Work::Suspend))
+        })
+    });
+    assert!(suspending, "the premise: the Suspend is in flight");
+
+    assert!(
+        cx.update(|_, cx| crate::launcher::entry::new_available(cx)),
+        "a pending Suspend holds no launch back"
+    );
+    assert!(
+        !cx.update(|_, cx| crate::hosts::host_change_in_flight(cx)),
+        "nothing Launch refuses on is in flight"
+    );
+    test_support::click(cx, super::NEW_ID);
+    assert!(launcher_drawn(cx), "New opened the launcher");
+}
+
 // ---- Stop and suspend ----------------------------------------------------------------------------------------------
 
 /// SPEC.md: "The row menu always offers Stop and suspend, so it remains reachable when ordinary confirmations are
@@ -494,7 +533,8 @@ fn a_suspend_answered_after_the_phase_changed_still_suspends(cx: &mut TestAppCon
 /// which shows a running, and asks "Stop and suspend sandbox?" with the line that names "Every other process freezes";
 /// a push meanwhile giving a a tab and an ended agent changes nothing; the answer sends exactly
 /// `POST /api/sessions/a/stop-and-suspend` with `{refuse_if_tabs_open: true, refuse_if_agent_running: false}` and no
-/// separate Suspend; the helm's 409 shows on a's row as "Stop: <its words>".
+/// separate Suspend; the helm's 409 shows on a's row as "Stop: <its words>", and the same line below the open
+/// session's header.
 #[gpui::test]
 fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
@@ -535,6 +575,11 @@ fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut Te
     assert_eq!(
         label_of(cx, "session-outcome-a").as_deref(),
         Some("Stop: the agent's tab is still open")
+    );
+    assert_eq!(
+        label_of(cx, "session-header-outcome-a").as_deref(),
+        Some("Stop: the agent's tab is still open"),
+        "the open session's header shows the same refusal"
     );
 }
 

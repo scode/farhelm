@@ -4,7 +4,7 @@
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::json;
 
 use super::{Buttons, wiggle_angle};
@@ -202,4 +202,42 @@ fn reduced_motion_or_a_hidden_button_plays_nothing(cx: &mut TestAppContext) {
         "the premise: the Trash button is drawn again"
     );
     assert_eq!(turn(cx), None, "and the cue it missed does not play late");
+}
+
+/// Why this matters: marking a session swaps the list's heading, the Trash button included, for the marked bar, so a
+/// row's own Delete can archive a checkout while no Trash is drawn; the old app then played nothing, and checked that the
+/// same cue does play once Trash is back (`bulk-session-actions.spec.ts`, "archive cues require a visible Trash
+/// destination while marks remain"). A cue for a hidden button shows nothing and would hold the ticker meanwhile.
+/// Specified: with a marked by the platform's toggle click, the Trash button is not drawn and b's archived Delete from
+/// its own menu starts no wiggle; once Clear takes the marks away and the button is drawn again, still upright, b's next
+/// archived Delete wiggles it.
+#[gpui::test]
+fn an_archive_while_sessions_are_marked_plays_nothing(cx: &mut TestAppContext) {
+    let (mut fake, cx) = opened(cx);
+    // SPEC.md's toggle gesture on this platform: Cmd+click on macOS, Ctrl+click elsewhere.
+    let toggle = cx.update(|_, cx| Modifiers::secondary_key(cx));
+    let row = test_support::center(cx, "session-row-a");
+    cx.simulate_click(row, toggle);
+    test_support::settle(cx);
+    assert!(
+        cx.debug_bounds(crate::trash::BUTTON_ID).is_none(),
+        "the premise: the marked bar stands in the heading's place"
+    );
+    let id = delete_b(&mut fake, cx);
+    fake.reply(id, 200, Some(json!({ "archived": true })));
+    test_support::settle(cx);
+    assert_eq!(turn(cx), None, "nothing wiggles toward a hidden Trash");
+    assert!(!wiggling(cx), "and no ticker handle is held");
+
+    test_support::click(cx, "session-marked-clear");
+    test_support::settle(cx);
+    assert!(
+        cx.debug_bounds(crate::trash::BUTTON_ID).is_some(),
+        "the premise: Clear brought the Trash button back"
+    );
+    assert_eq!(turn(cx), None, "the missed cue does not play late");
+    let id = delete_b(&mut fake, cx);
+    fake.reply(id, 200, Some(json!({ "archived": true })));
+    test_support::settle(cx);
+    assert_eq!(turn(cx), Some(0.), "the same answer wiggles a drawn Trash");
 }
