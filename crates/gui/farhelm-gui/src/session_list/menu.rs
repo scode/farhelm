@@ -102,8 +102,10 @@
 //! and ask beside the row's button when it says so, as any of the row's questions do. Both are unavailable while the
 //! environment changes or something is pending for it, saying so in the row. While the environment is frozen
 //! (suspended, stopped, changing or being deleted), Replace with…, Replace and Stop are unavailable, as in the old menu,
-//! and Stop's description says what plain Stop leaves running in the environment. While it is being deleted, every
-//! command is unavailable ([`refused`]), and Clone's and Delete's description and help say why
+//! and Stop's description says what plain Stop leaves running in the environment. Clone's description is the old
+//! item's "New session in a new environment, keep this one", for a sandbox and a container alike, since the launcher
+//! opens a Clone of an environment session on a fresh environment. While it is being deleted, every command is
+//! unavailable ([`refused`]), and Clone's and Delete's description and help say why
 //! ([`Environment::deleting`]), as the old menu's descriptions did. Otherwise Delete's description and help name the
 //! environment Delete a click asks for, the session's alone or the whole environment's
 //! ([`super::environment_delete::help`]). The header's summary ends with " · " and the environment's name ("dev
@@ -872,7 +874,11 @@ impl RowMenu {
             Icon::Clone,
             "Clone",
             CLONE_HELP,
-            "New session, keep this one",
+            if environment.is_some() {
+                "New session in a new environment, keep this one"
+            } else {
+                "New session, keep this one"
+            },
             deleting.or(launcher_wait),
             entry::open_clone,
         );
