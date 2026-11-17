@@ -1,6 +1,7 @@
 //! Tests of the host progress card ([`super`]): which hosts get one, what it shows and follows as the helm pushes, the
-//! elapsed time it shares with the Hosts row, its hold on the ticker, its fit in a short window (both as drawn and as
-//! the pure share it rests on), and its showing as the hover of the Hosts row's running status, beside the sidebar.
+//! elapsed time it shares with the Hosts row, its hold on the ticker, its fit in a short window (both as drawn, with
+//! the current step kept whole as the run moves it, and as the pure share it rests on), and its showing as the hover of
+//! the Hosts row's running status, beside the sidebar.
 //!
 //! The card is drawn alone in a test root view beside a Hosts panel that is never drawn: the panel is there because its
 //! store subscription is what records a run's first sight, whether or not Hosts shows, as in the app. The card is read
@@ -473,6 +474,52 @@ fn a_short_window_previews_only_diagnostics_that_cannot_fit(cx: &mut TestAppCont
 #[gpui::test]
 fn a_run_without_steps_yet_previews_its_diagnostics_too(cx: &mut TestAppContext) {
     previews_only_what_cannot_fit(0, cx);
+}
+
+/// Host 2's running setup of 24 steps, too many for a card in a window of the app's least size: step `current` running,
+/// those before it completed and those after it pending.
+fn long_run(current: usize) -> ProvisioningView {
+    let mut view = setup(RunStatus::Running);
+    view.steps = (0..24)
+        .map(|n| {
+            let status = match n.cmp(&current) {
+                std::cmp::Ordering::Less => StepStatus::Completed,
+                std::cmp::Ordering::Equal => StepStatus::Running,
+                std::cmp::Ordering::Greater => StepStatus::Pending,
+            };
+            step(&format!("Step {n}"), status)
+        })
+        .collect();
+    view
+}
+
+/// Why this matters: SPEC.md, "Topology": "In a short window the step list shrinks, keeping the current step in view
+/// as it changes", so the card must keep each new current step in view as the helm pushes the run, not only the one it
+/// first drew. The old card followed its marked step list again after every update (`tooltip.spec.ts`, "a card
+/// follows only its marked step list after every clone", at reference commit `24bc0580`, which moved the current step
+/// from late in the list to early; its unmarked list, left where it was, was the old tooltip's own markup, with nothing
+/// here to port). Specified: in a window of the app's least size, a setup of 24 steps whose list does not fit draws its
+/// running step 18 whole; pushed with step 4 running instead, it draws step 4 whole; each time some step is not drawn
+/// whole, so the list did shrink.
+#[gpui::test]
+fn the_current_step_stays_whole_as_the_run_moves_it(cx: &mut TestAppContext) {
+    let height = f32::from(crate::bootstrap::MIN_WINDOW_SIZE.height);
+    let (mut fake, harness, cx) = open(cx, &[build_box()], &[long_run(18)]);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    assert!(show(&harness, 2, cx), "the premise: the card shows");
+    for current in [18, 4] {
+        push_run(&mut fake, &long_run(current), cx);
+        let nodes = fitted(cx);
+        let drawn_whole = |n: usize| whole(&nodes, &format!("host-card-step-2-{n}"), height);
+        assert!(
+            (0..24).any(|n| !drawn_whole(n)),
+            "step {current}: the premise: the list shrank"
+        );
+        assert!(
+            drawn_whole(current),
+            "step {current}, the current one, is drawn whole"
+        );
+    }
 }
 
 // ---- The fit's arithmetic --------------------------------------------------------------------------------------------

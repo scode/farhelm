@@ -1,19 +1,27 @@
 //! Tests of a host's actions menu as the Hosts panel opens it: what it offers on a remote host and on the helm's own
 //! machine, what its greyed Update does (nothing) and what that Update does in the installed desktop app (asks the
 //! app's updater to check), the header of a host that reports no build, Settings and Remove
-//! waiting for the host's own work, which hosts offer Remove, and where focus goes.
+//! waiting for the host's own work, which hosts offer Remove, where focus goes, and an open menu following its row
+//! through what the helm pushes until its host goes.
 //!
-//! The panel runs over the helm client's fake with the reference screens' three hosts (the local host as 1,
-//! `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of the
-//! shared harness's step helpers, so the focus and layer invariants are checked after each.
+//! The panel runs over the helm client's fake, most tests with the reference screens' three hosts (the local host as
+//! 1, `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of
+//! the shared harness's step helpers, so the focus and layer invariants are checked after each.
 //!
 //! One test runs the real main view instead, since it needs the host rail's Settings gear beside an open menu.
 
+use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
+use farhelm_proto::provisioning::{
+    PlanStepPath, ProvisioningOperation, ProvisioningView, RunStatus, StepStatus,
+};
+use farhelm_proto::ui_channel::{Availability, Collection, CollectionChanges, HostView};
 use gpui::{DriverNode, Role, TestAppContext, VisualTestContext, px, size};
 
+use crate::hosts::progress::tests::step;
 use crate::hosts::tests::{
-    connected, connecting, host, hosts, open_panel, open_panel_in_column, reference_hosts,
+    aliased, connected, connected_with, connecting, host, hosts, local_down, open_panel,
+    open_panel_in_column, progress, reference_hosts, run, start_work,
 };
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
@@ -402,4 +410,324 @@ fn the_gear_closes_an_open_host_menu_and_opens_settings_at_its_first_switch(
         "Escape closed Settings and nothing is left open"
     );
     assert_eq!(focused_id(cx).as_deref(), Some("app-settings-toggle"));
+}
+
+// ---- The menu through changes underneath ---------------------------------------------------------------------------
+
+/// The remote hosts of [`an_open_menu_follows_its_row_and_closes_when_its_host_goes`], by id: aliased `a`, `b` and
+/// `c`, so no two share a destination.
+const A: i64 = 2;
+const B: i64 = 3;
+const C: i64 = 4;
+
+/// A build long enough that its details line wraps over several lines of the panel's column; every other remote host
+/// reports `0.16.0`.
+const LONG_BUILD: &str = "balanced-detail-sentinel visible detail words visible detail words visible \
+                          detail words visible detail words visible detail words";
+
+/// A step message, and a local dial failure, that wrap likewise.
+const LONG_MESSAGE: &str = "/opt/fixture/retained-payload-directory/retained-payload-directory/retained-payload-\
+                            directory/retained-payload-directory/farhelm already has the requested payload";
+
+/// Host `id`'s toggle, as the step helpers name it.
+fn toggle(id: i64) -> &'static str {
+    [
+        "host-menu-toggle-2",
+        "host-menu-toggle-3",
+        "host-menu-toggle-4",
+    ][(id - A) as usize]
+}
+
+/// What the registry holds: the remote hosts' order, which of them reports [`LONG_BUILD`], and the local host's dial
+/// failure while its supervisor is down; with the save [`Push::Save`] sent, for [`Push::Refuse`] to answer.
+struct Registry {
+    order: Vec<i64>,
+    long: i64,
+    local: Option<&'static str>,
+    saved: Option<u64>,
+}
+
+impl Registry {
+    /// The hosts as the helm pushes them: the local host first, then the remote hosts in order.
+    fn listed(&self) -> Vec<HostView> {
+        let local = match self.local {
+            Some(failure) => host(1, "local", local_down(failure)),
+            None => host(1, "local", connected()),
+        };
+        let remote = self.order.iter().map(|&id| {
+            let build = if id == self.long {
+                LONG_BUILD
+            } else {
+                "0.16.0"
+            };
+            let alias = ["a", "b", "c"][(id - A) as usize];
+            let view = host(id, "ssh", connected_with(build, "id-1", 0));
+            aliased(view, alias, &format!("dev@{alias}.invalid"))
+        });
+        std::iter::once(local).chain(remote).collect()
+    }
+}
+
+/// What one case changes, before it opens the menu or while the menu is open.
+enum Push {
+    /// The registry with the remote hosts in this order.
+    Order([i64; 3]),
+    /// The registry with this host's build the long one.
+    LongBuild(i64),
+    /// The registry with the local host's supervisor down, its dial failure reading this.
+    LocalFailure(&'static str),
+    /// A registry read that failed: the rows stay, under a line that says so.
+    ReadFails,
+    /// This host's retained Update run.
+    Run(ProvisioningView),
+    /// A save under this host's key, as the settings dialog's, left in flight, as when the dialog was closed first.
+    Save(i64),
+    /// The helm's refusal of that save, which shows under `b`'s row.
+    Refuse,
+    /// The registry without this host.
+    Gone(i64),
+}
+
+/// An Update of host `id`, its upload step `upload` with `message`, its install step `install`, and the run done once
+/// the install is.
+fn update(
+    id: i64,
+    upload: StepStatus,
+    install: StepStatus,
+    message: Option<&str>,
+) -> ProvisioningView {
+    let status = match install {
+        StepStatus::Completed => RunStatus::Completed,
+        _ => RunStatus::Running,
+    };
+    let mut view = run(id, ProvisioningOperation::Update, status);
+    let mut uploaded = step("Upload the farhelm binary", upload);
+    uploaded.message = message.map(str::to_owned);
+    view.steps = vec![
+        step("Create directories", StepStatus::Completed),
+        uploaded,
+        step("Install the farhelm binary", install),
+    ];
+    view
+}
+
+/// Make `push` happen, settle, and check that the panel draws it: the rows in the registry's order, and the line the
+/// change adds or grows, if any.
+fn apply(push: Push, now: &mut Registry, helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    let (mut registry, mut failed, mut remove) = (true, false, Vec::new());
+    // The line the change draws, by id, and words it must hold.
+    let mut shows: Option<(String, String)> = None;
+    match push {
+        Push::Order(order) => now.order = order.to_vec(),
+        Push::LongBuild(id) => {
+            (now.long, shows) = (id, Some((format!("host-detail-{id}-1"), LONG_BUILD.into())))
+        }
+        Push::LocalFailure(failure) => {
+            (now.local, shows) = (
+                Some(failure),
+                Some(("host-detail-1-0".into(), failure.into())),
+            )
+        }
+        Push::ReadFails => {
+            (failed, shows) = (true, Some(("hosts-load-error".into(), "locked".into())))
+        }
+        Push::Gone(id) => {
+            now.order.retain(|&listed| listed != id);
+            remove.push(HostView::key(id));
+        }
+        Push::Run(view) => {
+            let (id, step) = (view.host_id, &view.steps[1]);
+            // Without a message, the step's own name: the result words of the statuses these runs give it there,
+            // Running and Completed, are their names (`progress.rs`, `look`).
+            let drawn = match &step.message {
+                Some(message) => (format!("host-step-{id}-1-message"), message.clone()),
+                None => (format!("host-step-{id}-1"), format!("{:?}", step.status)),
+            };
+            helm.push(CollectionChanges {
+                collection: Collection::HostProgress,
+                // Both hosts that ever get a run here, as the helm orders every run it holds.
+                meta: test_support::meta(&["3", "4"]),
+                upsert: progress(&[view]).entries,
+                remove: Vec::new(),
+            });
+            (registry, shows) = (false, Some(drawn));
+        }
+        Push::Save(id) => {
+            now.saved = Some(start_work(
+                helm,
+                cx,
+                Work::Save,
+                OpKey::host(&HostView::key(id)),
+            ));
+            registry = false;
+        }
+        Push::Refuse => {
+            let refusal = serde_json::json!("another host already has this alias");
+            helm.reply(
+                now.saved.take().expect("the premise: a save is out"),
+                409,
+                Some(refusal),
+            );
+            (registry, shows) = (
+                false,
+                Some((format!("host-error-{B}"), "has this alias".into())),
+            );
+        }
+    }
+    if registry {
+        let mut state = hosts(&now.listed());
+        if failed {
+            state.meta.availability = Availability::Unavailable {
+                error: "locked".into(),
+            };
+            state.entries.clear();
+        }
+        let (meta, upsert) = (state.meta, state.entries);
+        helm.push(CollectionChanges {
+            collection: Collection::Hosts,
+            meta,
+            upsert,
+            remove,
+        });
+    }
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    let rows = nodes.iter().filter_map(|node| {
+        node.element_id
+            .as_deref()?
+            .strip_prefix("host-row-")?
+            .parse()
+            .ok()
+    });
+    let drawn: Vec<i64> = std::iter::once(1)
+        .chain(now.order.iter().copied())
+        .collect();
+    assert_eq!(
+        rows.collect::<Vec<i64>>(),
+        drawn,
+        "the premise: the registry's rows"
+    );
+    if let Some((id, words)) = shows {
+        assert!(
+            label(&nodes, &id).contains(&words),
+            "the premise: {id} draws the change"
+        );
+    }
+}
+
+/// Why this matters: SPEC.md, "Things changing underneath": "a focused row, or its open menu, moves with its session",
+/// and nothing closes a menu it did not open; a host's menu likewise goes only when its host does. The old app closed
+/// an open host menu whenever its toggle moved (`popover-host-movement.spec.ts` and
+/// `popover-expanded-host-movement.spec.ts` at reference commit `24bc0580`, inverted by that rule); each of their host
+/// menu cases is one case here. Run under Linux's click rule, where the click that opens a menu focuses its toggle, so
+/// in the last case the menu's return target and what held focus before it opened go with the row together.
+/// Specified: in a tall window, with Details on and the remote hosts a, b and c after the local host (c with the long
+/// build), each case makes its premise, opens its host's menu with a click, and makes its change, which the panel
+/// draws; the menu stays open on Retry with the same commands and moves exactly as far as its toggle, down where the
+/// case says so and not at all otherwise. In the last case the registry stops listing the host, and its menu closes
+/// with focus on something still drawn.
+#[gpui::test]
+fn an_open_menu_follows_its_row_and_closes_when_its_host_goes(cx: &mut TestAppContext) {
+    use Push::*;
+    use StepStatus::{Completed, Pending, Running, Skipped};
+    use std::cmp::Ordering::{self, Equal, Greater};
+
+    let mut now = Registry {
+        order: vec![A, B, C],
+        long: C,
+        local: None,
+        saved: None,
+    };
+    let (mut helm, _, cx) = open_panel_in_column(cx, vec![hosts(&now.listed()), progress(&[])]);
+    cx.simulate_resize(size(px(1600.), px(1400.)));
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    click(cx, "host-details-toggle");
+
+    let running = |id| Run(update(id, Running, Pending, None));
+    let grown = |id| Run(update(id, Skipped, Running, Some(LONG_MESSAGE)));
+    let finished = || update(B, Skipped, Completed, Some("already current"));
+    // Only what the row does not draw changes: the run's id, a step's id, its paths and its explanation.
+    let mut renamed = finished();
+    renamed.run_id = Some("run-3-again".into());
+    renamed.steps[0].step = "create-directories-new-metadata".into();
+    renamed.steps[0].paths = vec![PlanStepPath {
+        full: "/opt/fixture/full".into(),
+        short: "~/full".into(),
+    }];
+    renamed.steps[0].explanation = Some("drawn on the progress card alone".into());
+    let (down, still) = (Some(Greater), Some(Equal));
+    // (the case, what makes its premise, whose menu, the change while it is open, and `None` where the menu closes).
+    // One case per line, so the table reads down its columns.
+    type Case = (&'static str, Vec<Push>, i64, Push, Option<Ordering>);
+    #[rustfmt::skip]
+    let cases: Vec<Case> = vec![
+        ("a reorder moves b down", vec![], B, Order([A, C, B]), down),
+        ("a reorder below a", vec![], A, Order([A, B, C]), still),
+        ("a permutation above c", vec![], C, Order([B, A, C]), still),
+        ("b's detail above a grows, c's below shrinks", vec![], A, LongBuild(B), down),
+        ("the details above c trade lengths", vec![], C, LongBuild(A), still),
+        ("the details below b trade lengths", vec![], B, LongBuild(C), still),
+        ("b's Update above a grows a step message", vec![running(B)], A, grown(B), down),
+        ("c's Update below a moves on a step", vec![running(C)], A, Run(update(C, Completed, Running, None)), still),
+        ("the local host's dial failure grows", vec![LocalFailure("refused")], A, LocalFailure(LONG_MESSAGE), down),
+        ("b's Update grows after a failed registry read", vec![ReadFails, running(B)], A, grown(B), down),
+        ("b's finished run changes only undrawn fields", vec![Run(finished())], A, Run(renamed), still),
+        ("a late refusal of b's save shows under b", vec![Save(B)], A, Refuse, down),
+        ("the registry stops listing c", vec![], C, Gone(C), None),
+    ];
+    let at = |nodes: &[DriverNode], id: &str| node(nodes, id).map(|node| node.bounds.top());
+    let offered = |nodes: &[DriverNode]| {
+        nodes
+            .iter()
+            .filter(|node| node.role == Some(Role::MenuItem))
+            .filter_map(|node| node.element_id.clone())
+            .collect::<Vec<_>>()
+    };
+    for (case, before, target, push, way) in cases {
+        for premise in before {
+            apply(premise, &mut now, &mut helm, cx);
+        }
+        click(cx, toggle(target));
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("host-menu-retry"),
+            "{case}: the premise"
+        );
+        let nodes = frame(cx);
+        let (button, menu, commands) = (
+            at(&nodes, toggle(target)),
+            at(&nodes, "host-menu"),
+            offered(&nodes),
+        );
+
+        apply(push, &mut now, &mut helm, cx);
+        let nodes = frame(cx);
+        let Some(way) = way else {
+            assert!(!any_open(cx), "{case}: the menu closed");
+            assert!(
+                cx.update(|window, cx| window.focused(cx).is_some()),
+                "{case}: focus stayed"
+            );
+            continue;
+        };
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("host-menu-retry"),
+            "{case}: still open"
+        );
+        assert_eq!(offered(&nodes), commands, "{case}: the same commands");
+        let moved = at(&nodes, toggle(target)).unwrap() - button.unwrap();
+        let followed = at(&nodes, "host-menu").unwrap() - menu.unwrap();
+        assert!(
+            (followed - moved).abs() < px(1.),
+            "{case}: {followed:?} for {moved:?}"
+        );
+        assert_eq!(
+            moved.round().partial_cmp(&px(0.)),
+            Some(way),
+            "{case}: {moved:?}"
+        );
+        // Closed for the next case, which may click this toggle again.
+        keys(cx, "escape");
+    }
 }
