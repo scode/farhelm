@@ -439,9 +439,18 @@ step can make; meanwhile the tests above and smoke step 76 (a scripted setup fai
 Details) cover the behaviour. Not yet ported:
 `attention opens the menu header of an expanded host spanning the viewport` (Details on a host whose open row is taller
 than the panel; the reveal scrolls the toggle itself into view, which is that case's rule, but no test drives such a
-row). The rest are in Settings and hosts. Waiting for the environment Delete's piece (milestone M3.4b), which brings
-their remedies: the old list's environment rows (a stopped environment, a failed environment delete, a failed resume,
-undelivered credentials, failed tunnels, and "Deleting" as work in progress).
+row). The rest are in Settings and hosts. The old list's environment rows had no case of their own in this spec (the old
+app's unit tests covered them), and are crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+`environment_phases_have_their_rows_and_routine_ones_none` (a stopped environment, a failed deletion and a failed resume
+as problems, "Deleting" as work in progress, routine suspensions with no row),
+`credentials_and_tunnels_join_a_rows_words` (undelivered credentials and failed tunnels added to a row's words, tunnels
+only while connected), `environment_rows_offer_details_and_go_when_the_environment_recovers` and
+`failed_tunnels_show_only_while_the_host_reads_connected`. Details on a "Resume failed" or "Stopped" row reaches no
+Resume in Hosts yet, since Hosts' Resume is not ported (the session's own card offers one). SPEC.md, "Sandbox sessions",
+asks the attention area for a failed deletion's reason and Retry; the old row offered only Details with that sentence
+already in SPEC.md, so the GPUI migration's orchestrator decided on 2026-11-16 that the old app is its reference
+reading: the row shows the failure and leads to Hosts, which shows the reason and Retry, and SPEC.md's wording is to be
+revised to say so.
 
 ### `tests/work-start-order.spec.ts`
 
