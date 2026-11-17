@@ -40,10 +40,13 @@ why.
 
 A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) has **Delete sandbox** in place of **Remove**, and no
 **Uninstall**: Farhelm owns that machine, so deleting it loses its files and sessions.
-[Delete a Tensorlake sandbox](#delete-a-tensorlake-sandbox) covers it. The host menu has no **Suspend** or **Resume**.
-A [container session](/docs/agents/containerized-sessions/#stopping-and-deleting)'s host has **Delete container**,
-which removes its whole environment and files; the session's own menu has **Suspend** and **Resume**. A container
-session's container, like
+[Delete a Tensorlake sandbox](#delete-a-tensorlake-sandbox) covers it. A
+[container session](/docs/agents/containerized-sessions/#stopping-and-deleting)'s host has **Delete container**,
+which removes its whole environment and files. The menu of a sandbox or a container also has **Suspend**, or **Resume**
+once it is suspended, and a suspended one shows **Resume** on its row too;
+[Suspend and resume for a sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains what each keeps and
+when Suspend asks first, and [Container sessions](/docs/agents/containerized-sessions/#stopping-and-deleting) covers a
+container's. A container session's container, like
 a [sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox)'s sandbox, appears in Hosts and
 update notices without a permanent rail icon.
 
@@ -168,9 +171,11 @@ a refusal shows under the host's row in the host list instead.
 
 ## Delete a Tensorlake sandbox
 
-Tensorlake can suspend a sandbox host itself, for example on the Usage Credits plan after 24 hours without a connection
-from Farhelm; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume) explains more. A suspended host shows a grey **Suspended** state, and while it resumes, **Resuming…** and then **Connecting**.
-An open session on it offers **Resume host**.
+Choose **Suspend** in a sandbox host's menu to suspend it, which stops its CPU and memory billing while keeping its
+files and processes. Tensorlake can also suspend a sandbox host itself, for example on the Usage Credits plan after 24
+hours without a connection from Farhelm; [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#suspend-and-resume)
+explains more. A suspended host shows a grey **Suspended** state with **Resume** on its row, and an open session on it
+offers **Resume host**. While it resumes, it shows **Resuming…** and then **Connecting**.
 
 **Delete sandbox** permanently deletes the sandbox, its files, sessions and snapshots taken from it. It always asks,
 regardless of **Remove hosts without asking**. Keep work you need elsewhere first. While Farhelm deletes it, the host

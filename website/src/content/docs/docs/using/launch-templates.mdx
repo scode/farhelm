@@ -39,13 +39,16 @@ chosen with the same **Folder** and **Managed checkout** control as the launcher
 moves to the trash when its last session is deleted. A model or a destination can stand on its own. Another template can
 supply the agent or host.
 
-The editor's **Host** field offers your hosts. A template can also place sessions in a new container, with a recipe
-and a container host; applying it sets the launcher's **Runs on** the same way, and a removed container host or deleted
-recipe makes it unavailable. The editor cannot show such a placement yet: it says so, and keeps the placement as stored
-unless you choose a host or remove the field. In a new container the folder is its home, and a managed checkout is
-cloned inside. Deleting its session removes the checkout permanently, without trash, unless another session still uses
-it; deleting the container removes every checkout in it the same way. See
-[Container sessions](/docs/agents/containerized-sessions/).
+The editor's **Host** field begins with a **Runs on** switch like the launcher's: **Existing host** with a host to choose,
+**New container** with a **Recipe** and a **Container host**, or **New sandbox** with a **Recipe**. Applying the
+template sets the launcher's **Runs on** the same way. The editor offers recipes that are not built yet and container
+hosts that cannot run containers right now, since those are checked when you launch; a removed container host or deleted
+recipe stays selected, marked unavailable, and the launcher refuses the template until you change it. In a new container or sandbox the folder
+is its home, and a managed checkout is cloned inside. Deleting its session removes the checkout permanently, without
+trash, unless another session still uses it; deleting the container or sandbox removes every checkout in it the same
+way. See [Container sessions](/docs/agents/containerized-sessions/) and
+[Give each session its own sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), which also
+covers the question Farhelm asks before creating a sandbox.
 
 A **Session name** can be a **Base name** or a **Fixed name**. When you apply a base name in the session launcher or a
 quick launch, or an agent starts a session from the template, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
@@ -73,7 +76,10 @@ switch**, it is judged as an agent launch.
 Choices the template leaves out use the defaults of **+** (New session), including the open session's destination and
 the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs). A template can start a fresh
 [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
-fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens
+fails, the session launcher opens with that setup and the question or error. A template that starts a new sandbox
+opens the launcher on [Create a sandbox for this session?](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox)
+the same way, unless you have turned that question off. Marking it, or giving it a number key, does not skip the
+question. With no marked template, the shortcut opens
 Templates to help you choose one. Renaming keeps the mark; deleting clears it, and **Undo** restores only the template.
 
 The quick switcher's **Quick launch** row does the same thing. While the session launcher is open, the shortcut
