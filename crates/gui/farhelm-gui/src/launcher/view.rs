@@ -579,8 +579,7 @@ pub(crate) struct Launcher {
     pub(super) flags: TextInputState,
     /// The model field's text: the chosen model while closed, what is typed while its list is open.
     pub(super) model_input: TextInputState,
-    /// The command line and resume command the launcher opened with, which alone are spelled out while editable
-    /// (`shown_text`).
+    /// The values whose spellings depend on what the launcher opened with (`shown_text`).
     opened: shown_text::Opened,
     /// The model field's list and what the user is doing in it.
     model_field: model_field::ModelField,
@@ -672,10 +671,13 @@ enum Input {
 
 impl Input {
     /// Whether the field shows its value through `shown_text`'s rules, which an edit can change.
-    fn shown_through_text_rules(self) -> bool {
+    fn shown_through_text_rules(self, draft: &LaunchDraft) -> bool {
         match self {
             Input::Wrapper | Input::Prompt | Input::Flags | Input::Command | Input::Resume => true,
-            Input::Folder | Input::Name | Input::Conversation => false,
+            Input::Folder | Input::Name => {
+                matches!(draft.mode, Mode::Clone) && draft.checkout.is_none()
+            }
+            Input::Conversation => false,
         }
     }
 }
@@ -692,8 +694,9 @@ impl Launcher {
             state.set_text(text.to_owned(), window, cx);
             state
         };
-        let folder = field(draft.folder.value(), window, cx);
-        let name = field(draft.name.value(), window, cx);
+        let opened = shown_text::Opened::of(&draft);
+        let folder = field(&shown_text::folder(&draft, &opened), window, cx);
+        let name = field(&shown_text::name(&draft, &opened), window, cx);
         let conversation = field(&draft.conversation, window, cx);
         // The mode never changes while the launcher is open, so neither does this placeholder.
         let required =
@@ -709,7 +712,6 @@ impl Launcher {
         );
         // A value holding invisible characters starts spelled out, and read-only where the old field was (`shown_text`);
         // `sync_fields` keeps it so as the draft changes.
-        let opened = shown_text::Opened::of(&draft);
         let wrapper = TextInputState::new(window, cx);
         wrapper.set_placeholder("with-endpoint --profile work --", window, cx);
         let prompt = TextInputState::new_growing(PROMPT_ROWS, window, cx);
@@ -818,7 +820,7 @@ impl Launcher {
                         launcher.edited(which, input.text(cx).to_string(), cx);
                         // A typed or pasted invisible character can change how the field shows its value
                         // (`shown_text`), so it is put in step at once rather than at the next resync.
-                        if which.shown_through_text_rules() {
+                        if which.shown_through_text_rules(&launcher.draft) {
                             launcher.sync_fields(window, cx);
                         }
                     }
@@ -1083,10 +1085,10 @@ impl Launcher {
         }
         let pairs = [
             (&self.conversation, self.draft.conversation.clone()),
-            (&self.folder, self.draft.folder.value().clone()),
+            (&self.folder, shown_text::folder(&self.draft, &self.opened)),
             // While a managed checkout is chosen the field shows the name the checkout gets, which ignores an untouched
             // copied title.
-            (&self.name, self.draft.shown_name()),
+            (&self.name, shown_text::name(&self.draft, &self.opened)),
             (
                 &self.checkout.repository,
                 self.draft
