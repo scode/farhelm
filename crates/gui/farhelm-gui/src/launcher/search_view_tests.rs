@@ -6,7 +6,7 @@
 //! Every step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after
 //! each.
 
-use farhelm_proto::{LaunchHarness, LaunchPermission, RestartOffer};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, RestartOffer};
 use gpui::{TestAppContext, VisualTestContext};
 
 use super::draft::{LaunchDraft, Tab};
@@ -251,6 +251,105 @@ fn a_model_taken_on_the_command_tab_switches_to_the_agent_tab(cx: &mut TestAppCo
     assert_eq!(draft.tab, Tab::Agent);
     assert_eq!(draft.agent.harness, Some(LaunchHarness::Codex));
     assert_eq!(draft.agent.model.as_deref(), Some("gpt-5"));
+}
+
+/// Specified: taking `name:fix-login` on Command keeps that tab and its typed `make watch` command while setting the
+/// name. Why: naming is shared by both tabs and must not throw away the command being written ("search on the command
+/// tab switches to the agent tab only for an agent choice", `e2e/tests/launcher-tabs.spec.ts` at `24bc0580`, its `name:`
+/// half).
+#[gpui::test]
+fn a_name_row_on_the_command_tab_keeps_the_tab_and_its_command(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_launcher(cx);
+    test_support::click(cx, "launcher-tabs-Command");
+    assert_eq!(
+        draft(cx).tab,
+        Tab::Command,
+        "the premise: Command is chosen"
+    );
+    test_support::click(cx, "launcher-command-row");
+    type_in(cx, "make watch");
+    test_support::click(cx, "launcher-search-row");
+    assert!(search_focused(cx), "the premise: the search box has focus");
+    type_in(cx, "name:fix-login");
+    keys(cx, "enter");
+    let chosen = draft(cx);
+    assert_eq!(chosen.tab, Tab::Command);
+    assert_eq!(chosen.name.value(), "fix-login");
+    assert_eq!(chosen.command.command, "make watch");
+}
+
+/// Specified: words and Enter in one search box choose Codex, `gpt-5`, High, Default effort, High again, YOLO and
+/// Guarded; each choice leaves the emptied box focused, and a final Enter sends one create carrying Codex, `gpt-5`,
+/// High and Guarded. Why: separate picker tests do not prove that the whole keyboard path reaches the ordinary launch
+/// with its choices intact ("composer word search drives a structured launch", `e2e/tests/composer-word-search.spec.ts`
+/// at `24bc0580`).
+#[gpui::test]
+fn the_whole_keyboard_path_builds_a_launch_and_sends_it(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher(cx);
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(
+            serde_json::json!([{ "id": "gpt-5", "harness": "codex", "efforts": ["low", "high"] }]),
+        ),
+    );
+    assert!(search_focused(cx), "the premise: search starts focused");
+    type_in(cx, "codex");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after codex");
+
+    type_in(cx, "gpt-5");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-5"));
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after gpt-5");
+
+    type_in(cx, "high");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.effort, Some(LaunchEffort::High));
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after high");
+
+    type_in(cx, "effort:default");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.effort, None);
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after effort:default");
+
+    type_in(cx, "high");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.effort, Some(LaunchEffort::High));
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after high again");
+
+    type_in(cx, "perms:yolo");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Yolo));
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx), "after perms:yolo");
+
+    type_in(cx, "guarded");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
+    assert_eq!(
+        search_text(cx),
+        "",
+        "the premise: the launch Enter sees an empty box"
+    );
+    assert!(search_focused(cx), "after guarded");
+
+    keys(cx, "enter");
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create, not {}", sent.len());
+    };
+    let launch = &create.body.as_ref().unwrap()["launch"];
+    assert_eq!(launch["harness"], serde_json::json!("codex"));
+    assert_eq!(launch["model"], serde_json::json!("gpt-5"));
+    assert_eq!(launch["effort"], serde_json::json!("high"));
+    assert_eq!(launch["permissions"], serde_json::json!("guarded"));
 }
 
 /// Enter on an empty box launches a complete draft, once; a query that offers nothing sends nothing; and a held Enter

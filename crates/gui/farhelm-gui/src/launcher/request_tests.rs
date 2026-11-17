@@ -434,6 +434,26 @@ fn a_command_create_body_sends_the_command_as_written() {
     );
 }
 
+/// Specified: with Claude and YOLO chosen on Agent, a Command create sends no agent launch, keeps `run  --fast`
+/// byte for byte, and leaves the agent choices intact. Why: Command must submit its own draft without destroying the
+/// choices waiting on Agent ("New's command tab keeps the agent draft dormant and preserves the raw invocation",
+/// `e2e/tests/composer-word-search.spec.ts` at `24bc0580`, its create half).
+#[test]
+fn a_command_launch_leaves_the_agent_draft_dormant() {
+    let hosts = hosts();
+    let mut draft = draft();
+    draft.choose_harness(LaunchHarness::Claude, None, None);
+    draft.choose_permissions(Some(LaunchPermission::Yolo));
+    draft.choose_tab(Tab::Command);
+    draft.edit_command("run  --fast".into());
+    draft.choose_command_yolo(false);
+    let body = draft.create_body(target(&hosts, None)).unwrap();
+    assert_eq!(body.launch, None);
+    assert_eq!(body.command.unwrap().command, "run  --fast");
+    assert_eq!(draft.agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(draft.agent.permissions, Some(LaunchPermission::Yolo));
+}
+
 /// Replace with sends this draft's create and the delete precondition matching what the launcher showed about the
 /// source (SPEC.md, "Replace with"); an incomplete draft sends nothing.
 #[test]

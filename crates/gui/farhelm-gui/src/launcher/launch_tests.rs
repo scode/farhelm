@@ -284,6 +284,23 @@ fn a_refused_launch_brings_the_launcher_back_with_the_helms_words(cx: &mut gpui:
     assert_eq!(shown_refusal(cx), None, "an edit takes the refusal away");
 }
 
+/// Specified: a 409 saying the folder does not exist brings the launcher back; fixing the folder to `/srv` and pressing
+/// Launch sends that folder, and a success opens session b while the user waits. Why: preserving the form must leave it
+/// usable for another attempt, not stuck after the refusal ("create dialog surfaces a precondition failure, preserves
+/// the form, and creates no session", `e2e/tests/terminal.spec.ts` at `24bc0580`, its second half).
+#[gpui::test]
+fn a_second_press_after_a_refusal_launches_the_fixed_draft(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    helm.reply(create.id, 409, Some(json!("the folder does not exist")));
+    settle(cx);
+    assert!(any_open(cx), "the launcher came back");
+    super::folder_default_tests::edit_draft(cx, |draft| draft.edit_folder("/srv".into()));
+    let retry = press(&mut helm, cx, "/api/sessions");
+    assert_eq!(retry.body.as_ref().unwrap()["cwd"], json!("/srv"));
+    created(&mut helm, cx, retry.id, "b");
+    assert_eq!(selected(cx).as_deref(), Some("b"));
+}
+
 /// A create that fails after the host's registry row moved to another installation while it was out comes back with
 /// the old launcher's generic words, not the helm's own. Why: those words came from the earlier installation and could
 /// describe a machine the draft no longer targets (launcher-enter.spec's "launcher shows a generic refusal after its
