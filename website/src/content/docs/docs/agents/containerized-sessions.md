@@ -89,6 +89,9 @@ A [launch template](/docs/using/launch-templates/) that holds a recipe and conta
 [quick launch](/docs/using/launch-templates/#quick-launch) too. **Save as template** is not offered for a new container.
 A template whose recipe or container host is gone is refused, and nothing from it applies.
 
+You can also pick an earlier container launch by recipe and container host from the launcher's
+[recent setups](/docs/using/start-a-session/#launch-a-setup-you-used-before).
+
 ## Working inside the container
 
 [Terminal tabs, attachments, file links and downloads](/docs/using/work-in-a-session/) work inside the container as on
@@ -139,7 +142,8 @@ When Farhelm is connected to the container host, it attempts to start a stopped 
 and offers **Resume**. Sessions whose running agent was lost to a host reboot show **Interrupted**. Sessions that had
 already exited keep their status, and stopping a container without rebooting its host leaves its agents exited. Choose
 **Restart** to resume a captured conversation. Restarting the helm reconnects running containers and leaves paused ones
-paused.
+paused. While a container is paused or stopped, its sessions' **Restart** and **Replace** are unavailable; choose
+**Resume** in **Hosts** first.
 
 **Delete** always asks first, because the container may go with the session. Its confirmation says both outcomes: the
 session and its checkout are deleted, and if it is the last session in the container, the whole container and its files

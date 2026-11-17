@@ -211,7 +211,8 @@ opens the launcher on **New sandbox** with the source's recipe, for a fresh sand
 directory, or a fresh managed checkout of the same repository inside when the source was in one; nothing from the source
 sandbox's files comes along. If that recipe has been deleted since, it stays chosen and shows as unavailable, so you
 pick another before launching. Opening **+** (New session) while a sandbox session is open preselects its recipe the
-same way; a quick launch keeps its template's choices instead.
+same way; a quick launch keeps its template's choices instead. You can also pick an earlier sandbox launch from the
+launcher's [recent setups](/docs/using/start-a-session/#launch-a-setup-you-used-before).
 
 An agent starts a sandbox session with `farhelm agent create --recipe <name>`, and Farhelm shows a card for it every
 time ([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)). If you type the
@@ -311,7 +312,8 @@ example while the helm's machine is asleep. An idle agent while Farhelm stays co
 Farhelm does not suspend idle hosts itself or resume them without a user action. After Farhelm disconnects, configured
 tunnels leave no separate connection keeping the sandbox awake.
 
-You cannot start a session on a suspended host; resume it first.
+To start a session on a suspended host, resume it first; a launch on it is
+[refused until then](/docs/using/start-a-session/#when-a-launch-fails).
 
 ## Delete a sandbox
 

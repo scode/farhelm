@@ -130,9 +130,19 @@ rest of them.
 ## Launch a setup you used before
 
 A setup keeps the agent, model, effort, permissions, wrapper prefix and destination of a launch you made on the
-launcher's **Agent** tab, however you filled it in. Farhelm keeps setups separately for each host. Under the search box,
-the launcher shows up to three of the chosen host's setups that match what you have chosen so far. Clicking one fills
-in the launcher without launching; Enter on it launches. Type `recent:` in the search box to find older ones.
+launcher's **Agent** tab, however you filled it in. Farhelm keeps setups separately for each host, and keeps launches
+into a new sandbox or container on their own, so they stay after that sandbox or container is deleted. Under the search
+box, the launcher shows up to three setups that match what you have chosen so far, from the chosen host and from your
+new sandboxes and containers. Click a row below the search box to fill in the launcher, or focus that row and press
+Enter to launch. Type `recent:` in the search box to find older setups.
+
+A setup that made a new sandbox or container names the recipe and where it runs, such as "web container on build1".
+Matching setups can show even when the selected host is disconnected or you already have a recipe selected. Choosing
+one restores the recipe and where it runs. The next launch creates a fresh sandbox or container. If the recipe or
+container host has been removed, choose another before launching.
+
+If you choose one of these setups in **Replace with…**, Farhelm refuses it and says **Restart and Replace keep the
+existing environment**.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -334,6 +344,12 @@ No session is created. When
 the agent itself fails to start, for example because it is not installed on that host, the session is created and its
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
+
+If you try to launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume) or
+[container](/docs/agents/containerized-sessions/#stopping-and-deleting), Farhelm shows the host's name and asks you to
+resume it first. For example, **devbox is suspended. Resume it in Hosts, then launch.** If a stopped container offers
+**Resume**, the message says "is stopped". A [quick launch](/docs/using/launch-templates/#quick-launch) to a suspended
+Tensorlake host is refused for the same reason.
 
 If the host does not answer within 20 seconds, the launcher comes back without **Not launched.** and says the request is
 still being carried out: the session may still start and appear in the session list. Your choices stay in the launcher.
