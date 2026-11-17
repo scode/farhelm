@@ -18,7 +18,8 @@ use on the host.
 
 A container session gets a new container on one of your hosts, built from a saved recipe. Its agent, terminal tabs and
 checkout live inside. Farhelm's [supervisor](/docs/how-it-works/the-pieces/), the program that keeps sessions running,
-runs there too, so the session has ordinary hooks, conversation tracking, Restart, file transfers and localhost tunnels.
+runs there too, so the session has ordinary hooks, conversation tracking, Restart, file transfers and, in the Mac app,
+localhost tunnels.
 
 For the cloud equivalent, see
 [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
@@ -68,9 +69,9 @@ rebuilt. Existing containers keep their software. Rebuild affects future launche
 
 ## Start a session
 
-Open **+** (New session). In [the session launcher](/docs/using/start-a-session/), **Runs on** offers **Existing host**,
-**New container** and **New sandbox** when those choices are available. Choose **New container**, then **Recipe** and
-**Container host**. The host defaults to the one you used last. Recipes that cannot run there show why.
+Open **+** (New session). In [the session launcher](/docs/using/start-a-session/), when a container host is available,
+**Runs on** offers **Existing host** and **New container**. Choose **New container**, then **Recipe** and **Container
+host**. The host defaults to the one you used last. Recipes that cannot run there show why.
 
 Choose a **Managed checkout** to clone a GitHub repository inside the new container. **Folder** is fixed to the
 container user's home directory. Directory browsing and recent host directories are unavailable for this destination.
@@ -78,24 +79,20 @@ The checkout and home live inside the container, with the host's checkout and ho
 **Command** tabs both work.
 
 Launch progress shows preparation when needed, container creation, starting Farhelm inside it, then the ordinary session
-launch. The task continues after you close your window. A failed initial launch attempts to remove its new environment.
-Failed cleanup or an interrupted launch remains available for explicit deletion in **Hosts** or **Containers not on this
-helm**. An interrupted launch stays interrupted when Farhelm starts.
+launch. A failed initial launch attempts to remove its new environment. Failed cleanup or an interrupted launch remains
+available for explicit deletion in **Hosts** or **Containers not on this helm**. An interrupted launch stays interrupted
+when Farhelm starts.
 
-[Templates and quick launch](/docs/using/launch-templates/) save the recipe and container host together. Use the
-template editor to save that choice. **Save as template** is unavailable for an environment launch. Recent setups
-restore the same choices even after you delete the old container. **Clone** opens the launcher for a fresh container
-from the recipe with the same repository choice and a fresh disk. Opening **+** (New session) while a container session
-is selected also starts from its recipe and host. A removed host or deleted recipe stays unavailable until you change
-the choice.
+A [launch template](/docs/using/launch-templates/) that holds a recipe and container host applies both, for
+[quick launch](/docs/using/launch-templates/#quick-launch) too. **Save as template** is unavailable for a new container.
+A template whose recipe or container host is gone is refused, and nothing from it applies.
 
 ## Working inside the container
 
 [Terminal tabs, attachments, file links and downloads](/docs/using/work-in-a-session/) work inside the container as on
-an ordinary host. File links can reach any file its account can read there. A localhost tunnel reaches the container's
-loopback, including when the container host is the same machine as the helm, the program that shows all your sessions
-([The pieces](/docs/how-it-works/the-pieces/)). Recipe tunnels carry traffic in the other direction, to services
-reachable from the helm's machine.
+an ordinary host. File links can reach any file its account can read there. In the Mac app, a localhost tunnel reaches
+the container's loopback. Recipe tunnels carry traffic in the other direction, to services reachable from the machine
+running the helm, the program that shows all your sessions ([The pieces](/docs/how-it-works/the-pieces/)).
 
 [Restart and Replace](/docs/using/stop-restart-resume/) stay in this container. Restart resumes the agent's conversation
 where the agent supports it. Replace starts a new session before removing its source session. It preserves the container
@@ -169,8 +166,8 @@ or changing that host's destination. A refusal names what still needs cleanup.
 The earlier experimental feature ran only the agent and tabs inside a container and mounted a host checkout. Those
 sessions now support **Delete only**. Their rows are marked **Retired container**, and an agent still running in one
 keeps running until you delete it. Terminal access, Stop, Restart, Clone and Replace are unavailable. Stored templates
-and recent setups still load. Remove their retired container choice before launching again, then select a recipe-based
-container in the launcher or template editor.
+still load. Remove their retired container choice before launching again, then select a recipe-based container in the
+launcher.
 
 Continue with [Start a session](/docs/using/start-a-session/) or
 [make a shared recipe](/docs/using/tensorlake-sandboxes/#make-a-recipe).

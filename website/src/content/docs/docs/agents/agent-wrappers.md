@@ -16,9 +16,9 @@ have their usual Bash meaning; `with-endpoint --profile "$PROFILE" --`, for exam
 starts. Farhelm keeps your quotes and escapes as typed and quotes the agent's own arguments separately, so a model or
 initial prompt cannot become shell code. Previously saved prefixes acquire the same Bash meaning. Farhelm refuses
 placeholders such as `{cwd}` in a prefix; use a custom command when your wrapper needs one. Leave it empty for no
-wrapper. Each agent has its own last used prefix, shared across your Farhelm windows; switching agents picks up that
-agent's value. A [launch template](/docs/using/launch-templates/) can set a prefix or explicitly clear one, including
-for [quick launch](/docs/using/launch-templates/#quick-launch). Clone, Replace with, and Restart with open with the
+wrapper. Farhelm remembers the last prefix you launched each agent with; switching agents picks up that agent's value. A
+[launch template](/docs/using/launch-templates/) can set a prefix or explicitly clear one, including for
+[quick launch](/docs/using/launch-templates/#quick-launch). Clone, Replace with, and Restart with open with the
 session's prefix so you can keep or change it. Plain Restart reuses the stored launch.
 
 NOTE: Do not put secrets in a prefix. It becomes part of the launch command, which other processes may see, and an agent
