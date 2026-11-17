@@ -733,14 +733,16 @@ changed marker"), an omitted permission compared by its effective mode ("restart
 permission by its effective mode"), an edited resume command with its resume and YOLO markers ("restart with edits a
 command launch's command, resume command and YOLO answer"; the command's own marker, shown for an edited command and for
 nothing else, is `launcher::restart_with_tests::restart_with_marks_an_edited_command`), a stored trust being no edit and
-left out of the body ("restart with choice Enter applies effort and permissions without old trust"), a held Enter in the
-model field ("restart with model Enter refuses an unselected draft and held keys"; the unselected draft is tested), a
-command template, the shortcut batches and the bolt in Restart with ("restart with applies an allowed partial command
-template", "restart with refuses held shortcut batches and bolt templates", "restart with applies matching bolt and
-shortcut templates without restarting"; their tests would sit in `templates::apply_tests` and
-`templates::launcher_modes_tests`), and the catalog's Retry keeping an edit made before it ("restart with retries the
-catalog without reseeding its draft")
+left out of the body ("restart with choice Enter applies effort and permissions without old trust"), a command template,
+the shortcut batches and the bolt in Restart with ("restart with applies an allowed partial command template", "restart
+with refuses held shortcut batches and bolt templates", "restart with applies matching bolt and shortcut templates
+without restarting"; their tests would sit in `templates::apply_tests` and `templates::launcher_modes_tests`), and the
+catalog's Retry keeping an edit made before it ("restart with retries the catalog without reseeding its draft")
 
+- "restart with model Enter refuses an unselected draft and held keys": the unselected draft in
+  `launcher::view_tests::restart_with_model_enter_chooses_without_restarting`, and a held Enter in
+  `launcher::restart_with_tests::a_held_enter_in_the_model_field_does_nothing`; not yet ported: its composing Enter, an
+  input method's Enter while composing in the model field
 - "restart with keeps gap focus and container Enter uses its enabled action", the gap half:
   `layers_tests::the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus`.
 - "don't ask again from restart with keeps focus in the dialog and marks before restarting" (the question and its host
