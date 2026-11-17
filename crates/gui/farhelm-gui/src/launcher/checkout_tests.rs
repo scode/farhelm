@@ -553,6 +553,183 @@ fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
     );
 }
 
+/// The repository row Enter would choose must remain visible while arrows wrap through an overflowing list. Checking
+/// selection alone misses a clipped highlight, which gives no usable feedback while focus stays in the field.
+#[gpui::test]
+fn repository_arrows_keep_the_highlight_visible_through_wrapping(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    test_support::click(cx, "launcher-repository-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .repository_focused(window, cx)));
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
+    assert_eq!(reads.len(), 1, "the premise: discovery is waiting");
+    let names: Vec<_> = (0..24).map(|index| format!("repo-{index:02}")).collect();
+    let repos: Vec<_> = names.iter().map(|name| ("acme", name.as_str())).collect();
+    helm.reply(reads[0].id, 200, Some(repositories(&repos, false, None)));
+    settle(cx);
+    let row = |cx: &mut VisualTestContext, index| {
+        let id = format!("launcher-repository-option-acme/repo-{index:02}");
+        test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id.as_str()))
+            .unwrap_or_else(|| panic!("the list has no row for {id}"))
+    };
+    let viewport = test_support::bounds(cx, "launcher-repository-list");
+    assert!(
+        row(cx, 23).bounds.top() >= viewport.bottom(),
+        "the premise: the last row starts below the viewport"
+    );
+    // The GPUI list has no highlight when it opens. Down establishes the first highlight before testing wraps.
+    for (key, presses, expected) in [
+        ("down", 1, 0),
+        ("up", 1, 23),
+        ("down", 1, 0),
+        ("down", 12, 12),
+    ] {
+        for _ in 0..presses {
+            test_support::keys(cx, key);
+        }
+        let row = row(cx, expected);
+        assert_eq!(row.selected, Some(true), "row {expected} is highlighted");
+        assert_eq!(
+            row.visible_bounds, row.bounds,
+            "all of row {expected} is visible"
+        );
+        assert!(
+            read(cx, |launcher, window, cx| launcher
+                .repository_focused(window, cx)),
+            "arrows leave focus in the field"
+        );
+    }
+}
+
+/// A name edit refreshes the preview of the chosen repository. The original discovery still applies, so the host
+/// should receive only the new preview during and after the discovery debounce.
+#[gpui::test]
+fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    test_support::click(cx, "launcher-repository-row");
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
+    assert_eq!(reads.len(), 1, "the premise: discovery is waiting");
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(repositories(&[("acme", "bar")], false, None)),
+    );
+    settle(cx);
+    test_support::click(cx, "launcher-repository-option-acme/bar");
+    let previews = to(&sent(&mut helm, cx), PREVIEW);
+    assert_eq!(
+        previews.len(),
+        1,
+        "the premise: the choice requested its preview"
+    );
+    helm.reply(
+        previews[0].id,
+        200,
+        Some(preview_reply("/work/bar-1", "bar-1", 3)),
+    );
+    settle(cx);
+    assert_eq!(
+        checkout_folder(cx),
+        "/work/bar-1",
+        "the premise: the chosen repository has a ready preview"
+    );
+
+    test_support::click(cx, "launcher-name-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .name
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "x");
+    test_support::advance(cx, Duration::from_millis(160));
+    assert_eq!(draft(cx).shown_name(), "x");
+    let commands = sent(&mut helm, cx);
+    assert!(
+        to(&commands, REPOSITORIES).is_empty(),
+        "the name edit sends no discovery read"
+    );
+    let [preview] = &to(&commands, PREVIEW)[..] else {
+        panic!("the name edit sends one preview");
+    };
+    assert_eq!(preview.body.as_ref().unwrap()["title"], json!("x"));
+    helm.reply(
+        preview.id,
+        200,
+        Some(preview_reply("/work/bar-x", "bar-x", 3)),
+    );
+    settle(cx);
+    assert_eq!(checkout_folder(cx), "/work/bar-x");
+    test_support::advance(cx, Duration::from_millis(160));
+    assert!(
+        to(&sent(&mut helm, cx), REPOSITORIES).is_empty(),
+        "accepting the new preview sends no discovery read either"
+    );
+}
+
+/// Focusing Repository closes the composer's search, so only the repository field offers choices for Enter. After
+/// discovery answers with a failed scan and no matches, Enter leaves the draft unselected and sends neither a
+/// preview nor a create.
+#[gpui::test]
+fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = checkout_open(cx);
+    test_support::click(cx, "launcher-search-row");
+    assert!(
+        super::view_tests::search_focused(cx),
+        "the premise: the search box has focus"
+    );
+    test_support::keys(cx, "h o s t : m i s s i n g");
+    assert_eq!(
+        name_of(cx, "launcher-search-message").as_deref(),
+        Some("No host matches")
+    );
+    test_support::click(cx, "launcher-repository-row");
+    assert!(!super::view_tests::has_node(cx, "launcher-search-results"));
+    assert!(read(cx, |launcher, window, cx| launcher
+        .repository_focused(window, cx)));
+    test_support::keys(cx, "i n v a l i d");
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
+    let [discovery] = &reads[..] else {
+        panic!("the repository field requests one scan for the typed query");
+    };
+    assert_eq!(
+        discovery.body,
+        Some(json!({"host": 1, "expected_incarnation": 4, "query": "invalid"}))
+    );
+    let scan_error = "fixture scan unavailable";
+    helm.reply(
+        discovery.id,
+        200,
+        Some(repositories(&[], true, Some(scan_error))),
+    );
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-repository-note").as_deref(),
+        Some(scan_error),
+        "the premise: the failed scan has answered"
+    );
+
+    let words = Some("No repository matches; enter owner/repo");
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), words);
+    test_support::keys(cx, "enter");
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), words);
+    test_support::keys(cx, "escape");
+    assert!(!super::view_tests::has_node(
+        cx,
+        "launcher-repository-empty"
+    ));
+    test_support::keys(cx, "enter");
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), words);
+    assert_eq!(draft(cx).checkout.and_then(|checkout| checkout.repo), None);
+    assert_eq!(shown_refusal(cx), None);
+    let commands = sent(&mut helm, cx);
+    assert!(to(&commands, PREVIEW).is_empty());
+    assert!(to(&commands, "/api/sessions").is_empty());
+}
+
 /// The composer search's `gh:` offers the same choices as the repository field, from a Folder destination too: the
 /// host's discovered repositories that match, and a valid typed `owner/repo` first whatever discovery found (SPEC.md,
 /// "Managed checkouts": "Incomplete discovery is visible and does not prevent selecting a valid manually entered
@@ -948,6 +1125,108 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
         read(cx, |launcher, _, cx| launcher.folder.text(cx).to_string()),
         "/tmp/retained-folder"
     );
+}
+
+/// A preview for the original host cannot authorize a checkout on the new host. Check after the original reply and
+/// while the replacement is still held, so the replacement cannot mask stale output. The new host must also reveal
+/// its missing checkout folder through discovery even though the repository stays selected.
+#[gpui::test]
+fn switching_hosts_drops_the_old_preview_and_checks_the_new_hosts_setup(cx: &mut TestAppContext) {
+    // The fixture's host10 is a second connected host with its own installation identity.
+    let fleet = super::view_tests::fixture_hosts(&[0, 9]);
+    let (mut helm, cx) = super::view_tests::launcher_with_hosts(cx, command_draft(1), fleet);
+    answer_catalog(&mut helm, cx, Some(json!([])));
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = to(&sent(&mut helm, cx), REPOSITORIES);
+    assert_eq!(
+        reads.len(),
+        1,
+        "the premise: host1's discovery was requested"
+    );
+    helm.reply(reads[0].id, 200, Some(repositories(&[], false, None)));
+    settle(cx);
+    assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
+    edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
+    let previews = to(&sent(&mut helm, cx), PREVIEW);
+    let [first] = &previews[..] else {
+        panic!("the premise: host1's preview is held");
+    };
+    assert_eq!(first.body.as_ref().unwrap()["host"], json!(1));
+
+    test_support::click(cx, "launcher-host");
+    test_support::click(cx, "launcher-host-option-10");
+    assert_eq!(draft(cx).host, Some(10), "the picker changed hosts");
+    assert_eq!(
+        draft(cx).checkout.and_then(|checkout| checkout.repo),
+        Some(repo("acme", "bar"))
+    );
+    test_support::advance(cx, Duration::from_millis(160));
+    let pending = sent(&mut helm, cx);
+    assert!(to(&pending, PREVIEW).is_empty(), "a preview is already out");
+    let discoveries = to(&pending, REPOSITORIES);
+    let [discovery] = &discoveries[..] else {
+        panic!("the new host was asked once about the chosen repository");
+    };
+    assert_eq!(
+        discovery.body,
+        Some(json!({"host": 10, "expected_incarnation": 4, "query": "acme/bar"}))
+    );
+
+    helm.reply(first.id, 200, Some(preview_reply("/work/old", "old", 3)));
+    settle(cx);
+    assert_eq!(
+        checkout_folder(cx),
+        "",
+        "host1's late success has no authority"
+    );
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_none(),
+        "the new host's discovery is still held"
+    );
+    // These reads were queued while the first preview was out. The replacement preview is now behind them.
+    for command in pending {
+        let reply = if command.path == REPOSITORIES {
+            let mut reply = repositories(&[], false, None);
+            reply["host"] = json!("10");
+            reply["installation_identity"] = json!("identity10");
+            reply["needs_checkout_root"] = json!(true);
+            Some(reply)
+        } else {
+            None
+        };
+        helm.reply(command.id, 200, reply);
+    }
+    settle(cx);
+    let commands = sent(&mut helm, cx);
+    let previews = to(&commands, PREVIEW);
+    let [preview] = &previews[..] else {
+        panic!("the new host's preview is now out");
+    };
+    let setup_reads = to(&commands, "/api/checkout-root");
+    let [setup_read] = &setup_reads[..] else {
+        panic!("the visible setup field reads the default checkout folder");
+    };
+    assert_eq!(preview.body.as_ref().unwrap()["host"], json!(10));
+    assert_eq!(preview.body.as_ref().unwrap()["repo"], json!("acme/bar"));
+    assert_eq!(
+        checkout_folder(cx),
+        "",
+        "the replacement preview is still held"
+    );
+    assert!(
+        cx.debug_bounds("launcher-checkout-setup").is_some(),
+        "discovery offered checkout-folder setup"
+    );
+    test_support::click(cx, "launcher-launch");
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+    let mut reply = preview_reply("/work/new", "new", 3);
+    reply["host"] = json!("10");
+    reply["installation_identity"] = json!("identity10");
+    helm.reply(preview.id, 200, Some(reply));
+    helm.reply(setup_read.id, 200, Some(json!({"root": null})));
+    settle(cx);
+    assert_eq!(checkout_folder(cx), "/work/new");
 }
 
 /// Push host1 as connected on connection `incarnation`, as the helm does after the host reconnects. The app's Trash

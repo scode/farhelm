@@ -422,6 +422,36 @@ fn a_held_enter_in_a_field_never_launches(cx: &mut gpui::TestAppContext) {
     assert_eq!(creates(&mut helm, cx).len(), 1, "a fresh Enter launches");
 }
 
+/// SPEC.md, "Creation": "A held Enter never launches". The host button handles its own Enter, so inject only the
+/// repeat with the list closed. An earlier fresh key would hide a broken repeat guard behind a launch already in flight.
+#[gpui::test]
+fn a_held_enter_on_the_closed_host_button_never_launches(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, command_draft());
+    assert!(creates(&mut helm, cx).is_empty());
+    test_support::click(cx, "launcher-host");
+    assert!(super::view_tests::has_node(cx, "launcher-host-list"));
+    keys(cx, "escape");
+    assert!(!super::view_tests::has_node(cx, "launcher-host-list"));
+    assert!(
+        read(cx, |launcher, window, _| launcher
+            .host_focus
+            .is_focused(window)),
+        "the premise: Enter will reach the closed host button"
+    );
+    cx.simulate_event(gpui::KeyDownEvent {
+        native_key: None,
+        keystroke: Keystroke::parse("enter").unwrap(),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty(), "a repeat did not launch");
+    assert!(any_open(cx), "the launcher stayed open");
+    assert!(!super::view_tests::has_node(cx, "launcher-host-list"));
+    keys(cx, "enter");
+    assert_eq!(creates(&mut helm, cx).len(), 1, "a fresh Enter launches");
+}
+
 /// The notice offers a launcher that lives with the UI session (decided by the maintainer for the migration: drafts do
 /// not survive a reset). After a reset there is nothing left for Open launcher to bring back, so a notice still showing
 /// would offer nothing. Specified: a refusal the user moved on from posts the notice; the channel breaks and a new UI
