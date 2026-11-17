@@ -25,12 +25,13 @@ use serde_json::{Value, json};
 
 use super::environment::needs_confirmation;
 use super::host_rail::tests::hover_help;
+use super::lifecycle_tests::node_bounds;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
 use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::host_text::HostSentence;
 use crate::local_time::Zone;
-use crate::test_support::{self, frame, meta};
+use crate::test_support::{self, focused_id, frame, meta};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -400,6 +401,45 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
         );
     }
     assert!(pending(&mut fake).is_empty(), "nothing was sent");
+}
+
+/// The focus coordinator's reveal (its module docs, after SPEC.md's "Reaching everything by keyboard"): the control
+/// focus lands on is scrolled into view. An environment session's two extra commands make its menu's commands taller
+/// than the menu's cap in the smallest window, and Up on the closed button opens the menu on its last command, Delete,
+/// which the layer manager focuses before the menu has a position to scroll to. Specified: in a window of the app's
+/// least size, where the menu opened on Rename leaves Delete below its bottom, a sandbox session's menu opened with Up
+/// from its focused button focuses Delete, drawn wholly inside the menu, with Rename scrolled out above the menu's top.
+#[gpui::test]
+fn up_opens_an_environment_menu_scrolled_to_its_delete(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(session("a"), 0)], false, &host);
+    pending(&mut fake);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    test_support::settle(cx);
+    // Opened once on Rename, to check the premise, and closed, so focus is on the button, where Up opens the menu.
+    test_support::click(cx, "session-menu-a");
+    let menu = test_support::bounds(cx, "session-menu");
+    let delete = node_bounds(cx, "session-menu-delete");
+    assert!(
+        delete.bottom() > menu.bottom(),
+        "the premise: the commands do not fit, so Delete starts below the menu's bottom: {delete:?} in {menu:?}"
+    );
+    test_support::keys(cx, "escape");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-a"));
+
+    test_support::keys(cx, "up");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
+    let menu = test_support::bounds(cx, "session-menu");
+    let rename = node_bounds(cx, "session-menu-rename");
+    assert!(
+        rename.top() < menu.top(),
+        "the menu scrolled to Delete: {rename:?} in {menu:?}"
+    );
+    let delete = node_bounds(cx, "session-menu-delete");
+    assert!(
+        menu.top() <= delete.top() && delete.bottom() <= menu.bottom(),
+        "Delete is in view: {delete:?} in {menu:?}"
+    );
 }
 
 // ---- Suspend's activity read ----------------------------------------------------------------------------------------
