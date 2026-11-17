@@ -3572,6 +3572,59 @@ fn select_all_and_copy_copy_the_whole_terminal(cx: &mut TestAppContext) {
     );
 }
 
+/// The Mac Edit menu is how a mouse user copies from and pastes into a session, and macOS enables an item only while
+/// something on the focused element's path handles its action. The menu's Copy, Paste and Select All dispatch the
+/// terminal's own actions so that a focused terminal answers them as it answers Cmd+C, Cmd+V and Cmd+A; before that
+/// they were a text field's actions, so Paste and Select All were disabled over a terminal and Copy was enabled but did
+/// nothing (GPUI Kit's window root took it). Undo, Redo and Cut have nothing to act on in a terminal (the old app's did
+/// nothing useful there either), so they must stay disabled rather than look usable.
+///
+/// Spec: with a live terminal focused, the menu's Copy, Paste and Select All are enabled and its Undo, Redo and Cut are
+/// not; the menu's Select All and then Copy put everything the terminal shows, history included, on the clipboard; the
+/// menu's Paste sends the clipboard's text to the program as one paste.
+#[gpui::test]
+fn the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal(cx: &mut TestAppContext) {
+    use crate::components::EditCommand;
+    let mut h = harness(cx);
+    h.attach_with_history(5);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let enabled = [
+        (EditCommand::Undo, false),
+        (EditCommand::Redo, false),
+        (EditCommand::Cut, false),
+        (EditCommand::Copy, true),
+        (EditCommand::Paste, true),
+        (EditCommand::SelectAll, true),
+    ];
+    for (command, expected) in enabled {
+        // The app's question, as macOS asks it before showing the menu: the focused path's handlers and app-wide ones.
+        let on =
+            h.cx.cx
+                .update(|cx| cx.is_action_available(command.action().as_ref()));
+        assert_eq!(on, expected, "{command:?} with a live terminal focused");
+    }
+    let from_menu = |h: &mut Harness, command: EditCommand| {
+        h.cx.update(|window, cx| window.dispatch_action(command.action(), cx));
+        settle(h.cx);
+    };
+    h.set_clipboard("someone else's");
+    from_menu(&mut h, EditCommand::SelectAll);
+    from_menu(&mut h, EditCommand::Copy);
+    let copied = h.clipboard().unwrap();
+    assert!(
+        copied.starts_with("h0\nh1\nh2\nh3\nh4\nscreen"),
+        "Select All and Copy copied the whole terminal: {copied:?}"
+    );
+    h.set_clipboard("pasted");
+    from_menu(&mut h, EditCommand::Paste);
+    assert_eq!(
+        h.sent(),
+        [(paste("pasted", true), true)],
+        "Paste sent the clipboard's text as one paste"
+    );
+}
+
 // ---- Links ---------------------------------------------------------------------------------------------------------
 
 /// A screen whose first row prints a web address at columns 3 to 23 and another from column 29.
