@@ -12,6 +12,7 @@ use super::{
     needs_app_supervisor, offers,
 };
 use crate::hosts::tests::{connected, host, local_down, run, skew};
+use farhelm_input_mapping::Platform;
 use farhelm_proto::ProviderKind;
 
 /// An idle SSH host's offers: everything an SSH host can be offered, all of it available.
@@ -335,12 +336,12 @@ fn a_failed_update_on_the_local_host_is_offered_again_greyed() {
     );
 }
 
-/// Why this matters: the helm refuses to update its own machine (it is updated by running the installer again), and
-/// that refusal used to stick under the local row with no way to dismiss it; SPEC.md, "Session list", has the row show
-/// Update greyed wherever it would otherwise be offered, saying to run the installer again. The old
+/// Why this matters: the helm refuses to update its own machine (it is updated outside the panel), and that refusal
+/// used to stick under the local row with no way to dismiss it; SPEC.md, "Session list", has the row show Update
+/// greyed wherever it would otherwise be offered, saying how that machine is updated instead. The old
 /// `update_menu_item_is_disabled_on_the_local_row_and_points_at_the_installer` and the spec case "the local row's
 /// update is greyed out, points at the installer, and sends nothing". Specified: the connected local host is offered
-/// [`Update::Greyed`] with the installer description, Settings, and no Remove; an SSH host's Update is
+/// [`Update::Greyed`], on macOS with the installer description, Settings, and no Remove; an SSH host's Update is
 /// [`Update::Available`] with "Install the newer Farhelm version".
 #[test]
 fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
@@ -360,13 +361,48 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
         }
     );
     assert_eq!(
-        Update::Greyed.description(),
+        Update::Greyed.description(Platform::Mac),
         "Run the installer again to update this machine"
     );
     assert_eq!(
-        Update::Available.description(),
+        Update::Available.description(Platform::Mac),
         "Install the newer Farhelm version"
     );
+}
+
+/// Why this matters: Linux has no desktop installer, so "run the installer again" pointed a Linux user at nothing; the
+/// migration's orchestrator decided on 2026-11-17 that there the greyed Update says to install a newer Farhelm, while
+/// macOS keeps the installer (SPEC.md, "Session list"). The words take the platform as an argument, so both are checked
+/// on any build; the macOS line is pinned by `the_local_hosts_update_is_greyed_and_points_at_the_installer`. Specified:
+/// on Linux the greyed Update's line reads "Install a newer Farhelm on this machine to update it" and its help "Update:
+/// install a newer Farhelm on this machine to update it"; on macOS its help reads "Update: run the installer again to
+/// update this machine"; the other two offers read the same on both.
+#[test]
+fn the_greyed_updates_reason_is_this_platforms_way_to_update() {
+    assert_eq!(
+        Update::Greyed.description(Platform::Linux),
+        "Install a newer Farhelm on this machine to update it"
+    );
+    assert_eq!(
+        Update::Greyed.help(Platform::Linux),
+        "Update: install a newer Farhelm on this machine to update it"
+    );
+    assert_eq!(
+        Update::Greyed.help(Platform::Mac),
+        "Update: run the installer again to update this machine"
+    );
+    for offered in [Update::Available, Update::CheckForRelease] {
+        assert_eq!(
+            offered.description(Platform::Mac),
+            offered.description(Platform::Linux),
+            "{offered:?}"
+        );
+        assert_eq!(
+            offered.help(Platform::Mac),
+            offered.help(Platform::Linux),
+            "{offered:?}"
+        );
+    }
 }
 
 /// Why this matters: in the installed desktop app the helm's own machine is the machine the app runs on, and the app
@@ -402,7 +438,7 @@ fn in_the_desktop_app_the_local_hosts_update_checks_for_a_release() {
         );
     }
     assert_eq!(
-        Update::CheckForRelease.description(),
+        Update::CheckForRelease.description(Platform::Mac),
         "Check for a newer Farhelm and install it"
     );
     let failed = run(1, ProvisioningOperation::Update, RunStatus::Failed);

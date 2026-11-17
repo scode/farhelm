@@ -12,12 +12,14 @@
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
+use farhelm_input_mapping::Platform;
 use farhelm_proto::provisioning::{
     PlanStepPath, ProvisioningOperation, ProvisioningView, RunStatus, StepStatus,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, CollectionChanges, HostView};
 use gpui::{DriverNode, Role, TestAppContext, VisualTestContext, px, size};
 
+use crate::actions::THIS_PLATFORM;
 use crate::hosts::progress::tests::step;
 use crate::hosts::tests::{
     aliased, connected, connected_with, connecting, host, hosts, local_down, open_panel,
@@ -26,6 +28,16 @@ use crate::hosts::tests::{
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::test_support::{self, any_open, bounds, center, click, focused_id, frame, keys};
+
+/// The greyed Update's line on this build's platform, written out rather than read from
+/// [`crate::hosts::offers::Update::description`], so a menu that drew another platform's words fails on whichever
+/// platform runs the test.
+fn greyed_reason() -> &'static str {
+    match THIS_PLATFORM {
+        Platform::Mac => "Run the installer again to update this machine",
+        Platform::Linux => "Install a newer Farhelm on this machine to update it",
+    }
+}
 
 /// The panel over the reference hosts in a window as large as the reference screens', with nothing open.
 fn open_hosts(
@@ -186,8 +198,9 @@ fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
 /// command draws no highlight, so a menu opening there showed no mark of where Enter would go (the old menu opened on
 /// Retry, ahead of it, as this one does). Specified: the local host's menu reads "Local host · Farhelm ..." and offers
 /// Retry, Update, then Settings, and neither Remove nor Uninstall; focus starts on Retry, and Down reaches the greyed
-/// Update, as the old menu's arrows reached it; its line says "Run the installer again to update this machine";
-/// clicking it and pressing Enter on it send nothing and leave the menu open.
+/// Update, as the old menu's arrows reached it; its line gives this platform's way to update the machine, "Run the
+/// installer again to update this machine" on macOS and "Install a newer Farhelm on this machine to update it" on
+/// Linux; clicking it and pressing Enter on it send nothing and leave the menu open.
 #[gpui::test]
 fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -207,7 +220,7 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
         node(&nodes, "host-menu-uninstall").is_none(),
         "nor uninstalled from the panel: `farhelm uninstall` there does it"
     );
-    assert!(painted(&nodes).contains("Run the installer again to update this machine"));
+    assert!(painted(&nodes).contains(greyed_reason()));
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     keys(cx, "down");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
@@ -239,7 +252,7 @@ fn in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check(cx: &mut 
     assert!(node(&nodes, "host-menu-update").is_some());
     let text = painted(&nodes);
     assert!(text.contains("Check for a newer Farhelm and install it"));
-    assert!(!text.contains("Run the installer again"));
+    assert!(!text.contains(greyed_reason()));
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     keys(cx, "down");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
