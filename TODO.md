@@ -44,6 +44,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Managed checkout says no checkout folder is configured.** In the GPUI desktop app (a devbuild with fresh state),
+  choosing Managed checkout of a repository on a remote host showed "no checkout folder is configured; set one in this
+  host's settings or a default in Settings → Checkouts", and the Folder field read "Checkout preview unavailable". This
+  may be an existing bug unrelated to the GPUI port, or only the result of not having configured a checkout folder; dig
+  into which.
+
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
   and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
   Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
