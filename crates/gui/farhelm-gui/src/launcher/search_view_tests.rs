@@ -522,12 +522,22 @@ fn launcher_with_templates_on<'a>(
     farhelm_helm_client::fake::FakeHelm,
     &'a mut VisualTestContext,
 ) {
+    launcher_with_these_templates(cx, templates_state(unavailable), draft)
+}
+
+/// [`launcher_with_templates_on`] with the templates collection `templates` in place of the shared set, for a test that
+/// needs templates of its own.
+fn launcher_with_these_templates(
+    cx: &mut TestAppContext,
+    templates: farhelm_proto::ui_channel::CollectionState,
+    draft: LaunchDraft,
+) -> (farhelm_helm_client::fake::FakeHelm, &mut VisualTestContext) {
     let (mut helm, _connection) = crate::test_support::started(cx);
     helm.connect(vec![
         crate::session_list::tests::listing(&["a"], &[crate::session_list::tests::session("a")]),
         fixture_hosts(&[0]),
         crate::session_list::tests::preferences(&[], None),
-        templates_state(unavailable),
+        templates,
     ]);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, crate::main_view::MainView::new);
@@ -1028,4 +1038,165 @@ fn a_tl_reset_of_gooses_permission_launches_yolo(cx: &mut TestAppContext) {
         "reset-goose",
     );
     assert_eq!(sent, serde_json::json!("yolo"));
+}
+
+// ---- Templates applied over an open YOLO question -------------------------------------------------------------------
+
+/// The templates collection for the YOLO question tests: `yolo-codex` (Codex with YOLO), `guarded` (Guarded
+/// permissions), `cmd-true` (the command `true`, asserted YOLO) and `cmd-other` (another command, asserted YOLO).
+fn yolo_templates() -> farhelm_proto::ui_channel::CollectionState {
+    use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
+    use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+    let command = |name: &str, command: &str| LaunchTemplate {
+        name: name.into(),
+        fields: TemplateFields {
+            kind: Some(LauncherKind::Command),
+            command: Some(command.into()),
+            yolo: Some(true),
+            ..TemplateFields::default()
+        },
+    };
+    let all = [
+        LaunchTemplate {
+            name: "yolo-codex".into(),
+            fields: TemplateFields {
+                agent: Some(LaunchHarness::Codex),
+                permissions: Some(Some(LaunchPermission::Yolo)),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "guarded".into(),
+            fields: TemplateFields {
+                permissions: Some(Some(LaunchPermission::Guarded)),
+                ..TemplateFields::default()
+            },
+        },
+        command("cmd-true", "true"),
+        command("cmd-other", "printf second"),
+    ];
+    CollectionState {
+        collection: Collection::Templates,
+        meta: test_support::meta(&["yolo-codex", "guarded", "cmd-true", "cmd-other"]),
+        entries: all
+            .iter()
+            .map(|template| KeyedEntry {
+                key: template.name.clone(),
+                value: serde_json::to_value(template).unwrap(),
+            })
+            .collect(),
+    }
+}
+
+/// The shared body of the two YOLO question tests below: open the launcher on `draft`, press Launch and have the helm
+/// refuse for YOLO; apply `same` (a template that leaves the launch as it was) and check the question stays and its
+/// one-off answer sends the first create again with consent; have that refused, press Launch again for a new question;
+/// apply `other` (one that changes the launch) and check the question goes; apply `same` again and check it does not
+/// come back. Applying a template sends no create.
+fn yolo_question_across_templates(
+    cx: &mut TestAppContext,
+    draft: LaunchDraft,
+    same: &str,
+    other: &str,
+) {
+    let (mut helm, cx) = launcher_with_these_templates(cx, yolo_templates(), draft);
+    // Read now, so a template's application never waits for the catalog and the step after it sees it applied.
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    let question_up = |cx: &mut VisualTestContext| name_of(cx, "yolo-reason").is_some();
+    let apply = |cx: &mut VisualTestContext, name: &str| {
+        test_support::click(cx, "launcher-search-row");
+        type_in(cx, &format!("tl:{name}"));
+        keys(cx, "enter");
+    };
+    let launch = |helm: &mut farhelm_helm_client::fake::FakeHelm, cx: &mut VisualTestContext| {
+        test_support::click(cx, "launcher-launch");
+        let sent = super::launch_tests::creates(helm, cx);
+        let [create] = &sent[..] else {
+            panic!("Launch sent one create, not {}", sent.len());
+        };
+        create.clone()
+    };
+
+    let first = launch(&mut helm, cx);
+    super::yolo_tests::refuse_for_yolo(&mut helm, cx, first.id);
+    assert!(question_up(cx), "the premise: the question is up");
+    apply(cx, same);
+    // The premise: the template applied (the box emptied, no note says it was refused) and the launcher took no new
+    // question, which would have moved focus to its Cancel.
+    assert_eq!(search_text(cx), "", "the premise: {same} applied");
+    assert!(
+        name_of(cx, "launcher-note").is_none(),
+        "the premise: nothing refused {same}"
+    );
+    assert!(search_focused(cx), "focus stays in the search box");
+    assert!(
+        question_up(cx),
+        "{same} left the launch as it was, so the question stays"
+    );
+    assert!(
+        super::launch_tests::creates(&mut helm, cx).is_empty(),
+        "applying sent nothing"
+    );
+    test_support::click(cx, "prompt-confirm");
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [consented] = &sent[..] else {
+        panic!("the one-off answer sent one create, not {}", sent.len());
+    };
+    let mut expected = first.body.clone().expect("a create body");
+    expected["confirm_yolo"] = serde_json::json!(true);
+    assert_eq!(
+        consented.body.as_ref(),
+        Some(&expected),
+        "the same create, with consent"
+    );
+    helm.reply(
+        consented.id,
+        503,
+        Some(serde_json::json!("refused in this test")),
+    );
+    settle(cx);
+
+    let second = launch(&mut helm, cx);
+    super::yolo_tests::refuse_for_yolo(&mut helm, cx, second.id);
+    assert!(question_up(cx), "the premise: a new question is up");
+    apply(cx, other);
+    assert!(
+        !question_up(cx),
+        "{other} changed the launch, so the question went"
+    );
+    apply(cx, same);
+    assert!(!question_up(cx), "and going back does not bring it back");
+    assert!(
+        super::launch_tests::creates(&mut helm, cx).is_empty(),
+        "nothing more was sent"
+    );
+}
+
+/// An agent template applied over an open YOLO question keeps it when the launch stays the same, and retires it when
+/// the permission changes (yolo-guard.spec's "template edits retain an unchanged YOLO question and retire a changed
+/// one"). Why: the question answers for the launch that was sent, so an application that leaves it so must not make
+/// the user launch again to be asked again. Specified: on a Codex YOLO draft, `tl:yolo-codex` keeps the question and its
+/// one-off answer resends the first create with consent; `tl:guarded` retires a new question; `tl:yolo-codex` again
+/// does not bring it back.
+#[gpui::test]
+fn an_unchanged_agent_template_keeps_the_yolo_question(cx: &mut TestAppContext) {
+    yolo_question_across_templates(
+        cx,
+        super::yolo_tests::yolo_codex_draft(),
+        "yolo-codex",
+        "guarded",
+    );
+}
+
+/// The Command tab's case (yolo-guard.spec's "command templates preserve equal YOLO questions and retire changed
+/// commands"). Specified: on a YOLO-asserted `true`, `tl:cmd-true` keeps the question and its one-off answer resends the
+/// first create with consent; `tl:cmd-other` retires a new question; `tl:cmd-true` again does not bring it back.
+#[gpui::test]
+fn an_unchanged_command_template_keeps_the_yolo_question(cx: &mut TestAppContext) {
+    yolo_question_across_templates(
+        cx,
+        super::yolo_tests::yolo_command_draft(),
+        "cmd-true",
+        "cmd-other",
+    );
 }

@@ -80,7 +80,7 @@ fn only_an_explicit_yolo_choice_offers_guarded() {
 }
 
 /// A Command tab launch of `true`, asserted YOLO, on host1 in `~`.
-fn yolo_command_draft() -> LaunchDraft {
+pub(super) fn yolo_command_draft() -> LaunchDraft {
     let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
     draft.choose_tab(Tab::Command);
     draft.edit_command("true".into());
@@ -89,7 +89,7 @@ fn yolo_command_draft() -> LaunchDraft {
 }
 
 /// A Codex launch with YOLO chosen, on host1 in `~`.
-fn yolo_codex_draft() -> LaunchDraft {
+pub(super) fn yolo_codex_draft() -> LaunchDraft {
     let mut draft = LaunchDraft::new(Some(1), "~".into(), Some(LaunchPermission::Yolo));
     let _ = draft.choose_harness(LaunchHarness::Codex, None, None);
     draft.choose_permissions(Some(LaunchPermission::Yolo));

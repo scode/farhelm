@@ -955,6 +955,16 @@ impl Launcher {
     fn apply_now(&mut self, edit: Batch, window: &mut Window, cx: &mut Context<Self>) {
         // What the agent choices said before the batch, for an escalation banner's Undo to put back.
         let notice_before = self.notice.clone();
+        // An open YOLO question answers for the launch a press sends. A template that leaves that launch as it was just
+        // before the batch keeps the question, as the old launcher did ("while its completed request is unchanged");
+        // one that changes it retires the question with every other edit (`changed`). The old launcher compared with
+        // the refused request instead; the two differ only when something outside the launcher (a source coming back
+        // alive, a re-read preview) changed it meanwhile, and the question's answer sends the current one either way.
+        let asked = self
+            .yolo
+            .is_some()
+            .then(|| self.request(false, cx))
+            .flatten();
         match edit(&mut self.draft, self.catalog.as_deref(), cx) {
             Ok(BatchApplied {
                 notice,
@@ -966,7 +976,10 @@ impl Launcher {
                     self.notice = notice;
                 }
                 self.sync_fields(window, cx);
+                let unchanged = asked.is_some() && asked == self.request(false, cx);
+                let kept = if unchanged { self.yolo.take() } else { None };
                 self.changed(cx);
+                self.yolo = kept;
                 self.follow_escalation(switched_agent, escalation, notice_before, cx);
                 // After the edit, which takes away what the launcher was saying. A banner (a switcher pick's) goes on its
                 // own after the same while as a quick launch's, counted from now, when its template has applied.
@@ -1200,20 +1213,10 @@ impl Launcher {
         self.submit(false, Mark::take(cx), window, cx);
     }
 
-    /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
-    /// first (the YOLO question's answers, `yolo_question`); a plain press never consents. `mark` is the answer the
-    /// reply's moved-on check counts from ([`launch::start`]).
-    fn submit(
-        &mut self,
-        confirm_yolo: bool,
-        mark: Mark,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.refused = None;
-        self.yolo = None;
-        // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
-        self.note = None;
+    /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
+    /// while the launcher refuses the press. Shared by the press ([`Self::submit`]) and by an applied template batch,
+    /// which keeps an open YOLO question while this stays the same (`apply_now`).
+    fn request(&self, confirm_yolo: bool, cx: &App) -> Option<Request> {
         let hosts = self.hosts(cx);
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
@@ -1222,7 +1225,7 @@ impl Launcher {
             preview: self.checkout_preview(cx),
             recipes: &recipes,
         };
-        let request = if self.refusal(cx).is_some() {
+        if self.refusal(cx).is_some() {
             None
         } else {
             match &self.draft.mode {
@@ -1267,7 +1270,25 @@ impl Launcher {
                         }
                     }),
             }
-        };
+        }
+    }
+
+    /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
+    /// first (the YOLO question's answers, `yolo_question`); a plain press never consents. `mark` is the answer the
+    /// reply's moved-on check counts from ([`launch::start`]).
+    fn submit(
+        &mut self,
+        confirm_yolo: bool,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.refused = None;
+        self.yolo = None;
+        // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
+        self.note = None;
+        let hosts = self.hosts(cx);
+        let request = self.request(confirm_yolo, cx);
         // The progress pill's host, captured now for the request's life: the registry's display name, without the
         // footer's phase, or the new environment's label (the old pill named its target the same way). A request exists
         // only for a host the refusal check found among `hosts`.
