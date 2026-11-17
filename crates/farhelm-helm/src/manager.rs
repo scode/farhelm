@@ -11777,10 +11777,9 @@ mod tests {
     /// are already sitting at (with the desktop app, quitting it and opening
     /// it again), never an offer to install. Its recorded error names no
     /// hand-start command: the desktop app starts the helm's own machine's
-    /// supervisor when it opens (or a unit `farhelm helm setup` wrote does),
-    /// so `farhelm supervisor run` is the wrong fix there, and the dial
-    /// (`farhelm_supervisor::service::connect`) leaves the remedy to its
-    /// caller.
+    /// supervisor when it opens, so `farhelm supervisor run` is the wrong fix
+    /// there, and the dial (`farhelm_supervisor::service::connect`) leaves
+    /// the remedy to its caller.
     ///
     /// Runs against the REAL [`SystemTransport`] and a genuinely empty
     /// state directory, not a scripted peer: the whole claim is about how

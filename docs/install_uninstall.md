@@ -7,8 +7,9 @@ the hosts panel (see the docs site's Manage hosts page).
 ## Installation and updates
 
 The installer temporarily supports only the macOS desktop app on Apple silicon, including when invoked under Rosetta.
-Intel Macs and other platforms are refused. Only the installer is limited: Linux remains supported for helms and session
-hosts, and a helm sets up its remote hosts over SSH.
+Intel Macs and other platforms are refused. Only the installer is limited: Linux remains supported for session hosts,
+which the Farhelm app sets up over SSH, and the app also runs on Linux, with its own helm as on macOS. No Linux build of
+the app is released yet, so there you run it from a build of the source, and it does not update itself.
 
 Installation needs `curl`, `tar` with gzip support, and one of `sha256sum`, `shasum` or `openssl` for checksum
 verification.
@@ -136,10 +137,10 @@ Before removing the software, stop local sessions and their additional terminals
 manually started Farhelm processes. **This is your responsibility: uninstall does not detect live sessions or refuse
 because they are running.** On macOS it does refuse while the desktop app (or another Farhelm supervisor or helm using
 the default state directory) holds its state-directory lock. Sessions can survive their supervisor, so quitting the app
-or supervisor alone is not enough. Stop any custom services yourself. Farhelm automatically stops its recognized
-setup-owned Linux services during uninstall.
+or supervisor alone is not enough. Stop any services that run Farhelm yourself; uninstall stops none (see
+[Services from `farhelm helm setup`](#services-from-farhelm-helm-setup)).
 
-Preview the operation without changing files or stopping services:
+Preview the operation without changing files or stopping anything:
 
 ```sh
 farhelm uninstall --dry-run
@@ -173,30 +174,20 @@ file types and ownership; a symlink in place of a claimed file cannot redirect d
 recognized files and the app's empty directories, rather than recursively deleting whatever happens to be inside an
 installation directory or the app.
 
-On Linux, a service is selected only when its systemd unit file identifies it as managed by Farhelm setup and names an
-executable belonging to this installation. These are `farhelm-helm.service` and `farhelm-supervisor.service` in the user
-systemd user unit directory, normally `~/.config/systemd/user` (or beneath `XDG_CONFIG_HOME`). Their first line must be
-`# managed-by: farhelm helm setup`, and their `ExecStart` executable must resolve to this installation's CLI. Selected
-services are stopped and disabled before their files or executables are removed. Custom services and systemd unit files
-belonging to another installation are retained. Systemd service drop-ins are retained and reported, and uninstall leaves
-user lingering settings alone. It does not interpret overrides to establish what a service is actually running; review
-and stop custom service arrangements yourself.
-
 Your session history, attachments, credentials, host registry, preferences, logs and cached payloads remain. The output
 names the known retained state location; custom data locations also remain untouched. Project directories, agent tools
 and their data, programs you installed separately, unrelated files, and shared directories such as `~/.local/bin` and
 `~/Applications` are preserved. There is no purge option. Uninstalling a helm does not remove remote installations or
 stop sessions on remote hosts.
 
-Uninstall also refuses, with nothing removed, when an install, update or setup of this installation holds its lock, and
-when what it is about to remove changed after you confirmed; an install or update started while uninstall is running
-refuses in turn, and so does a setup when Farhelm's services are set up. On a Mac it also refuses while any program
-still runs a version of Farhelm kept in the app, naming the version and the `lsof` command that shows which program it
-is, and on a volume where files cannot be locked, where it says how to remove Farhelm by hand. If you interrupt an
-uninstall after confirming (Ctrl-C, a closed terminal), the app records that an uninstall was interrupted and the retry
-finishes it; on Linux it can leave `.farhelm-install.lock` in the installation's directory, and the retry then refuses
-and names it: once nothing is running, remove it as the message says. The command does not inspect running processes or
-prove that sessions have stopped.
+Uninstall also refuses, with nothing removed, when an install or update of this installation holds its lock, and when
+what it is about to remove changed after you confirmed; an install or update started while uninstall is running refuses
+in turn. On a Mac it also refuses while any program still runs a version of Farhelm kept in the app, naming the version
+and the `lsof` command that shows which program it is, and on a volume where files cannot be locked, where it says how
+to remove Farhelm by hand. If you interrupt an uninstall after confirming (Ctrl-C, a closed terminal), the app records
+that an uninstall was interrupted and the retry finishes it; on Linux it can leave `.farhelm-install.lock` in the
+installation's directory, and the retry then refuses and names it: once nothing is running, remove it as the message
+says. The command does not inspect running processes or prove that sessions have stopped.
 
 An uninstall from 0.31.0 or an earlier release, typed in a session that still runs such a release, refuses the record
 that newer installers write and asks to rerun the installer. Quit Farhelm and run `~/.local/bin/farhelm uninstall` from
@@ -204,17 +195,31 @@ a terminal outside Farhelm instead (or `env -u FARHELM_SUPERVISOR_SOCK ~/.local/
 has the session's variables); if an upgrade was interrupted, run the installer first. Opening Farhelm once on the new
 release also moves its sessions there.
 
+## Services from `farhelm helm setup`
+
+Earlier releases had `farhelm helm setup`, which installed systemd user services running a helm and a supervisor on a
+Linux machine. That command is gone, and uninstall no longer stops or removes those services. If you used it, they stay
+installed and keep running the `farhelm` they were set up with (usually `~/.local/bin/farhelm`): once uninstall removes
+that `farhelm` they fail on their next start, and the helm service fails the next time it starts once that `farhelm` is
+replaced with a release that no longer has `farhelm helm run`. While the helm service runs, the Farhelm app on that
+machine refuses to open, saying Farhelm appears to be already open, because that service holds the lock on the same
+state directory the app uses (unless you set up with a different `--state-dir`); remove the service first. The services
+are `farhelm-helm.service` and, unless you set up with `--no-supervisor`, `farhelm-supervisor.service`, in
+`~/.config/systemd/user` (or `$XDG_CONFIG_HOME/systemd/user`). Each file setup wrote starts with
+`# managed-by: farhelm helm setup`. To remove one, run `systemctl --user disable --now` with its name and delete its
+file. Setup may also have left a `.farhelm-setup.lock` file in that directory, which you can delete with them.
+
 ## Refusals and interrupted removal
 
 A refusal names the path and the check or concrete error that prevented removal. Investigate that evidence rather than
 deleting the named file just to get past the check. Missing or invalid ownership records may require rerunning the
 installer to repair the installation. Preserve any intentional modifications before reinstalling.
 
-Removal can fail after some work has completed, for example if stopping a service or deleting a file fails. The output
-reports completed actions and the failure. Uninstall removes everything else before the files `farhelm uninstall` itself
-needs (on a Mac the Terminal link, the script in `Contents/MacOS/farhelm`, `Contents/Versions/installed`, the folders of
-the version it runs as and the installed version; on Linux the CLI), so you can resolve the problem and rerun the same
-command. Already-removed files do not by themselves prevent retrying. If removal fails within that last group on a Mac,
-what remains of `Farhelm.app` holds no data; move it to the Trash. If only tidying the final executable-directory
-ownership record fails after a Linux CLI is gone, uninstall reports the leftover record without treating the software
-removal as failed. Successful uninstall retains user data and does not mean every trace of Farhelm has been erased.
+Removal can fail after some work has completed, for example if deleting a file fails. The output reports completed
+actions and the failure. Uninstall removes everything else before the files `farhelm uninstall` itself needs (on a Mac
+the Terminal link, the script in `Contents/MacOS/farhelm`, `Contents/Versions/installed`, the folders of the version it
+runs as and the installed version; on Linux the CLI), so you can resolve the problem and rerun the same command.
+Already-removed files do not by themselves prevent retrying. If removal fails within that last group on a Mac, what
+remains of `Farhelm.app` holds no data; move it to the Trash. If only tidying the final executable-directory ownership
+record fails after a Linux CLI is gone, uninstall reports the leftover record without treating the software removal as
+failed. Successful uninstall retains user data and does not mean every trace of Farhelm has been erased.
