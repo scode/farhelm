@@ -925,6 +925,43 @@ fn an_empty_fleet_says_so_in_the_list_and_the_pane(cx: &mut TestAppContext) {
     assert_eq!(sent(&mut fake), []);
 }
 
+/// The old `sidebar.spec.ts` case "the empty-fleet placeholder appears only when proven and yields to auto-select":
+/// the placeholder is a statement about the fleet, so it must go with the first session the helm reports, one made
+/// from the command line or by an agent included, and that session opens by the ordinary automatic choice (SPEC.md,
+/// "Session list"). The rule is a pure function tested on its own (`a_selection_settles_only_on_evidence`); this pins
+/// the list and the pane applying it to a pushed listing. Specified: over a proven empty fleet showing "No sessions —
+/// create one", a pushed listing of p opens p, which is remembered and named in the session query; neither "No
+/// sessions" line is painted any more, and the details bar names p's title.
+#[gpui::test]
+fn a_session_pushed_into_an_empty_fleet_replaces_the_placeholder_and_opens(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, vec![listing(&[], &[])]);
+    assert!(
+        painted(&frame(cx))
+            .iter()
+            .any(|text| text == "No sessions — create one"),
+        "the premise: the placeholder shows"
+    );
+
+    fake.push(change(
+        listing_meta(&["p"], 1, false),
+        &[session("p").title("placeholder cycle")],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("p"));
+    assert_eq!(sent(&mut fake), [remembered("p"), named("p")]);
+    let texts = painted(&frame(cx));
+    for gone in ["No sessions", "No sessions — create one"] {
+        assert!(!texts.iter().any(|text| text == gone), "{gone}: {texts:?}");
+    }
+    assert_eq!(
+        test_support::label(cx, session_pane::details::TITLE_ID).as_deref(),
+        Some("placeholder cycle")
+    );
+}
+
 /// A failed listing is no evidence that any session went, so the rows stay, and the line saying the read failed is the
 /// only sign that they may be out of date; it must go as soon as the helm reads the listing again, or a warning about
 /// a read that has since succeeded stays up for good. The old `readers.spec.ts` case "a failed stop refetch is handed

@@ -2129,6 +2129,65 @@
       ]
     },
     {
+      "id": "app-hosts-clone-shows-sessions",
+      "title": "Clone pressed in Fixture 1's header while the Hosts panel shows (after Escape on Restart with): New prefilled from the session, and the session list back in place of the Hosts panel, since the header's ways into the launcher are New handoffs",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "2"
+      ],
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Destination"
+        ],
+        [
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "click",
+          "id:hosts-panel-toggle"
+        ],
+        [
+          "wait",
+          "id:hosts-panel"
+        ],
+        [
+          "click",
+          "id:session-header-clone"
+        ],
+        [
+          "wait",
+          "--text",
+          "Destination"
+        ],
+        [
+          "wait",
+          "--text",
+          "Recently active"
+        ],
+        [
+          "hover",
+          "text:Destination"
+        ],
+        [
+          "wait",
+          "500"
+        ]
+      ]
+    },
+    {
       "id": "app-settings-sessions",
       "title": "Settings as the rail's gear opens it over the open Fixture 1, at Sessions: its three switches (first in an app run of its own with the scripted backend's fake SSH hosts, which the Hosts scenes after the Settings ones use)",
       "reference": "settings-sessions",

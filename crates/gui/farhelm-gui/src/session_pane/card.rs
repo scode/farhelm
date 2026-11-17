@@ -33,10 +33,12 @@
 //!   working), and it is drawn only when the conversation can be resumed. **Replace** asks its inline question in the
 //!   card, unless Skip session confirmations is on, through `replace::begin` and `confirm` as the row and the header do.
 //!   A legacy launch (a session from before launch kinds) cannot be replaced as it is, so its card offers the
-//!   launcher's Replace with in Replace's place, as the old card did. Restart and Replace start a session, so they wait
-//!   for a host change as the header's and the row's do (`session_list::menu::launch_wait`). Replace with opens the
-//!   launcher, so it waits whenever the launcher cannot open (`session_list::menu::launcher_wait`: a pending launch as
-//!   well as a host change), as the row's and the header's Replace with do, saying why in its hover help.
+//!   launcher's Replace with in Replace's place, as the old card did; once the launcher opens, the sidebar shows
+//!   Sessions in place of the Hosts panel, a New handoff like the header's Replace with… (`super::header`). Restart
+//!   and Replace start a session, so they wait for a host change as the header's and the row's do
+//!   (`session_list::menu::launch_wait`). Replace with opens the launcher, so it waits whenever the launcher cannot
+//!   open (`session_list::menu::launcher_wait`: a pending launch as well as a host change), as the row's and the
+//!   header's Replace with do, saying why in its hover help.
 //! - **While it asks.** The card's open Replace question is a lifecycle confirmation like any other, so it refuses the
 //!   session's other lifecycle actions (SPEC.md: "an open lifecycle confirmation or a pending request refuses another
 //!   lifecycle action"): the header's, the row menu's and the card's own Restart. It is inline, so a press elsewhere
@@ -454,8 +456,13 @@ pub(crate) fn draw(
         // The launcher holds one launch at a time, so a pending launch keeps it from opening as a host change does; the
         // entry point refuses then anyway (`launcher::entry::new_available`), and this says why rather than look ready.
         .busy(launcher_wait.is_some())
+        // A New handoff, as the header's Replace with… is (`super::header`, "Into the launcher from Hosts"): once
+        // the launcher opens, Sessions shows in place of the Hosts panel, as the old card's did through the header's
+        // path.
         .on_click(move |_, window, cx| {
-            launcher::entry::open_replace_with(&owner, window, cx);
+            if launcher::entry::open_replace_with(&owner, window, cx) {
+                session_list::show_sessions(window, cx);
+            }
         })
     } else {
         Button::new(

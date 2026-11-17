@@ -620,6 +620,10 @@ fn a_complete_listing_without_the_session_disables_save_and_keeps_the_draft(
     keys(cx, RENAME);
     keys(cx, "x");
     let typed = field(cx);
+    assert_ne!(
+        typed, "old",
+        "the premise: the typed letter reached the field"
+    );
 
     push(&mut helm, only(&[session("b")]), &["a"], cx);
     let selected = cx.update(|_, cx| crate::local_state::selected(cx));
@@ -648,13 +652,21 @@ fn a_complete_listing_without_the_session_disables_save_and_keeps_the_draft(
 }
 
 /// SPEC.md: "a filtered, truncated, failed, or stale listing is not proof that the session disappeared". Disabling
-/// Save on such a listing would strand the user's edit behind a passing read error. Specified: after each of a
-/// filtered, a truncated and an unavailable listing without `a`, Save stays enabled and Enter sends the rename (whose
-/// refusal keeps the editor open for the next case).
+/// Save on such a listing would strand the user's edit behind a passing read error, and so would losing the draft or
+/// the field's focus (the old `sidebar.spec.ts` case "filtered-list absence retains an enabled rename editor and its
+/// draft"). Specified: after a typed letter, after each of a filtered, a truncated and an unavailable listing without
+/// `a`, Save stays enabled, the field keeps the typed draft and focus, and Enter sends the typed draft (whose refusal
+/// keeps the editor open for the next case).
 #[gpui::test]
 fn a_listing_that_proves_nothing_keeps_save_enabled(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_main(cx, fleet("old"));
     keys(cx, RENAME);
+    keys(cx, "x");
+    let typed = field(cx);
+    assert_ne!(
+        typed, "old",
+        "the premise: the typed letter reached the field"
+    );
     let counts = |matching, truncated| ListCounts {
         total: 2,
         matching,
@@ -677,8 +689,11 @@ fn a_listing_that_proves_nothing_keeps_save_enabled(cx: &mut TestAppContext) {
         let opened = editor(cx);
         let unavailable = cx.update(|_, cx| opened.read(cx).unavailable);
         assert!(!unavailable, "{what}: Save stays enabled");
+        assert_eq!(field(cx), typed, "{what}: the typed draft is kept");
+        assert!(field_focused(cx), "{what}: focus stays in the field");
         keys(cx, "enter");
-        let (id, _) = one_rename(&mut helm);
+        let (id, title) = one_rename(&mut helm);
+        assert_eq!(title, json!(typed), "{what}: Save sends the kept draft");
         helm.reply(id, 500, Some(json!("try again")));
         settle(cx);
         assert!(any_open(cx), "{what}: the editor stays open");
