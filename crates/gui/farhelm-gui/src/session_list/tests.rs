@@ -79,6 +79,9 @@ pub(crate) struct Fixture {
     no_launch_repository: bool,
     /// The session's shared pin position when it is pinned; `None` for an unpinned row.
     pin: Option<i64>,
+    /// The agent kind the supervisor recorded, in the helm's wire form (`generic` for a command it knows nothing
+    /// about), when the test names one; else the helm fixture's, `codex`.
+    agent_kind: Option<&'static str>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -102,6 +105,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         working_copy: None,
         no_launch_repository: false,
         pin: None,
+        agent_kind: None,
     }
 }
 
@@ -192,6 +196,12 @@ impl Fixture {
         self.pin = Some(position);
         self
     }
+    /// The session recorded as an agent of `kind` (`"generic"` for a plain command, which the menu header then names by
+    /// its program).
+    pub(crate) fn agent_kind(mut self, kind: &'static str) -> Self {
+        self.agent_kind = Some(kind);
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -236,6 +246,9 @@ impl Fixture {
         value["pin_position"] = json!(self.pin);
         if self.no_launch_repository {
             value["github_repo"] = Value::Null;
+        }
+        if let Some(kind) = self.agent_kind {
+            value["agent_kind"] = json!(kind);
         }
         entry
     }

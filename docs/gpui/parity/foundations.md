@@ -54,7 +54,33 @@ replaced
 
 Tests: 3. Covers: interface and technical values load their own bundled font roles.
 
-not yet ported
+partly
+
+- crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_directory_is_drawn_in_the_monospace_face` (interface and
+  technical values: a row's directory in the monospace face beside its title in the proportional interface face)
+- crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_ages_and_the_command_line_are_drawn_in_the_monospace_face`
+  (the same case: a row's age, and the details bar's command line and age)
+- crates/gui/farhelm-gui/src/session_list/row_tests.rs `the_menu_summary_draws_a_commands_program_in_the_monospace_face`
+  (the same case: the row menu's summary draws a command session's program in the monospace face)
+- crates/gui/farhelm-gui/src/host_text.rs `a_mono_part_is_drawn_in_the_monospace_face` (the shared sentence's monospace
+  host parts) and crates/gui/farhelm-gui/src/terminal/tests.rs
+  `the_cell_is_the_bundled_fonts_advance_by_its_ascent_plus_descent` (the terminal's bundled face)
+- crates/gui/farhelm-gui/src/templates/summary_tests.rs `template_values_are_host_text` (template summaries split
+  command fonts: the wrapper prefix and flags as monospace parts beside labels in words, in the Templates dialog and the
+  quick switcher alike)
+
+Not yet ported:
+
+- of the first case, the row's host name and the list heading's New button in the interface face (this area's); the
+  launcher's search field in the interface face, its Folder and Agent command fields in the monospace face, and its
+  search's "Use this path" and "Browse this path" rows, words in the interface face and paths in the monospace face (the
+  launcher area's); and the version readout (desktop integration's `update_readout/view/tests.rs`, pending there)
+- the second case, the Trash dialog's archive times (other dialogs')
+- of the third, the number keys' equal-width digits (templates and quick launch's)
+
+"A bundled face loaded" has no case here, since the fonts are built into the app (`assets.rs`). The row's pin glyph is
+not measured: no bundled face but the monospace one has it, so the text system draws it from that face whichever face
+the row asks for, and a width cannot say which one did; the row asks for the monospace face, as the old stylesheet did.
 
 ### `tests/modal-layout.spec.ts`
 
@@ -70,18 +96,44 @@ partly: crates/gui/farhelm-gui/src/components/tests/dialog.rs `a_long_dialog_bod
 
 ### `tests/modal-trap.spec.ts`
 
-Tests: 4. Covers: the ${mode} switcher wraps search and close, excluding result options.
+Tests: 5. Covers: the ${mode} switcher wraps search and close, excluding result options.
 
-partly: crates/gui/farhelm-gui/src/focus_tests.rs `tab_stays_inside_the_topmost_dialog`,
+replaced: crates/gui/farhelm-gui/src/focus_tests.rs `tab_stays_inside_the_topmost_dialog`,
 crates/gui/farhelm-gui/src/layers_tests.rs `tab_stays_inside_an_open_menu`
+
+- crates/gui/farhelm-gui/src/session_list/quick_switcher/tests.rs
+  `tab_walks_the_search_field_and_close_and_skips_the_rows_in_either_mode` (the sessions and the templates switcher wrap
+  search and Close, excluding result options: one test for both modes, under both answers of macOS's Keyboard navigation
+  setting, which makes Tab skip Close while it is off)
+- crates/gui/farhelm-gui/src/session_list/rename/tests.rs `tab_walks_close_the_field_cancel_and_save_and_wraps` (Rename
+  wraps Close through Save: under both answers of macOS's Keyboard navigation setting, which leaves only the field a Tab
+  stop while it is off), and crates/gui/farhelm-gui/src/layers_tests.rs `an_approval_card_stays_usable_over_a_dialog`
+  (the real approval stays usable meanwhile;
+  [Approvals and agent-spawned sessions](approvals-and-agent-spawned-sessions.md) lists that case too)
+- crates/gui/farhelm-gui/src/layers_tests.rs `the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus`,
+  crates/gui/farhelm-gui/src/launcher/view_tests.rs `cancel_and_the_host_button_are_tab_stops` and
+  crates/gui/farhelm-gui/src/session_list/order/tests.rs
+  `new_opens_the_launcher_and_closing_returns_focus_to_the_button` (ordinary New isolates the page and wraps its
+  controls; the late sibling made inert is the browser's DOM, with nothing to port)
+- crates/gui/farhelm-gui/src/templates/dialog_tests.rs `a_write_in_flight_leaves_focus_and_the_dialog_alone` and
+  crates/gui/farhelm-gui/src/focus_tests.rs `tab_in_a_dialog_of_buttons_stays_put_where_tab_skips_buttons` (busy
+  Templates contains Tab with no enabled control: the premise does not arise, since the dialog's controls turn busy, not
+  disabled, while a write runs and keep focus, and a dialog none of whose controls Tab reaches keeps focus where it is)
 
 ### `tests/modal-focus.spec.ts`
 
 Tests: 1. Covers: rename keeps focus in its field when the selected tab goes away.
 
 partly: crates/gui/farhelm-gui/src/focus_tests.rs
-`focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control` (home never takes focus from a control); the
-case itself needs the rename dialog and the terminal
+`focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control` (home never takes focus from a control)
+
+- crates/gui/farhelm-gui/src/focus_tests.rs `choosing_a_terminal_while_a_dialog_is_open_leaves_focus_in_the_dialog` (a
+  terminal chosen while a dialog is open leaves focus in the dialog)
+- crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_reaped_tab_leaves_focus_on_an_open_header_question` (a reaped tab
+  leaves focus on an open header question, the case's twin)
+
+The case itself, a reaped tab under an open Rename leaving the field focused and typing in it, is not yet ported; it
+belongs with that twin in the terminal area's `terminal/set/tests.rs`.
 
 ### `tests/keyboard-scroll.spec.ts`
 
@@ -124,6 +176,43 @@ Tests: 18. Covers: a session's title and open area share its summary card.
 
 partly: crates/gui/farhelm-gui/src/components/tests/hover_help.rs tooltip tests; the session-row cases are in the
 sidebar's parity file
+
+- the nine session-row cases, from "a session's title and open area share its summary card" to "moving to the next mark
+  while a tooltip shows replaces it at once" and the superseded "a card target clones its hidden source into the shared
+  tooltip": [Sidebar and session view](sidebar-and-session-view.md), `tests/tooltip.spec.ts` (its session-row cases)
+- crates/gui/farhelm-gui/src/components/tests/hover_help.rs
+  `pointer_help_at_the_top_edge_sits_below_its_control_clear_of_the_pointer` (the version at the top edge gets its
+  tooltip below, clear of the cursor: pointer help is placed against its control, centered above it, or 28 pixels below
+  it when there is no room above, as help shown for keyboard focus already was)
+- crates/gui/farhelm-gui/src/components/tests/hover_help.rs
+  `moving_inside_a_control_while_its_help_waits_starts_the_wait_again` and
+  `a_pointer_moving_over_a_control_leaves_a_wait_keyboard_focus_began` (the delay restarts while the pointer keeps
+  moving inside a target, and only for a wait the pointer began)
+- crates/gui/farhelm-gui/src/components/tests/hover_help.rs
+  `a_press_puts_a_controls_help_away_while_the_pointer_rests_on_it` and
+  `a_press_in_the_same_update_as_the_move_onto_a_mark_puts_the_marks_help_away` (a press or Escape dismisses the tooltip
+  until the pointer leaves: the press half; the Escape half is a deviation, below)
+- crates/gui/farhelm-gui/src/components/tests/hover_help.rs
+  `keyboard_focus_shows_a_controls_help_after_the_delay_and_a_click_does_not` (keyboard focus shows the focused
+  control's tooltip)
+- crates/gui/farhelm-gui/src/components/tests/hover_help.rs
+  `focus_help_goes_with_focus_and_escape_keeps_it_down_until_focus_moves` (an Escape dismissal ends when focus leaves
+  the control)
+- touch input never shows a tooltip, and the page carries no native title tooltips: nothing to port, since the app takes
+  no touch input, and GPUI draws no native tooltips while every control constructor takes its hover help
+  (`tests/tooltip-coverage.spec.ts` below)
+- quiet focus survives asset reinstall and allows the first later hover: the reinstall was the browser reloading its
+  scripts, with nothing to port; quiet focus itself is a recorded deviation
+  (crates/gui/farhelm-gui/src/layers/tooltip.rs, the second NOTE: every keyboard landing shows help)
+
+Not yet ported: "a card follows only its marked step list after every clone", which in the GPUI app means the host
+progress card keeping the current step whole as the run moves on; it is the settings and hosts area's, in
+`hosts/progress/card/tests.rs`.
+
+Deviation, decided by the migration's orchestrator on 2026-11-16: after Escape puts a control's help away, the next
+pointer move over the control brings it back after the delay, where the old app kept it down until the pointer left the
+control. GPUI ends every hover on a key press, so the move after Escape begins a new hover, as the pointer arriving
+would. crates/gui/farhelm-gui/src/layers/tooltip.rs's first NOTE lists it with the other ways a dismissal differs.
 
 ### `tests/tooltip-coverage.spec.ts`
 

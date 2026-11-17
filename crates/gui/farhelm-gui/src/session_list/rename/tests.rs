@@ -5,6 +5,9 @@
 //! the tests reach the open editor through [`layers::last_opened`] (test builds only). Every step ends in
 //! one of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::DeleteGuard;
@@ -16,6 +19,7 @@ use serde_json::{Value, json};
 
 use super::RenameEditor;
 use crate::actions::RENAME_SESSION_CHORD;
+use crate::focus::{self, TabReach};
 use crate::layers;
 use crate::main_view::MainView;
 use crate::operations::OpKey;
@@ -206,6 +210,53 @@ fn the_header_close_closes_the_editor_like_escape(cx: &mut TestAppContext) {
     test_support::click(cx, "rename-close");
     assert!(!any_open(cx), "Close closed the editor");
     assert!(terminal_focused(cx), "focus went to the terminal");
+}
+
+/// The old `modal-trap.spec.ts` case "Rename wraps Close through Save while a real approval remains usable", its Rename
+/// half (the approval half is the layer manager's `an_approval_card_stays_usable_over_a_dialog`): Tab walks the dialog
+/// in reading order, the header's Close, the field, then the footer's Cancel and Save, and never leaves it, so the
+/// header's Close coming first does not take the field's opening focus. On macOS, Tab skips buttons unless the system's
+/// Keyboard navigation setting is on, so the test runs under both answers of that setting.
+/// Specified, opened by the shortcut from a's terminal with focus in the field: where Tab reaches every control, Tab
+/// moves to Cancel, Save, Close (wrapping) and back to the field, and Shift+Tab then to Close and Save; where Tab skips
+/// buttons, Tab and Shift+Tab each leave focus in the field.
+#[gpui::test]
+fn tab_walks_close_the_field_cancel_and_save_and_wraps(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_main(cx, fleet("old"));
+    let reach = Rc::new(Cell::new(TabReach::EveryControl));
+    let source = reach.clone();
+    cx.update(|_, cx| focus::follow_tab_reach(Rc::new(move || source.get()), cx));
+    keys(cx, RENAME);
+    assert!(field_focused(cx), "the premise: focus starts in the field");
+
+    for next in ["rename-cancel", "rename-save", "rename-close"] {
+        keys(cx, "tab");
+        assert_eq!(test_support::focused_id(cx).as_deref(), Some(next), "Tab");
+    }
+    keys(cx, "tab");
+    assert!(field_focused(cx), "Tab from Close came to the field");
+    for next in ["rename-close", "rename-save"] {
+        keys(cx, "shift-tab");
+        assert_eq!(
+            test_support::focused_id(cx).as_deref(),
+            Some(next),
+            "Shift+Tab"
+        );
+    }
+
+    keys(cx, "tab tab");
+    assert!(
+        field_focused(cx),
+        "the premise: Tab from Save wrapped to Close and then the field"
+    );
+    reach.set(TabReach::TextFieldsAndPopups);
+    for key in ["tab", "shift-tab"] {
+        keys(cx, key);
+        assert!(
+            field_focused(cx),
+            "{key} skipped the buttons and stayed in the field"
+        );
+    }
 }
 
 /// The shortcut acts on the open session only; with none there is nothing to rename, and it must still not reach a
