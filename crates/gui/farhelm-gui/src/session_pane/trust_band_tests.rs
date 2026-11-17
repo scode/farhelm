@@ -1,18 +1,22 @@
-//! Tests of Claude's trust hint band (`trust_band.rs`): when it shows, where it sits, what it reads and when, its three
-//! buttons, and its failure line. They port the old `claude-trust.spec.ts` (reference commit `24bc0580`), whose four
-//! cases are named on the tests that replace them.
+//! Tests of the trust hint band (`trust_band.rs`): when it shows, where it sits, what it reads and when, its three
+//! buttons, its failure line, and which agent it speaks for. They port the old `claude-trust.spec.ts` and the band's
+//! half of `workspace-trust.spec.ts` (reference commit `24bc0580`), whose cases are named on the tests that replace
+//! them. The rules every agent's band shares are tested on Claude's; Codex's and Muse's tests cover what is the agent's
+//! own (its words, its switch, its dismissal and its occurrences).
 //!
 //! The window tests run the real main view over the helm client's fake, whose terminal streams the connection serves,
-//! and read what the window drew from GPUI's driver record of the frame. The open session is `a`, at Claude's question
-//! in the helm fixture's managed checkout. The fake answers commands only in the order they were sent, as the helm
-//! does, so the tests keep what the window sent ([`Trust::pending`]) and answer up to the one they mean, answering
-//! everything before it as an ordinary success. Claude's trust reads and the band's dismissals are never answered that
-//! way: a test answers each one itself.
+//! and read what the window drew from GPUI's driver record of the frame. The open session is `a`, at the question of
+//! the agent under test ([`Agent`]; Claude unless a test names another) in the helm fixture's managed checkout. The
+//! fake answers commands only in the order they were sent, as the helm does, so the tests keep what the window sent
+//! ([`Trust::pending`]) and answer up to the one they mean, answering everything before it as an ordinary success. The
+//! reads of the agent under test's trust and the band's dismissals are never answered that way: a test answers each
+//! one itself.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeCommand;
+use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, KeyedEntry, PREFERENCES_KEY, Preferences,
+    Collection, CollectionChanges, KeyedEntry, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use gpui::{Bounds, Pixels, Role, TestAppContext, px, size};
 use serde_json::{Value, json};
@@ -33,58 +37,139 @@ use crate::ticker;
 
 /// Claude's trust route, which the band and Settings both read.
 const CLAUDE_TRUST: &str = "/api/checkout-claude-trust";
+/// The shared trust route of the other agents, which ends in the agent's word.
+const AGENT_TRUST: &str = "/api/checkout-agent-trust/";
+
+/// An agent the band speaks for, as these tests see it from outside: where its trust is read, where its dismissal is
+/// stored, its switch in Settings, and a session at its question.
+#[derive(Clone, Copy)]
+struct Agent {
+    route: &'static str,
+    field: &'static str,
+    switch: &'static str,
+    asking: fn(&'static str) -> Fixture,
+}
+
+const CLAUDE: Agent = Agent {
+    route: CLAUDE_TRUST,
+    field: "claude_trust_hint_dismissed",
+    switch: "settings-claude-trust",
+    asking: claude_asking,
+};
+const CODEX: Agent = Agent {
+    route: "/api/checkout-agent-trust/codex",
+    field: "codex_trust_hint_dismissed",
+    switch: "settings-codex-trust",
+    asking: codex_asking,
+};
+const MUSE: Agent = Agent {
+    route: "/api/checkout-agent-trust/muse",
+    field: "muse_trust_hint_dismissed",
+    switch: "settings-muse-trust",
+    asking: muse_asking,
+};
+
+/// The session filed under `key` at Claude's question, in the helm fixture's managed checkout, whatever its launch.
+fn claude_asking(key: &'static str) -> Fixture {
+    session(key).at_claude_trust_question()
+}
+
+/// The session filed under `key` launched as Codex, at the workspace-trust question in the helm fixture's checkout.
+fn codex_asking(key: &'static str) -> Fixture {
+    session(key)
+        .launch(launched("codex"))
+        .at_workspace_trust_question()
+}
+
+/// The same for Muse.
+fn muse_asking(key: &'static str) -> Fixture {
+    session(key)
+        .launch(launched("muse"))
+        .at_workspace_trust_question()
+}
+
+/// A structured agent launch of the harness whose wire name is `harness`, in the helm's wire form.
+fn launched(harness: &str) -> Value {
+    json!({
+        "kind": "agent",
+        "selection": {"harness": harness, "permissions": null},
+        "start": [harness, "{farhelm_args}"],
+        "resume": null,
+    })
+}
+
+/// A command launch of `codex` that declares Codex, which names no structured harness.
+fn command_launch() -> Value {
+    json!({"kind": "command", "command": "codex", "yolo": false, "agent": "codex", "resume": null})
+}
 
 /// The open session: at Claude's question, in the helm fixture's managed checkout.
 fn a() -> Fixture {
-    session("a").at_claude_trust_question()
+    claude_asking("a")
 }
 
-/// The main window over `a` (open) and `b`, and the commands it sent that the test has not answered yet.
+/// The main window over `a` (open) and `b`, the agent under test, and the commands the window sent that the test has
+/// not answered yet.
 struct Trust<'a> {
     main: MainWindow<'a>,
+    agent: Agent,
     pending: Vec<FakeCommand>,
 }
 
-/// The window with `a` open, its terminal live and focused, and the band's first read of Claude's trust sent.
+/// The window with `a` open at Claude's question, its terminal live and focused, and the band's first read sent.
 fn open(cx: &mut TestAppContext) -> Trust<'_> {
-    let mut main = test_support::open_main(cx, snapshot(&[(a(), 0), (session("b"), 0)], false));
+    open_as(cx, CLAUDE)
+}
+
+/// The window with `a` open at `agent`'s question, its terminal live and focused, and the band's first read of
+/// `agent`'s trust sent.
+fn open_as(cx: &mut TestAppContext, agent: Agent) -> Trust<'_> {
+    let fleet = [((agent.asking)("a"), 0), (session("b"), 0)];
+    let mut main = test_support::open_main(cx, snapshot(&fleet, false));
     // Tall enough for Settings at Agent trust to show Claude's hint switch without scrolling.
     main.cx.simulate_resize(size(px(1600.), px(1000.)));
     main.terminal_live();
     Trust {
         main,
+        agent,
         pending: Vec::new(),
     }
 }
 
-/// Whether `command` is a read of Claude's trust.
-fn claude_read(command: &FakeCommand) -> bool {
-    command.method == Method::Get && command.path == CLAUDE_TRUST
-}
-
-/// Whether `command` saves the shared dismissal of Claude's trust hint.
-fn dismissal(command: &FakeCommand) -> bool {
-    command.method == Method::Put
-        && command.path == "/api/preferences"
-        && command
-            .body
-            .as_ref()
-            .is_some_and(|body| body.get("claude_trust_hint_dismissed").is_some())
+/// Whether `command` reads any agent's trust.
+fn any_trust_read(command: &FakeCommand) -> bool {
+    command.method == Method::Get
+        && (command.path == CLAUDE_TRUST || command.path.starts_with(AGENT_TRUST))
 }
 
 impl Trust<'_> {
+    /// Whether `command` is a read of the agent under test's trust.
+    fn is_read(&self, command: &FakeCommand) -> bool {
+        command.method == Method::Get && command.path == self.agent.route
+    }
+
+    /// Whether `command` saves the shared dismissal of the agent under test's hint.
+    fn is_dismissal(&self, command: &FakeCommand) -> bool {
+        command.method == Method::Put
+            && command.path == "/api/preferences"
+            && command
+                .body
+                .as_ref()
+                .is_some_and(|body| body.get(self.agent.field).is_some())
+    }
+
     /// Take what the window sent since the last call into [`Trust::pending`].
     fn take(&mut self) {
         let sent = self.main.helm.commands();
         self.pending.extend(sent);
     }
 
-    /// The reads of Claude's trust waiting for an answer, in order: the band's and Settings' alike.
-    fn claude_reads(&mut self) -> Vec<u64> {
+    /// The reads of the agent under test's trust waiting for an answer, in order: the band's and Settings' alike.
+    fn reads(&mut self) -> Vec<u64> {
         self.take();
         self.pending
             .iter()
-            .filter(|command| claude_read(command))
+            .filter(|command| self.is_read(command))
             .map(|command| command.id)
             .collect()
     }
@@ -94,14 +179,14 @@ impl Trust<'_> {
         self.take();
         self.pending
             .iter()
-            .filter(|command| dismissal(command))
+            .filter(|command| self.is_dismissal(command))
             .map(|command| (command.id, command.body.clone().unwrap_or_default()))
             .collect()
     }
 
     /// Answer command `id` with `status` and `body`, after answering every command sent before it: another agent's
-    /// trust read as off, and anything else as a success with no body. Panics when one of those is a read of Claude's
-    /// trust or a dismissal, which a test must answer itself.
+    /// trust read as off, and anything else as a success with no body. Panics when one of those is a read of the agent
+    /// under test's trust or a dismissal, which a test must answer itself.
     fn answer(&mut self, id: u64, status: u16, body: Option<Value>) {
         self.take();
         let at = self
@@ -127,19 +212,18 @@ impl Trust<'_> {
     }
 
     /// Answer `command` the ordinary way: another agent's trust read as off, anything else as a success with no body.
-    /// Panics on a read of Claude's trust or a dismissal, which a test must answer itself.
+    /// Panics on a read of the agent under test's trust or a dismissal, which a test must answer itself.
     fn ordinary(&mut self, command: &FakeCommand) {
         assert!(
-            !claude_read(command) && !dismissal(command),
+            !self.is_read(command) && !self.is_dismissal(command),
             "answer {command:?} first"
         );
-        let reply = (command.method == Method::Get
-            && command.path.starts_with("/api/checkout-agent-trust/"))
-        .then(|| json!({ "enabled": false, "hint_dismissed": false }));
+        let reply =
+            any_trust_read(command).then(|| json!({ "enabled": false, "hint_dismissed": false }));
         self.main.helm.reply(command.id, 200, reply);
     }
 
-    /// Answer the read of Claude's trust `id`: on as `enabled` says.
+    /// Answer the read of the agent under test's trust `id`: on as `enabled` says.
     fn trust_is(&mut self, id: u64, enabled: bool) {
         self.answer(
             id,
@@ -153,13 +237,13 @@ impl Trust<'_> {
         self.answer(id, 503, Some(json!("fixture refusal")));
     }
 
-    /// The one read of Claude's trust waiting, which must be the only one.
+    /// The one read of the agent under test's trust waiting, which must be the only one.
     fn one_read(&mut self) -> u64 {
-        let reads = self.claude_reads();
+        let reads = self.reads();
         assert_eq!(
             reads.len(),
             1,
-            "one read of Claude's trust is out: {reads:?}"
+            "one read of the agent's trust is out: {reads:?}"
         );
         reads[0]
     }
@@ -185,20 +269,21 @@ impl Trust<'_> {
         )
     }
 
-    /// The helm pushes the preference row with the hint's dismissal stored as `dismissed`.
+    /// The helm pushes the preference row with the agent under test's dismissal stored as `dismissed`, and no other.
     fn dismissed_is(&mut self, dismissed: Option<bool>) {
         let preferences = Preferences {
             visit_history: vec!["a".into()],
             welcome_seen: Some(true),
-            claude_trust_hint_dismissed: dismissed,
             ..Preferences::default()
         };
+        let mut value = serde_json::to_value(preferences).unwrap();
+        value[self.agent.field] = json!(dismissed);
         self.main.helm.push(CollectionChanges {
             collection: Collection::Preferences,
             meta: meta(&[PREFERENCES_KEY]),
             upsert: vec![KeyedEntry {
                 key: PREFERENCES_KEY.into(),
-                value: serde_json::to_value(preferences).unwrap(),
+                value,
             }],
             remove: Vec::new(),
         });
@@ -327,7 +412,7 @@ fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
         test_support::label(trust.main.cx, SETTINGS_ID).as_deref(),
         Some("Settings and caveats")
     );
-    assert!(trust.claude_reads().is_empty(), "one read");
+    assert!(trust.reads().is_empty(), "one read");
 }
 
 /// The band belongs to Claude's question in a managed checkout's agent terminal only: a folder the user chose keeps
@@ -340,7 +425,7 @@ fn only_a_managed_checkouts_agent_terminal_shows_the_band(cx: &mut TestAppContex
     trust.shown();
     trust.a_is(a().unmanaged());
     assert!(!trust.shows());
-    assert!(trust.claude_reads().is_empty(), "nothing to read for");
+    assert!(trust.reads().is_empty(), "nothing to read for");
 
     push(
         &mut trust.main.helm,
@@ -395,19 +480,13 @@ fn closing_settings_reads_trust_again(cx: &mut TestAppContext) {
 fn a_tick_reads_trust_again_while_the_band_shows(cx: &mut TestAppContext) {
     let mut trust = open(cx);
     trust.shown();
-    assert!(
-        trust.claude_reads().is_empty(),
-        "the premise: no read is out"
-    );
+    assert!(trust.reads().is_empty(), "the premise: no read is out");
     test_support::advance(trust.main.cx, ticker::CLOCK_PERIOD);
     let read = trust.one_read();
     trust.trust_is(read, true);
     assert!(!trust.shows(), "turned on elsewhere");
     test_support::advance(trust.main.cx, ticker::CLOCK_PERIOD);
-    assert!(
-        trust.claude_reads().is_empty(),
-        "no tick while the band is away"
-    );
+    assert!(trust.reads().is_empty(), "no tick while the band is away");
 }
 
 /// A tick must not pile reads on a helm slower than the clock: the helm answers in order, so each late answer would be
@@ -434,7 +513,7 @@ fn only_the_newest_trust_read_counts(cx: &mut TestAppContext) {
     let first = trust.one_read();
     trust.open_settings();
     trust.close_settings();
-    let reads = trust.claude_reads();
+    let reads = trust.reads();
     assert_eq!(reads.len(), 2, "a second read: {reads:?}");
 
     trust.trust_is(first, false);
@@ -647,4 +726,184 @@ fn a_dont_show_again_while_another_preference_save_is_out_says_why(cx: &mut Test
         test_support::label(trust.main.cx, ERROR_ID).as_deref(),
         Some(&*busy)
     );
+}
+
+// ---- Which agent asks -----------------------------------------------------------------------------------------------
+
+/// The flag-based agents' explanation after their lead (the old `AgentTrustBand`'s).
+const FLAG: &str = "Farhelm can answer it for managed checkouts through a command-line flag. It's off by default \
+                    because repository hooks, settings and commands are then trusted.";
+
+/// The agent the band names decides whose switch it advertises and whose dismissal it stores, so a session must never
+/// borrow another agent's: the harness-neutral question flag says only that some agent asks (the old
+/// `TrustAgent::for_session`). Specified (`TrustAgent::asking`): Claude's own flag names Claude whatever the launch;
+/// without it, the neutral flag names Codex or Muse for a structured launch of that harness, and no agent for every
+/// other harness (Pi, whose approval is not a recognized question, and Claude, whose question has its own flag), for a
+/// command launch declaring Codex, or for a legacy session stored as Codex; with neither flag, no agent.
+#[test]
+fn only_a_sessions_own_launch_names_the_agent_asking() {
+    let flagged = [
+        (LaunchHarness::Codex, TrustAgent::Codex),
+        (LaunchHarness::Muse, TrustAgent::Muse),
+    ];
+    let mut launches: Vec<(Value, Option<TrustAgent>)> = LaunchHarness::ALL
+        .iter()
+        .map(|harness| {
+            let name = serde_json::to_value(harness).unwrap();
+            let named = flagged.iter().find(|(flag, _)| flag == harness);
+            (
+                launched(name.as_str().unwrap()),
+                named.map(|(_, agent)| *agent),
+            )
+        })
+        .collect();
+    launches.push((command_launch(), None));
+    let legacy = json!({
+        "kind": "legacy", "invocation": "codex", "agent_kind": "codex", "resume_template": null,
+    });
+    launches.push((legacy, None));
+    for (launch, named) in launches {
+        for (claude, workspace) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut fixture = session("a").launch(launch.clone());
+            if claude {
+                fixture = fixture.at_claude_trust_question();
+            }
+            if workspace {
+                fixture = fixture.at_workspace_trust_question();
+            }
+            let row: SessionRow = serde_json::from_value(fixture.entry().value).unwrap();
+            let expected = match (claude, workspace) {
+                (true, _) => Some(TrustAgent::Claude),
+                (false, true) => named,
+                (false, false) => None,
+            };
+            assert_eq!(
+                TrustAgent::asking(&row.info),
+                expected,
+                "{launch} with the Claude flag {claude} and the neutral flag {workspace}"
+            );
+        }
+    }
+}
+
+/// SPEC.md: "Codex and Muse show the same nonmodal discovery hint ... The hint names the agent, offers Settings at its
+/// switch in Agent trust and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent" (the
+/// old `workspace-trust.spec.ts`, "${name} trust hint stays scoped to its managed agent terminal and own dismissal", its
+/// band half; the gates every agent's band shares are tested on Claude's above). Specified for `agent`, named `name`,
+/// with `other` the other flag-based agent: with `a` at `agent`'s question and its trust read off, the band shows the
+/// old words naming the agent and a Settings button; Settings opens with focus on `agent`'s switch once its read
+/// answers, and closing it reads `agent`'s trust again; × hides the band and stores nothing, `a` pushed at `other`'s
+/// question shows `other`'s band, and `a` pushed at `agent`'s question again shows the band, a new occurrence; Don't
+/// show again sends `agent`'s dismissal field alone, and with it stored the band stays away while `a` pushed at
+/// `other`'s question shows `other`'s.
+fn a_flag_agents_band_is_its_own(cx: &mut TestAppContext, agent: Agent, other: Agent, name: &str) {
+    let mut trust = open_as(cx, agent);
+    trust.shown();
+    assert_eq!(
+        test_support::label(trust.main.cx, COPY_ID),
+        Some(format!("{name} asks about trust for this checkout. {FLAG}"))
+    );
+    assert_eq!(
+        test_support::label(trust.main.cx, SETTINGS_ID).as_deref(),
+        Some("Settings")
+    );
+
+    click(trust.main.cx, SETTINGS_ID);
+    assert!(any_open(trust.main.cx), "Settings opened");
+    let settings_read = trust.one_read();
+    trust.trust_is(settings_read, false);
+    trust.answer_rest();
+    assert_eq!(
+        test_support::focused_id(trust.main.cx).as_deref(),
+        Some(agent.switch)
+    );
+    trust.close_settings();
+    let read = trust.one_read();
+    trust.trust_is(read, false);
+    assert!(trust.shows(), "back after Settings closed");
+
+    click(trust.main.cx, HIDE_ID);
+    assert!(!trust.shows());
+    assert!(trust.dismissals().is_empty(), "× stores nothing");
+    trust.a_is((other.asking)("a"));
+    trust.answer_rest();
+    assert!(
+        trust.shows(),
+        "another agent's question is not the hidden one"
+    );
+    trust.a_is((agent.asking)("a"));
+    let read = trust.one_read();
+    trust.trust_is(read, false);
+    assert!(trust.shows(), "a new occurrence");
+
+    click(trust.main.cx, DISMISS_ID);
+    assert!(!trust.shows(), "hidden while the save is out");
+    let dismissals = trust.dismissals();
+    assert_eq!(dismissals.len(), 1);
+    let mut alone = json!({});
+    alone[agent.field] = json!(true);
+    assert_eq!(dismissals[0].1, alone);
+    let read = trust.one_read();
+    trust.dismissed_is(Some(true));
+    trust.answer(dismissals[0].0, 204, None);
+    trust.trust_is(read, false);
+    assert!(!trust.shows(), "dismissed");
+    trust.a_is((other.asking)("a"));
+    trust.answer_rest();
+    assert!(trust.shows(), "the other agent's hint is not dismissed");
+}
+
+/// Codex's band, as [`a_flag_agents_band_is_its_own`] specifies it, with Muse as the other agent.
+#[gpui::test]
+fn codexs_band_is_its_own(cx: &mut TestAppContext) {
+    a_flag_agents_band_is_its_own(cx, CODEX, MUSE, "Codex");
+}
+
+/// Muse's band, as [`a_flag_agents_band_is_its_own`] specifies it, with Codex as the other agent.
+#[gpui::test]
+fn muses_band_is_its_own(cx: &mut TestAppContext) {
+    a_flag_agents_band_is_its_own(cx, MUSE, CODEX, "Muse");
+}
+
+/// SPEC.md: "Pi has a switch but no hint band", and a session whose launch names no harness must not borrow Codex's
+/// switch or dismissal from the neutral question flag (the old `workspace-trust.spec.ts`, "Pi and command launches do
+/// not borrow a workspace trust hint"). Specified: with `a` a Pi launch and `b` a command launch declaring Codex, both
+/// at the workspace-trust question in a managed checkout, opening either sends no read of any agent's trust and `a`,
+/// whose agent terminal is live, shows no band; `b` pushed as the fixture's Codex launch at the same question then
+/// sends a read, so the silence was the launch's doing.
+#[gpui::test]
+fn pi_and_command_launches_borrow_no_band(cx: &mut TestAppContext) {
+    let pi = session("a")
+        .launch(launched("pi"))
+        .at_workspace_trust_question();
+    let command = session("b")
+        .launch(command_launch())
+        .at_workspace_trust_question();
+    let mut main = test_support::open_main(cx, snapshot(&[(pi, 0), (command, 0)], false));
+    main.terminal_live();
+    assert!(!main.helm.commands().iter().any(any_trust_read));
+    // A consistency check only: no read was answered, so trust stays unknown and no band would show for any agent. The
+    // read assertions are what tell the mechanisms apart.
+    let band = frame(main.cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(BAND_ID));
+    assert!(band.is_none(), "no band for Pi");
+
+    click(main.cx, "session-row-b");
+    settle(main.cx);
+    assert!(!main.helm.commands().iter().any(any_trust_read));
+    push(
+        &mut main.helm,
+        &["a", "b"],
+        &[(session("b").at_workspace_trust_question(), 0)],
+        main.cx,
+    );
+    let reads: Vec<String> = main
+        .helm
+        .commands()
+        .into_iter()
+        .filter(any_trust_read)
+        .map(|command| command.path)
+        .collect();
+    assert_eq!(reads, [CODEX.route], "the premise: a Codex launch reads");
 }

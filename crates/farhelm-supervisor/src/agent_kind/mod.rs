@@ -83,11 +83,14 @@
 //!   `crates/gui/farhelm-gui/src/permission/words.rs`,
 //!   and its conversation selector's label is `conversation_label` in
 //!   `launcher/view.rs`. Settings' Agent trust section names its agents with
-//!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`,
-//!   whose exhaustive methods hold each trust agent's route, wording, caution
-//!   and hint switch (a harness with no managed-checkout trust setting has no
-//!   variant there, as the helm's `trust_column` refuses it). The session
-//!   row's marks read theirs from `crates/gui/farhelm-gui/src/harness.rs`:
+//!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`
+//!   (a harness with no managed-checkout trust setting has no variant there,
+//!   as the helm's `trust_column` refuses it), whose exhaustive methods hold
+//!   each trust agent's route, wording, caution, hint switch and hint band
+//!   words, and which launch harness's workspace-trust question names which
+//!   agent (`TrustAgent::asking`, for the session view's trust hint band).
+//!   The session row's marks read theirs from
+//!   `crates/gui/farhelm-gui/src/harness.rs`:
 //!   which mark an agent type and a legacy session's stored kind draw, each
 //!   mark's bundled picture and identity color, the agent's product name, and
 //!   the status-line words for a mode without checks. Only the row reads them
