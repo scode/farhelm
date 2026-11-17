@@ -114,11 +114,13 @@ partly: the destination switch, the repository field and its suggestions, the pr
 checkout-folder setup, a lost race and the guarded answer's wait for a new preview in
 `launcher::checkout_tests::{managed_checkout_hides_the_folder_until_a_repository_is_chosen, suggestions_are_read_after_typing_and_enter_picks_one, a_typed_pair_is_chosen_when_discovery_fails, a_chosen_repository_is_previewed_before_it_launches, a_refused_preview_says_why_and_shows_no_path, what_a_preview_answers_for_asks_again_and_late_answers_never_apply, a_preview_from_another_installation_is_refused, the_destination_switch_keeps_the_folder_and_typed_text_never_chooses, a_checkout_launches_only_with_a_repository_and_a_current_preview, a_checkout_create_carries_its_preview, a_checkout_ignores_an_untouched_copied_title, a_refused_checkout_launch_comes_back_with_focus_on_its_folder, a_host_without_a_checkout_folder_offers_the_setup_inline, a_lost_race_takes_a_new_preview_and_sends_nothing, the_guarded_answer_waits_for_the_new_preview_then_launches_once, escape_closes_the_suggestions_before_the_launcher}`;
 unsafe inherited repository text is not carried at all
-(`a_clone_carries_only_a_repository_the_shared_parser_reads_back`; see Deviations); waiting: the `gh:` search (with the
-composer search), a configuration change from the command line refreshing the preview (1383; with the launch-history
-read) and a repository recent setup choosing a fresh checkout (1132; with recent setups); not yet ported: the
-highlighted suggestion kept in view while the arrows wrap (161) and Replace with's checkout carrying the shown
-precondition (976)
+(`a_clone_carries_only_a_repository_the_shared_parser_reads_back`; see Deviations); the `gh:` search's discovered
+repositories and valid typed pair, its scan note under the search box, Launch held until a pick and a field pick
+retiring the query in
+`launcher::checkout_tests::{gh_search_offers_discovered_repositories_and_a_valid_typed_pair, a_gh_query_shows_its_scan_note_and_holds_launch_until_a_pick}`;
+waiting: a configuration change from the command line refreshing the preview (1383; with the launch-history read) and a
+repository recent setup choosing a fresh checkout (1132; with recent setups); not yet ported: the highlighted suggestion
+kept in view while the arrows wrap (161) and Replace with's checkout carrying the shown precondition (976)
 
 ### `tests/composer-word-search.spec.ts`
 
@@ -559,7 +561,6 @@ not yet ported (environments, milestone M3)
   (`launcher::search_view_tests::replace_with_refuses_a_host_row`).
 - A refused search row keeps the query in the box and its reason until the next keystroke there; the old box emptied on
   a refusal and kept the reason until the next accepted row. Keeping the query lets the user correct it in place.
-- Until the managed checkouts' repositories reach the search, `gh:` says it has no match.
 - New's folder shows `~` while it waits for the chosen host's history after a host change; the old field kept showing
   the previous host's folder until the answer. Launch waits either way ("Wait for this host's last folder before
   launching").

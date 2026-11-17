@@ -548,6 +548,164 @@ fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
     );
 }
 
+/// The composer search's `gh:` offers the same choices as the repository field, from a Folder destination too: the
+/// host's discovered repositories that match, and a valid typed `owner/repo` first whatever discovery found (SPEC.md,
+/// "Managed checkouts": "Incomplete discovery is visible and does not prevent selecting a valid manually entered
+/// pair"; the old launcher's `SearchScope::Github` rows). Why: the maintainer typed `gh:scode/farhelm` and got "No
+/// repository matches" with no row, since the search had no repository rows at all. Specified: on a Folder draft,
+/// `gh:widg` reads the host's repositories for "widg" after 150 ms and lists the one that matches
+/// ("Managed checkout: acme/widgets"); `gh:widg/new`, a valid pair discovery did not list, is offered at once and
+/// first; Enter takes it: a managed checkout of widg/new, the search box emptied.
+#[gpui::test]
+fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, command_draft(1));
+    answer_catalog(&mut helm, cx, Some(json!([])));
+    assert_eq!(
+        draft(cx).destination_kind(),
+        DestinationKind::Folder,
+        "the premise: a folder destination"
+    );
+    test_support::click(cx, "launcher-search-row");
+    assert!(
+        super::view_tests::search_focused(cx),
+        "the premise: the search box has focus"
+    );
+    test_support::keys(cx, "g h : w i d g");
+    test_support::advance(cx, Duration::from_millis(160));
+    // The fake helm answers strictly in order, so every command taken is answered, in order: the repositories read with
+    // its reply, the rest (the launcher's other reads) as failed reads, which leave the search alone.
+    let taken = sent(&mut helm, cx);
+    let reads = to(&taken, REPOSITORIES);
+    let [read_] = &reads[..] else {
+        panic!("one read for the gh: query, not {}", reads.len());
+    };
+    assert_eq!(
+        read_.body,
+        Some(json!({"host": 1, "expected_incarnation": 4, "query": "widg"}))
+    );
+    for command in &taken {
+        if command.path == REPOSITORIES {
+            helm.reply(
+                command.id,
+                200,
+                Some(repositories(
+                    &[("acme", "widgets"), ("other", "x")],
+                    false,
+                    None,
+                )),
+            );
+        } else {
+            helm.reply(command.id, 503, Some(json!("not answered in this test")));
+        }
+    }
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Managed checkout: acme/widgets")
+    );
+    assert!(
+        name_of(cx, "launcher-search-option-1").is_none(),
+        "only the match"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-search-group-GitHub repositories").as_deref(),
+        Some("GitHub repositories")
+    );
+
+    test_support::keys(cx, "/ n e w");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Managed checkout: widg/new"),
+        "the typed pair is offered before any answer about it"
+    );
+    test_support::keys(cx, "enter");
+    assert_eq!(draft(cx).destination_kind(), DestinationKind::Checkout);
+    assert_eq!(
+        draft(cx).checkout.and_then(|checkout| checkout.repo),
+        Some(repo("widg", "new"))
+    );
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.search.text(cx).to_string()),
+        ""
+    );
+}
+
+/// While the search holds a `gh:` query, what the host's scan says about it shows under the search box, and Launch
+/// waits for a pick, as in the old launcher (its `github-checkout-composer.spec.ts` case for an unavailable scan). Why:
+/// SPEC.md, "Managed checkouts", has "Incomplete discovery is visible" and "Invalid `gh:` input cannot launch a hidden
+/// existing directory"; from a Folder destination there is no repository field to say it under, and a launch would
+/// quietly use the folder the user is replacing. Specified: on a complete Folder draft, `gh:x` and a truncated reply
+/// with a scan error show that error under the box (no repository field is drawn); a press of Launch says "Not
+/// launched. Select a GitHub repository before launching" and sends no create; then, with Managed checkout chosen,
+/// picking `acme/bar` in the repository field empties the search box and chooses it.
+#[gpui::test]
+fn a_gh_query_shows_its_scan_note_and_holds_launch_until_a_pick(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, command_draft(1));
+    answer_catalog(&mut helm, cx, Some(json!([])));
+    test_support::click(cx, "launcher-search-row");
+    assert!(
+        super::view_tests::search_focused(cx),
+        "the premise: the search box has focus"
+    );
+    test_support::keys(cx, "g h : x");
+    test_support::advance(cx, Duration::from_millis(160));
+    let taken = sent(&mut helm, cx);
+    assert_eq!(
+        to(&taken, REPOSITORIES).len(),
+        1,
+        "the premise: the gh: query's read went out"
+    );
+    for command in taken {
+        if command.path == REPOSITORIES {
+            helm.reply(
+                command.id,
+                200,
+                Some(repositories(&[], true, Some("fixture scan unavailable"))),
+            );
+        } else {
+            helm.reply(command.id, 503, Some(json!("not answered in this test")));
+        }
+    }
+    settle(cx);
+    assert!(
+        cx.debug_bounds("launcher-repository-row").is_none(),
+        "the premise: a folder destination, with no repository field"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-search-repository-note").as_deref(),
+        Some("fixture scan unavailable")
+    );
+    test_support::keys(cx, "escape");
+    test_support::click(cx, "launcher-launch");
+    assert_eq!(
+        shown_refusal(cx),
+        Some(format!("Not launched. {SELECT_REPOSITORY}"))
+    );
+    assert!(
+        to(&sent(&mut helm, cx), "/api/sessions").is_empty(),
+        "no create"
+    );
+
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    assert!(
+        name_of(cx, "launcher-search-repository-note").is_some()
+            && name_of(cx, "launcher-repository-note").is_none(),
+        "with the query still in the box, its note stays under the box and is not repeated under the field"
+    );
+    test_support::click(cx, "launcher-repository-row");
+    test_support::keys(cx, "a c m e / b a r");
+    test_support::click(cx, "launcher-repository-option-acme/bar");
+    assert_eq!(
+        draft(cx).checkout.and_then(|checkout| checkout.repo),
+        Some(repo("acme", "bar"))
+    );
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.search.text(cx).to_string()),
+        "",
+        "the pick answered the gh: query"
+    );
+}
+
 /// The preview: asked as soon as a repository is chosen, with the checkout's name (empty for an unnamed one); the
 /// folder field waits, then shows the exact path; the name field offers the `repo-N` the checkout gets; and Launch
 /// sends the create with the preview. SPEC.md: "Before Launch becomes available, the composer shows the exact host and

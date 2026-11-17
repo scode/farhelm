@@ -106,6 +106,7 @@ impl Draft {
             hosts: &self.hosts,
             templates: self.templates.as_deref(),
             history: self.history.as_ref().zip(Some(&placement)),
+            repositories: &[],
         })
     }
 
