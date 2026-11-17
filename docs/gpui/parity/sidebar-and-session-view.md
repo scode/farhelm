@@ -1174,9 +1174,9 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
   orchestrator on 2026-11-16): the GPUI app has no markup path. Hidden characters in the question's title are
   prompt_tests.rs `a_title_that_names_a_host_value_is_drawn_and_named_escaped`.
 - `a legal multi-KB, unbroken title keeps the consequence text intact and clips only the title, without disturbing the confirm/cancel buttons`:
-  test to port (raised 2026-11-16), waiting for the foundations area's planned height cap for anchored questions (raised
-  2026-11-16): the question wraps its title rather than cutting it (a recorded deviation in `prompt.rs`), and with no
-  cap on its height a title this long pushes Cancel and Confirm out of the window.
+  session_list/menu_tests.rs `a_huge_title_leaves_the_delete_questions_words_and_answers_whole`, on the question's
+  height cap, prompt_tests.rs `an_anchored_question_quoting_a_huge_title_keeps_its_answers_in_the_window`. The question
+  wraps the title rather than cutting it (a recorded deviation in `prompt.rs`), and the cap scrolls what does not fit.
 - `an inline confirming state survives a listing refresh; cancel still works afterward` and
   `dispatching cancel and confirm in the same tick never deletes the session`: session_list/menu_tests.rs
   `a_question_answers_once_for_what_it_showed_even_after_the_session_changed`, and prompt_tests.rs

@@ -978,6 +978,95 @@ fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut Tes
     assert!(!any_layer(cx));
 }
 
+/// A session title is host text with no length limit, and the row's Delete question quotes it whole, wrapping rather
+/// than cutting it (a recorded deviation in `prompt.rs`). The question must still say what Delete does and still be
+/// answerable by pointer, or a long enough title would hide Cancel and Confirm below the window. The old
+/// `terminal.spec.ts` case "a legal multi-KB, unbroken title keeps the consequence text intact and clips only the
+/// title, without disturbing the confirm/cancel buttons" (reference commit `24bc0580`) pinned it. The prompt's own
+/// height cap and its scrolling are pinned with a question built by hand, by
+/// `prompt_tests::an_anchored_question_quoting_a_huge_title_keeps_its_answers_in_the_window`; this pins the real row's
+/// question on that cap. Specified, in a window of the app's minimum size, for a running session whose title is 20,000
+/// characters with no spaces: Delete chosen from its menu by keys asks with a quoted title taller than the window and
+/// drawn clipped inside the question; the question, Cancel and Confirm lie inside the window; the consequence line and
+/// the checkout's line are painted whole; nothing is sent until a click on Confirm sends the one Delete. Delete is
+/// chosen by keys because, without the row menu's height fix (#4025), a row menu at the minimum window size runs past
+/// the window's bottom, where Delete takes no click; the keys reach it either way.
+#[gpui::test]
+fn a_huge_title_leaves_the_delete_questions_words_and_answers_whole(cx: &mut TestAppContext) {
+    use crate::host_text::tests::painted_words;
+
+    /// The text painted inside the question whose words (isolates aside) hold `words`, which must be there. Only
+    /// the question's own texts count: the row, the header and the details bar draw the same title too.
+    fn painted_text(nodes: &[gpui::DriverNode], words: &str) -> gpui::DriverText {
+        let texts = texts_within(nodes, "prompt");
+        match texts
+            .into_iter()
+            .find(|painted| painted_words(&painted.text).contains(words))
+        {
+            Some(painted) => painted,
+            None => panic!(
+                "{}… was not painted in the question",
+                words.chars().take(40).collect::<String>()
+            ),
+        }
+    }
+
+    let title = "x".repeat(20_000);
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a").title(&title), 0)], false));
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    test_support::settle(cx);
+    deletes(&mut fake);
+    // Delete is chosen by keys, as `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it` chooses it: this
+    // test is about the question, and what the pointer can reach inside the menu is the menu's tests' concern.
+    test_support::click(cx, "session-menu-a");
+    test_support::keys(cx, "up");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-delete"),
+        "the premise: Up from the first command reaches Delete"
+    );
+    test_support::keys(cx, "enter");
+    assert!(drawn(cx, "prompt"), "the premise: a's question is open");
+
+    let shown = gpui::Bounds::new(
+        gpui::point(px(0.), px(0.)),
+        cx.update(|window, _| window.viewport_size()),
+    );
+    let question = test_support::bounds(cx, "prompt");
+    let nodes = frame(cx);
+    let quoted = painted_text(&nodes, &title);
+    assert!(
+        quoted.bounds.size.height > shown.size.height,
+        "the premise: the quoted title is taller than the window"
+    );
+    assert!(
+        quoted.visible_bounds.size.height < quoted.bounds.size.height
+            && quoted.visible_bounds.is_contained_within(&question),
+        "the title is clipped inside the question: {:?} in {question:?}",
+        quoted.visible_bounds
+    );
+    for control in ["prompt", "prompt-cancel", "prompt-confirm"] {
+        let at = test_support::bounds(cx, control);
+        assert!(
+            at.is_contained_within(&shown),
+            "{control} lies inside the window: {at:?}"
+        );
+    }
+    for whole in [
+        "Still running — deleting kills the agent:",
+        super::delete::MANAGED_CHECKOUT,
+    ] {
+        let painted = painted_text(&nodes, whole);
+        assert_eq!(
+            painted.visible_bounds, painted.bounds,
+            "{whole:?} is painted whole"
+        );
+    }
+    assert_eq!(deletes(&mut fake), [], "nothing is sent before the answer");
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/a"]);
+}
+
 /// The precondition is what makes a stale row safe: SPEC.md, "Confirmed 2026-10-01", has the supervisor refuse a
 /// Delete when the session has more alive than the click showed. The old app's `delete-precondition.spec.ts` pinned
 /// three cases, and its `terminal.spec.ts` three more (reference commit `24bc0580`): an unknown status confirms first
