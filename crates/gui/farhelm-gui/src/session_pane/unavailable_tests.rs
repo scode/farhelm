@@ -13,7 +13,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal};
+use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
 use farhelm_proto::DetachCode;
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::tensorlake::LifecycleDirection;
@@ -357,6 +357,53 @@ fn the_terminals_own_notices_stay_hidden_while_the_card_shows(cx: &mut TestAppCo
     assert_eq!(count(&mut main), 0);
     push_a(&mut main, a(false), connected());
     assert_eq!(count(&mut main), 1);
+}
+
+/// How many times stream `index` was asked to end its reconnect wait early since the last call.
+fn reconnect_nows(main: &MainWindow, index: usize) -> usize {
+    main.terminals.borrow_mut()[index]
+        .received()
+        .iter()
+        .filter(|request| **request == FakeTerminalRequest::ReconnectNow)
+        .count()
+}
+
+/// SPEC.md: "When the host returns, retained terminals retry promptly and automatically". The stream's own retry knows
+/// nothing of the host, and after a Suspend its wait had grown to 15 seconds or more, so a user watched "reconnecting"
+/// long after Hosts read Connected; the old app nudged its terminals when the session's `unavailable` flag cleared.
+/// Specified: with a live, gone stale, and its stream dropped into a reconnect's wait (the premise, with nothing asked
+/// of it meanwhile), a push that lists a reachable asks the stream once to end its wait; a later sync of the pane (a
+/// is chosen again) asks nothing more.
+#[gpui::test]
+fn a_host_that_answers_again_reattaches_the_open_terminal_at_once(cx: &mut TestAppContext) {
+    let (mut main, _) = open(cx, fleet(&[a(false), session("b")], connected()));
+    main.terminal_live();
+    push_a(&mut main, a(true), unreachable());
+    main.terminals.borrow_mut()[0].detach(Some(DetachCode::Other), "host gone");
+    test_support::settle(main.cx);
+    assert_eq!(streams(&main), [FakePhase::Reconnecting], "the premise");
+    assert_eq!(reconnect_nows(&main, 0), 0, "the premise");
+    push_a(&mut main, a(false), connected());
+    assert_eq!(reconnect_nows(&main, 0), 1);
+    test_support::click(main.cx, "session-row-a");
+    assert_eq!(reconnect_nows(&main, 0), 0, "once");
+}
+
+/// The nudge answers the open session's own row turning fresh, never a change of session: leaving a stale session for
+/// a reachable one is not its host answering, and a pane that read the edge before dropping the old terminals would
+/// dial a host that is still away. Specified: with a gone stale and its stream in a reconnect's wait (the premise), a
+/// click opens the fresh b; a's stream is closed and was never asked to end its wait.
+#[gpui::test]
+fn a_change_of_session_asks_no_terminal_to_reattach(cx: &mut TestAppContext) {
+    let (mut main, _) = open(cx, fleet(&[a(false), session("b")], connected()));
+    main.terminal_live();
+    push_a(&mut main, a(true), unreachable());
+    main.terminals.borrow_mut()[0].detach(Some(DetachCode::Other), "host gone");
+    test_support::settle(main.cx);
+    assert_eq!(streams(&main), [FakePhase::Reconnecting], "the premise");
+    test_support::click(main.cx, "session-row-b");
+    assert_eq!(streams(&main)[0], FakePhase::Closed);
+    assert_eq!(reconnect_nows(&main, 0), 0);
 }
 
 /// A session opened unreachable has no terminal only until its host answers; then it is opened as any other, with its

@@ -19,7 +19,9 @@ use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, GridOutput};
-use farhelm_proto::ui_channel::{Availability, Collection, CollectionChanges, CollectionState};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionChanges, CollectionState, HostView,
+};
 use gpui::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, Styled as _, TestAppContext, VisualTestContext, Window, div, px,
@@ -33,6 +35,7 @@ use crate::launcher::launch_tests::{
 };
 use crate::launcher::view_tests::fixture_hosts;
 use crate::main_view::MainView;
+use crate::operations::{Command, OpKey, Work};
 use crate::session::Connection;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::node;
@@ -1311,6 +1314,81 @@ fn a_restart_does_not_hold_back_a_stall(cx: &mut TestAppContext) {
     assert!(fleet.drawn(BAND));
     assert!(fleet.drawn(STATUS_RECONNECT_ID));
     assert!(!fleet.drawn(CARD));
+}
+
+// ---- A Suspend of the open session's host -------------------------------------------------------------------------
+
+impl Fleet<'_> {
+    /// Start `work` on `key` in the window's operation store, as the control that sends it would, after answering
+    /// whatever else the window sent, and return its id, unanswered. The path is a stand-in: the pane's hold reads only
+    /// the work and the key.
+    fn start_work(&mut self, key: OpKey, work: Work) -> u64 {
+        self.restarts();
+        self.cx.update(|_, cx| {
+            let operations = crate::session::current_operations(cx).expect("a UI session");
+            let path = farhelm_helm_client::ApiPath::api(&["work"]).unwrap();
+            let command = Command::new(work, Method::Post, path, None, "POST /api/work");
+            operations.update(cx, |operations, cx| {
+                operations.start(&key, command, cx, |_, _| {}).unwrap();
+            });
+        });
+        settle(self.cx);
+        let sent = self.helm.commands();
+        let [command] = &sent[..] else {
+            panic!("one command was sent");
+        };
+        command.id
+    }
+}
+
+/// The UI channel pushes this window nothing while its own command runs, so during its Suspend of the open session's
+/// host the stream ends and the row still reads fresh: the reconnect card would show for the whole Suspend (seconds for
+/// a container, up to 20 for a sandbox) before "Session suspended" did. Holding it was decided by the
+/// sidebar-and-session-view area on 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold. Specified: with
+/// a, on host 2, live, and its Suspend in flight on a's key (what the header and row send), a's `other` detach puts the
+/// stream into a reconnect (the premise) and no card is drawn; once the helm refuses it and the stream's next attempt
+/// fails, the card is drawn; with the stream still reconnecting (the premise before each check), a Stop and suspend on
+/// a's key hides it until its refusal, a Suspend on host 2's key (the Hosts panel's) hides it again, and the push that
+/// lists a stale before that Suspend's answer leaves it hidden after.
+#[gpui::test]
+fn a_suspend_from_this_window_holds_back_the_reconnect_card(cx: &mut TestAppContext) {
+    let snapshot = vec![
+        listing(&["a", "b"], &[session("a").host(2), session("b")]),
+        preferences(&["a"], None),
+    ];
+    let mut fleet = open_main(cx, snapshot);
+    fleet.go_live(0);
+    let id = fleet.start_work(OpKey::session("a"), Work::Suspend);
+    fleet.opened.borrow_mut()[0]
+        .0
+        .detach(Some(DetachCode::Other), "host suspending");
+    settle(fleet.cx);
+    assert!(fleet.reconnecting(), "the premise: the stream ended");
+    assert!(!fleet.drawn(CARD), "the session's Suspend");
+
+    fleet.helm.reply(id, 409, None);
+    fleet.opened.borrow_mut()[0].0.drop_link();
+    settle(fleet.cx);
+    assert!(fleet.drawn(CARD), "refused, and the next attempt failed");
+
+    let id = fleet.start_work(OpKey::session("a"), Work::StopAndSuspend);
+    assert!(fleet.reconnecting(), "the premise");
+    assert!(!fleet.drawn(CARD), "the session's Stop and suspend");
+    fleet.helm.reply(id, 409, None);
+    settle(fleet.cx);
+    assert!(fleet.drawn(CARD), "refused");
+
+    let id = fleet.start_work(OpKey::host(&HostView::key(2)), Work::Suspend);
+    assert!(fleet.reconnecting(), "the premise");
+    assert!(!fleet.drawn(CARD), "the Hosts panel's Suspend");
+    let stale = [session("a").host(2).stale()];
+    fleet
+        .helm
+        .push(change(listing_meta(&["a", "b"], 2, false), &stale, &[]));
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert!(fleet.reconnecting(), "the premise");
+    assert!(!fleet.drawn(CARD), "stale once answered");
 }
 
 // ---- Resets --------------------------------------------------------------------------------------------------------

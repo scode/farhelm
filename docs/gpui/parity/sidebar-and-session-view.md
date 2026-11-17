@@ -941,10 +941,11 @@ host dropped leaves focus on the card, whose stop takes Page Down),
 `a_tab_that_arrives_under_the_card_leaves_focus_on_the_card`, `focus_elsewhere_stays_as_the_card_comes_and_goes` (focus
 left on another control is not taken, and recovery does not steal it),
 `the_terminals_own_notices_stay_hidden_while_the_card_shows` (no reconnecting band or detach banner under the card),
-`a_session_opened_unreachable_shows_the_card_and_mounts_no_terminal` ("stale-session-metadata-view": no terminal and no
-strip, the heading, the explanation and the transport's error as diagnostics, the last-known status and age in the band
-and not in the details bar, the card between the top row and the bar, focus on the card),
-`a_session_opened_unreachable_mounts_its_terminal_when_the_host_answers`,
+`a_host_that_answers_again_reattaches_the_open_terminal_at_once` ("reattach promptly"),
+`a_change_of_session_asks_no_terminal_to_reattach`, `a_session_opened_unreachable_shows_the_card_and_mounts_no_terminal`
+("stale-session-metadata-view": no terminal and no strip, the heading, the explanation and the transport's error as
+diagnostics, the last-known status and age in the band and not in the details bar, the card between the top row and the
+bar, focus on the card), `a_session_opened_unreachable_mounts_its_terminal_when_the_host_answers`,
 `choosing_an_unreachable_session_focuses_its_card`, `a_stale_row_that_goes_away_leaves_no_inert_terminal_under_nothing`,
 `the_cards_spinner_turns`, `the_bands_age_moves_on_with_the_shared_clock`,
 crates/gui/farhelm-gui/src/session_pane/card_tests.rs `a_session_opened_unreachable_takes_no_interrupted_card` (stale
@@ -1719,3 +1720,9 @@ Where the port does not match the old app, and why. Each stays until the work na
 - A Don't show again pressed while another preference save holds the row's key sends nothing and says so with the shared
   busy line ("Not saved: another operation was in progress. Try again."). The old app queued the press; here it is
   refused visibly, per the migration's orchestrator's decision of 2026-11-14 on presses the operation store refuses.
+- While this window's Suspend of the open session's host runs, the agent terminal's reconnect card is held back until
+  the answer's push shows "Session suspended" (decided by the sidebar-and-session-view area on 2026-11-16, extending the
+  orchestrator's 2026-11-15 Restart hold; `session_pane/tests.rs`
+  `a_suspend_from_this_window_holds_back_the_reconnect_card`). The old app showed it for under a second, until its stale
+  read landed; unheld here it would last the whole Suspend (about 3 seconds for a container, up to 20 for a sandbox). A
+  shown shell tab's card is not held: the terminal set holds only the agent's, a terminal-area rule.
