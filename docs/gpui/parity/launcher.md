@@ -678,17 +678,19 @@ launch keeps recipe and place through refusal" in
 surface of "... refreshes recipe places after a delayed probe without a fleet notice", whose Container host select
 follows the pushed Podman checks it asks for on opening and whose note follows the pushed recipe places, in
 `launcher::environment_view_tests::{opening_the_launcher_checks_the_container_hosts, opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable, new_container_shows_its_rows_with_unusable_hosts_disabled, the_note_follows_the_recipe_place}`;
-not yet ported: "restored container placement displays the recipe and host it submits", "environment recents hold
-focused intent until deliberate promotion" and "environment recents stay independent of a held ordinary folder default",
-which come with the environments work's recent setups, and the drawn Runs on segments, defaults and place note of the
-partly ported cases above: covered by the New sandbox PRs (desktop integration), the citation the migration's
-orchestrator decided on 2026-11-16 for every environments case until those PRs land. The spec's other cases are other
-areas': "container template quick launch retains its saved place" is the templates and quick launch area's, "a connected
-container's Delete asks its Farhelm and reports the container that stays" is the session view's, and "Containers
-Settings keeps failed cleanup explicit" and the `recipes` surface of the delayed-probe case are in
-[Settings and hosts](settings-and-hosts.md). Beyond this spec's cases, SPEC.md's carried placements (Container sessions
-follow Sandbox sessions' Clone, and New beside an open environment session preselects its recipe and place, never in a
-quick launch): one seed for both providers in
+New container's default host and its note going with its host in
+`launcher::environment_view_tests::{new_container_defaults_to_the_last_container_host, no_note_once_the_container_host_is_gone}`;
+not yet ported: "restored container placement displays the recipe and host it submits", a saved container template taken
+from the composer search showing the recipe and container host it then sends in one create (its draft half, entering a
+new container at its home, is `templates::apply_tests::a_container_template_enters_a_new_container_at_its_home`); and
+"environment recents hold focused intent until deliberate promotion" and "environment recents stay independent of a held
+ordinary folder default", which wait for recent setups of new environments, not yet built (the desktop integration
+area's next environments work). The spec's other cases are other areas': "container template quick launch retains its
+saved place" is the templates and quick launch area's, "a connected container's Delete asks its Farhelm and reports the
+container that stays" is the session view's, and "Containers Settings keeps failed cleanup explicit" and the `recipes`
+surface of the delayed-probe case are in [Settings and hosts](settings-and-hosts.md). Beyond this spec's cases,
+SPEC.md's carried placements (Container sessions follow Sandbox sessions' Clone, and New beside an open environment
+session preselects its recipe and place, never in a quick launch): one seed for both providers in
 `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_and_chooses_nothing`, driven with a sandbox
 in
 `launcher::entry_tests::{clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe, new_beside_an_open_environment_session_preselects_its_recipe_and_place}`,
@@ -718,10 +720,16 @@ and `launcher::environment_tests::only_a_sandbox_asks_before_creating_unless_its
 sandbox waiting for the account and then coming back to ask rather than create in
 `launcher::sandbox_view_tests::a_hidden_quick_launch_waits_for_the_account_and_comes_back_to_ask`. "A recipe template
 quick launch asks before one recipe request" is ported with the templates area's number key in
-`templates::dispatch_tests::a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating`. Not yet ported: "an
-existing-host launch stays nonmodal while its Resume is held", "a held sandbox Suspend and a launch on another host
-proceed side by side" and "Hosts refuses a host's Resume and Settings while a launch is waking that host" with resume
-before create; "template placement keeps Host editable after leaving an environment" with templates' placement.
+`templates::dispatch_tests::a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating`. "A held sandbox
+Suspend and a launch on another host proceed side by side": New staying available while a Suspend is out in
+`session_list::environment_tests::a_suspend_in_flight_leaves_new_available` and a launch elsewhere not holding a Resume
+in `hosts::environment_tests::a_launch_elsewhere_does_not_hold_resume`; not yet ported: its create sent while another
+host's Suspend is held. Not yet ported: "an existing-host launch stays nonmodal while its Resume is held" and "Hosts
+refuses a host's Resume and Settings while a launch is waking that host", which wait for resume before create, not yet
+built in the launcher (the desktop integration area's). "Template placement keeps Host editable after leaving an
+environment" is the templates and quick launch area's. The registration note shows with no recipe chosen too, as the old
+launcher's did and SPEC.md says ("whether or not a recipe is chosen")
+(`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
 
 ### `tests/github-checkouts.spec.ts`
 
@@ -815,10 +823,10 @@ settling, refusal and the pending row in `launcher::restart_with_tests::restart_
 `launcher::launch_tests::a_held_enter_in_a_field_never_launches`; superseded by the focus coordinator and layer manager:
 the backdrop, stray-focus, inert-page and tab-gone focus cases, and the container Enter half of "restart with keeps gap
 focus and container Enter uses its enabled action" (the launcher keeps focus on an empty-space click, so its container
-never takes it); not yet ported: a command template, the shortcut batches and the bolt in Restart with ("restart with
-applies an allowed partial command template", "restart with refuses held shortcut batches and bolt templates", "restart
-with applies matching bolt and shortcut templates without restarting"; their tests would sit in `templates::apply_tests`
-and `templates::launcher_modes_tests`)
+never takes it); the shortcut batches and the bolt in Restart with ("restart with refuses held shortcut batches and bolt
+templates", "restart with applies matching bolt and shortcut templates without restarting") in
+`templates::launcher_modes_tests::{restart_with_refuses_a_held_change_from_a_sequence_or_the_chord_whole, restart_with_applies_matching_shortcuts_without_restarting}`,
+whose detail is in the templates file's restart-with entry
 
 - "named restart with requires a target when no conversation was captured", its sending half: a named conversation alone
   restarting the stored launch, sent beside it, in
@@ -886,8 +894,10 @@ and `templates::launcher_modes_tests`)
   `launcher::view_tests::restart_with_model_enter_chooses_without_restarting`.
 - "restart with applies an allowed partial agent template", "restart with applies a template's matching held ${field}"
   and "restart with refuses a template's held ${field} atomically":
-  `templates::apply_tests::{restart_with_applies_equal_held_values_as_nothing, restart_with_resets_permissions_to_todays_default, restart_with_refuses_a_change_to_a_held_field}`
+  `templates::apply_tests::{restart_with_applies_a_partial_agent_template_and_sends_its_choices, restart_with_applies_equal_held_values_as_nothing, restart_with_resets_permissions_to_todays_default, restart_with_refuses_a_change_to_a_held_field}`
   and `launcher::draft_tests::each_mode_holds_its_own_fields`.
+- "restart with applies an allowed partial command template":
+  `templates::apply_tests::restart_with_applies_a_partial_command_template_and_sends_it`.
 - "restart with refuses held composer actions and scopes model search":
   `launcher::search_view_tests::restart_with_refuses_a_held_field_and_says_why` and
   `launcher::search_tests::model_rows_follow_the_chosen_agent`.
@@ -1199,8 +1209,7 @@ chosen host
 Case: its 13 cases of a launch that resumes its suspended host first (lines 216 to 630 and 1131 to 1835 at the pin); its
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
-not yet ported (environments, milestone M3): covered by the New sandbox PRs (desktop integration), the citation the
-migration's orchestrator decided on 2026-11-16 for every environments case until those PRs land
+not yet ported: all 13 wait for resume before create, not yet built in the launcher (the desktop integration area's)
 
 ## Deviations
 
@@ -1322,6 +1331,12 @@ migration's orchestrator decided on 2026-11-16 for every environments case until
 - While a launch's create is out, the old launcher stayed on screen with its host picker disabled; this launcher hides
   for the whole time the create is out instead, so neither the picker nor anything else in it can be pressed
   (`launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`).
+- A new environment with no recipe chosen is named "new sandbox" or "new container on <host>" in the footer and in
+  Launch's name; the old launcher named it with a double space where the recipe would be (`new  sandbox`)
+  (`launcher::sandbox_view_tests::a_new_environment_without_a_recipe_is_named_without_one`).
+- The sandbox registration note's command sits in the shared command well, boxed with its Copy beside it, as Settings →
+  Tensorlake shows it; the old launcher showed it as inline code with a button beside it
+  (`launcher::sandbox_view_tests::the_registration_note_shows_and_copies_the_command`).
 - A host removed from the registry while New has it chosen stays chosen, and Launch is refused with "Choose a connected
   host before launching", the words any unconnected host gets. The old launcher said the host was no longer registered,
   in a note under its host field, which then stopped showing the removed host.
