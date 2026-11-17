@@ -124,16 +124,17 @@ crates/gui/farhelm-gui/src/layers_tests.rs `tab_stays_inside_an_open_menu`
 
 Tests: 1. Covers: rename keeps focus in its field when the selected tab goes away.
 
-partly: crates/gui/farhelm-gui/src/focus_tests.rs
+replaced: crates/gui/farhelm-gui/src/focus_tests.rs
 `focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control` (home never takes focus from a control)
 
 - crates/gui/farhelm-gui/src/focus_tests.rs `choosing_a_terminal_while_a_dialog_is_open_leaves_focus_in_the_dialog` (a
   terminal chosen while a dialog is open leaves focus in the dialog)
 - crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_reaped_tab_leaves_focus_on_an_open_header_question` (a reaped tab
   leaves focus on an open header question, the case's twin)
-
-The case itself, a reaped tab under an open Rename leaving the field focused and typing in it, is not yet ported; it
-belongs with that twin in the terminal area's `terminal/set/tests.rs`.
+- crates/gui/farhelm-gui/src/terminal/set/tests.rs `a_reaped_tab_leaves_focus_in_an_open_rename_field` (the case itself:
+  with a shell tab chosen and Rename open from the row menu with a draft typed, the tab's reap chooses the agent
+  terminal and leaves focus in the title field; further typing lands in the draft that Enter saves, and the agent
+  terminal gets no key)
 
 ### `tests/keyboard-scroll.spec.ts`
 
