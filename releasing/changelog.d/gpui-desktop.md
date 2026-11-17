@@ -45,6 +45,16 @@ Block characters in the terminal are drawn as exact cell-sized rectangles, so pr
 thin stripes at text sizes other than the default. (Curator: confirm the released app striped before keeping this; if
 only early builds of the new app did, drop it.)
 
+The questions that delete a sandbox or a container start with Cancel focused, so pressing Enter right after one opens no
+longer destroys the machine, its files and its sessions.
+
+Sandbox and container hosts are called Sandbox and Container rather than Remote, in Hosts and in the session list. A
+machine that is being deleted, or whose deletion failed, no longer offers Update or a setup rerun, and a recipe's
+summary says "Managed Ubuntu" rather than "Tensorlake Ubuntu".
+
+A new sandbox or container session's launch progress names its steps for its kind, such as "Creating a web container
+on build-box…", instead of the generic step names.
+
 On Linux, when the desktop does not draw window title bars (GNOME, for example), the app draws its own, with the title
 and the minimize, maximize and close buttons. (Curator: KDE, which draws its own title bars, has not been tried yet.)
 
