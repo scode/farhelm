@@ -160,7 +160,9 @@ fn push_removed(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
 /// SPEC.md, "Topology": removing a host "merely forgets it — the supervisor and its sessions are untouched". The
 /// confirmation is where the user reads that before anything changes, so it must name the host, show its full
 /// destination (the title may shorten the name) and the old explanation, and offer the old three answers in their order,
-/// starting on Remove, the action the user asked for (SPEC.md, "Opening and closing", lists host removal). Specified:
+/// starting on Remove, the action the user asked for (SPEC.md, "Opening and closing", lists host removal), since adding
+/// the host again undoes it; a machine's deletion, which cannot be undone, starts on Cancel instead
+/// (`hosts/environment_tests.rs`, `a_machines_deletion_starts_on_cancel_and_enter_keeps_it`). Specified:
 /// the menu's Remove opens "Remove host · build-box", summarized "Connected · Farhelm 0.0.0-unreleased", with
 /// `dev@build-box`, the explanation and the footer note naming the gear; the answers read Cancel, "Remove, don't ask
 /// again" and Remove in that order; focus is on Remove; nothing was sent.
