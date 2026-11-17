@@ -1,28 +1,39 @@
 //! Tests of the Trash dialog over the helm client's fake: opening and its measured reads, focus and Tab order, what
 //! each host's card shows, an entry's immediate Delete and Retry and their answers, the settle pause after rows move,
-//! and the refusals the dialog keeps (and when it lets them go).
+//! the refusals the dialog keeps (and when it lets them go), and the face an archive time is drawn in, which only the
+//! real text system can tell apart, so that one test lays the dialog out in a headless app with the bundled fonts.
 //!
 //! The dialog opens from the button's own press, as the user opens it, and the tests read what it drew from GPUI's
 //! driver record of the frame by element id (`trash-entry-delete-<host>-<id>`, `trash-host-totals-<host>`,
 //! `trash-notice-<host>-<n>-message` and so on). The fixtures are the button tests'.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView};
-use gpui::{DriverNode, Pixels, TestAppContext, VisualTestContext, px, size};
+use gpui::{
+    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Pixels, TestAppContext, TextStyle,
+    VisualTestContext, WindowTextSystem, px, size,
+};
+use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::SETTLE;
-use crate::focus;
+use super::{SETTLE, SMALL};
+use crate::focus::{self, Mark};
+use crate::host_text::tests::painted_words;
 use crate::local_time;
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::test_support::{self, focused_id, frame, meta};
 use crate::trash::tests::{
-    answer, answer_reads, checkout, down, epoch, listing, local, open_button, push_hosts,
+    Harness, answer, answer_reads, checkout, down, epoch, listing, local, open_button, push_hosts,
     push_registry_failure, reads, remote, snapshot, take,
 };
 use crate::trash::{BUTTON_ID, Refused};
+use crate::{assets, bootstrap};
 
 /// The node drawn under `id`, if any.
 fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
@@ -1185,4 +1196,125 @@ fn page_keys_scroll_the_global_questions_region_from_its_focused_answer(cx: &mut
         None,
         "and the region is no stop while its answers can take focus"
     );
+}
+
+// ---- Fonts, with the real text system ------------------------------------------------------------------------------
+
+/// How wide `cx`'s text system lays out `text` on one line at `size` pixels, in the interface face up to byte
+/// `mono_from` and in the monospace face from there on.
+fn shaped_width(cx: &mut HeadlessAppContext, text: &str, mono_from: usize, size: f32) -> f32 {
+    cx.update(|cx| {
+        let shaper = WindowTextSystem::new(cx.text_system().clone());
+        let run = |family: &'static str, len: usize| {
+            TextStyle {
+                font_family: family.into(),
+                ..TextStyle::default()
+            }
+            .to_run(len)
+        };
+        let runs: Vec<_> = [
+            (assets::UI_FONT, mono_from),
+            (assets::TERMINAL_FONT, text.len() - mono_from),
+        ]
+        .into_iter()
+        .filter(|(_, len)| *len > 0)
+        .map(|(family, len)| run(family, len))
+        .collect();
+        let line = shaper.shape_line(text.to_owned().into(), px(size), &runs, None);
+        f32::from(line.width)
+    })
+}
+
+/// The old `interface-fonts.spec.ts` case "archive metadata keeps labels in Inter and only known timestamps in mono":
+/// the old stylesheet drew a known archive time as a technical value, in the monospace face, and every word around it
+/// in the interface face, so the time reads apart from its label and its digits line up from entry to entry. The test
+/// text system gives every face the same widths, so this lays the dialog out with the real one and the bundled fonts
+/// in a headless app. Specified, in UTC, with the local host's archives `a`, archived at 2026-11-13 17:40:55, and `b`,
+/// whose archive time is unknown: a's line paints "Archived 2026-11-13 17:40" as wide as "Archived " in the interface
+/// face followed by the time in the monospace face, and b's paints "Archive time unknown" as wide as the interface face
+/// draws it, each within half a pixel, where drawing a's time, or b's words, in the other face would put the line at
+/// least a pixel off (the premise).
+#[test]
+fn a_known_archive_time_alone_is_drawn_in_the_monospace_face() {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+    cx.update(bootstrap::install).unwrap();
+    cx.update(|cx| local_time::pin(0, cx));
+    let (mut helm, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| session::start(handle, events, None, cx));
+    helm.connect(vec![crate::hosts::tests::hosts(&[local()])]);
+    cx.run_until_parked();
+    let made = Rc::new(RefCell::new(None));
+    let keep = made.clone();
+    let window = cx
+        .open_window(size(px(1000.), px(800.)), move |window, cx| {
+            let harness = cx.new(|cx| Harness::new(window, cx));
+            *keep.borrow_mut() = Some(harness.read(cx).button.clone());
+            cx.new(|cx| Root::new(harness, window, cx))
+        })
+        .unwrap();
+    let mut unknown = checkout("b", Some(1024));
+    unknown["archived_at"] = Value::Null;
+    let archives = move |_: i64| listing(&[checkout("a", Some(4096)), unknown.clone()], false);
+    answer_reads(&mut helm, &archives);
+    cx.run_until_parked();
+    let button = made
+        .borrow()
+        .clone()
+        .expect("the premise: the button was made");
+    cx.update_window(window.into(), |_, window, cx| {
+        let mark = Mark::take(cx);
+        button.update(cx, |button, cx| {
+            button.open(focus::ReturnTo::Opener, &mark, window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    answer_reads(&mut helm, &archives);
+    cx.run_until_parked();
+    let nodes = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.set_driver_enabled(true);
+            // Twice, as the sidebar's real-layout tests draw, so the record is of a frame that follows a drawn one.
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            window.driver_nodes().to_vec()
+        })
+        .unwrap();
+
+    for (words, mono_at) in [
+        ("Archived 2026-11-13 17:40", Some("2026")),
+        ("Archive time unknown", None),
+    ] {
+        let lines: Vec<&DriverText> = nodes
+            .iter()
+            .flat_map(|node| node.texts.iter())
+            .filter(|line| painted_words(&line.text) == words)
+            .collect();
+        let [line] = lines[..] else {
+            panic!("{words:?} is painted on one line: {lines:?}");
+        };
+        let drawn_text = line.text.to_string();
+        // The line as drawn, isolates included, shaped as it should be and as it should not: a known time in the
+        // monospace face after words in the interface face, or the whole line in one face.
+        let mono_from = mono_at.map_or(drawn_text.len(), |at| {
+            drawn_text.find(at).expect("the time is in the line")
+        });
+        let right = shaped_width(&mut cx, &drawn_text, mono_from, SMALL);
+        let wrong = match mono_at {
+            Some(_) => shaped_width(&mut cx, &drawn_text, drawn_text.len(), SMALL),
+            None => shaped_width(&mut cx, &drawn_text, 0, SMALL),
+        };
+        assert!(
+            (right - wrong).abs() >= 1.,
+            "premise: the faces draw {words:?} apart ({right} and {wrong})"
+        );
+        let drawn = f32::from(line.bounds.size.width);
+        assert!(
+            (drawn - right).abs() < 0.5,
+            "{words:?} is {drawn} wide; its faces would draw it {right}, the other face {wrong}"
+        );
+    }
 }

@@ -1,6 +1,6 @@
 //! Tests of the Send feedback dialog: what it starts from, what Send sends and what becomes of the helm's answer, the
-//! contact it remembers or clears afterwards, what it refuses before sending, and the rule that nothing closes it while
-//! a send is out.
+//! contact it remembers or clears afterwards, what it refuses before sending, the rule that nothing closes it while
+//! a send is out, and where Tab goes then and after a refusal.
 //!
 //! The dialog is opened the way the Help menu opens it, with the `?` button as the opener that closing returns focus
 //! to: one button in a root view of the test's own stands in for both the `?` button and its menu's item, and its click
@@ -646,4 +646,86 @@ fn after_a_send_the_thanks_has_a_body_stop_of_its_own(cx: &mut TestAppContext) {
         label(cx, "feedback-body-stop").as_deref(),
         Some("Feedback sent")
     );
+}
+
+/// Where focus is, as a walk with Tab names it: `message` or `contact` for one of the dialog's fields, else the
+/// focused control's id.
+fn stop(cx: &mut VisualTestContext) -> Option<String> {
+    let dialog = dialog(cx);
+    let field = cx.update(|window, cx| {
+        let dialog = dialog.read(cx);
+        [("message", &dialog.message), ("contact", &dialog.contact)]
+            .into_iter()
+            .find(|(_, field)| field.focus_handle(cx).is_focused(window))
+            .map(|(name, _)| name.to_owned())
+    });
+    field.or_else(|| focused_id(cx))
+}
+
+/// The old `keyboard-scroll.spec.ts` case "sending feedback gains a body stop and refusal restores editor entry". The
+/// old dialog disabled its fields while a send was out, so its body took a stop of its own to stay reachable from the
+/// keyboard; this one keeps the fields focusable and read-only instead (the module docs), so they stay the body's way
+/// in and that stop's premise does not arise. What the case still asks is that the keyboard keeps its way through the
+/// dialog while the send is out, and that a refusal gives the fields back to be typed in. The send goes from the
+/// keyboard, which no click rule touches, so focus is on a control throughout. Specified, with Tab reaching every
+/// control (the tests' default): after typing a message, Tab to the contact, Cancel and Send, and Enter, while the send
+/// is out focus stays on the busy Send, no body stop is drawn, and Tab walks to Chat on Discord (passing the disabled
+/// header Close), the message, the contact and back to Send (passing the disabled Cancel); once the helm refuses,
+/// focus is still on Send, Shift+Tab goes back through Cancel, enabled again, and the contact to the message, a typed
+/// key lands in it, and Tab goes on to the contact.
+#[gpui::test]
+fn tab_walks_the_dialog_while_a_send_is_out_and_a_refusal_gives_the_fields_back(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _toggle) = open_bar(cx, None);
+    open_dialog(cx);
+    keys(cx, "h e l d");
+    for next in ["contact", "feedback-cancel", "feedback-send"] {
+        keys(cx, "tab");
+        assert_eq!(stop(cx).as_deref(), Some(next), "the premise: Tab to Send");
+    }
+    keys(cx, "enter");
+    let (id, _) = one_command(&mut helm, Method::Post, "/api/feedback");
+    assert_eq!(
+        label(cx, "feedback-send").as_deref(),
+        Some("Sending…"),
+        "the premise: the send is out"
+    );
+    assert_eq!(
+        stop(cx).as_deref(),
+        Some("feedback-send"),
+        "the busy Send keeps focus"
+    );
+    assert_eq!(
+        label(cx, "feedback-body-stop"),
+        None,
+        "the fields are still the body's way in"
+    );
+    for next in ["feedback-discord", "message", "contact", "feedback-send"] {
+        keys(cx, "tab");
+        assert_eq!(stop(cx).as_deref(), Some(next), "Tab while the send is out");
+    }
+
+    answer(&mut helm, cx, id, 502, json!(UNREACHABLE));
+    assert!(
+        label(cx, "feedback-failure").is_some(),
+        "the premise: the refusal shows"
+    );
+    assert_eq!(
+        stop(cx).as_deref(),
+        Some("feedback-send"),
+        "focus stayed on Send"
+    );
+    for back in ["feedback-cancel", "contact", "message"] {
+        keys(cx, "shift-tab");
+        assert_eq!(
+            stop(cx).as_deref(),
+            Some(back),
+            "Shift+Tab after the refusal"
+        );
+    }
+    keys(cx, "s");
+    assert_eq!(message(cx), "helds", "the message takes keys again");
+    keys(cx, "tab");
+    assert_eq!(stop(cx).as_deref(), Some("contact"));
 }

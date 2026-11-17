@@ -121,6 +121,9 @@ partly
 - crates/gui/farhelm-gui/src/templates/dialog_tests.rs `the_number_keys_digits_are_drawn_at_equal_widths` (the same
   case's "shortcut digits keep equal widths": the Templates dialog's number-key chords in the monospace face, each as
   many monospace advances wide as it has characters)
+- crates/gui/farhelm-gui/src/trash/dialog/tests.rs `a_known_archive_time_alone_is_drawn_in_the_monospace_face` (the
+  second case, archive metadata keeps labels in the interface face and only known timestamps in the monospace face: the
+  Trash dialog's "Archived" before a time in the monospace face, and "Archive time unknown" in the interface face)
 
 Not yet ported:
 
@@ -131,10 +134,6 @@ Not yet ported:
 - of the first case, the version readout in the monospace face; belongs to desktop integration
   ([Desktop integration and Linux packaging](desktop-integration-and-linux-packaging.md)), in
   crates/gui/farhelm-gui/src/update_readout/view/tests.rs
-- the second case, "archive metadata keeps labels in Inter and only known timestamps in mono": the Trash dialog's
-  "Archived" label in the interface face beside a known time in the monospace face, and "Archive time unknown" wholly in
-  the interface face; belongs to other dialogs ([Other dialogs](other-dialogs.md)), in
-  crates/gui/farhelm-gui/src/trash/dialog/tests.rs
 
 The first case's New button in the interface face has no port: the list heading's New is an icon button (SPEC.md,
 "Session list"), whose words are its accessible name and hover help, and it paints no text for a face to draw.
@@ -235,6 +234,12 @@ partly
   crates/gui/farhelm-gui/src/components/tests/dialog.rs
   `a_dialog_body_has_its_own_stop_whenever_it_holds_nothing_to_focus` (sent feedback is keyboard-scrollable without
   changing the editing Tab order)
+- crates/gui/farhelm-gui/src/feedback/tests.rs
+  `tab_walks_the_dialog_while_a_send_is_out_and_a_refusal_gives_the_fields_back` (sending feedback gains a body stop and
+  refusal restores editor entry: the stop's premise does not arise, since the fields stay focusable and read-only while
+  a send is out, and so remain the body's way in; Tab walks the dialog meanwhile from the busy Send, which keeps focus
+  through the refusal, and after it Shift+Tab reaches the message, which takes keys again, and Tab goes on to the
+  contact)
 - crates/gui/farhelm-gui/src/components/tests/scroll_box.rs
   `an_approvals_complete_initial_prompt_is_keyboard_scrollable` (an approval's complete initial prompt is
   keyboard-scrollable)
@@ -272,10 +277,11 @@ partly
   (crates/gui/farhelm-gui/src/feedback/tests.rs `nothing_closes_the_dialog_or_sends_again_while_a_send_is_out`, in which
   a click focuses the read-only message field while the send is out)
 
-Not yet ported: the same case's refusal half, where a refused send puts focus back in the message field with its text
-and Tab then reaches the contact field (crates/gui/farhelm-gui/src/feedback/tests.rs
-`a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks the text, not focus); belongs to other dialogs
-([Other dialogs](other-dialogs.md)), in crates/gui/farhelm-gui/src/feedback/tests.rs.
+Not yet ported: the same case's refusal half, where a refused send puts focus back in the message field itself.
+`tab_walks_the_dialog_while_a_send_is_out_and_a_refusal_gives_the_fields_back` (listed above) leaves focus on the busy
+Send through the refusal and reaches the message with Shift+Tab and then the contact field with Tab, and
+`a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks the text; the move of focus into the message belongs to
+other dialogs ([Other dialogs](other-dialogs.md)), in crates/gui/farhelm-gui/src/feedback/tests.rs.
 
 ### `tests/tooltip.spec.ts`
 
@@ -349,6 +355,11 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
 - crates/gui/farhelm-gui/src/session_list/delete_notice_tests.rs
   `an_open_row_menu_stays_open_and_follows_its_button_when_the_band_appears` (the crossing cases' own movement, content
   above a row that stays at its index growing and moving its button, which an open row menu follows)
+- crates/gui/farhelm-gui/src/notices_bell/tests.rs `an_open_list_follows_its_bell_through_what_changes_underneath` (the
+  bell cases, for a row's notification list opened by its keys: the row above rewrapping its ended line moves the bell
+  down and the list follows it, which is also what a refusal or a stale cause line growing on that row does; a change
+  compact hides moves nothing; a pushed reorder that moves the bell's row down or up across a row above it moves the
+  list with it, and a permutation wholly above it moves nothing)
 
 The held served reorder with the row's notification list open is a recorded deviation: the list does not keep the order
 hold ([Sidebar and session view](sidebar-and-session-view.md), "Deviations from the old app").
@@ -375,6 +386,11 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
   (another row's removal leaves an open row menu open and in place, the menu part of "a Delete with no notice"; a failed
   listing keeps the rows and the menu, which follows its button down past the failure line and back up when the next
   listing is read, inverting "recovering from a failed listing closes an open menu")
+- crates/gui/farhelm-gui/src/notices_bell/tests.rs `an_open_list_follows_its_bell_through_what_changes_underneath` (the
+  bell cases: an open notification list stays open and follows its bell when a completed Delete's notice brings the
+  band, when the listing is cut and its count becomes a warning line, and through a failed listing and its recovery;
+  another row's removal moves nothing. Dismissing the band under an open list is unreachable: a press on Dismiss is a
+  press outside the list, which closes it, and Tab out of the list closes it too)
 
 ### `tests/popover-host-movement.spec.ts`
 
@@ -391,9 +407,8 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
   moves with its toggle when the details of a row above it grow as a row below shrinks, and stays in place when the rows
   wholly above or wholly below it trade the lengths of their details; and the remaining case, a host menu closing when
   the registry stops listing its host)
-
-Not yet ported: "a concealed same-height host reorder leaves the session bell open", with the row bell's other movement
-cases (other dialogs', the bell's owner).
+- crates/gui/farhelm-gui/src/notices_bell/tests.rs `an_open_list_follows_its_bell_through_what_changes_underneath` (the
+  same for an open notification list, "a concealed same-height host reorder leaves the session bell open" among them)
 
 ### `tests/popover-expanded-host-movement.spec.ts`
 
@@ -465,6 +480,11 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
 - crates/gui/farhelm-gui/src/layers_tests.rs `a_popover_follows_its_anchor_and_closes_when_the_anchor_is_gone` (a bell's
   notification list and a row menu are popovers of the layer manager, so a growing age or a Trash count that wraps the
   header moves them with their buttons and leaves them open)
+- crates/gui/farhelm-gui/src/notices_bell/tests.rs `an_open_list_follows_its_bell_through_what_changes_underneath` (the
+  bell cases: the clock turning the bell's own age from 9m to 10m moves the bell left and its open list with it; 10m to
+  11m, as wide, and another row's age widening move nothing. The Trash count's bell cases are the heading above the rows
+  growing and a redraw that moves nothing, which the same test makes with the cut listing's warning line and the steps
+  that move nothing, not with a Trash count)
 
 ### `tests/shell-scroll.spec.ts`
 
