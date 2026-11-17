@@ -11,7 +11,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
                                        [--remote-host DEST ... | --user-session (Linux)]
     scripts/gui-agent.py RUN_DIR snapshot -i         # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
-    scripts/gui-agent.py RUN_DIR capture OUT.png       # a --scenario run's picture, once every check passes
+    scripts/gui-agent.py RUN_DIR capture OUT.png [--keep-focus] [--park id:TARGET]
     scripts/gui-agent.py RUN_DIR stop
 
 `start` builds `farhelm-desktop` with the `agent` feature (the test-automation bridge), the `farhelm` CLI the app
@@ -1561,13 +1561,20 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
     """`capture OUT.png`: the scenario run's picture, written to OUT only if every check passes (see the section
     comment above). Each step says what it waits for or what it found; a failure raises a RuntimeError naming the step,
     and the shot taken so far stays at CAPTURE_FILE in the run directory. `platform` decides the Linux frame crop and
-    `bridge_cli` is `cli` unless a test hands in a stand-in bridge."""
+    `bridge_cli` is `cli` unless a test hands in a stand-in bridge. `--keep-focus` leaves dialogs and their fields
+    focused, skipping the terminal click and transcript wait so a picture can show those surfaces. `--park` uses the
+    shot's chosen spot directly; the bridge still refuses a covered target."""
     import argparse
     import shutil
 
     parser = argparse.ArgumentParser(prog="gui-agent.py RUN_DIR capture")
     parser.add_argument("output", type=Path, help="where to write the PNG once every check passed")
+    parser.add_argument("--keep-focus", action="store_true",
+                        help="keep the current focus; skip the terminal click and transcript wait for dialog shots")
+    parser.add_argument("--park", metavar="TARGET", help="park on this id: target instead of searching for a spot")
     options = parser.parse_args(args)
+    if options.park is not None and (not options.park.startswith("id:") or len(options.park) == 3):
+        raise UsageError("--park must be an id: target")
     if not record.get("scenario"):
         raise UsageError("capture takes the picture of a scenario run; start this run with --scenario")
     bridge_cli = bridge_cli or cli
@@ -1588,32 +1595,37 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
         return None if answer.returncode != 0 or answer.stdout.strip() == "null" else probe_text(answer.stdout)
 
     def park() -> None:
-        # The bridge aims at an element's centre, so each candidate is tried in turn: one that something else covers
-        # at its centre is refused by the bridge, and the next is tried.
-        entries = json.loads(bridge("snapshot", "-a", "--json", "--no-source"))["entries"]
-        for target in park_targets(entries, json.loads(bridge("tree"))):
-            if bridge_cli(run, record, ["hover", target], capture=True).returncode == 0:
-                print(f"capture: pointer parked on {target}", flush=True)
-                break
+        if options.park is not None:
+            bridge("hover", options.park)
+            print(f"capture: pointer parked on {options.park}", flush=True)
         else:
-            raise RuntimeError("no spot in the window is clear of hover and tooltip reactions to park the pointer on")
+            # The bridge aims at an element's centre, so each candidate is tried in turn: one that something else
+            # covers at its centre is refused by the bridge, and the next is tried.
+            entries = json.loads(bridge("snapshot", "-a", "--json", "--no-source"))["entries"]
+            for target in park_targets(entries, json.loads(bridge("tree"))):
+                if bridge_cli(run, record, ["hover", target], capture=True).returncode == 0:
+                    print(f"capture: pointer parked on {target}", flush=True)
+                    break
+            else:
+                raise RuntimeError("no spot in the window is clear of hover and tooltip reactions to park the pointer on")
         bridge("wait", "--idle", "--timeout", str(IDLE_MILLISECONDS))
 
     # Park first: on a Mac the pointer is the real one, wherever it was left on the screen, and resting on a link in the
     # terminal it opens a tooltip naming the link's real target, which covers the terminal and refuses the click.
     park()
-    # Settle: the open session's terminal holds focus and shows the end of its transcript.
-    if terminal() is None:
-        bridge("click", f"id:{TERMINAL_ELEMENT}")
-    if opened.get("transcript") is not None:
-        line = last_transcript_line(opened["transcript"])
+    # A dialog shot must keep its field focused: clicking the terminal could dismiss the surface being photographed.
+    if not options.keep_focus:
+        if terminal() is None:
+            bridge("click", f"id:{TERMINAL_ELEMENT}")
+        if opened.get("transcript") is not None:
+            line = last_transcript_line(opened["transcript"])
 
-        def replayed():
-            text = terminal()
-            return (text if text is not None and line in text else None), f"it shows {text!r}"
+            def replayed():
+                text = terminal()
+                return (text if text is not None and line in text else None), f"it shows {text!r}"
 
-        poll(f"the open session's terminal to show {line!r}", replayed, TRANSCRIPT_SECONDS, 0.25)
-    print("capture: the open session's terminal holds focus and shows its transcript's last line", flush=True)
+            poll(f"the open session's terminal to show {line!r}", replayed, TRANSCRIPT_SECONDS, 0.25)
+        print("capture: the open session's terminal holds focus and shows its transcript's last line", flush=True)
     # And again, since the click left the pointer in the middle of the terminal.
     park()
 

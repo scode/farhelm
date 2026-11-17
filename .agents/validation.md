@@ -761,16 +761,17 @@ systemd or SSH substrate ran.
   shield checks), a scenario `capture` (the transcript's readiness line, the pointer parked only clear of hover and
   tooltip reactions, the leak check refusing machine paths anywhere and the account's ssh spelling and the hostname only
   where drawn, the size check quoting the window's points and scale, and against a stand-in bridge the order of park,
-  focus click, park and shot, with nothing written on a failed check), the wait for a fleet's statuses,
-  `terminal-text --wait` asking again until its text shows, a helm reply without a body read as none, that a recorded
-  pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and
-  UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may still be
-  running, given up by a holder whose `start` was killed while it waited, and a lock path that cannot be opened failing
-  at once. Seconds; builds nothing and starts no app (the sshd tests start a private sshd on 127.0.0.1); runs on Linux
-  and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs
-  `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the
-  tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
-  `farhelm-desktop`, or the app's startup changes.
+  focus click, park and shot, with nothing written on a failed check, and `--keep-focus` retaining the parks and leak
+  probes without a click or transcript wait, and `--park` hovering its named id without searching and naming a refused
+  target), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply
+  without a body read as none, that a recorded pid whose start time no longer matches is never signalled (from /proc on
+  Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by
+  `stop` while part of the run may still be running, given up by a holder whose `start` was killed while it waited, and
+  a lock path that cannot be opened failing at once. Seconds; builds nothing and starts no app (the sshd tests start a
+  private sshd on 127.0.0.1); runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run
+  (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI
+  session of the same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the
+  bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
@@ -779,16 +780,23 @@ systemd or SSH substrate ran.
   the committed scene list (`docs/gpui/screenshot-scenes.json`) is flagged, the list's validation (and the committed
   list passing it against the golden manifest), and the output being outside the checkout and new. Reading PNGs is
   checked against every row filter, and cropping a Linux capture's window frame against a framed picture and pictures
-  without that frame (left uncropped and reported). The capture step runs against a fake `gui-agent.py`: one app run per
-  variant with its theme, size (on Linux, larger by the frame, cropped back to the variant's size) and lock, `stop`
-  after every `start` that made a run directory (also a failed or interrupted one), a failed start (also with no app
-  scenes), a failed or timed-out step, a failed `stop`, a golden the manifest names for no platform or a named picture
-  the fetched directory lacks failing the batch, every platform's goldens copied wherever the batch runs, and run
-  directories removed when clean and kept when not, and scenes with their own `start` options getting an app run of
-  their own while the rest share the list's `app_start`, and a scene whose `sizes` limits it run only at those sizes,
-  with the page giving its `sizes_why` for the others. Seconds; needs neither the app nor the reference set. The batch
-  itself is a tool, not a gate. Run the tests when the script or the scene list changes, or the golden manifest gains or
-  loses a scene.
+  without that frame (left uncropped and reported), and a region crop preserving the selected pixels and the source. The
+  capture step runs against a fake `gui-agent.py`: one app run per variant with its theme, size (on Linux, larger by the
+  frame, cropped back to the variant's size) and lock, `stop` after every `start` that made a run directory (also a
+  failed or interrupted one), a failed start (also with no app scenes), a failed or timed-out step, a failed `stop`, a
+  golden the manifest names for no platform or a named picture the fetched directory lacks failing the batch, every
+  platform's goldens copied wherever the batch runs, and run directories removed when clean and kept when not, and
+  scenes with their own `start` options getting an app run of their own while the rest share the list's `app_start`, and
+  a scene whose `sizes` limits it run only at those sizes, with the page giving its `sizes_why` for the others. Seconds;
+  needs neither the app nor the reference set. The batch itself is a tool, not a gate. Run the tests when the script or
+  the scene list changes, or the golden manifest gains or loses a scene.
+- `python3 -B scripts/test-docs-shots.py` — the docs screenshot engine (`scripts/docs_shots.py`): page modules refused
+  without SHOTS, with bad or duplicate shot names, or with empty or non-id regions or a non-id park target; crop unions
+  padded, clamped and scaled; and against a stand-in harness, failed captures leaving no output while later shots run,
+  and layer reset failing after six Escape presses. Seconds, no app or network. Run it when the engine or its page
+  modules change. `shellcheck scripts/docs-screenshots.sh` checks its local command; a live
+  `scripts/docs-screenshots.sh --local --only launch-templates` builds and drives the staged GPUI app. On Linux both
+  shots stop at the size check by design (scale 1); the run's retained messages and clean stop are the evidence.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run

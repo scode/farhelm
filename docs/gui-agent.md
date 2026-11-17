@@ -279,8 +279,7 @@ NOTE: A capture refuses rather than repairs. It never resizes the window, rescal
 drawing; a picture it cannot take at the scenario's size is no picture.
 
 `capture OUT.png` on a scenario run takes the scenario's picture: `scripts/readme-screenshot.sh` runs it for the README
-hero, and the docs screenshots and the demo video are meant to reuse it, or the helpers under it in
-`scripts/gui-agent.py`, when they are rebuilt. In order, it:
+hero, and `scripts/docs_shots.py` uses it for docs screenshots. The demo video can reuse it when rebuilt. In order, it:
 
 - settles the open session: when no terminal holds focus it clicks the open session's terminal, then waits (30 seconds)
   until it shows the last line its transcript prints;
@@ -295,6 +294,13 @@ hero, and the docs screenshots and the demo video are meant to reuse it, or the 
 - takes the bridge's screenshot (window content, at the window's scale) into `capture.png` in the run directory, and on
   Linux crops the window frame and title bar off (the screenshot batch's `crop_frame`);
 - checks the size against the viewport times its scale, as the publish script does, and only then copies it to OUT.
+
+`capture OUT.png --keep-focus` skips the terminal click and the wait for its transcript's last line. Use it to capture a
+dialog or field whose focus must stay where the shot's steps left it. Pointer parking never clicks; both parks and idle
+waits, the leak checks before and after, the screenshot, Linux frame crop and size check still run. The docs runner
+always uses this option. Without it the README hero's terminal settling stays as described above.
+
+`--park id:TARGET` hovers the named spot instead of searching, fails if it is covered, and keeps the idle wait.
 
 Any failure stops with the step and the reason, writes nothing to OUT, and leaves the shot in the run directory to look
 at. A size failure quotes the window's points and scale: a window smaller than the viewport means the display is too

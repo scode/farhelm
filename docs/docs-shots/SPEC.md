@@ -1,208 +1,103 @@
 # Docs screenshots: requirements
 
-This directory is the design of the annotated screenshots the docs website shows, and the requirements that govern how
-they are produced. The capture code lives under `e2e/docs-shots/` (one spec per docs page, one test per shot), the
-commands are `scripts/docs-screenshots.sh` and `scripts/publish-docs-shots.sh`, and pages show a shot with the
-`Screenshot` component in `website/src/components/`. The fleet staging is the README hero's
-(`docs/readme-hero/SPEC.md`), so what that file says about staging governs these shots too, except where this file lists
-an addition.
+The docs screenshot runner captures regions of the real GPUI desktop app against a staged fleet. The engine is
+`scripts/docs_shots.py`, page modules live under `scripts/docs-shots/`, and the commands are
+`scripts/docs-screenshots.sh` and `scripts/publish-docs-shots.sh`. Pages show a shot with the `Screenshot` component in
+`website/src/components/`.
 
-NOTE: This is not a visual regression fixture. Nothing in CI captures the images, compares them, or fails when they
-drift. They exist so the docs show the real product at whatever version was last captured, and so an agent can refresh
-them without inventing anything.
+NOTE: Capture is local only until the Mac path lands with the first published page. Only Launch templates has been
+ported, with two unannotated crops; no page is published yet. Linux runs exercise staging and capture checks, then stop
+at the size check because headless Mutter renders at scale 1 and the scenario requires scale 2. This is not a visual
+regression fixture: nothing in CI captures or compares the images.
 
 ## Why screenshots, and who owns them
 
-The docs show where to click with a real screenshot, annotated with red arrows and short labels, instead of narrating
-the clicks (`website/EDITORIAL_RULES.md`, "Rules from feedback"). The shots belong to the pages: an agent writing a page
-writes its shots, including the annotation wording, and changes them with the page. That differs from the README hero,
-whose design only the maintainer changes. The scenario here is likewise the docs' own and may grow when a shot needs
-something the fleet lacks, as long as the existing shots still show what their pages say.
+The docs use real screenshots to show where to click (`website/EDITORIAL_RULES.md`, "Rules from feedback"). Shots belong
+to their pages and change with them. The scenario here likewise belongs to the docs and may grow when a shot needs
+something the fleet lacks, as long as existing shots still show what their pages say. The current runner adds no
+annotation overlay.
 
 ## What is real and what is not
 
-Everything visible comes from a real helm, real supervisors, and real terminals, with the hero's two exceptions (the
-staged fleet, and each row's age and folder rewritten in transit) and six more, all of them in transit, all of them from
-`scenario.json5`, and no others. The last two are installed only for the shots that ask for them, so every other shot
-shows the fleet's real replies:
+The fleet staging is the README hero's (`docs/readme-hero/SPEC.md`): real helm, supervisors and terminals, with fake
+agents replaying invented transcripts. Statuses are the supervisor's real readings. The app pins the scenario's ages and
+directories on the staged sessions so the run's private paths do not enter the picture. `gui-agent.py start --scenario`
+owns that staging and its private sshd; nothing uses a live installation.
 
-- **Launch history.** The session launcher's recent setups come from launches it remembers. A fresh stack remembers
-  none, and staged sessions are not launches made from the launcher, so the history reply carries the scenario's
-  `launch_history` instead. The model catalog the launcher checks those setups against is the real one.
-- **Recent folders.** The folders offered under the launcher's folder field come from the same reply, from the
-  scenario's `folders`.
-- **Folder check.** The launcher checks that the directory it will start in exists on the chosen host, and warns under
-  the field when it does not. The scenario's directories are invented and do not exist on the capturing machine, so for
-  a directory the scenario names on that host (in `folders`, `sessions` or `launch_history`) the check answers that it
-  exists. Browsing a directory, and checking any other path, still reaches the real helm.
-- **Host destinations.** Host settings and details show each host's ssh destination. The staged remotes are self-ssh
-  spellings on the capturing machine, and one of them names its account, which must never be photographed, so every host
-  reply shows each remote's `shown_ssh` instead.
-- **Managed checkout trash.** The trash at the top of the session list lists managed checkouts whose last session was
-  deleted. Making one needs a real GitHub clone, which the staged fleet does not make, so the trash shots get the
-  scenario's `checkout_trash` as each host's listing, with names and paths built the way Farhelm records an archive.
-  Deleting from that trash is refused outright.
-- **Terminal file checks.** Hovering a file path in a session's terminal checks it on the session's host and shows the
-  host, the full path, and the size. The staged sessions' real directories are the run's temporary state, which must
-  never be photographed, and the transcripts name files that do not exist there, so the download shot gets the
-  scenario's `terminal_files` as the check's answer. Downloads are refused outright.
+The docs engine also stores the scenario's launch templates through the helm's real `PUT /api/templates/<name>` API. A
+template's host key becomes that host's install identity from `GET /api/hosts`. No shot saves or deletes a template.
+Other scenario declarations for pages not yet ported are not staged by this engine.
 
-One more thing is staged rather than real, the add-host check. Asking Farhelm to add a host makes it check that host
-over ssh before showing what setup would install, and the staged fleet has no spare machine to check. So for the
-scenario's invented `add_host` destination, and only that one, the helm answers the check from Farhelm's own test
-stand-in (the one the browser tests use) as a reachable Ubuntu machine with nothing set up. The setup confirmation it
-then shows is the helm's real plan, with the scenario's invented home directory in its paths. No shot confirms that
-setup, so no host is ever added.
-
-The fleet also holds the scenario's launch templates. Staging creates them through the helm's own templates API, the one
-the templates panel uses, so they are real templates rather than a rewrite; the scenario names a template's host by its
-key, and staging swaps in that host's install identity. No shot saves or deletes a template.
-
-Statuses are never rewritten, as for the hero. Before writing each PNG the capture also checks the page's visible text
-and form values for the capturing account's name, its home directory, and the run's temporary state, and fails if any
-appears: the rewrites are supposed to keep those out, and the check is what proves they did.
+Before each shot the engine presses Escape until no layer remains, giving up after six presses. The page's steps then
+reach the state to photograph. Every shot uses the scenario's viewport and dark appearance, in one shared app run. The
+harness's `capture --keep-focus` parks the pointer, waits for idle, checks for machine details before and after the
+screenshot, crops the Linux window frame and checks the full picture's size. It leaves the shot's focus alone. Only a
+passing capture is cropped to the union of the page's region boxes, padded by 16 logical pixels, clamped to the window
+and scaled to image pixels. A failed shot writes no output and the engine continues to the next; `stop` runs at the end
+even after a failure.
 
 ## Where the images live
 
-The PNGs are never committed on main. Each publish builds a snapshot, a root commit holding every shot the docs pages
-reference, and points `refs/docs-assets/keep` at a keeper commit whose parents are the new snapshot and every earlier
-snapshot replaced less than six weeks ago, plus the one main's manifest pins, whatever its age. That manifest is read
-from main on the remote as well as from the checkout that publishes, which may be behind main; a publish that would
-prune the keeper but cannot read main's manifest stops before pushing anything. `website/src/data/docs-shots.json` pins
-the newest snapshot, records which main commit its capture ran on (`captured_from`) and when (`captured_at`), and
-records each shot's size. Pages load each image from that snapshot's raw GitHub URL.
+PNGs are never committed on main. Local captures go to the gitignored
+`website/public/docs-shots-local/<page>/<shot>.png`, where the docs preview can show them. A failed run prints its run
+directory, retained with its full capture and failure messages.
 
-The maintainer chose that shape for three reasons:
+The existing publisher builds a snapshot, a root commit holding every shot the docs reference, and points
+`refs/docs-assets/keep` at a keeper whose parents are the new snapshot, snapshots replaced less than six weeks ago, and
+the snapshot main's manifest pins, whatever its age. `website/src/data/docs-shots.json` pins the snapshot, records
+`captured_from` and `captured_at`, and records each shot's size. Pages load images from that snapshot's raw GitHub URL.
 
-- **Old images are garbage.** A snapshot that falls out of the six-week window is reachable from nothing, so GitHub may
-  collect it, which is the point: images nobody needs any more should not accumulate anywhere.
-- **Recent tags keep working.** A tag pins whichever snapshot was current when it was cut, and that snapshot stopped
-  being current only when the next one was published. Counting the six weeks from that replacement, not from the
-  snapshot's own publish date, is what keeps the docs at any release tag from the last six weeks showing their images
-  when screenshots are republished rarely.
-- **Clones stay small.** The ref is outside `refs/heads/`, so clones never fetch it: `jj git fetch` and a default
-  `git fetch` only pull branches. A branch would have put every retained snapshot into every checkout.
-
-Publishing is scripted end to end. `scripts/publish-docs-shots.sh` is the only thing that knows the ref and the only
-thing that pushes it. It pushes with a lease on the keeper it read, so a concurrent publish fails instead of being
-overwritten, and it writes the manifest only after GitHub serves the new snapshot. Two changes that both moved the
-manifest conflict on it; resolve that by rebasing onto the newer one and capturing and publishing again, never by
-editing the manifest. An agent that finds itself typing a push to that ref has left the procedure and should stop.
+This keeps clones small (the ref is outside `refs/heads/`), lets old images become unreachable, and preserves images for
+recent release tags for six weeks after their snapshot was replaced. The publisher reads main's manifest from the remote
+too, so a checkout behind main cannot prune its images. It pushes with a lease and writes the manifest only after GitHub
+serves the snapshot. Only `scripts/publish-docs-shots.sh` pushes the ref; never push it by hand or resolve a manifest
+conflict by hand-editing it.
 
 ## Regenerated in bulk
 
-Every publish is a complete regeneration: all pages' shots from one run of `scripts/docs-screenshots.sh`, captured
-against one main commit. Published release shots are the one exception: they are carried over unchanged (see below). The
-capture writes a record of that run (`capture.json` beside the shots) naming the commit and the checksum of every PNG,
-and only a complete run that can vouch for showing main's UI writes it. `--only <page>`, which is for drafting a page,
-deletes it, and so does a full run whose app code (`crates/`, `Cargo.toml`, `Cargo.lock`) differs from main, one with
-`--no-build`, or one whose builds go to a `CARGO_TARGET_DIR` outside the checkout; such a full run still captures for
-the preview but exits 3, and says so before it starts. The publish script refuses shots without a complete record, a
-page referencing a shot the run did not produce, and a shot that changed after the run recorded it, so a published set
-never mixes captures from different versions of the UI.
+Publishing requires every page's shots from one complete capture against one main commit. Published release shots are
+carried over unchanged. A complete run writes `capture.json` beside the shots, naming the commit and each PNG's
+checksum. `--only <page>` deletes that record, as does a full run whose app code (`crates/`, `Cargo.toml`, `Cargo.lock`)
+differs from main or which used `--no-build`. Such a full run still captures for preview but exits 3 and explains why.
+The harness asks cargo where it builds, so `CARGO_TARGET_DIR` does not affect this decision.
 
-The maintainer asked for that so a refresh can be reasoned about: the manifest says exactly which version of the UI the
-published shots show, and the changes since then are a `git log` away.
+The publisher refuses a partial record, a referenced shot the run did not produce, or a shot whose bytes changed after
+capture. This preserves one identifiable UI version across the published set. Publishing remains out of scope until the
+Mac path lands.
 
 ## Release shots are frozen
 
-The Release notes page shows screenshots under some releases' entries (`website/.agents/release-notes.md`, "Release
-notes"). A release shot is a shot one of `website/src/release-notes/*.json` lists, and it is published once the manifest
-lists it. Release notes are stable once published, except for a deliberate correction, and a release's screenshot is
-part of its notes: a recapture from today's UI would show that release something it never had. So no capture takes a
-published release shot, whether full or `--only`; its test skips, and the publish copies the image byte for byte from
-the snapshot the manifest pins. `captured_from` therefore describes every published shot except these, which keep
-showing the UI of the release they belong to. A release shot not yet published, a new release's first screenshot, is
-captured like any other.
+A release shot is one listed by `website/src/release-notes/*.json` and recorded as published in the manifest. It stays
+byte-identical in later publishes, copied from the pinned snapshot; recapturing from today's UI would misrepresent the
+release. A missing pinned image makes the publisher refuse rather than drop it.
 
-A correction is the one way to change one: `scripts/docs-screenshots.sh --recapture-release-shot <name>` captures it
-from the current UI, and the capture record says it was recaptured on purpose. The publish refuses a record that holds a
-published release shot without saying so, so a capture by older tooling cannot replace one by accident, and it refuses
-when the pinned snapshot lacks a release shot it should carry over rather than dropping it from the notes.
+The command retains validation of `--recapture-release-shot <name>` but refuses the capture: no page module captures
+release shots yet. Deliberate corrections and first captures for new releases need that support before they can run.
 
 ## Adding or changing a shot
 
-A shot is a test in `e2e/docs-shots/<page>.spec.ts` named after the page. It opens the staged fleet, drives the UI to
-the state it shows without launching sessions or changing settings, draws annotations with the docs overlay theme, and
-calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regions plus every annotation on screen.
+Create `scripts/docs-shots/<page>.py`, import `Shot` with `from docs_shots import Shot`, and define `SHOTS`, a list of
+`Shot(name, steps, regions, park=None)` values. `name` is lowercase kebab case and unique within the page. `steps` is a
+function taking the engine's bridge facade (`click`, `fill`, `press`, `wait`, `wait_text`); `regions` is a non-empty
+list of stable `id:` targets. The engine refuses missing SHOTS, bad or duplicate names, and empty or non-id regions
+before starting the app. Use the element IDs in the GPUI source, and wait for the state the shot needs rather than
+adding delays. Steps never launch a session or change a setting. The optional `park` is an `id:` target for a static
+spot that has no hover or tooltip reaction and stays clear of overlays; capture hovers it directly instead of searching.
 
-Every docs shot, release shots included, is taken in the app's dark theme. The maintainer wants no light theme in the
-docs, and the app follows the device's appearance, which Playwright emulates as light unless told otherwise, so
-`e2e/docs-shots.config.ts` makes dark the default for every test. Only `visual-review.spec.ts`, whose shots no page
-shows, chooses light explicitly.
-
-`visual-review.spec.ts` is the development-review exception: it captures unannotated app surfaces in dark and light
-mode, at wide and constrained window widths, for the Steel plans' visual reviews. It may change the owned staged fleet's
-preferences to show the states under review. To show a selected session's last-known status, it may temporarily retarget
-one of its own staged remotes to an invented unavailable destination, then restore the exact original destination and
-verify that the same host and install reconnect. Statuses remain real; no SSH configuration or installation changes. Its
-`visual-review/` shots are referenced by no docs page and are never published; the publisher selects only shots the docs
-pages reference. It shares the real fleet and machine-detail check with ordinary docs shots.
-
-For Trash footer review, the focused `trash-footer` selection may confirm the staged archive question and hold each
-host's first delete request in the browser. It photographs the renderer's pending progress, then releases those requests
-into the existing staged refusal. No request reaches real deletion, no success is invented, and the staged listing
-remains unchanged. Cleanup releases and drains the held callbacks before removing their route or closing the page. This
-selection takes idle, global confirmation and pending views in both themes at 1600×1000 and 390×520, plus an ordinary
-Rename comparison at each theme and size. Ordinary docs shots still cancel the question.
-
-For approval-card review, development staging may add one owned source using the existing fake-agent Spawn script. Its
-public launch command is portable; its private wrapper lives with the staged fleet. With the genuine GUI connected, the
-capture temporarily sets that local host's command and YOLO permissions to ask for the request while permitting its
-inherited command, preserving both exact prior values. It photographs the same real pending `spawn /tmp` request in both
-themes and at wide and measured 650px main-pane widths before the production expiry, then answers Deny, observes the
-source's refusal and verifies that no child appeared. Cleanup removes only that source and restores both permissions on
-failure too. Only the existing cwd/age rewrites apply to its listed row; approval replies, feed and statuses remain
-real. This exception supplies source state for development review; ordinary shots still never launch a session, and the
-requested child is never launched.
-
-For setup-progress review, this spec may also confirm the scenario's invented add-host plan against that same E2E-only
-backend. Its actions are simulated, as in the provisioning browser tests; no installation or SSH configuration changes.
-The capture holds an action through the backend's existing control file, photographs the real helm's running progress,
-then restores the exact control file, waits for the run to release its host and removes only that newly registered host.
-Connection and session statuses are still never rewritten.
-
-The same simulated setup action may fail at a controlled step for host-warning review. With Hosts closed, the capture
-photographs the warning on an ordinary and selected avatar, then holds a retry to show its progress ring beside the
-unacknowledged warning. The failure and progress come from the real helm's retained run; cleanup restores the backend
-control file and removes only the invented host as above. The focused sentence-case selection also opens that retained
-failure in Hosts before retrying, to photograph its steps and Re-run menu. Opening Hosts acknowledges it, so this
-selection's retry shows progress after acknowledgement.
-
-- `scripts/docs-screenshots.sh --only <page>` captures that page's shots into `website/public/docs-shots-local/`, and
-  the local docs preview shows them straight away, labelled as local captures. Look at every one: the arrow points at
-  what the label says, the label covers nothing the reader needs, and nothing from the capturing machine shows. A
-  one-page capture cannot be published.
-- The page shows a shot with `<Screenshot name="<page>/<shot>" alt="…" />` (the page must be `.mdx`). The alt text says
-  what the shot points at, for readers who cannot see it.
-- To publish, run `scripts/docs-screenshots.sh` with no `--only` on a checkout based on the latest main, look at every
-  page's shots, then run `scripts/publish-docs-shots.sh`. Commit the manifest change with the page.
+Run `scripts/docs-screenshots.sh --local --only <page>` to develop that page. The engine resets layers before its steps,
+then captures and crops each shot. Inspect every successful image for the intended controls and machine details. A
+one-page capture cannot be published. Pages reference a shot with `<Screenshot name="<page>/<shot>" alt="…" />` in MDX;
+the alt text explains what the image shows.
 
 ## Refreshing
 
-A full docs refresh (`website/.agents/refreshing.md`, "Refreshing the docs") runs this as one of its steps when the UI
-changed.
-
-"Refresh the docs screenshots" means, on a checkout of the latest main:
-
-1. Read `captured_from` in `website/src/data/docs-shots.json` and look at what changed in the app since then:
-   `git log --oneline <captured_from>..origin/main -- crates/ Cargo.toml Cargo.lock` for the overview (the same paths
-   the capture checks; the UI's wording also comes from the shared protocol crate, and a dependency bump in the lockfile
-   can change what renders), then the diffs of anything that touches a screen a page shows. Note what a shot or a page
-   will need: a renamed control, a new option, a moved menu, changed wording in a dialog. A label that changed in the UI
-   can make a page's prose wrong too.
-2. Update the shot specs for those changes and run `scripts/docs-screenshots.sh`. When a shot fails because the UI moved
-   under it (a selector that no longer matches, a control now behind a menu), rewrite its steps so it shows the same
-   thing on the current UI; change its annotation wording only when what it explains changed. Published release shots
-   are not part of a refresh: the capture skips them and the publish carries them over, so leave their tests, their
-   lists, and the release notes alone even when the UI they show has since changed.
-3. Look at every image, and fix any page whose text no longer matches what its shots show.
-4. Run `scripts/publish-docs-shots.sh`, and commit the manifest with any page or spec changes.
-
-When nothing in the UI changed since `captured_from`, say so and ask whether to regenerate anyway.
+Until the Mac capture path lands, use local runs to port and check page modules; a full published refresh is
+unavailable. When it becomes available, the bulk publishing contract above still applies: read UI changes since the
+manifest's `captured_from`, update the affected modules and page wording, capture every page, inspect the pictures, then
+publish and commit the manifest with the page changes. Published release material stays frozen.
 
 ## Prerequisites
 
-The hero's: a cargo build, a dx web build, Playwright with Chromium installed under `e2e/`, and passwordless ssh to the
-scenario's remote destinations (`localhost` and `$USER@localhost`). The publish script also needs `file`, `curl`, and
-network access to GitHub; its `--self-test` needs ImageMagick's `convert` and no network.
+The GPUI harness's build and runtime tools are listed in `docs/gui-agent.md`. Linux needs headless Mutter and lavapipe;
+staged hosts use the run's private OpenSSH server, without passwordless ssh to the machine itself. The publisher also
+needs `file`, `curl` and GitHub access; its self-test needs ImageMagick's `convert` and no network.
