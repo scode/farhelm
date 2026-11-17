@@ -11,11 +11,11 @@
 //!   brings back the folder as it was. Enter on it only chooses, as the old control's did.
 //! - **Repository suggestions** (`POST /api/github-repositories`) are read while the user is choosing (no repository
 //!   chosen, or the list open), 150 ms after the field, the host or its connection stops changing (SPEC_impl.md:
-//!   "Browser requests debounce for 150 ms and discard stale host/query generations"). The list floats under the field
-//!   on the layer manager's non-focusing popover, as the model field's does (`field_list`): a valid `owner/repo` typed
-//!   into the field is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete discovery
-//!   is visible and does not prevent selecting a valid manually entered pair"), and an incomplete scan says so under the
-//!   field. Enter picks the highlighted row and never launches.
+//!   "The launcher's requests debounce for 150 ms and discard stale host/query generations"). The list floats under the
+//!   field on the layer manager's non-focusing popover, as the model field's does (`field_list`): a valid `owner/repo`
+//!   typed into the field is always its first row, so an incomplete scan never stops a choice (SPEC.md: "Incomplete
+//!   discovery is visible and does not prevent selecting a valid manually entered pair"), and an incomplete scan says
+//!   so under the field. Enter picks the highlighted row and never launches.
 //! - **The preview** (`POST /api/github-checkout-preview`) is asked for whenever what it answers for changes: the host,
 //!   its connection and installation, the repository (or choosing it again), the checkout's name, the agent choices and
 //!   the configuration revision last observed (SPEC.md: "Host, installation, destination, title, agent choice and
