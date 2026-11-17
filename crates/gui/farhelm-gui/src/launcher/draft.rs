@@ -33,10 +33,12 @@
 //!
 //! - A placement ([`LaunchDraft::target`]): an existing host, or a new disposable environment made from a recipe at a
 //!   place (SPEC.md, "Creation", the Runs on bullet). Its three hand edits are [`LaunchDraft::choose_runs_on`],
-//!   [`LaunchDraft::choose_recipe`] and [`LaunchDraft::choose_container_host`]. While a recipe is chosen a folder
-//!   destination is the new environment's home, `~`, and nothing edits it: no folder default waits for a host's
-//!   history, and no installation binds it. A managed checkout works as on a host, its repository cloned inside the
-//!   new environment (SPEC.md, "Container sessions" and "Sandbox sessions"), and it survives entering and leaving.
+//!   [`LaunchDraft::choose_recipe`] and [`LaunchDraft::choose_container_host`], and Clone and New opened beside an
+//!   environment session seed the source's recipe and place through [`LaunchDraft::seed_target`], which shares the
+//!   first edit's effects. While a recipe is chosen a folder destination is the new environment's home, `~`, and
+//!   nothing edits it: no folder default waits for a host's history, and no installation binds it. A managed checkout
+//!   works as on a host, its repository cloned inside the new environment (SPEC.md, "Container sessions" and "Sandbox
+//!   sessions"), and it survives entering and leaving.
 //!
 //! Not here: the composer search's parsing, recent setups and the host's default-folder precedence (the view passes
 //! the folder a host change should seed), a managed checkout's suggestions and preview (the view reads them from the
@@ -359,8 +361,9 @@ pub struct LaunchDraft {
     /// Where the launch runs when it is not an existing host: a new disposable environment made from a recipe at a
     /// place, which the helm creates for this launch alone (SPEC.md, "Sandbox sessions" and "Container sessions").
     /// `None` is Existing host, the Host row's choice. Set only through the Runs on edits
-    /// ([`Self::choose_runs_on`], [`Self::choose_recipe`], [`Self::choose_container_host`]); [`Self::host`] is kept
-    /// while it is set, so leaving the environment gives the Host row back as it was.
+    /// ([`Self::choose_runs_on`], [`Self::choose_recipe`], [`Self::choose_container_host`]) and the seed a source's
+    /// environment gives Clone and New ([`Self::seed_target`]); [`Self::host`] is kept while it is set, so leaving the
+    /// environment gives the Host row back as it was.
     pub target: Option<LaunchTarget>,
 }
 
@@ -1303,17 +1306,46 @@ impl LaunchDraft {
         if self.holds(Field::Host) || segment == RunsOn::of(self.target.as_ref()) {
             return;
         }
-        match segment {
-            RunsOn::ExistingHost => self.target = None,
+        let target = match segment {
+            RunsOn::ExistingHost => None,
             RunsOn::New(provider) => {
                 let Some(target) = entering.filter(|target| target.provider() == provider) else {
                     return;
                 };
-                self.target = Some(target);
-                self.folder = Draft::load(ENVIRONMENT_HOME.to_owned());
-                self.folder_install = None;
+                Some(target)
             }
+        };
+        self.place_on(target);
+    }
+
+    /// Open the draft on a new environment made from `target`, the recipe and place of the environment a source
+    /// session ran in: Clone of such a session, and New opened beside one, start there (SPEC.md, "Sandbox sessions":
+    /// "Clone targets the recipe for a fresh sandbox", and New "preselect[s] its recipe for a new sandbox and use[s] the
+    /// new sandbox's home Folder default, never the disposable host or its old folder"; "Container sessions" follows).
+    ///
+    /// A seed, as the rest of a source's seeding is: it marks nothing chosen, and its effects are exactly those of
+    /// entering the segment by hand ([`Self::choose_runs_on`]), so the folder becomes the environment's home and the
+    /// host the draft holds is what Existing host gives back. The target is taken as it is, even with a recipe the
+    /// catalog no longer lists or a place whose host is gone: the view keeps such a choice as unavailable with its
+    /// reason, and Launch refuses it, rather than silently choosing another (SPEC.md: "A missing recipe stays
+    /// unavailable rather than silently choosing another host"). Refused, changing nothing, where the mode holds the
+    /// host (Restart with and Replace with keep the existing environment).
+    pub fn seed_target(&mut self, target: LaunchTarget) {
+        if self.holds(Field::Host) {
+            return;
         }
+        self.place_on(Some(target));
+    }
+
+    /// Move the launch onto `target` (`None` is Existing host) with every effect a change of placement carries: the one
+    /// path both the hand edit ([`Self::choose_runs_on`]) and the seed ([`Self::seed_target`]) take, so the two cannot
+    /// drift apart. Callers check what the mode holds.
+    fn place_on(&mut self, target: Option<LaunchTarget>) {
+        if target.is_some() {
+            self.folder = Draft::load(ENVIRONMENT_HOME.to_owned());
+            self.folder_install = None;
+        }
+        self.target = target;
         // A suffix the existing host's previews moved the name to says nothing about the new environment, where the
         // helm numbers the base itself once it can see what is taken; carrying it in would name a fresh container
         // `review-2` where `review` is free. Coming back, the search starts over from the base, as after a host change.
