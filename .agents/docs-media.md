@@ -11,12 +11,12 @@ reading list in `website/AGENTS.md`.
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
-> NOTE: The README screenshot, the demo video and the docs screenshots cannot be refreshed right now. Their capture
-> scripts drove the web UI through the Playwright suites under `e2e/readme-hero/`, `e2e/readme-video/` and
-> `e2e/docs-shots/`, which were removed with the browser interface, and they stay broken until they are rebuilt on the
-> GPUI desktop app's tooling. Asked for one of these refreshes, say so instead of running the scripts. The procedures
-> below describe how the flows worked and are kept for that rebuild. The brand marks and the docs refresh's text work
-> are unaffected; a docs refresh leaves its screenshots as they are.
+> NOTE: The demo video and the docs screenshots cannot be refreshed right now. Their capture scripts drove the web UI
+> through the Playwright suites under `e2e/readme-video/` and `e2e/docs-shots/`, which were removed with the browser
+> interface, and they stay broken until they are rebuilt on the GPUI desktop app's tooling. Asked for one of these
+> refreshes, say so instead of running the scripts. Their procedures below describe how the flows worked and are kept
+> for that rebuild. The README screenshot has been rebuilt on the GPUI tooling. The brand marks and the docs refresh's
+> text work are unaffected; a docs refresh leaves its screenshots as they are.
 
 ## Brand marks: the icon and the wordmark
 
@@ -32,16 +32,21 @@ it, never the SVGs by hand, and the outline step only reruns when the word or th
 
 ## README hero screenshot
 
-Unavailable until rebuilt on the GPUI app's tooling (see the note at the top).
+> NOTE: The capture needs a Mac display that fits the hero's window; when it does not, `scripts/readme-screenshot.sh`
+> stops at its size check with no picture. Then say so, and do not work around it with window resizing, rescaling or a
+> GPUI patch. `docs/gui-agent.md`, "On a Mac", has the test Mac's display.
 
-The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the web UI
-against a staged fleet, governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run
-`scripts/readme-screenshot.sh`, look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the
-one-line URL change it leaves behind in README.md and in the landing page. The design (`docs/readme-hero/scenario.json5`
-and the transcripts beside it) changes only when the maintainer asks for a different picture. The publish script is the
-only thing that pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main.
-Neither script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its
-`--self-test`, which is its whole validation and needs no network.
+The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the GPUI desktop
+app against a staged fleet, taken on a Mac and governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot"
+means exactly: run `scripts/readme-screenshot.sh --mac <destination>` (its header lists the environment that names the
+Mac), look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the one-line URL change it
+leaves behind in README.md and in the landing page. Its preflight, shipment, build and window run under the Mac-wide
+lock, after a disk and memory check, and touches no Farhelm installation there; a failed run names its run directory on
+the Mac, kept for its logs; remove it once read. The design (`docs/readme-hero/scenario.json5` and the transcripts
+beside it) changes only when the maintainer asks for a different picture. The publish script is the only thing that
+pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main. Neither script is a
+gate: nothing in CI runs or checks the image. Changing the publish script means running its `--self-test`, which is its
+whole validation and needs no network.
 
 ## README demo video
 

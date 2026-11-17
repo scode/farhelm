@@ -1,10 +1,10 @@
 # README hero screenshot: requirements
 
 This directory is the design of the screenshot at the top of the README, which the docs website's landing page shows
-too, and the requirements that govern how it is produced. The capture code lives under `e2e/readme-hero/` and the two
-commands under `scripts/`; this file is what they are built to satisfy. The fleet staging (`e2e/readme-hero/stage.ts`)
-is shared with the demo video (`docs/readme-video/SPEC.md`), so what this file says about staging governs both, and a
-change to it changes both.
+too, and the requirements that govern how it is produced. The staging and the capture live in `scripts/gui-agent.py`
+(`start --scenario` and `capture`, described in `docs/gui-agent.md`, "Scenario runs" and "Scenario captures") and the
+two commands under `scripts/`; this file is what they are built to satisfy. The fleet staging is shared with the demo
+video (`docs/readme-video/SPEC.md`), so what this file says about staging governs both, and a change to it changes both.
 
 NOTE: This is not a visual regression fixture. Nothing in CI looks at the image, compares it, or fails when it drifts.
 It exists so the README shows the real product at whatever version is checked out, and so an agent can refresh it
@@ -24,11 +24,12 @@ touch the scenario or the transcript unless the request is about the design.
 Everything visible comes from a real helm, real supervisors, and real terminals, with two deliberate exceptions.
 
 The fleet is staged. The hosts are separate supervisors on the capturing machine, registered with the helm over ssh to
-localhost under distinct destination spellings, and given the aliases the scenario names. The sessions run a fake agent
-that replays `transcript.txt` and then behaves as the scenario's target status requires. The transcript imitates what a
-coding agent's turn looks like; it is invented, not a capture of any real session, and the file says so at the top. No
-real hostname, path, user name, or project from the capturing machine may appear in the picture, which is the reason the
-fleet is staged rather than photographed.
+localhost under distinct destination spellings (reached through a private sshd the run starts, not the machine's own ssh
+setup), and given the aliases the scenario names. The sessions run a fake agent that replays `transcript.txt` and then
+behaves as the scenario's target status requires. The transcript imitates what a coding agent's turn looks like; it is
+invented, not a capture of any real session, and the file says so at the top. No real hostname, path, user name, or
+project from the capturing machine may appear in the picture, which is the reason the fleet is staged rather than
+photographed.
 
 Statuses are real. Every dot and badge in the list is the supervisor's own classification of a live pane, and the
 capture waits for each session to reach the status the scenario asks for before taking the picture. A capture must not
@@ -78,14 +79,21 @@ name has left the procedure and should stop.
 
 ## Refreshing the image
 
-Prerequisites are the ones the browser suite has (a cargo build, a dx web build, Playwright with Chromium installed
-under `e2e/`) plus passwordless ssh to `localhost` and to `$USER@localhost` on the capturing machine, and ImageMagick's
-`identify` for the publish check.
+The picture is taken on a Mac, the only platform that renders the app at the scenario's scale of 2.
+`scripts/readme-screenshot.sh` ships the checkout's files to the Mac over ssh, builds the app's agent build there,
+stages the fleet, captures and fetches the PNG; its header lists what the Mac and the machine you run it from need, and
+the environment that names the Mac (the script names none). The Mac's display must fit the scenario's window, or the
+capture stops at its size check (`docs/gui-agent.md`, "On a Mac"). Neither machine needs passwordless ssh to itself.
 
-- `scripts/readme-screenshot.sh` builds what is missing, stages the fleet, captures, and prints the PNG path under
-  `target/readme-hero/`. Look at it.
+- `scripts/readme-screenshot.sh --mac <destination>` prints the PNG's path (`target/readme-hero/readme-hero.png` unless
+  `--output` says otherwise). The capture refuses a picture that shows a machine path, the account's ssh spelling or the
+  hostname, or that is not the scenario's size; then there is no PNG, and the message names the Mac's run directory,
+  kept for its logs (remove it once read). Look at the picture.
 - `scripts/publish-readme-hero.sh <png>` pushes it and rewrites both pages' URL. `--dry-run` first if in doubt.
 - Commit the two-page change like any other change.
+
+`--local` runs the same capture on the machine you are on: on a Mac the picture itself, on Linux a development run on
+headless Mutter that runs every check and stops at the size check, since it renders at scale 1.
 
 ## Changing the design
 
