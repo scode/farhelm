@@ -52,7 +52,7 @@ pub(super) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNo
 
 /// The lines of text painted under `id`, at any depth, in paint order: where a node's text is, since text is painted
 /// by the text elements inside it.
-pub(super) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+pub(crate) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
     let Some(top) = nodes
         .iter()
         .position(|node| node.element_id.as_deref() == Some(id))

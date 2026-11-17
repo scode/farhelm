@@ -30,9 +30,10 @@ deferred, as the migration's coordinator decided on 2026-11-16: nothing carries 
 embedded helm and a Send there would post real feedback to the project, so no bridge run presses Send; the helm's half
 is covered by its forwarder's own tests against a stand-in (named below). The short and narrow window geometry checks,
 at 600 by 320 and 380 by 460, are dropped, as the migration's coordinator decided on 2026-11-16: both sizes are below
-the app's 720 by 560 minimum window (the dialog frame's own tests cover a scrolling body with pinned answers). Not yet
-ported: the failed send after the contact was edited and Re-use unchecked, then Cancel, writing no preference and
-leaving the next dialog on the remembered contact. `modal-layout.spec.ts`'s sent-feedback case is replaced by
+the app's 720 by 560 minimum window (the dialog frame's own tests cover a scrolling body with pinned answers). The
+failed send after the contact was edited and Re-use unchecked, then Cancel, writing no preference and leaving the next
+dialog on the remembered contact, is `feedback::tests::a_failed_send_and_cancel_leave_an_edited_contact_unremembered`.
+`modal-layout.spec.ts`'s sent-feedback case is replaced by
 `feedback::tests::after_a_send_the_thanks_has_a_body_stop_of_its_own` (the text-only body's own stop, "Feedback sent";
 the shared stop's keys are tested in `components::tests::dialog`)
 
@@ -60,10 +61,10 @@ the shared stop's keys are tested in `components::tests::dialog`)
   was, which writes the contact again) and `a_successful_send_remembers_only_an_opted_in_nonblank_contact` (the rule); a
   contact another client wrote reaching the next dialog is
   `a_pushed_contact_seeds_the_next_dialog_but_never_the_open_one`.
-- "failed feedback and cancel preserve remembered contact without a preference write", partly:
-  `feedback::tests::a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks that a failed send writes no
-  preference, but with the contact untouched. The edited contact, the unchecked Re-use and the Cancel leg are not yet
-  ported (above).
+- "failed feedback and cancel preserve remembered contact without a preference write":
+  `feedback::tests::a_failed_send_and_cancel_leave_an_edited_contact_unremembered` (the edited contact, Re-use
+  unchecked, the refusal and Cancel), with `a_failed_send_says_so_and_keeps_the_text_for_a_retry` for the contact
+  untouched.
 - "a failed send keeps the text and says it failed":
   `feedback::tests::a_failed_send_says_so_and_keeps_the_text_for_a_retry` and `a_refusal_is_shown_in_plain_words`; the
   wording for a helm not reached at all is a deviation (below).
@@ -112,9 +113,8 @@ marking what the list showed, nothing sent when nothing unread was shown, a refu
 Clear all and the bell's return, and the docs-link rule are replaced by `notices_bell::tests` and the
 `session-bell-list` golden; the cleanup-helper case is test infrastructure (it tested the old suite itself); the two
 build-mismatch cases and the older-failure race are superseded by the store (every change is pushed before its reply,
-and no mark is cached locally); the resize and moved-row dismissals are deviations (below). Not yet ported: the bell's
-place in a compact row. The old case checked the bell's place in both densities, and no test here draws the bell with
-compact on, although compact rows are ported.
+and no mark is cached locally); the resize and moved-row dismissals are deviations (below). The bell's place in a
+compact row is `notices_bell::tests::a_compact_row_keeps_its_bell_before_its_age`.
 
 - "a failed notification read mark retries on the next close":
   `notices_bell::tests::a_refused_read_mark_is_sent_again_on_the_next_close`.
@@ -128,10 +128,11 @@ compact on, although compact rows are ported.
   `notices_bell::tests::a_docs_link_in_notification_text_is_cut_out`, `nothing_but_a_plain_docs_link_is_ever_a_link`,
   `entry_text_is_host_text_and_a_look_alike_is_no_link` and
   `only_a_docs_link_is_clickable_and_it_opens_through_the_apps_opener`.
-- "the bell appears only with notifications, loud while unread, beside the time", partly:
+- "the bell appears only with notifications, loud while unread, beside the time":
   `notices_bell::tests::only_a_row_with_notifications_draws_a_bell_before_its_age`,
   `the_bells_name_and_help_count_the_unread_and_escape_the_title` and
-  `the_bells_ink_and_drawing_follow_unread_selection_and_open`, with compact rows off only (above).
+  `the_bells_ink_and_drawing_follow_unread_selection_and_open`; with compact rows on,
+  `a_compact_row_keeps_its_bell_before_its_age`.
 - "the list floats, marks new entries, and closing marks them read":
   `notices_bell::tests::the_bell_opens_its_list_beside_it_without_opening_the_session`,
   `entries_are_newest_first_with_new_ones_set_apart_and_resolved_greyed`,
@@ -146,7 +147,7 @@ compact on, although compact rows are ported.
 
 Tests: 4. Covers: rail notices quiet, alerting and resolved in ${palette}.
 
-partly, below (in process, and the empty panel end to end by `gui-e2e-smoke.py`'s `test_66`); the sidebar parity file
+replaced, below (in process, and the empty panel end to end by `gui-e2e-smoke.py`'s `test_66`); the sidebar parity file
 lists it too
 
 ## `tests/welcome.spec.ts` and `tests/announcements.spec.ts`
@@ -284,9 +285,10 @@ button's, `trash/listing/tests.rs` the rules'):
   delete's timed-out answer, by `a_refused_delete_stays_visible_on_the_next_opening`. The split between an HTTP failure
   and a transport failure is superseded, as the migration's coordinator decided on 2026-11-16: the GPUI app's helm
   client reports both through one refusal path, so either way a lost answer is the one notice above, kept and shown on
-  the next opening. Not yet ported, at the dialog: a Delete all where one host's answer is lost while the other's
-  carries a per-checkout issue, that help while one host is still pending, and two reopenings each showing both notices
-  with no progress.
+  the next opening. Deferred, as the migration's coordinator decided on 2026-11-16 (it did not fit the size agreed for
+  porting this audit's gaps): at the dialog, a Delete all where one host's answer is lost while the other's carries a
+  per-checkout issue, that help while one host is still pending, and two reopenings each showing both notices with no
+  progress.
 - "a late trash poll cannot restore a confirmed deletion": superseded, as the migration's coordinator decided on
   2026-11-16. The ordered channel and the reads issued after a delete settles replace the old poll and its read
   generations: commands are answered in order, the newest read per host wins, and the host is read again once the delete
@@ -399,12 +401,13 @@ unless named otherwise:
   reads them.
 - "Trash reads follow host epochs and coalesce independently": the Trash button's, in `trash/tests.rs`
   (`reads_follow_each_hosts_connection_and_trash_epoch_only`).
-- "rail Retry and Open Trash share the permanent guarded cleanup owner", partly: `retry_now_follows_the_trashs_guards`
-  and `open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell` (with host management shown, which hides the
-  header's Trash button too); the guard itself is
+- "rail Retry and Open Trash share the permanent guarded cleanup owner": `retry_now_follows_the_trashs_guards` and
+  `open_trash_opens_the_dialog_and_closing_it_returns_to_the_bell` (with host management shown, which hides the header's
+  Trash button too); the guard itself is
   `trash::listing::tests::retry_needs_a_capable_listing_showing_the_checkout_stuck`. The Trash dialog is a layer of its
-  own, which nothing that hides the header's button closes. Not yet ported: the case's marking half, Open Trash and
-  Retry now while marked sessions hide the button. Marking is ported, but no test here marks a session.
+  own, which nothing that hides the header's button closes. The case's marking half, Open Trash and Retry now while
+  marked sessions hide the button, is
+  `rail_notices::tests::open_trash_and_retry_work_while_marks_hide_the_trash_button`.
 
 ## The status sounds
 

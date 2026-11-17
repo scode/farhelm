@@ -277,11 +277,13 @@ partly
   (crates/gui/farhelm-gui/src/feedback/tests.rs `nothing_closes_the_dialog_or_sends_again_while_a_send_is_out`, in which
   a click focuses the read-only message field while the send is out)
 
-Not yet ported: the same case's refusal half, where a refused send puts focus back in the message field itself.
-`tab_walks_the_dialog_while_a_send_is_out_and_a_refusal_gives_the_fields_back` (listed above) leaves focus on the busy
-Send through the refusal and reaches the message with Shift+Tab and then the contact field with Tab, and
-`a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks the text; the move of focus into the message belongs to
-other dialogs ([Other dialogs](other-dialogs.md)), in crates/gui/farhelm-gui/src/feedback/tests.rs.
+The same case's refusal half, where a refused send puts focus back in the message field itself, is replaced by
+crates/gui/farhelm-gui/src/feedback/tests.rs `a_refused_send_clicked_on_a_mac_gives_focus_back_to_the_message` (a
+pointer send under the macOS click rule leaves focus on the dialog, and the refusal moves it to the message) and
+`a_refused_send_leaves_focus_on_the_send_that_holds_it` (focus already on a control stays there); with a keyboard send,
+`tab_walks_the_dialog_while_a_send_is_out_and_a_refusal_gives_the_fields_back` (listed above) keeps focus on the busy
+Send, and `a_failed_send_says_so_and_keeps_the_text_for_a_retry` checks the text. The dialog is other dialogs'
+([Other dialogs](other-dialogs.md)).
 
 ### `tests/tooltip.spec.ts`
 
