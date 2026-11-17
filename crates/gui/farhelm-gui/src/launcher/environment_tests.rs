@@ -261,14 +261,7 @@ fn recipe_and_host_edits_need_an_environment() {
 /// Replace with and Restart with, entering New container changes nothing.
 #[test]
 fn restart_with_and_replace_with_keep_the_existing_environment() {
-    let session: SessionInfo = serde_json::from_value(
-        serde_json::from_str::<serde_json::Value>(include_str!(
-            "../../../../farhelm-helm/http-contract/session-list.json"
-        ))
-        .unwrap()["sessions"][0]
-            .clone(),
-    )
-    .unwrap();
+    let session = fixture_session();
     let mut replace = LaunchDraft::replace_with("a", &session, Some(1));
     assert!(
         matches!(replace.mode, Mode::ReplaceWith { .. }),
@@ -280,6 +273,60 @@ fn restart_with_and_replace_with_keep_the_existing_environment() {
         .expect("the premise: the fixture's Codex launch offers Restart with");
     restart.choose_runs_on(RunsOn::New(ProviderKind::Podman), Some(container("web", 1)));
     assert_eq!(restart.target, None, "Restart with");
+}
+
+/// The helm's pinned session-list fixture's first session: a Codex launch in `~/src/widgets` on host2.
+fn fixture_session() -> SessionInfo {
+    serde_json::from_value(
+        serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../../../farhelm-helm/http-contract/session-list.json"
+        ))
+        .unwrap()["sessions"][0]
+            .clone(),
+    )
+    .unwrap()
+}
+
+/// SPEC.md, "Sandbox sessions": Clone "targets the recipe for a fresh sandbox", and New beside a sandbox session uses
+/// "the new sandbox's home Folder default, never the disposable host or its old folder". Both come in through one seed,
+/// which must leave exactly what entering the segment by hand leaves, or the two ways into an environment would launch
+/// differently. Specified: a Clone seeded with `web` on host1 holds that target and the folder `~` in place of the
+/// source's, untouched and bound to no installation, with no host marked chosen, and Existing host then gives back the
+/// host it held; a New seeded while its folder default is pending no longer waits for it; Replace with's seed changes
+/// nothing.
+#[test]
+fn a_seeded_environment_has_the_segments_effects_and_chooses_nothing() {
+    let session = fixture_session();
+    let mut clone = LaunchDraft::clone_of(&session, Some(1));
+    assert_ne!(
+        clone.folder.value(),
+        ENVIRONMENT_HOME,
+        "the premise: the source's folder"
+    );
+    clone.seed_target(container("web", 1));
+    assert_eq!(clone.target, Some(container("web", 1)));
+    assert_eq!(clone.folder.value(), ENVIRONMENT_HOME);
+    assert!(!clone.folder.is_touched() && clone.folder_install.is_none());
+    assert!(!clone.host_chosen, "a seed is no hand pick");
+    clone.choose_runs_on(RunsOn::ExistingHost, None);
+    assert_eq!((clone.target, clone.host), (None, Some(1)));
+
+    let mut new = LaunchDraft::new(Some(1), "~".into(), None);
+    new.folder_default = FolderDefault::Pending;
+    assert!(new.folder_default_waiting(), "the premise: New waits");
+    new.seed_target(container("web", 1));
+    assert!(
+        !new.folder_default_waiting(),
+        "a new environment's home waits for no host's history"
+    );
+
+    let mut replace = LaunchDraft::replace_with("a", &session, Some(1));
+    let before = replace.clone();
+    replace.seed_target(container("web", 1));
+    assert_eq!(
+        replace, before,
+        "Replace with keeps the existing environment"
+    );
 }
 
 /// A host is Existing host's choice: a host picked from the search or a template's host must leave a new environment,
