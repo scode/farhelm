@@ -34,10 +34,11 @@
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the search's `gh:` repositories (`crate::launcher::search`
-//! says so); the rest of managed checkouts (`checkout` says which); the escaped display of a prompt, wrapper prefix,
-//! Custom flags, seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix,
-//! Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took
-//! focus once it overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
+//! says so); the rest of managed checkouts (`checkout` says which); the escaped display of a prompt, Custom flags, a
+//! seeded model, or a command line or resume command copied by Clone or Replace with, holding invisible characters
+//! (the wrapper prefix, and Restart with's stored command line and resume command, are `stored`); and keyboard
+//! scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one or two
+//! lines). The model field is `model_field`, the host picker
 //! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
 //! `browse`, the recent setups strip `recents`, the escalation banner `escalation`, Save as template's side `save`. The
 //! floating lists under the model, folder, search and repository fields share `field_list`, and the debounced reads
@@ -114,6 +115,7 @@ mod placement;
 mod recents;
 mod save;
 mod search;
+mod stored;
 pub(in crate::launcher) mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
@@ -566,8 +568,10 @@ pub(crate) struct Launcher {
     checkout: checkout::CheckoutState,
     /// The host button's focus handle; leaving it closes the host list.
     pub(super) host_focus: gpui::FocusHandle,
-    command: TextInputState,
-    resume: TextInputState,
+    /// The Command tab's command line and resume command fields; a stored value holding invisible characters shows
+    /// escaped there (`stored`).
+    pub(super) command: TextInputState,
+    pub(super) resume: TextInputState,
     /// Cancel's focus handle, where Restart with starts.
     pub(super) cancel_focus: gpui::FocusHandle,
     layer: Option<LayerId>,
@@ -654,13 +658,33 @@ impl Launcher {
             window,
             cx,
         );
-        let wrapper = field(&draft.agent.wrapper, window, cx);
+        // A stored value holding invisible characters starts escaped and read-only (`stored`); `sync_fields` keeps it
+        // so as the draft changes.
+        let escaped = stored::wrapper(&draft);
+        let wrapper = field(
+            escaped.as_deref().unwrap_or(&draft.agent.wrapper),
+            window,
+            cx,
+        );
+        wrapper.set_read_only(escaped.is_some(), cx);
         wrapper.set_placeholder("with-endpoint --profile work --", window, cx);
         let prompt = TextInputState::new_growing(PROMPT_ROWS, window, cx);
         prompt.set_text(draft.prompt.clone(), window, cx);
         let flags = field(&draft.agent.permission_flags, window, cx);
-        let command = field(&draft.command.command, window, cx);
-        let resume = field(&draft.command.resume, window, cx);
+        let escaped = stored::command(&draft);
+        let command = field(
+            escaped.as_deref().unwrap_or(&draft.command.command),
+            window,
+            cx,
+        );
+        command.set_read_only(escaped.is_some(), cx);
+        let escaped = stored::resume(&draft);
+        let resume = field(
+            escaped.as_deref().unwrap_or(&draft.command.resume),
+            window,
+            cx,
+        );
+        resume.set_read_only(escaped.is_some(), cx);
         // The model field is not a plain text edit: what is typed filters its list, and Enter, focus and blur drive it
         // (`model_field`), so it has its own subscriptions.
         let model_input = field(
@@ -755,7 +779,12 @@ impl Launcher {
                         if matches!(which, Input::Folder) {
                             launcher.folder_typed(window, cx);
                         }
-                        launcher.edited(which, input.text(cx).to_string(), cx)
+                        launcher.edited(which, input.text(cx).to_string(), cx);
+                        // A typed or pasted invisible character makes the value one shown escaped, as a stored one
+                        // is (`stored`), so the field is put in step at once rather than at the next resync.
+                        if matches!(which, Input::Wrapper | Input::Command | Input::Resume) {
+                            launcher.sync_fields(window, cx);
+                        }
                     }
                     // SPEC.md: "A held Enter never launches". A single-line field reports Submitted on every
                     // auto-repeat of Enter, and its `held` says which (buttons, the choices and the dialog's own
@@ -977,10 +1006,25 @@ impl Launcher {
 
     /// Put the text fields the draft can change on its own back in step with it (after Reset choices, or a template
     /// batch, which can set the name, the command and its resume command too). A field already showing the draft's
-    /// value is left alone, so its caret and selection stay where they were.
+    /// value is left alone, so its caret and selection stay where they were. A stored value holding invisible
+    /// characters is shown escaped and read-only (`stored`), and becomes editable again once it no longer is; that is
+    /// why an edit of the wrapper prefix, command line or resume command calls this too, so typed or pasted text
+    /// holding one is escaped at once.
     fn sync_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let escaped = [
+            (&self.wrapper, stored::wrapper(&self.draft)),
+            (&self.command, stored::command(&self.draft)),
+            (&self.resume, stored::resume(&self.draft)),
+        ];
+        for (state, shown) in &escaped {
+            state.set_read_only(shown.is_some(), cx);
+        }
+        let [wrapper, command, resume] = escaped.map(|(_, shown)| shown);
         let pairs = [
-            (&self.wrapper, self.draft.agent.wrapper.clone()),
+            (
+                &self.wrapper,
+                wrapper.unwrap_or_else(|| self.draft.agent.wrapper.clone()),
+            ),
             (&self.conversation, self.draft.conversation.clone()),
             (&self.folder, self.draft.folder.value().clone()),
             (&self.prompt, self.draft.prompt.clone()),
@@ -996,8 +1040,14 @@ impl Launcher {
                     .map(|checkout| checkout.field_text())
                     .unwrap_or_default(),
             ),
-            (&self.command, self.draft.command.command.clone()),
-            (&self.resume, self.draft.command.resume.clone()),
+            (
+                &self.command,
+                command.unwrap_or_else(|| self.draft.command.command.clone()),
+            ),
+            (
+                &self.resume,
+                resume.unwrap_or_else(|| self.draft.command.resume.clone()),
+            ),
         ];
         for (state, value) in pairs {
             if state.text(cx).as_ref() != value {
@@ -1770,6 +1820,15 @@ impl Launcher {
             )
             .into_any_element(),
         );
+        if stored::wrapper(&self.draft).is_some() {
+            fields.push(stored::clear_button(
+                "launcher-clear-wrapper",
+                "Clear wrapper prefix",
+                "Clear wrapper prefix: remove this value before editing",
+                Launcher::clear_wrapper,
+                cx,
+            ));
+        }
         fields.push(
             help_line(
                 "Runs through Bash before the agent command; blank means none.",
@@ -1872,6 +1931,15 @@ impl Launcher {
             )
             .into_any_element(),
         ];
+        if stored::command(&self.draft).is_some() {
+            fields.push(stored::clear_button(
+                "launcher-clear-command",
+                "Clear agent command",
+                "Clear agent command: remove this stored command before editing",
+                Launcher::clear_command,
+                cx,
+            ));
+        }
         fields.extend(self.changed_marker(Changed::Command, palette));
         let (on_yolo, on_enter) = (weak.clone(), weak.clone());
         fields.push(
@@ -2023,6 +2091,15 @@ impl Launcher {
                     )
                     .into_any_element(),
                 );
+                if stored::resume(&self.draft).is_some() {
+                    fields.push(stored::clear_button(
+                        "launcher-clear-resume",
+                        "Clear resume command",
+                        "Clear resume command: remove this stored resume command before editing",
+                        Launcher::clear_resume,
+                        cx,
+                    ));
+                }
             }
             fields.extend(self.changed_marker(Changed::Resume, palette));
         }

@@ -14,6 +14,7 @@ use gpui::{TestAppContext, VisualTestContext};
 
 use super::draft::{LaunchDraft, Tab};
 use super::view::{Launcher, open};
+use crate::components::TextInputState;
 use crate::focus::Mark;
 use crate::layers;
 use crate::main_view::MainView;
@@ -1174,6 +1175,141 @@ fn leaving_the_model_field_closes_its_list(cx: &mut TestAppContext) {
     );
     assert!(!has_node(cx, "launcher-model-list"), "the list closed");
     assert_eq!(model_text(cx), "Harness default");
+}
+
+// ---- Stored values shown escaped ----------------------------------------------------------------------------------
+
+/// The contract every field shown escaped keeps (`view::stored`): the field in row `field` shows `shown`; a click and
+/// a typed key there change nothing, since editing the escape text would turn it into new launch words; `clear`
+/// empties the field, and the field then takes typing. `input` picks the field off the launcher; the click is checked
+/// to have focused it, so a key that went elsewhere cannot pass for a refused one.
+pub(super) fn escaped_until_cleared(
+    cx: &mut VisualTestContext,
+    field: &'static str,
+    clear: &'static str,
+    shown: &str,
+    input: fn(&Launcher) -> &TextInputState,
+) {
+    let field_text = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| input(launcher).text(cx).to_string())
+    };
+    assert_eq!(field_text(cx), shown, "{field} shows the escaped spelling");
+    test_support::click(cx, field);
+    assert!(
+        read(cx, |launcher, window, cx| input(launcher)
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused {field}"
+    );
+    keys(cx, "x");
+    assert_eq!(field_text(cx), shown, "{field} is read-only");
+    test_support::click(cx, clear);
+    assert_eq!(field_text(cx), "", "{clear} emptied it");
+    test_support::click(cx, field);
+    keys(cx, "x");
+    assert_eq!(field_text(cx), "x", "{field} takes typing again");
+}
+
+/// A stored wrapper prefix may have come from another host, so Restart with must show its direction-changing bytes
+/// without letting the escape text become new launch words (restart-with.spec's "restart with shows an unsafe stored
+/// wrapper prefix without editing its escape text"). Specified: Restart with of a Codex launch whose prefix is
+/// `wrapper<U+202E> --` shows it so, read-only, until Clear wrapper prefix empties it, in the field and the draft; an
+/// invisible character typed afterwards is shown escaped at once.
+#[gpui::test]
+fn restart_with_shows_an_unsafe_stored_wrapper_prefix_escaped(cx: &mut TestAppContext) {
+    let mut launch = codex(None, None, None);
+    if let SessionLaunch::Agent { selection, .. } = &mut launch {
+        selection.wrapper_prefix = Some(vec!["wrapper\u{202e}".into(), "--".into()]);
+    }
+    let mut source = super::draft_tests::session(launch);
+    source.restart_offer = RestartOffer::Resume;
+    let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
+    let (_helm, cx) = launcher_on(cx, restart);
+    assert_eq!(
+        draft(cx).agent.wrapper,
+        "wrapper\u{202e} --",
+        "the premise: the draft holds the raw words"
+    );
+    escaped_until_cleared(
+        cx,
+        "launcher-wrapper-row",
+        "launcher-clear-wrapper",
+        "wrapper<U+202E> --",
+        |launcher| &launcher.wrapper,
+    );
+    assert_eq!(draft(cx).agent.wrapper, "x");
+    // Typed or pasted text is judged the same way, at once.
+    cx.simulate_input("\u{202e}");
+    settle(cx);
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.wrapper.text(cx).to_string()),
+        "x<U+202E>",
+        "a typed invisible character is shown escaped"
+    );
+    assert_eq!(draft(cx).agent.wrapper, "x\u{202e}");
+    keys(cx, "y");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.wrapper.text(cx).to_string()),
+        "x<U+202E>",
+        "and the field is read-only again"
+    );
+    assert!(
+        cx.debug_bounds("launcher-clear-wrapper").is_some(),
+        "with its Clear"
+    );
+}
+
+/// A remembered prefix loaded by an agent switch is shown the same way, since the old launcher judged the prefix the
+/// field holds, whatever put it there (launcher-tabs.spec's "agent switch loads that agent's remembered wrapper
+/// prefix": "unsafe stored bytes are visible but cannot be edited as escaped text"). Specified: with Codex's and
+/// Claude's prefixes remembered, choosing Codex loads its prefix as written; choosing Claude shows
+/// `env CLAUDE_PROFILE=work<U+202E>` read-only until cleared; choosing Codex again loads Codex's.
+#[gpui::test]
+fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    let remembered =
+        crate::session_list::tests::preferences_state(farhelm_proto::ui_channel::Preferences {
+            welcome_seen: Some(true),
+            remembered_wrapper_prefixes: [
+                (
+                    LaunchHarness::Codex,
+                    vec![
+                        "with-endpoint".into(),
+                        "--profile".into(),
+                        "'codex profile'".into(),
+                        "--".into(),
+                    ],
+                ),
+                (
+                    LaunchHarness::Claude,
+                    vec!["env".into(), "CLAUDE_PROFILE=work\u{202e}".into()],
+                ),
+            ]
+            .into(),
+            ..Default::default()
+        });
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: remembered.collection,
+        meta: remembered.meta,
+        upsert: remembered.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    let wrapper = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| launcher.wrapper.text(cx).to_string())
+    };
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
+    test_support::click(cx, "launcher-harness-Claude");
+    escaped_until_cleared(
+        cx,
+        "launcher-wrapper-row",
+        "launcher-clear-wrapper",
+        "env CLAUDE_PROFILE=work<U+202E>",
+        |launcher| &launcher.wrapper,
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
 }
 
 /// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field only
