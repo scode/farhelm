@@ -5,8 +5,8 @@ NOTE: Debug builds only, and never against the live install. On Linux a run is h
 it opens a real window in the logged-in GUI session, which this script must run inside (over SSH is fine). Everything
 a run starts lives under the run directory you name (which must not exist yet), and `stop` takes all of it down again.
 
-    scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
-                                       [--lock FILE] [--window-size WxH] [--appearance light|dark]
+    scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,... | --scenario FILE] [--size WxH (Linux)]
+                                       [--no-build] [--lock FILE] [--window-size WxH] [--appearance light|dark]
                                        [--templates] [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
                                        [--remote-host DEST ... | --user-session (Linux)]
     scripts/gui-agent.py RUN_DIR snapshot -i         # any gpui-agent command: click, type, press, wait, screenshot ...
@@ -35,7 +35,10 @@ helm a directory of staged `farhelm` payloads to install on and update real remo
 a debug build otherwise has no release to download from; it is the one way to pass that setting in, since the caller's
 own `FARHELM_*` variables never reach the app. `--remote-host DEST` (repeatable) makes the run a staged one: it starts
 one more supervisor per destination, each in the run's own `r<N>` state directory, and has the app's helm register
-each as an SSH host reached at DEST, which must be this machine under a spelling of its own. `--user-session` (Linux)
+each as an SSH host reached at DEST, which must be this machine under a spelling of its own. `--scenario FILE` stages
+the fleet a docs-media `scenario.json5` describes, a staged run whose remote hosts are the scenario's: its hosts with
+their aliases, its sessions with their titles, agent types, YOLO launches, statuses and seen state, the window at its
+viewport and the open session opened (see "Scenario runs" below). `--user-session` (Linux)
 gives the app the caller's own runtime directory and session bus, so that its helm's Podman check reaches the user's
 systemd manager and New container shows; such a run shares that manager, and `stop` removes what the run's helm and
 supervisor left there by recorded name (USER_SESSION_ENV, `remove_user_session_objects`). Any other verb goes to the
@@ -56,6 +59,9 @@ by an agent harness's bare name, so it always runs the app, its supervisor and e
 HOME and PATH inside the run, where every harness name is a wrapper around the fake agent, and with the scripted
 provisioning backend on, since a staged remote host is this machine. `staged_start` says which runs are staged.
 
+Scenario runs (docs/gui-agent.md, "Scenario runs"). `load_scenario` checks the whole file before anything starts;
+`stage_scenario` stages it through the helm's API once the app is up.
+
 User-session runs (docs/gui-agent.md, "User-session runs"). Everything else about the run stays private: its state,
 its compositor (which keeps its own runtime directory and bus), the caller's `FARHELM_*` variables kept out. The one
 thing shared is the caller's systemd user manager and, through the caller's HOME, its Podman storage. A staged run
@@ -73,6 +79,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -255,10 +262,10 @@ SUPERVISOR_SOCKET_SECONDS = 30
 
 def staged_start(options) -> bool:
     """Whether a `start` with these options is a staged run, which always has the private HOME and PATH and the
-    scripted provisioning backend: one with remote hosts. A scenario front end adds its own option here, so that a
-    scenario with only the local host is staged as well; a plain `start` stays unstaged until the private environment
-    has been checked on a Mac."""
-    return bool(options.remote_host)
+    scripted provisioning backend: one with remote hosts, or one staging a scenario (`--scenario`), whose sessions are
+    launched as `claude` and `codex` by bare name even when it has only the local host. A plain `start` stays unstaged
+    until the private environment has been checked on a Mac."""
+    return bool(options.remote_host or getattr(options, "scenario", None))
 
 
 def staged_record(record: dict) -> bool:
@@ -788,6 +795,371 @@ def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[st
     return [f"{id}={states.get(id) or 'missing'}" for id, want in targets.items() if states.get(id) != want]
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Scenario runs: a docs-media scenario's fleet, staged through the helm's API
+#
+# `start --scenario FILE` stages the fleet a `scenario.json5` describes (docs/readme-hero/SPEC.md says what is real in
+# it and what is staged). The scenario is read and checked first (`load_scenario`), before anything is created or any
+# destination dialed, so a typo fails as a usage error instead of as a picture that looks plausible and is wrong. Its
+# remote hosts become `--remote-host` destinations, so the run is staged (`staged_start`). Once the app is up,
+# `stage_scenario` names the hosts, creates the sessions on them, waits for every status, sets the seen state, and
+# checks each row's permission shield in the window. Ported from the browser suite's `e2e/readme-hero/scenario.ts`
+# and `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). What a scenario says that is not
+# staged yet (ages, folders, the viewport's scale) is in docs/gui-agent.md, "Scenario runs".
+
+# The program names a scenario session may be launched as, and the permission-bypass flag each takes: the flags the
+# helm composes a YOLO launch of that harness with (`compile` in crates/farhelm-helm/src/launches.rs). The flag is only
+# what the row's command reads; the helm believes the command launch's `yolo` assertion, not the flag.
+SCENARIO_YOLO_FLAGS = {"claude": "--dangerously-skip-permissions", "codex": "--yolo"}
+
+# The session list's preferences the old staging set before the page loaded: the activity order the scenario's row order
+# is written for, and full rows. One sparse write, which touches no other preference.
+SCENARIO_PREFERENCES = {"list_sort": "activity", "compact": False}
+
+
+def _sibling(name: str):
+    """The script `name` beside this one, loaded as a module: the scenario loader (`scenario_json5.py`), so that `start`
+    reads a scenario exactly as the publish script and every capture flow do, and the screenshot batch, which owns the
+    Linux window frame's numbers. Loaded by path, so it works also under `python3 -I`."""
+    import importlib.util
+
+    module_name = name.removesuffix(".py").replace("-", "_")
+    spec = importlib.util.spec_from_file_location(module_name, Path(__file__).with_name(name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_scenario(path: Path, user: str | None) -> dict:
+    """Read and check the scenario file at `path` (`plan_scenario`); a UsageError for a file that cannot be read or
+    parsed, or that the checks refuse. `user` is the account name a `$USER` in a host's ssh destination stands for."""
+    loader = _sibling("scenario_json5.py")
+    try:
+        document = loader.load(path)
+    except (OSError, loader.ScenarioSyntaxError) as error:
+        raise UsageError(f"--scenario: {error}") from None
+    return plan_scenario(document, Path(path).resolve().parent, user, str(path))
+
+
+def plan_scenario(document, directory: Path, user: str | None, source: str) -> dict:
+    """The scenario `document`, checked and completed in place for staging, with `source` added: each remote host's
+    `ssh` with `$USER` expanded, and each session with `yolo` and `open` (false), `then` (the replay shape its `status`
+    implies) and `exit_code` (0) filled in where the file leaves them out, and its `transcript` resolved against
+    `directory` into an absolute path (or None). `source` names the file in errors.
+
+    The checks are the old browser loader's (`e2e/readme-hero/scenario.ts`) for the fields staged here, strict on
+    purpose: the scenario is edited by hand, and a typo that silently dropped a session or misread a status would make
+    a picture that looks plausible and is wrong. On top of them a transcript must name an existing file, since the
+    replay would otherwise fail inside a session long after `start` returned. Two remote hosts with one destination
+    are refused by `parse_remote_hosts`, which every staged run's destinations go through. `$USER` is the one
+    substitution: a self-ssh spelling naming the account is the cheapest second destination a machine has, and the
+    account name must not be written into a public file."""
+
+    def fail(message: str):
+        raise UsageError(f"{source}: {message}")
+
+    if not isinstance(document, dict):
+        fail("a scenario is an object")
+    viewport = document.get("viewport")
+    if not (isinstance(viewport, dict) and all(
+        type(viewport.get(name)) is int and viewport[name] > 0 for name in ("width", "height")
+    )):
+        fail("viewport needs positive integer width and height")
+
+    hosts = document.get("hosts")
+    if not isinstance(hosts, list) or not hosts:
+        fail("at least one host is required")
+    keys = set()
+    for host in hosts:
+        if not isinstance(host, dict) or not isinstance(host.get("key"), str) or not host["key"]:
+            fail(f"host {host!r} needs a key")
+        key = host["key"]
+        if not isinstance(host.get("alias"), str) or not host["alias"]:
+            fail(f"host {key} needs an alias")
+        if key in keys:
+            fail(f"duplicate host key {key}")
+        keys.add(key)
+        if host.get("kind") == "remote":
+            if not isinstance(host.get("ssh"), str) or not host["ssh"]:
+                fail(f"host {key}: a remote host needs an ssh destination")
+            if "$USER" in host["ssh"]:
+                if not user:
+                    fail(f"host {key} uses $USER but USER is not set")
+                host["ssh"] = host["ssh"].replace("$USER", user)
+        elif host.get("kind") != "local":
+            fail(f"host {key}: kind must be local or remote")
+    if sum(host["kind"] == "local" for host in hosts) != 1:
+        fail("exactly one host must be kind: local")
+
+    sessions = document.get("sessions")
+    if not isinstance(sessions, list) or not sessions:
+        fail("at least one session is required")
+    titles = set()
+    for session in sessions:
+        if not isinstance(session, dict) or not isinstance(session.get("title"), str) or not session["title"]:
+            fail("every session needs a title")
+        name = f"session {session['title']}"
+        # Titles are the sessions' identity in staging and in the captures, across hosts too.
+        if session["title"] in titles:
+            fail(f"duplicate session title {session['title']}")
+        titles.add(session["title"])
+        if session.get("host") not in keys:
+            fail(f"{name}: unknown host {session.get('host')!r}")
+        if session.get("wrapper") not in SCENARIO_YOLO_FLAGS:
+            fail(f"{name}: wrapper must be one of {', '.join(SCENARIO_YOLO_FLAGS)}")
+        for flag in ("yolo", "open"):
+            if not isinstance(session.setdefault(flag, False), bool):
+                fail(f"{name}: {flag} must be true or false")
+        if not isinstance(session.get("seen", False), bool):
+            fail(f"{name}: seen must be true or false")
+        if session.get("status") not in REPLAY_THEN:
+            fail(f"{name}: status must be one of {', '.join(REPLAY_THEN)}")
+        # `then` is what the replay does once its transcript ends, when that is not what `status` implies (the demo
+        # video's sessions stop on an input directive, so their end is not the status staging waits for).
+        if session.setdefault("then", REPLAY_THEN[session["status"]]) not in REPLAY_THEN.values():
+            fail(f"{name}: then must be one of {', '.join(REPLAY_THEN.values())}")
+        if session["status"] == "idle" and "seen" not in session:
+            fail(f"{name}: an idle session needs seen: true or false")
+        if type(session.setdefault("exit_code", 0)) is not int:
+            fail(f"{name}: exit_code must be an integer")
+        transcript = session.get("transcript")
+        if transcript is not None:
+            if not isinstance(transcript, str) or not (directory / transcript).is_file():
+                fail(f"{name}: transcript {transcript!r} is not a file in {directory}")
+            session["transcript"] = (directory / transcript).resolve()
+    if sum(session["open"] for session in sessions) != 1:
+        fail("exactly one session must carry open: true")
+    document["source"] = source
+    return document
+
+
+def scenario_remote_hosts(plan: dict) -> list[str]:
+    """The ssh destinations of the scenario's remote hosts, in its order: the run's `--remote-host` list."""
+    return [host["ssh"] for host in plan["hosts"] if host["kind"] == "remote"]
+
+
+def scenario_window_size(plan: dict, platform: str = sys.platform) -> str:
+    """The `--window-size` a scenario run asks for: the viewport as the app's own drawing, so on Linux larger by the
+    window's frame on every side and its title bar on top, the numbers the screenshot batch crops off
+    (`LINUX_FRAME` and `LINUX_TITLE_BAR` in scripts/gui-screenshot-batch.py, which say where they come from). The
+    viewport's `scale` is not applied."""
+    frame, bar = 0, 0
+    if platform.startswith("linux"):
+        batch = _sibling("gui-screenshot-batch.py")
+        frame, bar = batch.LINUX_FRAME, batch.LINUX_TITLE_BAR
+    viewport = plan["viewport"]
+    return f"{viewport['width'] + 2 * frame}x{viewport['height'] + 2 * frame + bar}"
+
+
+def scenario_creation_order(plan: dict) -> list[int]:
+    """The order `stage_scenario` creates the sessions in, as indexes into the scenario's list: the open session first,
+    then the rest in the scenario's order.
+
+    The window picks a session to open by itself as soon as its list has one, and keeps it: with no visit history or
+    remembered selection on a fresh helm, its pick is the newest-created session, and a selection stays until that
+    session is gone (`crates/gui/farhelm-gui/src/session_list/selection.rs`). The old staging set the `last_selected`
+    preference before the page loaded, so the page's own pick never landed on an idle row and marked it seen; the window
+    here is up before the helm has any session, so creating the open session alone first is what makes the window's
+    own pick the one the scenario names."""
+    opened = next(index for index, session in enumerate(plan["sessions"]) if session["open"])
+    return [opened, *(index for index in range(len(plan["sessions"])) if index != opened)]
+
+
+def staged_agent_script(session: dict, fixtures: str) -> str:
+    """The STAGED_AGENT_SCRIPT a scenario session's working directory holds, which the run's `claude` or `codex` wrapper
+    runs: the fake agent's replay of the session's transcript, in the dialect of its wrapper (whose question menus the
+    supervisor's reading of that agent type recognizes), holding the screen its `then` names (with its exit code for an
+    exit), with every argument the wrapper got passed on, where the supervisor's own per-launch flags land."""
+    argv = [fixtures, "fake-agent", "--script", "replay", "--dialect", session["wrapper"]]
+    if session.get("transcript") is not None:
+        argv += ["--transcript", str(session["transcript"])]
+    argv += ["--then", session["then"]]
+    if session["then"] == "exit":
+        argv += ["--exit-code", str(session["exit_code"])]
+    return (
+        "#!/bin/sh\n"
+        "# A scenario session's replay (scripts/gui-agent.py, \"Scenario runs\"), run by the staged wrapper.\n"
+        f'exec {" ".join(shlex.quote(arg) for arg in argv)} "$@"\n'
+    )
+
+
+def scenario_session_body(session: dict, host_id: int, cwd: Path) -> dict:
+    """The `POST /api/sessions` body that creates a scenario session on the host `host_id`, in `cwd`: a command launch
+    of its wrapper's bare name (with the wrapper's YOLO flag for a `yolo` one) declaring that agent type, so its row
+    shows that agent's mark, its status is read the way that agent's is, and its shield is the launch's own assertion,
+    with nothing in the listing rewritten. A declared agent type requires `{farhelm_args}`.
+
+    A YOLO one also carries `confirm_yolo`: every host starts out asking before a YOLO launch, and confirming this one
+    launch is what a user answering that question does, which, unlike turning the question off for the host, leaves
+    no setting behind that the picture could show."""
+    wrapper = session["wrapper"]
+    words = [wrapper, *([SCENARIO_YOLO_FLAGS[wrapper]] if session["yolo"] else []), "{farhelm_args}"]
+    return {
+        "host": host_id,
+        "cwd": str(cwd),
+        "title": session["title"],
+        "command": {"command": " ".join(words), "yolo": session["yolo"], "agent": wrapper, "resume": None},
+        "confirm_yolo": session["yolo"],
+    }
+
+
+def scenario_host_ids(plan: dict, listing: list[dict]) -> tuple[dict[str, int], list[str]]:
+    """The helm's host id of every scenario host found connected in `listing` (`GET /api/hosts`), by key, and the hosts
+    not yet connected as `key=phase` (`missing` for one the listing lacks). The local host is the listing's `local`
+    row; a remote one is the SSH row whose destination is its expanded ssh spelling."""
+    ids, pending = {}, []
+    for host in plan["hosts"]:
+        if host["kind"] == "local":
+            match = next((row for row in listing if row.get("kind") == "local"), None)
+        else:
+            match = next(
+                (row for row in listing if row.get("kind") == "ssh" and row.get("destination") == host["ssh"]), None
+            )
+        phase = ((match or {}).get("state") or {}).get("phase")
+        if phase == "connected":
+            ids[host["key"]] = match["id"]
+        else:
+            pending.append(f"{host['key']}={phase or 'missing'}")
+    return ids, pending
+
+
+def seen_body(session: dict, row: dict) -> dict | None:
+    """The `PUT /api/sessions/{id}/seen` body for a scenario session, from its listed `row`, or None for a session the
+    scenario leaves to the window: only an idle session's seen state shows (its dot is blue while unseen, grey once
+    seen; SPEC.md, "Status"), as in the old staging.
+
+    A seen one is stamped with its row's own activity (`effective_activity`, the stamp the window compares), which is
+    what reads as seen against the real stamps; the old staging stamped `now - age`, to agree with the ages it rewrote
+    in transit."""
+    if session["status"] != "idle":
+        return None
+    if not session["seen"]:
+        return {"seen_activity_at": None}
+    return {"seen_activity_at": row.get("last_activity_at") or row.get("created_at")}
+
+
+def agent_track_id(key: str) -> str:
+    """The element id the session list gives the agent track of the row of session `key`, the one node naming the row's
+    agent mark and shield together (`AGENT_ID_SUFFIX` in crates/gui/farhelm-gui/src/session_list/row_marks.rs)."""
+    return f"session-row-{key}-agent"
+
+
+def shield_problems(plan: dict, ids: dict[int, str], entries: list[dict]) -> tuple[list[str], list[str]]:
+    """The scenario sessions whose row's shield the window does not show yet, and those whose shield is the wrong one,
+    from a `snapshot -a --json`'s `entries`. `ids` maps each session's index in the scenario to its helm key.
+
+    The old staging's last check before the capture, followed here: each row has exactly one shield, slashed for a
+    `yolo` session and plain for every other. The shield is read from the first paragraph of the agent track's
+    accessible name (`Description::of` in crates/gui/farhelm-gui/src/session_list/row_marks.rs), which states a command
+    launch's assertion; a status-line observation of YOLO, which draws the slashed shield whatever the launch asserted,
+    comes first in its place, so it fails the check for a session that is not `yolo`."""
+    missing, wrong = [], []
+    for index, key in ids.items():
+        session = plan["sessions"][index]
+        names = [
+            entry.get("name", "")
+            for entry in entries
+            if (entry.get("key") or {}).get("path", "").rpartition("/")[2] == agent_track_id(key)
+        ]
+        if len(names) != 1:
+            missing.append(f"{session['title']} ({len(names)} shields)")
+            continue
+        # "— YOLO, as asserted" is not part of "— Not YOLO, as asserted", so each tells the two apart.
+        want = "— YOLO, as asserted" if session["yolo"] else "— Not YOLO, as asserted"
+        first = names[0].split("\n\n")[0]
+        if want not in first:
+            wrong.append(f"{session['title']}: {first!r} does not say {want!r}")
+    return missing, wrong
+
+
+def poll(what: str, probe, timeout: float, interval: float):
+    """Call `probe()`, which returns `(value, pending)`, until its value is not None, and return that value; after
+    `timeout` seconds fail saying what was awaited and what `pending` last said."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value, pending = probe()
+        if value is not None:
+            return value
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"timed out after {timeout:.0f} s waiting for {what}: {pending}")
+        time.sleep(interval)  # sleep-ok: polling the helm or the window; the harness subscribes to no events
+
+
+def stage_scenario(
+    run: Path,
+    plan: dict,
+    fixtures: str,
+    snapshot,
+    request=None,
+    timeout: float = SETTLE_TIMEOUT_SECONDS,
+    interval: float = 1.0,
+) -> dict[int, str]:
+    """Stage the scenario `plan` in the run's helm, once the app is up; return each session's helm key by its index in
+    the scenario. `snapshot()` returns the window's `snapshot -a --json` entries; `request` is `helm_request` unless a
+    test hands in its own.
+
+    In order: wait until every scenario host is connected (so no create races a host's ssh handshake), give each its
+    alias, set SCENARIO_PREFERENCES, create the open session and wait until the window has opened it (the helm's
+    `last_selected`, which the window writes for its own pick), create the others (`scenario_creation_order` says why
+    in that order), each in its own scratch directory `<run>/work/<index>` holding its STAGED_AGENT_SCRIPT, wait until
+    the supervisor reads every session as its status, set the idle sessions' seen state, and check every row's shield
+    in the window (`shield_problems`). Every status is the supervisor's own reading of a live screen; nothing here
+    writes one in."""
+    request = request or helm_request
+
+    def hosts_connected():
+        ids, pending = scenario_host_ids(plan, request(run, "GET", "/api/hosts")["hosts"])
+        return (None if pending else ids), ", ".join(pending)
+
+    host_ids = poll("every scenario host to connect", hosts_connected, timeout, interval)
+    for host in plan["hosts"]:
+        request(run, "POST", f"/api/hosts/{host_ids[host['key']]}/alias", {"alias": host["alias"]})
+    request(run, "PUT", "/api/preferences", SCENARIO_PREFERENCES)
+
+    work = run / "work"
+    work.mkdir(exist_ok=True)
+    ids: dict[int, str] = {}
+    for position, index in enumerate(scenario_creation_order(plan)):
+        session = plan["sessions"][index]
+        cwd = work / str(index)
+        cwd.mkdir()
+        (cwd / STAGED_AGENT_SCRIPT).write_text(staged_agent_script(session, fixtures))
+        body = scenario_session_body(session, host_ids[session["host"]], cwd)
+        ids[index] = request(run, "POST", "/api/sessions", body)["id"]
+        if position == 0:
+            opened = ids[index]
+
+            def window_opened():
+                selected = (request(run, "GET", "/api/preferences") or {}).get("last_selected")
+                return (True if selected == opened else None), f"last_selected={selected}"
+
+            poll(f"the window to open {session['title']!r}", window_opened, timeout, interval)
+
+    # Waited for by title, so a session that does not settle is named the way the scenario names it.
+    titles = {key: plan["sessions"][index]["title"] for index, key in ids.items()}
+    wait_for_statuses(
+        lambda: {titles.get(key, key): state for key, state in listed_states(run, request).items()},
+        {titles[key]: plan["sessions"][index]["status"] for index, key in ids.items()},
+        timeout,
+        interval,
+    )
+    by_id = {key: index for index, key in ids.items()}
+    for row in request(run, "GET", "/api/sessions")["sessions"]:
+        index = by_id.get(row.get("id"))
+        body = None if index is None else seen_body(plan["sessions"][index], row)
+        if body is not None:
+            request(run, "PUT", f"/api/sessions/{urllib.parse.quote(row['id'], safe='')}/seen", body)
+
+    def shields_drawn():
+        missing, wrong = shield_problems(plan, ids, snapshot())
+        return (None if missing else wrong), f"no single shield yet for {', '.join(missing)}"
+
+    wrong = poll("every row's shield in the window", shields_drawn, timeout, interval)
+    if wrong:
+        raise RuntimeError(f"rows show the wrong permission shield: {'; '.join(wrong)}")
+    return ids
+
+
 # Process identity. Linux reads /proc; macOS has no /proc, so there the same facts come from `ps`. Both give a start
 # time that, together with the pid, names one process.
 
@@ -1154,9 +1526,10 @@ def helm_request(run: Path, method: str, path: str, body: dict | None = None):
     return json.loads(reply) if reply else None
 
 
-def listed_states(run: Path) -> dict[str, str | None]:
-    """Every session the helm lists, by id, with the state of its status (`running`, `waiting`, ...)."""
-    rows = helm_request(run, "GET", "/api/sessions")["sessions"]
+def listed_states(run: Path, request=None) -> dict[str, str | None]:
+    """Every session the helm lists, by id, with the state of its status (`running`, `waiting`, ...). `request` is
+    `helm_request` unless a test hands in its own."""
+    rows = (request or helm_request)(run, "GET", "/api/sessions")["sessions"]
     return {row["id"]: (row.get("status") or {}).get("state") for row in rows}
 
 
@@ -1247,22 +1620,19 @@ def allow_copied_launches(run: Path) -> None:
 def wait_for_statuses(
     read_states, targets: dict[str, str], timeout: float = SETTLE_TIMEOUT_SECONDS, interval: float = 1.0
 ) -> None:
-    """Wait until `read_states()` (the listing's state by id) reports every id in `targets` at its target state, or
-    fail naming each session that is not and the state it is in.
+    """Wait until `read_states()` (the listing's state of each session, keyed as `targets` is: by id, or a scenario's
+    sessions by title) reports every session in `targets` at its target state, or fail naming each session that is not
+    and the state it is in.
 
     The statuses are the supervisor's own classification of each live screen, never written in by the harness, so a
     scene can show a waiting or idle session only after the supervisor has read it as one.
     """
-    deadline = time.monotonic() + timeout
-    while True:
+
+    def settled():
         pending = unsettled(targets, read_states())
-        if not pending:
-            return
-        if time.monotonic() > deadline:
-            raise RuntimeError(
-                f"seeded sessions did not reach their status within {timeout:.0f} s: {', '.join(pending)}"
-            )
-        time.sleep(interval)  # sleep-ok: polling the helm's listing; the harness subscribes to no status events
+        return (None if pending else True), ", ".join(pending)
+
+    poll("every seeded session to reach its status", settled, timeout, interval)
 
 
 def run_env(
@@ -1286,6 +1656,15 @@ def cli(run: Path, record: dict, args: list[str], capture: bool = False) -> subp
     return subprocess.run([record["binaries"]["cli"], *args], env=env, capture_output=capture, text=True)
 
 
+def window_entries(run: Path, record: dict) -> list[dict]:
+    """Every element of the window, clipped and scrolled-out ones included, as the bridge's `snapshot -a --json` lists
+    them; a RuntimeError when the bridge cannot answer."""
+    result = cli(run, record, ["snapshot", "-a", "--json", "--no-source"], capture=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"the bridge could not take a snapshot: {result.stderr.strip()}")
+    return json.loads(result.stdout)["entries"]
+
+
 def start(run: Path, args: list[str]) -> int:
     import argparse
 
@@ -1296,6 +1675,13 @@ def start(run: Path, args: list[str]) -> int:
         "--fleet",
         type=parse_fleet,
         help=f"seed one session per kind, in order, and wait for each replayed one's status ({', '.join(FLEET_KINDS)})",
+    )
+    seeding.add_argument(
+        "--scenario",
+        type=Path,
+        metavar="FILE",
+        help="stage the fleet a docs-media scenario.json5 describes: its hosts, sessions, statuses and seen state, "
+        "with the window at its viewport (makes the run a staged one; see docs/gui-agent.md, \"Scenario runs\")",
     )
     parser.add_argument("--size", help="Linux only: Mutter's virtual monitor (default 1600x1200)")
     parser.add_argument("--no-build", action="store_true", help="use the binaries already in the target directory")
@@ -1352,7 +1738,15 @@ def start(run: Path, args: list[str]) -> int:
         parse_size(options.window_size)
     if options.payload_dir is not None:
         check_payload_dir(options.payload_dir)
-    remote_hosts = parse_remote_hosts(options.remote_host)
+    # A scenario is read and checked before anything else happens, so a mistake in it creates nothing and dials nothing.
+    scenario = None
+    if options.scenario is not None:
+        if options.remote_host:
+            raise UsageError("--scenario stages the scenario's own hosts; it does not take --remote-host")
+        scenario = load_scenario(options.scenario, os.environ.get("USER"))
+    remote_hosts = parse_remote_hosts(scenario_remote_hosts(scenario) if scenario else options.remote_host)
+    # An explicit --window-size wins over the scenario's viewport.
+    window_size = options.window_size or (scenario_window_size(scenario) if scenario else None)
     # A staged run always has the private HOME and PATH and the scripted provisioning backend; nothing turns either off.
     staged = staged_start(options)
     # Before the ssh checks, so a refused combination fails without dialing anything.
@@ -1374,15 +1768,16 @@ def start(run: Path, args: list[str]) -> int:
         missing = [path for path in (LAVAPIPE_ICD, MESA_EGL_VENDOR) if not Path(path).exists()]
         if missing:
             raise UsageError(f"the software renderer is not installed: {', '.join(missing)} missing")
-        if options.window_size:
+        if window_size:
             # Mutter never grows its virtual monitor, and the app fits a first window to the display, so a window
             # larger than the monitor would open smaller than asked and be captured under the wrong size.
             monitor = options.size or DEFAULT_MONITOR
-            (want_w, want_h), (have_w, have_h) = parse_size(options.window_size), parse_size(monitor)
+            (want_w, want_h), (have_w, have_h) = parse_size(window_size), parse_size(monitor)
             if want_w > have_w or want_h > have_h:
-                raise UsageError(
-                    f"--window-size {options.window_size} does not fit Mutter's {monitor} monitor; pass --size"
-                )
+                asked = f"the scenario's window {window_size}"
+                if options.window_size:
+                    asked = f"--window-size {window_size}"
+                raise UsageError(f"{asked} does not fit Mutter's {monitor} monitor; pass --size")
     run.mkdir(mode=0o700)
     for sub in ("agent", "logs") if mac else ("runtime", "agent", "logs"):
         (run / sub).mkdir(mode=0o700)
@@ -1453,7 +1848,7 @@ def start(run: Path, args: list[str]) -> int:
             *launch_env_args(
                 run,
                 record,
-                window_size=options.window_size,
+                window_size=window_size,
                 appearance=options.appearance,
                 scripted_hosts=scripted_hosts_dir(run) if options.scripted_hosts else None,
                 start_dialogs=options.start_dialogs,
@@ -1474,7 +1869,18 @@ def start(run: Path, args: list[str]) -> int:
             file=sys.stderr,
         )
         return launched.returncode
-    kinds = options.fleet or ["basic"] * (2 if options.sessions is None else options.sessions)
+    if scenario:
+        ids = stage_scenario(run, scenario, binaries["fixtures"], snapshot=lambda: window_entries(run, record))
+        # What a capture step needs to find the staged sessions again: each one's helm key by its scenario title.
+        record["scenario"] = {
+            "file": str(options.scenario),
+            "sessions": {scenario["sessions"][index]["title"]: key for index, key in ids.items()},
+            "open": ids[scenario_creation_order(scenario)[0]],
+        }
+        save()
+        print(f"staged {len(scenario['hosts'])} hosts and {len(ids)} sessions from {options.scenario}; every session "
+              "reached its status and every row shows its shield")
+    kinds = [] if scenario else options.fleet or ["basic"] * (2 if options.sessions is None else options.sessions)
     if kinds:
         if "spawner" in kinds:
             allow_copied_launches(run)

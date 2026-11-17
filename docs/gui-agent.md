@@ -51,10 +51,11 @@ from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug
 payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this option is the way to
 pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run.
 `--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs").
-`--user-session` (Linux only) gives the app your own runtime directory and session bus, so that its helm's Podman check
-works and New container shows; such a run shares your systemd user manager and Podman storage (see "User-session runs").
-It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
-whatever `start` had already taken, the lock included.
+`--scenario FILE`, instead of `--sessions` or `--fleet`, stages the hosts and sessions a docs-media `scenario.json5`
+describes (see "Scenario runs"). `--user-session` (Linux only) gives the app your own runtime directory and session bus,
+so that its helm's Podman check works and New container shows; such a run shares your systemd user manager and Podman
+storage (see "User-session runs"). It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is
+interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
@@ -145,8 +146,8 @@ step to `events.jsonl` beside it (`{"event": ..., "target": ...}`), which tells 
 NOTE: A staged remote host is this machine, reached over ssh. Nothing a staged run does may reach the machine's own
 Farhelm installation, its real agents or its real account; the arrangement below exists to make sure of that.
 
-A staged run is one with `--remote-host` (and, once it exists, the scenario front end's option, which `staged_start` in
-`scripts/gui-agent.py` is where to add it; a scenario with only the local host is staged too). A plain `start` with
+A staged run is one with `--remote-host` or `--scenario` (a scenario with only the local host is staged too, since its
+sessions are launched as `claude` and `codex`; `staged_start` in `scripts/gui-agent.py` decides). A plain `start` with
 neither is not staged and keeps the caller's HOME and PATH, until the private environment below has been tried on a Mac.
 
 `start --remote-host DEST` (repeatable) stages a fleet of several hosts, which the README hero, the demo video and the
@@ -188,10 +189,53 @@ nor faking provisioning, which is fine only because the lifecycle check never st
 uninstall of a staged host would act on this machine's own Farhelm installation, so the helm fakes all of them. The
 connection to each host's supervisor stays real.
 
-Not done yet: the scenario front end (sessions with titles, hosts, statuses and transcripts). The seeded `--sessions`
-and `--fleet` sessions run on the local host as before, their command an absolute path to the fake agent. A staged run
-on a Mac has not been tried; there the vendors' credentials also live in the login Keychain, which a private HOME does
-not hide. On Linux it was checked with two remote hosts.
+The seeded `--sessions` and `--fleet` sessions run on the local host as before, their command an absolute path to the
+fake agent; only a scenario's sessions are launched by a harness's name. A staged run on a Mac has not been tried; there
+the vendors' credentials also live in the login Keychain, which a private HOME does not hide. On Linux it was checked
+with two remote hosts, and with the README hero's scenario.
+
+## Scenario runs
+
+NOTE: Not everything a scenario says is staged yet. Session ages and folders, which the old browser capture rewrote in
+the session listing on its way to the page, have no counterpart in the desktop app, so every row shows its session's
+real activity and its real scratch folder. The viewport's `scale` is not applied either. Sessions are created at the
+helm's default terminal size and resized when the window first attaches them; the old staging created them at the pane's
+measured size instead, because that first resize, landing while the replay was drawn, doubled the spinner line and lost
+a transcript line in its first captures. That probe is not ported, since the hero's transcripts fit 80x24 and its live
+runs replayed cleanly; if a capture shows a doubled spinner line or a missing transcript line, port it (pass the pane's
+`cols` and `rows` on each create, which the helm's create still takes).
+
+`start --scenario FILE` stages the fleet a docs-media `scenario.json5` describes (`docs/readme-hero/SPEC.md` has what is
+staged and why, and the file's own comments say what each field does). It is how the README hero, the demo video and the
+docs screenshots get their fleet, and it is a staged run, with everything "Staged runs" says. It takes the place of
+`--sessions` and `--fleet`, and refuses `--remote-host`, since the scenario names its own hosts.
+
+`start` reads the whole file through `scripts/scenario_json5.py` and checks what it stages before it creates the run or
+dials anything (`plan_scenario` has the checks). A mistake fails as a usage error naming the file. A remote host's `ssh`
+may hold `$USER`, which becomes your account name (the one substitution, so that the public file never names an
+account); each remote becomes a `--remote-host` destination and needs passwordless ssh like any.
+
+Once the app is up, `start` waits until every scenario host is connected and gives each its alias, sets the session list
+to activity order with full rows, and creates the sessions through the helm's API. Each is a command launch of its
+wrapper's bare name (`claude {farhelm_args}`, with the harness's YOLO flag for a `yolo` one) declaring that agent type
+and asserting its YOLO answer, with `confirm_yolo` for a YOLO one, so its row shows the agent's mark and the shield the
+launch earns with nothing rewritten. Each runs in a scratch directory of the run (`work/<index>`, by the session's place
+in the file) holding the `.staged-agent` script that the wrappers run: the fake agent's replay of the session's
+transcript, in its wrapper's dialect, holding the screen its status needs. Then `start` waits up to two minutes until
+the supervisor reads every session as its status, stamps each idle session seen (with its row's own activity) or clears
+it, and checks the window: every row's permission shield must be the slashed one for a `yolo` session and the plain one
+for every other, as the old staging checked before it took the picture. The run records each session's helm key by
+title, and the open one's, in `run.json` under `scenario`.
+
+The open session is created first, alone, and `start` waits until the window has opened it (the window writes its choice
+to the helm's `last_selected`) before it creates the rest. The old staging set that preference before the page loaded;
+here the window is up before the helm has any session, and it opens the first session it lists and keeps it, so creating
+the open one first is what makes the window's own choice the scenario's. The window does not give that terminal focus (a
+fresh window's focus is on New session), so `terminal-text` needs a click or Tab into the terminal first.
+
+The window starts at the viewport's size as the app's own drawing: on Linux `start` asks for a window larger by the
+frame and title bar the screenshot batch crops off (1322x876 for the hero's 1280x800), unless `--window-size` says
+otherwise. No scenario names a theme; pass `--appearance` (the old captures were dark, except the demo video).
 
 ## User-session runs
 
