@@ -1,17 +1,19 @@
 //! Startup overrides for agent builds: the first window's size and a forced appearance, so a screenshot batch can
-//! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge; and the start
-//! dialogs turned off, so a bridge run's first step acts on the app rather than on a Welcome card its fresh helm has
-//! never seen.
+//! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge; the start dialogs
+//! turned off, so a bridge run's first step acts on the app rather than on a Welcome card its fresh helm has never
+//! seen; and a staged run's session values (see "Staged session values" below), so a docs-media capture shows each
+//! session's age and folder as its scenario designs them.
 //!
 //! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values. The rest of this
 //! module is compiled into every build, so that the bootstrap has one way to read the overrides and ordinary test runs
 //! check the parsing and the bootstrap's use of it, but nothing installs overrides outside an agent build unless a test
-//! does. These are test hooks, not settings: the real appearance choice is the user's preference, which the helm's
-//! preferences hold (the maintainer decided on 2026-11-13 that appearance is a helm preference, not a per-device one),
-//! and a forced appearance wins over that stored choice for as long as the run lasts; the window's real size is its
-//! saved frame or the first-launch default. Turning the start dialogs off decides the window's start for the run
-//! without writing anything: the helm still holds the Welcome card unseen and the announcements pending.
-//! Nothing here is persisted, and the app never offers it.
+//! does. The staged session values are the exception: their reader and their rewrite exist only in agent builds and
+//! this crate's tests. These are test hooks, not settings: the real appearance
+//! choice is the user's preference, which the helm's preferences hold (the maintainer decided on 2026-11-13 that
+//! appearance is a helm preference, not a per-device one), and a forced appearance wins over that stored choice for
+//! as long as the run lasts; the window's real size is its saved frame or the first-launch default. Turning the start
+//! dialogs off decides the window's start for the run without writing anything: the helm still holds the Welcome card
+//! unseen and the announcements pending. Nothing here is persisted, and the app never offers it.
 //!
 //! The harness (`scripts/gui-agent.py start --window-size WxH --appearance light|dark`) passes the values through the
 //! app's environment, the same way it passes the desktop app's other agent-build variables
@@ -35,6 +37,15 @@ compile_error!(
      devbuild, whose optimized profiles turn debug assertions off"
 );
 
+use std::borrow::Cow;
+#[cfg(any(feature = "agent", test))]
+use std::collections::HashMap;
+
+#[cfg(any(feature = "agent", test))]
+use farhelm_helm_client::PushedEntry;
+use farhelm_helm_client::{PushedChanges, PushedState};
+#[cfg(any(feature = "agent", test))]
+use farhelm_proto::ui_channel::Collection;
 use gpui::{App, Global, Pixels, Size, px, size};
 
 use crate::theme::Preference;
@@ -73,6 +84,29 @@ pub fn from_env() -> anyhow::Result<Overrides> {
         var(APPEARANCE_ENV)?.as_deref(),
         var(START_DIALOGS_ENV)?.as_deref(),
     )
+}
+
+/// Install what the app's environment asks an agent build for: the [`Overrides`] always, and the [`StagedValues`]
+/// when [`SESSION_PINS_ENV`] names a file, their ages counted back from now. A pins file that cannot be read or parsed
+/// fails startup naming the variable and the file, so a run never captures real ages and scratch folders under a
+/// scenario's name. The bootstrap's first step in an agent build, so the theme, the first window and the first
+/// snapshot's store all see them.
+#[cfg(feature = "agent")]
+pub fn install_from_env(cx: &mut App) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+
+    cx.set_global(from_env()?);
+    let Some(path) = std::env::var_os(SESSION_PINS_ENV).map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    let read = || -> anyhow::Result<StagedValues> {
+        let anchor = crate::session_list::age::seconds(crate::ticker::wall_now(cx))
+            .context("the system clock is before the epoch")?;
+        StagedValues::parse(&std::fs::read_to_string(&path)?, anchor)
+    };
+    let staged = read().with_context(|| format!("{SESSION_PINS_ENV} names {}", path.display()))?;
+    cx.set_global(staged);
+    Ok(())
 }
 
 /// One variable's value, `None` when unset.
@@ -152,6 +186,146 @@ pub fn current(cx: &App) -> Overrides {
 /// ```
 pub fn start_dialogs_off(cx: &App) -> bool {
     current(cx).start_dialogs_off
+}
+
+// ---- Staged session values ------------------------------------------------------------------------------------------
+//
+// A docs-media scenario (`docs/readme-hero/scenario.json5`) designs each session's age and folder, and a staged run
+// cannot produce either for real: its sessions were created moments ago, in scratch directories under the run, whose
+// path is the kind of machine detail the picture must not show. The browser capture rewrote both in the helm's HTTP
+// replies on their way to the page. The desktop app reaches its helm over an in-memory channel, with nothing in between
+// to intercept, so the maintainer chose (2026-11-16) a seam in the app instead: an agent build reads the pins file that
+// `scripts/gui-agent.py start --scenario` writes, and the store rewrites the named sessions' last-activity stamp and
+// folder as it takes in pushed sessions (`docs/readme-hero/SPEC.md`, "What is real and what is not"). "Staged" rather
+// than "pinned" in the names here, because pinning a session to the top of the list is a product feature.
+//
+// Why the store: it is the one copy of pushed state every view reads (the row, the session pane's details bar, the
+// summary card, the quick switcher, the launcher's default folder), so one rewrite there reaches all of them, as the
+// old rewrite of both the listing and the detail reply did. Nothing else is rewritten, the order included: the list's
+// order is the helm's (`CollectionMeta::order`). The summary card's "Started" stays the real creation time, so it reads
+// later than the staged last activity.
+//
+// Never in a release build. Everything that reads or applies the values is behind `any(feature = "agent", test)`, the
+// `agent` feature cannot compile into an optimized build (the guard at the top of this file), and every other build
+// gets [`staged_snapshot`] and [`staged_changes`] as pass-throughs. `crates/farhelm-desktop/tests/release_build.rs`
+// checks an ordinary build of the app for [`SESSION_PINS_ENV`]'s value, which it reads from this file.
+
+/// The variable naming the pins file, `{"sessions": [{"title": ..., "age": ..., "cwd": ...}]}`: for each session the
+/// scenario titles, its age in seconds and the folder its row shows.
+#[cfg(any(feature = "agent", test))]
+pub const SESSION_PINS_ENV: &str = "FARHELM_DESKTOP_AGENT_SESSION_PINS";
+
+/// A staged run's session values, by title, with the anchor their ages count back from. Installed as a global by an
+/// agent build launched with [`SESSION_PINS_ENV`]; absent everywhere else.
+///
+/// Sessions are matched on every push by their current title, because that is all the harness knows when it writes the
+/// file, before any session exists (the old capture matched by title too). So a renamed session loses its values and
+/// shows its real scratch folder, a machine path; a Clone, which keeps its source's title, gets them; and Clone and
+/// Replace with start from the staged folder, as New session does from the open session's, a folder that does not
+/// exist on this machine. A session the file does not name is left exactly as pushed.
+///
+/// The anchor is when the app read the file, and it stays put: a staged row's age grows from then on like any age, so
+/// it reads older by however long the run took between launching the app and taking its picture (seconds for the
+/// README hero's run). Re-anchoring on every push would keep the ages exact, but the open session's automatic Mark read
+/// records the stamp the window sees, so a stamp that moved forward on every push would make the open row unseen again
+/// after each one and the window mark it again, without end.
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StagedValues {
+    /// Seconds since the epoch.
+    anchor: i64,
+    by_title: HashMap<String, Staged>,
+}
+
+#[cfg(any(feature = "agent", test))]
+impl Global for StagedValues {}
+
+/// The pins file as the harness writes it, after its own checks of the scenario. Strict, so a harness and an app that
+/// disagree about the shape fail the launch rather than stage nothing.
+#[cfg(any(feature = "agent", test))]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PinsFile {
+    sessions: Vec<Staged>,
+}
+
+/// One session's entry in the pins file: its age in seconds and its folder as the scenario spells it (`~/src/farhelm`).
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Staged {
+    title: String,
+    age: u32,
+    cwd: String,
+}
+
+#[cfg(any(feature = "agent", test))]
+impl StagedValues {
+    /// Parse a pins file's `text`, its ages counting back from `anchor` (seconds since the epoch). A repeated title
+    /// keeps its last entry; the harness, the file's only writer, refuses one.
+    pub fn parse(text: &str, anchor: i64) -> anyhow::Result<StagedValues> {
+        let file: PinsFile = serde_json::from_str(text)?;
+        let by_title = file.sessions.into_iter();
+        Ok(StagedValues {
+            anchor,
+            by_title: by_title
+                .map(|staged| (staged.title.clone(), staged))
+                .collect(),
+        })
+    }
+
+    /// The last-activity stamp and folder a session titled `title` is shown with, if the file names it.
+    fn stamp(&self, title: &str) -> Option<(i64, &str)> {
+        let staged = self.by_title.get(title)?;
+        Some((self.anchor - i64::from(staged.age), &staged.cwd))
+    }
+
+    /// Rewrite the sessions among `entries` that the file names; every other entry stays as pushed.
+    fn apply(&self, entries: &mut [(String, PushedEntry)]) {
+        for (_, entry) in entries {
+            if let PushedEntry::Session(row) = entry
+                && let Some((stamp, cwd)) = self.stamp(&row.info.title)
+            {
+                row.info.last_activity_at = stamp;
+                cwd.clone_into(&mut row.info.cwd);
+            }
+        }
+    }
+}
+
+/// `snapshot` as the store installs it: with the staged sessions rewritten in an agent build that has
+/// `StagedValues`, else unchanged and uncopied.
+pub(crate) fn staged_snapshot<'a>(snapshot: &'a [PushedState], cx: &App) -> Cow<'a, [PushedState]> {
+    #[cfg(any(feature = "agent", test))]
+    if let Some(staged) = cx.try_global::<StagedValues>() {
+        let mut snapshot = snapshot.to_vec();
+        for state in &mut snapshot {
+            if state.collection == Collection::Sessions {
+                staged.apply(&mut state.entries);
+            }
+        }
+        return Cow::Owned(snapshot);
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    let _ = cx;
+    Cow::Borrowed(snapshot)
+}
+
+/// `changes` as the store applies them: with the staged sessions among the upserts rewritten, like
+/// [`staged_snapshot`]. Every push of a staged session goes through here, so its row keeps the staged values however
+/// often the helm pushes it.
+pub(crate) fn staged_changes<'a>(changes: &'a PushedChanges, cx: &App) -> Cow<'a, PushedChanges> {
+    #[cfg(any(feature = "agent", test))]
+    if changes.collection == Collection::Sessions
+        && let Some(staged) = cx.try_global::<StagedValues>()
+    {
+        let mut changes = changes.clone();
+        staged.apply(&mut changes.upsert);
+        return Cow::Owned(changes);
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    let _ = cx;
+    Cow::Borrowed(changes)
 }
 
 #[cfg(test)]
@@ -262,6 +436,51 @@ mod tests {
                 "the window's appearance must not undo it"
             );
         });
+    }
+
+    /// The harness writes ages, and the store needs stamps: each age must become a stamp that many seconds before the
+    /// anchor, or a row would show some other age than the scenario's. Specified: every entry is found by its title,
+    /// with its age counted back from the anchor and its folder as written, a zero age staging the anchor itself, and
+    /// a title the file does not name has none.
+    #[test]
+    fn staged_values_become_stamps_counted_back_from_the_anchor() {
+        let text = r#"{"sessions": [
+            {"title": "fix flaky attach test", "age": 120, "cwd": "~/src/farhelm"},
+            {"title": "release 0.3.1", "age": 86400, "cwd": "~/src/farhelm"},
+            {"title": "now", "age": 0, "cwd": "/srv"}
+        ]}"#;
+        let values = StagedValues::parse(text, 1_800_000_000).unwrap();
+        let staged = |title: &str| values.stamp(title).unwrap();
+        assert_eq!(values.by_title.len(), 3);
+        assert_eq!(
+            staged("fix flaky attach test"),
+            (1_799_999_880, "~/src/farhelm")
+        );
+        assert_eq!(staged("release 0.3.1"), (1_799_913_600, "~/src/farhelm"));
+        assert_eq!(staged("now"), (1_800_000_000, "/srv"));
+        assert_eq!(values.stamp("unnamed"), None);
+    }
+
+    /// The harness checks the scenario before it writes the file; the app's own rule is the file's shape, so a harness
+    /// and an app that disagree about it fail the launch instead of staging nothing. Specified: an unknown field and a
+    /// missing one are refused, while the entry they spoil is accepted.
+    #[test]
+    fn a_pins_file_of_another_shape_is_refused() {
+        let entry = r#"{"title": "a", "age": 1, "cwd": "~/a"}"#;
+        let file = |entry: &str| format!(r#"{{"sessions": [{entry}]}}"#);
+        assert!(
+            StagedValues::parse(&file(entry), 1_000).is_ok(),
+            "the premise"
+        );
+        for spoiled in [
+            entry.replace(r#""cwd""#, r#""folder""#),
+            entry.replace(r#", "cwd": "~/a""#, ""),
+        ] {
+            assert!(
+                StagedValues::parse(&file(&spoiled), 1_000).is_err(),
+                "{spoiled}"
+            );
+        }
     }
 
     /// A typo must fail the launch: ignoring it would capture the default look under the label the batch asked for, or

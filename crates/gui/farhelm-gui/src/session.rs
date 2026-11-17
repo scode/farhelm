@@ -226,7 +226,7 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
                 let terminals = connection.terminals.clone();
                 let transfers = connection.transfers.clone();
                 UiSession {
-                    store: cx.new(|_| HelmStore::from_snapshot(&snapshot)),
+                    store: cx.new(|cx| HelmStore::from_snapshot(&snapshot, cx)),
                     operations: cx.new(|_| Operations::new(handle.clone())),
                     handle,
                     terminals,

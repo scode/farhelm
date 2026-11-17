@@ -5,23 +5,23 @@
 //! one expects (another GPUI app aborted 176 ms after launch that way). Order matters here. In [`run`], before any of
 //! it, an agent build starts the test-automation bridge (so a run whose window fails to open can still be inspected),
 //! and the host's quit wiring is installed (so a quit requested while the window is still opening is not lost). Then
-//! [`install`]: in an agent build, the startup overrides a screenshot batch passes (`agent_startup`), so the theme and
-//! the first window see them; then Kit's own init (it installs its theme and the text input's actions), then the
-//! bundled fonts, then Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings
-//! (after Kit's, so a deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer
-//! manager's registries, the ticker, the local time zone (UTC until the host's arrives), the notice center and the local
-//! state that survives resets, and, in test builds, the render counter. Last come the desktop integration's menus,
-//! after every key binding exists, because a Mac menu reads the shortcuts it shows once, when it is set. Then the
-//! coordinator starts following the host's answer for which controls Tab reaches, the ticker takes the host's
-//! reduced-motion setting (and, in an agent build, counts every window as active, so a run under headless Mutter, which
-//! reports every window inactive, still animates), the app's clock times follow the host's time zone if it hands one in
-//! (so the window's first frame already writes local times), the desktop integration keeps the host's source of the
-//! license notices and the host's updater (so the window's first frame already knows whether an updater runs), the
-//! host's status-sound player is installed if it has one (before any window exists to decide a sound), and the UI
-//! channel to the helm opens, so the window's first frame already reflects where the connection stands. Only then does
-//! a window open, at the frame the host restored if it restored one; once it is open, the window is handed to the
-//! desktop integration, which makes its close quit the app, tells the host about every change to its frame, and follows
-//! the host's reports of a second launch, which bring it forward.
+//! [`install`]: in an agent build, the startup overrides a screenshot batch passes and a staged run's session values
+//! (`agent_startup`), so the theme, the first window and the first snapshot's store see them; then Kit's own init (it
+//! installs its theme and the text input's actions), then the bundled fonts, then Farhelm's theme, which re-projects
+//! Kit's theme from Farhelm's tokens, then Farhelm's key bindings (after Kit's, so a deeper Farhelm context wins where
+//! both bind a key), the focus coordinator's and the layer manager's registries, the ticker, the local time zone (UTC
+//! until the host's arrives), the notice center and the local state that survives resets, and, in test builds, the
+//! render counter. Last come the desktop integration's menus, after every key binding exists, because a Mac menu reads
+//! the shortcuts it shows once, when it is set. Then the coordinator starts following the host's answer for which
+//! controls Tab reaches, the ticker takes the host's reduced-motion setting (and, in an agent build, counts every
+//! window as active, so a run under headless Mutter, which reports every window inactive, still animates), the app's
+//! clock times follow the host's time zone if it hands one in (so the window's first frame already writes local times),
+//! the desktop integration keeps the host's source of the license notices and the host's updater (so the window's first
+//! frame already knows whether an updater runs), the host's status-sound player is installed if it has one (before any
+//! window exists to decide a sound), and the UI channel to the helm opens, so the window's first frame already reflects
+//! where the connection stands. Only then does a window open, at the frame the host restored if it restored one; once
+//! it is open, the window is handed to the desktop integration, which makes its close quit the app, tells the host
+//! about every change to its frame, and follows the host's reports of a second launch, which bring it forward.
 //! Everything from [`install`] on is `start`, which a test runs on GPUI's test platform.
 //!
 //! The desktop integration ([`crate::desktop`]) is area code. The bootstrap only calls into it at those points and
@@ -74,7 +74,7 @@ pub const APP_ID: &str = "org.scode.farhelm.desktop";
 /// Install all app-wide state. Call once, inside the GPUI app, before opening any window.
 pub fn install(cx: &mut App) -> anyhow::Result<()> {
     #[cfg(feature = "agent")]
-    cx.set_global(crate::agent_startup::from_env()?);
+    crate::agent_startup::install_from_env(cx)?;
     install_app_state(cx)
 }
 

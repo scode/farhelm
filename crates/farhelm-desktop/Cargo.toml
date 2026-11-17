@@ -24,7 +24,8 @@ path = "src/main.rs"
 # it. It also makes the app write its helm's address and a credential for this process into the file named by
 # `FARHELM_DESKTOP_AGENT_HELM_FILE`, which is how that script seeds sessions through the real helm API, and hand its
 # embedded helm the ensure-hosts file named by `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, which is how a staged run gets a
-# fleet of several hosts.
+# fleet of several hosts; and the GUI stages the session values named by `FARHELM_DESKTOP_AGENT_SESSION_PINS`
+# (`farhelm_gui::agent_startup`).
 agent = ["farhelm-gui/agent"]
 
 [dependencies]
