@@ -534,6 +534,28 @@ fn restart_with_refuses_a_missing_conversation_and_a_changed_launch() {
     );
 }
 
+/// With no conversation captured, naming one is enough to restart: the request sends the stored launch unchanged with
+/// the named conversation beside it, never inside the launch (restart-with.spec's "named restart with requires a target
+/// when no conversation was captured"). Why: the helm resumes the named conversation only from the request's own
+/// field, and a draft that also required a setting change would leave such a session impossible to resume as launched.
+#[test]
+fn a_named_conversation_alone_restarts_the_stored_launch() {
+    let hosts = hosts();
+    let launch = agent_launch(codex());
+    let mut draft = LaunchDraft::restart_with(
+        "s1",
+        &session(launch.clone(), RestartOffer::default()),
+        Some(1),
+    )
+    .unwrap();
+    draft.edit_conversation("named-conversation".into());
+    let body = draft
+        .restart_body(target(&hosts, None), Some(&launch), false)
+        .expect("a named conversation is enough");
+    assert_eq!(body.with, Some(codex()));
+    assert_eq!(body.conversation.as_deref(), Some("named-conversation"));
+}
+
 /// Restart with refuses an edited command the shared rule refuses, but only once something was edited; and its host
 /// reasons name the held source host rather than asking for another (the old app's words).
 #[test]
