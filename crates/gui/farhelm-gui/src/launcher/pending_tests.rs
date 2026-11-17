@@ -19,10 +19,11 @@ use gpui::TestAppContext;
 use serde_json::json;
 
 use super::launch_tests::{command_draft, created_as, creates, launched_over, selected};
-use super::view_tests::{fixture_hosts, name_of};
+use super::view_tests::{draft, fixture_hosts, name_of, shown_refusal};
 use super::yolo_tests::{refuse_for_yolo, yolo_command_draft};
+use crate::session_list::host_rail::tests::within;
 use crate::session_list::menu_tests::{drawn, ended, snapshot};
-use crate::session_list::tests::{Fixture, change, listing_meta, session};
+use crate::session_list::tests::{Fixture, change, launcher_drawn, listing_meta, session};
 use crate::test_support::{self, any_open, focused_id, settle, terminal_focused};
 
 // ---- Fixtures --------------------------------------------------------------------------------------------------------
@@ -263,5 +264,82 @@ fn a_launchs_success_leaves_the_keyboard_in_the_session_switched_to(cx: &mut Tes
         super::view_tests::draft(cx).name.value(),
         "",
         "the next New starts fresh"
+    );
+}
+
+/// Opening Rename while a create waits gives Rename the keyboard. A late refusal can be recovered from its notice
+/// after Rename closes, so the reply must neither interrupt the title edit nor lose the launch draft.
+#[gpui::test]
+fn a_refused_launch_leaves_the_keyboard_in_rename(cx: &mut TestAppContext) {
+    let mut launch = command_draft();
+    launch.edit_name("held draft".into());
+    let (mut helm, cx, create) =
+        launched_over(cx, fleet(&[session("a"), session("b")], &["a"]), launch);
+    test_support::click(cx, "session-menu-b");
+    test_support::click(cx, "session-menu-rename");
+    let rename_focused = |cx: &mut gpui::VisualTestContext| {
+        within(&test_support::frame(cx), "rename-title")
+            .iter()
+            .any(|node| node.flags.focused)
+    };
+    assert!(rename_focused(cx), "Rename's title field has the keyboard");
+
+    helm.reply(create.id, 409, Some(json!("Rename overlap refused")));
+    settle(cx);
+    assert!(rename_focused(cx), "the refusal leaves focus in Rename");
+    assert!(!launcher_drawn(cx));
+    test_support::click(cx, "rename-cancel");
+    test_support::click(cx, "notice-open-launcher");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. Rename overlap refused")
+    );
+    assert_eq!(draft(cx).name.value(), "held draft");
+    assert_eq!(draft(cx).command.command, "true");
+}
+
+/// After the user goes to Hosts, the accepted launch leaves the selected session and the helm's remembered
+/// selection alone. Its Started report is a status with no action to take while the session list is hidden.
+#[gpui::test]
+fn started_in_hosts_leaves_the_source_remembered_and_offers_no_action(cx: &mut TestAppContext) {
+    let mut state = fleet(&[session("a")], &["a"]);
+    let preferences = state
+        .iter_mut()
+        .find(|collection| collection.collection == Collection::Preferences)
+        .unwrap();
+    preferences.entries[0].value["last_selected"] = json!("a");
+    let (mut helm, cx, create) = launched_over(cx, state, command_draft());
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    test_support::click(cx, "hosts-panel-toggle");
+    assert!(
+        drawn(cx, "hosts-panel"),
+        "Hosts is showing while the create waits"
+    );
+    created_as(&mut helm, cx, create.id, &["a", "d"], session("d"));
+    assert!(drawn(cx, "hosts-panel"));
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert!(
+        helm.commands().iter().all(|command| {
+            command.path != "/api/preferences"
+                || command
+                    .body
+                    .as_ref()
+                    .is_none_or(|body| body.get("last_selected").is_none())
+        }),
+        "completion sends no remembered selection"
+    );
+    assert_eq!(
+        name_of(cx, "launch-started-report").as_deref(),
+        Some("Started “d”")
+    );
+    assert!(
+        within(&test_support::frame(cx), "launch-started-report")
+            .iter()
+            .all(|node| {
+                !node.flags.focusable
+                    && !node.flags.click
+                    && !matches!(node.role, Some(gpui::Role::Button | gpui::Role::Link))
+            }),
+        "neither the report nor its descendants offer an action"
     );
 }

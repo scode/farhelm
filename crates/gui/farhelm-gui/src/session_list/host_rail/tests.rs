@@ -233,7 +233,7 @@ pub(crate) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNo
 
 /// The nodes drawn under `id`: the node itself and every node inside it, at any depth. Text a node shows is painted by
 /// the text element inside it, not by the node, so this is where its text is found.
-fn within<'a>(nodes: &'a [DriverNode], id: &str) -> Vec<&'a DriverNode> {
+pub(crate) fn within<'a>(nodes: &'a [DriverNode], id: &str) -> Vec<&'a DriverNode> {
     let Some(top) = nodes
         .iter()
         .position(|node| node.element_id.as_deref() == Some(id))

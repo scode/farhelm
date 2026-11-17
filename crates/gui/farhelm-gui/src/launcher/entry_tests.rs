@@ -685,6 +685,43 @@ fn a_clone_launch_sends_the_copied_launch(cx: &mut TestAppContext) {
     assert!(fresh.command.command.is_empty() && fresh.name.value().is_empty());
 }
 
+/// Clone creates an independent session. If the user starts working in another terminal while its create waits,
+/// the copied session can appear without taking that terminal's keyboard.
+#[gpui::test]
+fn a_clones_success_leaves_the_keyboard_in_the_session_switched_to(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(clone(cx, "e"));
+    assert_eq!(draft(cx).mode, Mode::Clone);
+    let create = super::launch_tests::press(&mut helm, cx, "/api/sessions");
+    test_support::click(cx, "session-row-c");
+    assert_eq!(selected(cx).as_deref(), Some("c"), "the premise: c opened");
+    assert!(
+        test_support::terminal_focused(cx),
+        "c's terminal has the keyboard"
+    );
+
+    super::launch_tests::created_as(
+        &mut helm,
+        cx,
+        create.id,
+        &["a", "b", "c", "d", "copy"],
+        session("copy"),
+    );
+    assert!(crate::session_list::menu_tests::drawn(
+        cx,
+        "session-row-copy"
+    ));
+    assert_eq!(
+        name_of(cx, "launch-started-report").as_deref(),
+        Some("Started “copy”")
+    );
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+    assert!(
+        test_support::terminal_focused(cx),
+        "the keyboard stayed in c's terminal"
+    );
+}
+
 /// When the source's host is not carried over, the Clone takes New's host, which is the open session's when there is
 /// one (the old launcher's "ordinary host default"), not always the helm's own. With a open on host9's install, that is
 /// host9 even for a Clone of b, whose listing named another install on host9's row: the user is looking at that
