@@ -33,6 +33,17 @@ fn painted_ring(cx: &mut VisualTestContext, id: &'static str) -> Option<Hsla> {
         .map(|quad| quad.border_color)
 }
 
+/// GPUI's own "last input was the keyboard" flag for the window under test, which app code never reads
+/// (`focus::last_input_was_keyboard` answers instead). Only a test premise reads it: that a pointer move cleared GPUI's
+/// flag, so a ring that outlasts the move shows the coordinator's flag at work rather than GPUI's.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test premise that GPUI's flag and the coordinator's differ; no app code reads GPUI's"
+)]
+fn gpui_keyboard_flag(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, _| window.last_input_was_keyboard())
+}
+
 /// Why this matters: a keyboard user needs to see which row has focus, and the selected row wears the accent fill, so
 /// an accent ring there would barely show; the old app drew it in the on-fill ink on the selection
 /// (`.session-row.selected :focus-visible`). This is the old chrome spec's "keyboard focus uses accent on ordinary
@@ -159,7 +170,7 @@ fn the_ring_and_help_outlast_pointer_movement_and_a_press_ends_the_ring_until_a_
     cx.simulate_mouse_move(beside, None, Modifiers::none());
     redraw(cx);
     assert!(
-        cx.update(|window, _| !window.last_input_was_keyboard()),
+        !gpui_keyboard_flag(cx),
         "the premise: the move cleared GPUI's own flag"
     );
     assert_eq!(

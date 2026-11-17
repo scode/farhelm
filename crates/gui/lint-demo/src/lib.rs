@@ -81,6 +81,13 @@ fn context_focus_view<T: 'static, W: Focusable>(
     cx.focus_view(view, window);
 }
 
+// The keyboard flag that focus rings and focus help read.
+
+fn window_last_input_was_keyboard(window: &Window) -> bool {
+    // expect: disallowed_methods gpui::Window::last_input_was_keyboard
+    window.last_input_was_keyboard()
+}
+
 // Overlays.
 
 fn deferred() {
