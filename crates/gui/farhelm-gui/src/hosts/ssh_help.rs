@@ -41,13 +41,13 @@ use gpui::{
 use serde_json::json;
 
 use super::identity::host_mark;
-use crate::components::{Button, DialogFrame, HoverHelp, Tier, copy_button};
+use crate::components::{Button, CommandWell, DialogFrame, HoverHelp, Tier};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Dialog, LayerId};
 use crate::operations;
 use crate::session;
-use crate::theme::{self, Palette, metrics};
+use crate::theme::{self, Palette};
 
 /// `.ssh-help-dialog`'s width.
 const WIDTH: f32 = 640.;
@@ -63,11 +63,8 @@ const SECTION_GAP: f32 = 8.;
 const SECTION_RULE_PAD: f32 = 20.;
 /// An `h3` at the dialog's 13 pixels: the browser's 1.17em, on the dialog's line height of 1.5.
 const HEADING: f32 = 15.21;
-/// `.ssh-help-command`'s gap between a command's label, its text and its Copy button.
+/// `.ssh-help-command`'s gap between a command's label and its well (the well's own gap to Copy is [`CommandWell`]'s).
 const COMMAND_GAP: f32 = 6.;
-/// `.ssh-help-command pre`: 11 pixels, padded 0.75rem, on the dialog's line height of 1.5.
-const COMMAND_TEXT: f32 = 11.;
-const COMMAND_PAD: f32 = 12.;
 /// The header tile's mark: `HostMark`'s default 24 pixels, as Add host's.
 const TILE_MARK: f32 = 24.;
 
@@ -383,39 +380,26 @@ fn section(id: &str, host: &Commands, ruled: bool, palette: &Palette) -> AnyElem
                         label,
                         copy_label,
                         command,
-                        palette,
                     ))
                 }),
         )
         .into_any_element()
 }
 
-/// One command (`.ssh-help-command`): its label over the command's text in a well, with Copy beside it. Copy takes the
-/// command's raw bytes, so a pasted command addresses the same destination and path even where the screen shows an
-/// escape; the button's name finishes the label's sentence ("Copy sessions connection"), as the old one did.
+/// One command (`.ssh-help-command`): its label over the command in a [`CommandWell`], whose Copy takes the command's
+/// raw bytes, so a pasted command addresses the same destination and path even where the screen shows an escape; the
+/// button's name finishes the label's sentence ("Copy sessions connection"), as the old one did.
 fn command_row(
     id: &str,
     label: &'static str,
     copy_label: &'static str,
     command: &HostText,
-    palette: &Palette,
 ) -> AnyElement {
-    let well = div()
-        .flex_1()
-        .min_w_0()
-        .p(px(COMMAND_PAD))
-        .bg(theme::color(palette.bg_1))
-        .border_1()
-        .border_color(theme::color(palette.border))
-        .rounded(metrics::RADIUS_SM)
-        .text_size(px(COMMAND_TEXT))
-        .line_height(px(COMMAND_TEXT * 1.5))
-        .child(HostSentence::new(SharedString::from(id.to_owned())).mono(command));
-    let copy = copy_button(
-        format!("{id}-copy"),
+    let well = CommandWell::new(
+        id.to_owned(),
+        command.clone(),
         "Copy",
         HoverHelp::tooltip("Copy: the exact SSH command to run on the helm's machine"),
-        command.raw().to_owned(),
     )
     .accessible_name(format!("Copy {copy_label}"));
     div()
@@ -423,15 +407,7 @@ fn command_row(
         .flex_col()
         .gap(px(COMMAND_GAP))
         .child(div().font_weight(FontWeight::BOLD).child(label))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(COMMAND_GAP))
-                .child(well)
-                .child(copy),
-        )
+        .child(well)
         .into_any_element()
 }
 

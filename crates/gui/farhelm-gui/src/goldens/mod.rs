@@ -435,6 +435,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "command-well",
+        size: (600., 200.),
+        draw: command_wells,
+        setup: no_setup,
+    },
+    Scene {
         name: "text-input-growing",
         size: (620., 300.),
         draw: growing,

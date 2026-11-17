@@ -987,7 +987,7 @@
         ],
         [
           "scrollintoview",
-          "id:tensorlake-ssh-key-copy"
+          "id:tensorlake-ssh-key-command-copy"
         ],
         [
           "wait",
@@ -1007,7 +1007,7 @@
       "steps": [
         [
           "click",
-          "id:tensorlake-ssh-key-copy"
+          "id:tensorlake-ssh-key-command-copy"
         ],
         [
           "wait",
@@ -2209,6 +2209,11 @@
       "golden": "switch",
       "title": "The Settings switch, off, on, and on but unavailable",
       "reference": "settings-notifications"
+    },
+    {
+      "golden": "command-well",
+      "title": "A command in its well with Copy beside it: one line with an escaped control character, and a long one wrapped",
+      "reference": null
     },
     {
       "golden": "scroll-box",

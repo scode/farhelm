@@ -20,6 +20,8 @@ linux/checkout-trash-confirm-host--dark.png 715d91730a2ad7e97fa3ae69593dea3134d6
 linux/checkout-trash-confirm-host--light.png 44d90291235d6599945bc43a2ff697028e586e45
 linux/checkout-trash-dialog--dark.png c40bf1bbe0ea603d3bcf761b1fddcef025c8c41b
 linux/checkout-trash-dialog--light.png 08e4d46cd747fd3e1c5b3e1cd29fe30477d88aad
+linux/command-well--dark.png 7f45088fe81823251d7e5b4cb113e5fe9f6814b2
+linux/command-well--light.png a13250153ef9fc1cf6ef02aa4599ac528f018c53
 linux/dialog--dark.png 4545851f4112663fc3672b30f4559a68f8326b0d
 linux/dialog--light.png e9ce8ca905fc5731b7ee5ead0551457cc78120df
 linux/dialog-launcher-frame--dark.png 9cec830fd28d10d0e1354b01394f248cd0c695c3
