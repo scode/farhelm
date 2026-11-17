@@ -998,7 +998,7 @@ pub(crate) async fn route_session(
     let client = status.client.ok_or_else(|| {
         anyhow::Error::new(SupervisorError::helm(
             ErrorKind::Conflict,
-            refusal_text(host, &status.state),
+            refusal_text(host, status.provider, &status.state),
         ))
     })?;
     Ok((claim, client))
@@ -1043,8 +1043,14 @@ pub(crate) async fn resolve_owner(
 /// would drift, and the one that drifted would be the one a user actually
 /// read. The phase label is the same vocabulary the hosts list chips and
 /// the log lines use ([`manager::HostState::phase`]), so a user comparing
-/// an error against the hosts panel sees the same word in both.
-fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
+/// an error against the hosts panel sees the same word in both. `provider`
+/// is the provider that made the host's machine ([`manager::HostStatus::provider`]),
+/// which words a suspended host's detail.
+fn refusal_text(
+    host: store::HostId,
+    provider: Option<farhelm_proto::ProviderKind>,
+    state: &manager::HostState,
+) -> String {
     let detail = match state {
         manager::HostState::Connecting { last_error, .. } => last_error
             .clone()
@@ -1081,14 +1087,9 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
         manager::HostState::TensorlakeChanging { .. } => "the host's environment is \
             changing its running state; wait for that operation to finish"
             .to_string(),
-        manager::HostState::Suspended { resume_failed, .. } => match resume_failed {
-            None => "the host's Tensorlake sandbox is suspended; it runs again once it is \
-                     resumed"
-                .to_string(),
-            Some(details) => format!(
-                "the host's Tensorlake sandbox is suspended and its last resume failed: {details}"
-            ),
-        },
+        manager::HostState::Suspended { resume_failed, .. } => {
+            crate::environment::suspended_refusal(provider, resume_failed.as_deref())
+        }
         manager::HostState::Retired { reason } => reason.clone(),
         // Neutral about the provider: the helm names no provider in shared
         // text, and the UI words this state per provider.
@@ -1643,7 +1644,7 @@ pub(crate) fn host_client(
     let client = status.client.ok_or_else(|| {
         anyhow::Error::new(SupervisorError::helm(
             ErrorKind::Conflict,
-            refusal_text(host, &status.state),
+            refusal_text(host, status.provider, &status.state),
         ))
     })?;
     Ok((claim, client))

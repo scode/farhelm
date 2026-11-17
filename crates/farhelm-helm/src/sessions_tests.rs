@@ -7544,7 +7544,7 @@ fn refusal_text_names_every_non_connected_state() {
         "all six non-connected states are covered; a seventh needs a case here"
     );
     for (state, phase, detail) in cases {
-        let text = super::refusal_text(42, &state);
+        let text = super::refusal_text(42, None, &state);
         assert!(
             text.contains(phase),
             "the refusal must name the phase {phase:?}: {text}"
@@ -7562,6 +7562,106 @@ fn refusal_text_names_every_non_connected_state() {
             "every refusal must name the host: {text}"
         );
     }
+}
+
+/// A suspended host's refusal names what its provider made, since a paused
+/// container is not a Tensorlake sandbox and the GUI shows this detail as it
+/// is (a real container run read "Tensorlake sandbox" for a paused container).
+///
+/// Specified: a suspended sandbox reads "the host's Tensorlake sandbox is
+/// suspended; it runs again once it is resumed", a suspended container "the
+/// host's container is paused; it runs again once it is resumed", each with
+/// "and its last resume failed: <reason>" in place of the remedy after a
+/// failed resume; a host no provider made says only that its environment is
+/// suspended; every one keeps the host and the phase.
+#[farhelm_testtrace::test]
+fn a_suspended_hosts_refusal_is_worded_by_its_provider() {
+    use crate::manager::HostState;
+    use farhelm_proto::ProviderKind;
+
+    let suspended = |resume_failed: Option<&str>| HostState::Suspended {
+        observed_at: 0,
+        suspended_by_farhelm_at: None,
+        resume_failed: resume_failed.map(str::to_owned),
+    };
+    let refused = |detail: &str| {
+        format!(
+            "host 42 is suspended, so this operation is refused and nothing was queued: {detail}"
+        )
+    };
+    for (provider, resumable, failed) in [
+        (
+            Some(ProviderKind::Tensorlake),
+            "the host's Tensorlake sandbox is suspended; it runs again once it is resumed",
+            "the host's Tensorlake sandbox is suspended and its last resume failed: quota",
+        ),
+        (
+            Some(ProviderKind::Podman),
+            "the host's container is paused; it runs again once it is resumed",
+            "the host's container is paused and its last resume failed: quota",
+        ),
+        (
+            None,
+            "the host's environment is suspended; it runs again once it is resumed",
+            "the host's environment is suspended and its last resume failed: quota",
+        ),
+    ] {
+        assert_eq!(
+            super::refusal_text(42, provider, &suspended(None)),
+            refused(resumable),
+            "{provider:?}"
+        );
+        assert_eq!(
+            super::refusal_text(42, provider, &suspended(Some("quota"))),
+            refused(failed),
+            "{provider:?}, resume failed"
+        );
+    }
+}
+
+/// The refusal's provider comes from the status the router reads
+/// (`HostStatus::provider`), so a status that dropped it would word a paused
+/// container as a generic environment with nothing else failing.
+///
+/// Specified: once the registry holds a pending container and a session
+/// sandbox beside the local host, the manager's status names Podman for the
+/// container, Tensorlake for the sandbox, and no provider for the local host.
+#[farhelm_testtrace::test]
+async fn a_hosts_status_names_the_provider_its_kind_records() {
+    use farhelm_proto::ProviderKind;
+
+    let h = rest_harness::idle_helm().await;
+    let local = rest_harness::local_id(&h.store).await;
+    let container = h
+        .store
+        .register_pending_session_container("farhelm-sess-paused".into(), "dev".into(), local)
+        .await
+        .unwrap();
+    let sandbox = h
+        .store
+        .register_session_sandbox(store::NewTensorlakeHost {
+            destination: crate::tensorlake::ssh::destination("farhelm-sess-sandbox"),
+            entry: store::NewHostEntry::new(Some("Status sandbox")).unwrap(),
+            sandbox: "farhelm-sess-sandbox".into(),
+            recipe: "dev".into(),
+            resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                cpus: 1,
+                memory_gb: 1,
+                disk_gb: 10,
+            },
+        })
+        .await
+        .unwrap();
+    h.manager.sync_registry().await.unwrap();
+    let provider = |host| {
+        h.manager
+            .status(host)
+            .unwrap_or_else(|| panic!("host {host} has an actor"))
+            .provider
+    };
+    assert_eq!(provider(container), Some(ProviderKind::Podman));
+    assert_eq!(provider(sandbox), Some(ProviderKind::Tensorlake));
+    assert_eq!(provider(local), None);
 }
 
 /// Creating on a non-connected host is a PRECONDITION FAILURE: a

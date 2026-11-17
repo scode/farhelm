@@ -14,7 +14,7 @@
 pub(crate) mod phase;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::HostView;
@@ -37,14 +37,27 @@ pub(crate) fn display_name(host: &HostView) -> HostText {
     named(&host.name, host.is_local())
 }
 
-/// A registered host's short name, for a surface too small for its full name (the progress card's header; the
-/// attention list's rows are to use it too): the alias, or the destination without its user and domain, or "Local" for
-/// the local host, by the protocol crate's one rule (`host_short_name`, which the old app's `Host::short_name` used
-/// too), and the registry's full name when that rule finds nothing. Host text, as [`display_name`] is.
+/// A registered host's short name, for a surface too small for its full name (the progress card's header and the
+/// attention list's rows): the alias, or the destination without its user and domain, or "Local" for the local host,
+/// by the protocol crate's one rule (`host_short_name`, which the old app's `Host::short_name` used too), and the
+/// registry's full name when that rule finds nothing. Host text, as [`display_name`] is.
+///
+/// A host the registry describes as a disposable environment (`environment` set) reads by its full name, the one the
+/// Hosts panel shows, unless it has an alias, and its destination is never consulted. A container's destination is the
+/// helm's registry coordinate, `podman:<container>`, not an SSH hostname, so SPEC.md's rule ("the first label of its SSH
+/// hostname") has nothing to derive from it. A sandbox's destination is a real SSH destination
+/// (`<sandbox>@<sandbox>.sandbox.tensorlake.ai`), but the helm names it `<sandbox>`, the same as the label the rule
+/// would derive, so it reads the same either way. The old app derived the short name from the destination for both,
+/// and its attention list named a container `podman:<container>`; a real container run on 2026-11-16 found the GPUI
+/// list doing the same.
 pub(crate) fn short_name(host: &HostView) -> HostText {
+    let destination = host
+        .destination
+        .as_deref()
+        .filter(|_| host.environment.is_none());
     let short = farhelm_proto::host_name::host_short_name(
         host.is_local(),
-        host.destination.as_deref(),
+        destination,
         host.alias.as_deref(),
     );
     if short.is_empty() {

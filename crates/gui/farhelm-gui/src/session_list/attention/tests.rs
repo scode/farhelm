@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 
 use super::{Dismissal, Kind, REQUIRED, Shown, classify, problem_words};
 use crate::host_text::HostText;
+use crate::hosts::identity::tests::listed_environment;
 use crate::hosts::progress::tests::step;
 use crate::hosts::status::{Activity, HostStatus, Live, Steps, Urgency};
 use crate::hosts::tests::{aliased, connected, host, hosts, progress, run, skew};
@@ -1342,4 +1343,34 @@ fn failed_tunnels_show_only_while_the_host_reads_connected(cx: &mut TestAppConte
     listed[1].state = connected();
     push_hosts(&mut fake, &listed, &[], cx);
     assert_eq!(row_ids(cx), [2]);
+}
+
+/// Why this matters: a real container run found the attention row naming a container by the helm's registry coordinate,
+/// `podman:<container>`, where Hosts names it `<container>`, so the row the user is sent to Hosts from did not match the
+/// row they find there. Specified: a stopped, unaliased container listed as the helm lists one draws
+/// `farhelm-sess-dev-1` as its row's name and no text starting `podman:`.
+#[gpui::test]
+fn an_environment_row_names_its_host_as_hosts_does(cx: &mut TestAppContext) {
+    let mut container = listed_environment(Provider::Container);
+    container.state = stopped();
+    let (_fake, cx) = open(
+        cx,
+        &[host(1, "local", connected()), container],
+        &[],
+        &[],
+        true,
+    );
+    assert_eq!(row_ids(cx), [2], "the premise: the container has a row");
+    let texts: Vec<String> = texts_within(&frame(cx), "host-attention-row-2")
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect();
+    assert!(
+        texts.iter().any(|text| text == "farhelm-sess-dev-1"),
+        "{texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.starts_with("podman:")),
+        "{texts:?}"
+    );
 }

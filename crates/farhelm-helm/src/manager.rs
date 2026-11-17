@@ -1352,6 +1352,12 @@ pub struct HostStatus {
     /// Ownership from the same registry capture as this state and client,
     /// available even while disconnected. It is not supervisor policy.
     pub is_session_owned: bool,
+    /// The provider that made this host's disposable machine, from the same
+    /// registry capture; `None` for the local host and ordinary SSH hosts.
+    /// Only for wording a refusal: `state` carries no provider, and a
+    /// suspended sandbox and a paused container need different words
+    /// (`environment::suspended_refusal`).
+    pub provider: Option<farhelm_proto::ProviderKind>,
     pub state: HostState,
     /// `None` in every state except [`HostState::Connected`]. Not an error
     /// case to paper over: it is the "refuse with the host's state named"
@@ -2211,6 +2217,7 @@ impl ConnectionManager {
         Some(HostStatus {
             entry_uuid: handle.row.entry_uuid.clone(),
             is_session_owned: handle.row.is_session_owned(),
+            provider: handle.row.kind.environment_provider(),
             client: match sealed {
                 Some(_) => None,
                 None => published.client.clone(),
