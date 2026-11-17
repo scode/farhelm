@@ -87,9 +87,8 @@ To leave Farhelm's terminals alone, have the startup file skip tmux when `TERM_P
 
 ## Farhelm no longer needs tmux
 
-Nothing in Farhelm needs tmux any more: not the desktop app, not a Linux machine running the helm, and not a remote
-host. Farhelm itself no longer runs tmux for any session either: it ends the tmux it ran old terminals in when it
-updates, and never starts one again.
+Nothing in Farhelm needs tmux any more: not the desktop app, and not a remote host. Farhelm itself no longer runs tmux
+for any session either: it ends the tmux it ran old terminals in when it updates, and never starts one again.
 
 Earlier versions installed their own copy of tmux on remote Linux hosts whose tmux was too old or missing, which was
 most of them (Ubuntu 24.04 and Debian 13 included). Typing `tmux` in a session or terminal tab on such a host ran that
@@ -99,7 +98,6 @@ the host's own tmux, or is not found if the host has none. A copy that a Farhelm
 you use tmux on that host, install it yourself. A tmux you had already started from Farhelm's copy keeps running until
 you end it.
 
-On a Linux machine, once `farhelm helm setup` or an update rewrites Farhelm's service there, sessions no longer get the
-directory of the tmux Farhelm used to run added to their `PATH`. A tmux you installed in a directory your login shell
-does not put on its `PATH` (Linuxbrew's, say) is found from a session only once your shell's startup files add that
-directory.
+On a remote Linux host, once an update rewrites Farhelm's service there, sessions no longer get the directory of the
+tmux Farhelm used to run added to their `PATH`. A tmux you installed in a directory your login shell does not put on its
+`PATH` (Linuxbrew's, say) is found from a session only once your shell's startup files add that directory.

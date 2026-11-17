@@ -5,21 +5,15 @@ sidebar:
   order: 5
 ---
 
-import Screenshot from '../../../../components/Screenshot.astro';
-
 A session outlives its agent. Stopping the agent, or a reboot ending it, leaves the session in the list, ready to start
 again; after a stop its terminal stays readable too. Only deleting a session removes it.
 
 ## The header's actions
 
-The action buttons share the row above the terminal with its tabs. The session's name, host, and other details are in
-the bar below the terminal. **Restart** and **Replace** each have an arrow beside them that opens a menu with the plain
-action and **Restart with…** or **Replace with…**.
-
-<Screenshot
-  name="stop-restart-resume/header-actions"
-  alt="The action buttons at the right of the row above the terminal, with stop, restart, replace, and clone explained."
-/>
+The action buttons share the row above the terminal with its tabs: **Stop**, **Restart**, **Replace**, **Clone** and
+**Delete**, at its right end. The session's name, host, and other details are in the bar below the terminal.
+**Restart** and **Replace** each have an arrow beside them that opens a menu with the plain action and **Restart with…**
+or **Replace with…**.
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
 conversation it can resume, because the agent cannot report one or none was captured, **Restart** is greyed out and
@@ -67,11 +61,6 @@ launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-la
 
 ## Stop or delete
 
-<Screenshot
-  name="stop-restart-resume/row-menu"
-  alt="A session's menu with stop and delete explained."
-/>
-
 Both are in a session's menu in the [session list](/docs/using/session-list/) and at the right of the row above the
 terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
 list, a session that has already ended and has no shell tabs open is deleted at once.
@@ -98,7 +87,7 @@ Stop or Delete confirmation, one question lists every included session with its 
 session confirmations** applies here too. Each host works through its sessions in turn, while other hosts can keep
 going. A failure stays on that session's row, and the marks clear when the run finishes.
 
-**Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser, deletes the open session the same way as its Delete
+**Cmd+W** on a Mac, or **Ctrl+Shift+Backspace** on Linux, deletes the open session the same way as its Delete
 button, including the confirmation setting below. Session shortcuts act only on the session you have open, even when
 others are marked. Escape cancels the Stop, Restart, Replace or Delete question under those
 buttons and returns you to the terminal.
@@ -108,8 +97,7 @@ keyboard, including Rename and the quick switcher.
 
 To stop, delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
 the **Sessions** section of **Settings**, behind the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge
-of the sidebar. It starts off and applies to your
-helm; other open windows pick it up when they reload. Delete of a session in a container or sandbox, YOLO, host and
+of the sidebar. It starts off, your helm keeps it, and it takes effect at once. Delete of a session in a container or sandbox, YOLO, host and
 trash questions keep their own rules, and **Restart with** still opens the launcher.
 
 On an ordinary host, a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) stays while another
