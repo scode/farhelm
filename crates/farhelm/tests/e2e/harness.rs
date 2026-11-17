@@ -860,12 +860,10 @@ impl Drop for EmbeddedHelm {
 pub(crate) fn helm_args(state_dir: &std::path::Path) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         port: 0,
-        state_dir: Some(state_dir.to_path_buf()),
+        state_dir: state_dir.to_path_buf(),
         ensure_hosts: None,
         payload_dir: None,
-        release_base_url: None,
         backstop_refresh_secs: None,
-        test_credential_file: None,
     }
 }
 
@@ -897,17 +895,13 @@ pub(crate) async fn start_helm_with(args: farhelm_helm::HelmArgs) -> EmbeddedHel
 /// test runtime's shutdown waiting. The helm itself still stops in that
 /// case: its shutdown sender drops with the future.
 ///
-/// Refuses `args` without a state directory: the helm would fall back to
-/// the user's real one, where a development build could open and migrate
-/// the live install's helm.db.
+/// `HelmArgs::state_dir` has no default, so a test helm can never fall
+/// back to the user's real state directory, where a development build could
+/// open and migrate the live install's helm.db.
 pub(crate) async fn try_start_helm(
     args: farhelm_helm::HelmArgs,
     ready_within: Duration,
 ) -> anyhow::Result<EmbeddedHelm> {
-    assert!(
-        args.state_dir.is_some(),
-        "a test helm needs its own state directory, never the user's default"
-    );
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
     let (done_tx, done) = std::sync::mpsc::channel::<()>();

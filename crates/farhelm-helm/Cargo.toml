@@ -19,7 +19,6 @@ anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 base64.workspace = true
-clap.workspace = true
 farhelm-proto.workspace = true
 farhelm-supervisor.workspace = true
 flate2.workspace = true

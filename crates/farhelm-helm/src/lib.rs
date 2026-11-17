@@ -3,10 +3,10 @@
 //! Per SPEC.md, exactly one helm runs at a time. It connects to
 //! supervisors (locally over their unix socket, remotely over the user's
 //! own ssh running `farhelm internal stdio`), aggregates their sessions,
-//! and serves the API over loopback HTTP/WS. The desktop app embeds a helm
-//! private to its window; a standalone `farhelm helm run` serves the same API
-//! with no client of its own. It holds no
-//! authoritative session state — supervisors are the authority.
+//! and serves the API over loopback HTTP/WS. The desktop app embeds it,
+//! private to its window, through [`run_embedded`], the only way to start a
+//! helm. It holds no authoritative session state — supervisors are the
+//! authority.
 //!
 //! The loopback-only bind is enforced here — SPEC.md's security posture
 //! says the helm refuses non-loopback addresses in v1, and this code simply
@@ -36,8 +36,8 @@
 //!   ways a host can fail to be connected, and all of them refuse
 //!   identically.
 //! - **Hosts are managed over REST.** [`hosts`] is the registry's own
-//!   surface — add, retarget, remove, adopt, retry — and `--ensure-hosts`
-//!   ([`ensure`]) is the same registration path run once at startup.
+//!   surface — add, retarget, remove, adopt, retry — and an ensure-hosts
+//!   file ([`ensure`]) is the same registration path run once at startup.
 //!
 //! ## What M6.75 added (PLAN_M6_75.md item 5)
 //!
@@ -70,8 +70,8 @@
 //! ## What is left in this file
 //!
 //! The composition root, and nothing that answers a request. [`HelmArgs`]
-//! and [`run`] are the process; [`AppState`] is the fleet the REST handlers
-//! reach into; [`build_router`] is the one place the routes and the
+//! and [`run_embedded`] are the process; [`AppState`] is the fleet the REST
+//! handlers reach into; [`build_router`] is the one place the routes and the
 //! middleware order are written down; [`http_error`] is the shared mapping
 //! from a typed REST or supervisor error to a status and a body — the
 //! failure path of the request/response routes, not a universal one, since
@@ -84,7 +84,6 @@
 
 use anyhow::Context;
 use axum::{Router, response::IntoResponse, routing::get};
-use clap::Args;
 use farhelm_proto::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -119,8 +118,8 @@ mod browser;
 pub use browser::LinkOpener;
 pub use downloads::{FileOpener, NativeDownloads, cleanup_native_downloads};
 
-/// `--ensure-hosts`: the JSON5 floor under the registry, applied once
-/// before serving starts.
+/// The ensure-hosts file ([`HelmArgs::ensure_hosts`]): the JSON5 floor
+/// under the registry, applied once before serving starts.
 mod ensure;
 
 /// Shared condition notices, initially stuck archived-checkout removal.
@@ -286,86 +285,43 @@ mod test_capture;
 #[cfg(test)]
 mod http_contract_tests;
 
-/// CLI arguments for `farhelm helm run`. Lives here (not in the bin
-/// crate) so the helm's surface and its implementation evolve together.
+/// What a helm is started with: the arguments [`run_embedded`] takes.
 ///
-/// M1's session and transport flags are deliberately absent (PLAN_M6.md
-/// item 5, user decision 2026-08-04). `--ssh`/`--remote-farhelm`/
-/// `--remote-state-dir` became per-host registry fields, and
-/// `--cwd`/`--agent`/`--title` became `POST /api/sessions` — a helm now
-/// drives every registered host at once, so an argv flag naming ONE of
-/// them could only ever have meant the wrong thing.
-#[derive(Args, Debug, Clone)]
+/// Lives here, not in the desktop crate, so the fields and what the helm
+/// does with them change together.
+#[derive(Debug, Clone)]
 pub struct HelmArgs {
-    /// Loopback port for the API. The desktop passes zero so the kernel
-    /// chooses its private API port for each launch.
-    #[arg(long, default_value_t = 7433)]
+    /// Loopback port for the API. The desktop app and the tests pass zero,
+    /// so the kernel chooses a private port for each launch; only the e2e
+    /// test `helm_bind_failure_happens_before_any_durable_setup` asks for a
+    /// fixed (taken) one.
     pub port: u16,
 
-    /// State directory (default: ~/.local/state/farhelm). Holds helm.db,
-    /// the helm's ownership lock, the ssh ControlMaster sockets, and
-    /// — in the ordinary single-machine arrangement — the local supervisor's
-    /// socket the reserved local host row is reached through.
-    #[arg(long)]
-    pub state_dir: Option<PathBuf>,
+    /// State directory. Holds helm.db, the helm's ownership lock, the ssh
+    /// ControlMaster sockets, and — in the ordinary single-machine
+    /// arrangement — the local supervisor's socket the reserved local host
+    /// row is reached through.
+    pub state_dir: PathBuf,
 
     /// JSON5 file of hosts to guarantee are registered at startup:
     /// `{ hosts: [ { ssh, remote_farhelm?, remote_state_dir? } ] }`.
     ///
     /// An additive floor over helm.db, applied before serving begins and
     /// never consulted again — see `crate::ensure` for what it does and
-    /// does not promise. Built for half-automated setups and agent-driven
-    /// testing, where a fleet has to exist before anything can drive it.
-    #[arg(long)]
+    /// does not promise. Built for agent-driven testing, where a fleet has
+    /// to exist before anything can drive it: the desktop app's agent
+    /// builds pass one when asked to, and every other launch passes `None`.
     pub ensure_hosts: Option<PathBuf>,
 
     /// Directory holding published release files (`farhelm-<target>.tar.gz`)
     /// to use as "add host" provisioning payloads instead of downloading
-    /// them. For air-gapped installs and mirrors, and for
-    /// tests that would rather not reach get.farhelm.io. Only read, so it may be
+    /// them. The desktop app fills it from `FARHELM_HELM_PAYLOAD_DIR`
+    /// (`helm_payload_dir` there). Only read, so it may be
     /// read-only or shared: the materialized binaries go to a cache in the
-    /// helm's own state directory. Farhelm does not verify files placed here —
-    /// this directory was explicitly supplied by the operator, so its
-    /// contents are trusted as given. Wins over `--release-base-url` when
-    /// both are given (see [`HelmArgs::payload_selection`]).
-    ///
-    /// `hide_env_values` (F5, review round 2, symmetry with
-    /// `--release-base-url`): a directory path is not a credential, but
-    /// clap would otherwise print whatever this variable currently holds
-    /// in `--help` output, and there is no reason to make an exception to
-    /// the same policy this flag's sibling needs for a real secret.
-    #[arg(long, env = "FARHELM_HELM_PAYLOAD_DIR", hide_env_values = true)]
+    /// helm's own state directory. Farhelm does not verify files placed
+    /// here — this directory was explicitly supplied by the operator, so its
+    /// contents are trusted as given.
     pub payload_dir: Option<PathBuf>,
-
-    /// Base URL to download "add host" provisioning payloads from, in place
-    /// of the default, this build's own release on get.farhelm.io. Exists
-    /// so tests and air-gapped mirrors can point at another server;
-    /// selectable on any build, not only a release build. The payloads are
-    /// verified against the signed checksums either way.
-    ///
-    /// Validated at parse time rather than at use (see
-    /// [`parse_release_base_url`]): a URL this flag accepted but the
-    /// downloader could not honour verbatim would fail much later, from
-    /// inside a provisioning run, with a message naming a URL that was never
-    /// requested.
-    ///
-    /// `hide_env_values` (F5, review round 2, security) is NOT made
-    /// redundant by that validation, because the two act at different
-    /// moments. Clap's default `--help` rendering prints an `env`-backed
-    /// argument's CURRENT value from the process environment, and it does
-    /// so WITHOUT running the value parser — so on a machine where someone
-    /// exported a URL carrying HTTP basic-auth userinfo or a token in the
-    /// query string, `farhelm helm run --help` would print that secret to
-    /// terminal scrollback, copied support output, or a screen share, even
-    /// though actually running with it is refused. The variable's NAME
-    /// still shows; only the value is suppressed.
-    #[arg(
-        long,
-        env = "FARHELM_RELEASE_BASE_URL",
-        hide_env_values = true,
-        value_parser = ReleaseBaseUrlParser
-    )]
-    pub release_base_url: Option<url::Url>,
 
     /// TEST ONLY: the seconds between a connected host's backstop session
     /// polls, in place of `manager::REFRESH_INTERVAL`. Lets an end-to-end
@@ -373,114 +329,16 @@ pub struct HelmArgs {
     /// learns about promptly can only have arrived as a supervisor's change
     /// hint.
     ///
-    /// Hidden because no production launch passes it: the poll is the
-    /// backstop for every change a hint misses, and a helm that polled
-    /// rarely would show such a change that much later.
-    #[arg(long, hide = true, value_name = "SECS")]
+    /// No production launch sets it: the poll is the backstop for every
+    /// change a hint misses, and a helm that polled rarely would show such a
+    /// change that much later.
     pub backstop_refresh_secs: Option<u64>,
-
-    /// TEST ONLY: write a device credential minted for this helm process to
-    /// this path, created new with mode 0600, before the helm prints its
-    /// address.
-    ///
-    /// The API accepts only credentials the helm minted in its own process,
-    /// and a standalone helm otherwise mints none, so this is how a helm
-    /// started from the command line can be reached at all. No test uses it
-    /// any more: the end-to-end tests run the helm in process through
-    /// [`run_embedded`] and take the credential it returns. Hidden because no
-    /// production launch passes it: the desktop app gets its credentials in
-    /// process (see [`EmbeddedReady`]). The credential dies with the process,
-    /// like every other.
-    #[arg(long, hide = true, value_name = "PATH")]
-    pub test_credential_file: Option<PathBuf>,
-}
-
-/// The one message a rejected `--release-base-url` produces, whatever was
-/// wrong with it.
-///
-/// Deliberately says nothing about the input (F10, review round 2, security).
-/// The value being rejected is frequently the one carrying a secret — a
-/// basic-auth password in the userinfo, a signed-URL token in the query —
-/// and a diagnostic that quoted it back would print that secret to stderr,
-/// into CI logs and support pastes, from the very check that exists to keep
-/// it out. Naming the accepted SHAPE tells the operator everything they can
-/// act on without repeating what they typed.
-const RELEASE_BASE_URL_REFUSAL: &str =
-    "--release-base-url must be an http(s) URL without credentials, query or fragment";
-
-/// A `clap` value parser for `--release-base-url` whose errors never echo the
-/// rejected value.
-///
-/// A plain `value_parser = fn` cannot do this: clap renders those failures as
-/// `invalid value '<the raw argument>' for '--release-base-url': <message>`,
-/// so the value is quoted back no matter how careful the message is.
-/// Implementing [`clap::builder::TypedValueParser`] lets the parser return a
-/// finished [`clap::Error`] instead, and clap prints that verbatim.
-#[derive(Clone)]
-struct ReleaseBaseUrlParser;
-
-impl clap::builder::TypedValueParser for ReleaseBaseUrlParser {
-    type Value = url::Url;
-
-    fn parse_ref(
-        &self,
-        cmd: &clap::Command,
-        _arg: Option<&clap::Arg>,
-        value: &std::ffi::OsStr,
-    ) -> Result<Self::Value, clap::Error> {
-        value
-            .to_str()
-            .and_then(parse_release_base_url)
-            .ok_or_else(|| {
-                clap::Error::raw(
-                    clap::error::ErrorKind::ValueValidation,
-                    format!("{RELEASE_BASE_URL_REFUSAL}\n"),
-                )
-                .with_cmd(cmd)
-            })
-    }
-}
-
-/// Validate `--release-base-url`, accepting only what the download source can
-/// address faithfully. `None` means refused; the caller renders
-/// [`RELEASE_BASE_URL_REFUSAL`], which never quotes the input.
-///
-/// Four rejections, each for a concrete reason rather than tidiness:
-///
-/// - anything but `http`/`https`, because that is all reqwest can fetch. A
-///   `file:` or `ftp:` base URL parses as a perfectly good `Url` and then
-///   fails deep inside a provisioning run, where it is reported as the
-///   release server being unreachable — a diagnosis pointing at the network
-///   for a URL that could never have worked.
-/// - a QUERY, because asset URLs are built with `Url::join`, which REPLACES
-///   the base's query. A signed-URL or query-routed mirror would therefore be
-///   accepted here and then silently fetched from a different endpoint than
-///   every error message, and the cache key, would name.
-/// - a FRAGMENT, because fragments are never sent to a server at all, so one
-///   here can only mislead.
-/// - a USERNAME or PASSWORD, because this is by design an unauthenticated
-///   download model (D3): credentials in argv are visible in process
-///   listings, and this URL is rendered verbatim into provisioning errors
-///   that travel to the browser. Accepting them would leak them.
-fn parse_release_base_url(value: &str) -> Option<url::Url> {
-    let url: url::Url = value.parse().ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    if url.query().is_some() || url.fragment().is_some() {
-        return None;
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return None;
-    }
-    Some(url)
 }
 
 impl HelmArgs {
-    /// Resolve the two payload flags into the one selection
-    /// `production_payloads` acts on, applying D18's precedence: an
-    /// explicit `--payload-dir` is unambiguous and local, so it wins over
-    /// `--release-base-url` whenever both happen to be given.
+    /// Resolve the payload directory into the selection
+    /// `production_payloads` acts on: the directory when one is given, and
+    /// otherwise this build's default (D13).
     ///
     /// `pub(crate)` (F24, review round 1): `PayloadSelection` lives in the
     /// private `provisioning` module, so no caller outside this crate could
@@ -488,12 +346,9 @@ impl HelmArgs {
     /// unnameable type is not a usable external contract, just a wider
     /// surface than the crate needs to expose.
     pub(crate) fn payload_selection(&self) -> provisioning::PayloadSelection {
-        match (&self.payload_dir, &self.release_base_url) {
-            (Some(dir), _) => provisioning::PayloadSelection::Directory(dir.clone()),
-            (None, Some(base_url)) => provisioning::PayloadSelection::Release {
-                base_url: base_url.clone(),
-            },
-            (None, None) => provisioning::PayloadSelection::Default,
+        match &self.payload_dir {
+            Some(dir) => provisioning::PayloadSelection::Directory(dir.clone()),
+            None => provisioning::PayloadSelection::Default,
         }
     }
 }
@@ -521,7 +376,8 @@ struct AppState {
     /// Own the event-driven updater independently of any connected interface.
     /// Dropping application state requests cancellation of its listener.
     _automatic_updates: provisioning::AutomaticUpdates,
-    /// A desktop-only capability; standalone helms never open links on their server machine.
+    /// A desktop-only capability, supplied by the window that embeds this
+    /// helm; tests may leave it `None`.
     link_opener: Option<LinkOpener>,
     /// Session-owned native TCP listeners; shutdown closes accepted relays too.
     tunnels: tunnels::TunnelManager,
@@ -554,15 +410,6 @@ struct AppState {
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
     approvals: approvals::Approvals,
-}
-
-/// The two serving surfaces share their handlers and authentication. The mode
-/// decides whether the helm owns its process's signals and whether it mints
-/// the embedding app's credential.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ServingMode {
-    Standalone,
-    Embedded,
 }
 
 impl AppState {
@@ -1371,37 +1218,6 @@ mod router_boundary_tests {
     }
 }
 
-/// Run the helm until SIGINT/SIGTERM or a fatal serving error: open helm.db, apply any
-/// `--ensure-hosts` floor, start a connection actor per registered host,
-/// and serve the API on loopback.
-///
-/// Startup order is deliberate at these points, each for a different
-/// reason:
-///
-/// - The listener is bound FIRST, so the likely failure (port busy because
-///   a helm is already running) happens before anything else has been set
-///   up or written.
-/// - The state directory's single-owner lock is claimed next, BEFORE
-///   `helm.db` is opened: a serving helm's open migrates the schema, and a
-///   second helm on a different port must not upgrade the database, write
-///   the host registry, or dial the fleet under a running incumbent.
-/// - `--ensure-hosts` is ingested BEFORE the manager starts, so the
-///   guaranteed hosts have actors from the first moment rather than after a
-///   reconcile — and so a bad file fails startup before anything is
-///   serving. See [`ensure::ingest`] for its all-or-nothing contract.
-/// - The manager returns as soon as its actors are SPAWNED, not once they
-///   have connected. A down host must never delay the helm's startup: it is
-///   simply a host in a non-connected state, which the API exposes for the
-///   forthcoming UI to draw.
-///
-/// Signals end serving and drain connection actors, including their local
-/// tunnel processes. Sessions themselves continue on their supervisors.
-/// Owns and drains its runtime before releasing the state-directory claim,
-/// including during panic unwind. Call from outside a tokio runtime.
-pub fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None, None, ServingMode::Standalone)
-}
-
 /// What an embedded helm hands the desktop process that owns it once every
 /// serving dependency is ready.
 ///
@@ -1417,8 +1233,10 @@ pub struct EmbeddedReady {
     pub native_device_secret: String,
 }
 
-/// Run an embedded helm and report its bound address and the desktop's own
-/// credentials once every serving dependency is ready.
+/// Run an embedded helm until its owner asks it to stop or serving fails:
+/// open helm.db, apply any ensure-hosts file, start a connection actor per
+/// registered host, serve the API on loopback, and report the bound address
+/// and the desktop's own credential once every serving dependency is ready.
 ///
 /// The desktop shell lets the kernel choose a fresh loopback port, but it must
 /// not launch the window until the HTTP listener and the local-host actor
@@ -1426,14 +1244,41 @@ pub struct EmbeddedReady {
 /// runtime and, unlike parsing stdout, cannot confuse another log line for
 /// readiness. The explicit shutdown receiver gives `DesktopBootstrap`
 /// a teardown path it can join; dropping its sender carries the same owner-
-/// disappeared meaning as sending the signal.
+/// disappeared meaning as sending the signal. The helm installs no signal
+/// handlers: the embedding process keeps its own signal policy.
+///
+/// Startup order is deliberate at these points, each for a different
+/// reason:
+///
+/// - The listener is bound FIRST, so a bind failure happens before anything
+///   durable is written (pinned by the e2e test
+///   `helm_bind_failure_happens_before_any_durable_setup`). Every launch but
+///   that test binds port 0, so what keeps two helms apart is the ownership
+///   claim below, not the port.
+/// - The state directory's single-owner lock is claimed next, BEFORE
+///   `helm.db` is opened: a serving helm's open migrates the schema, and a
+///   second helm on a different port must not upgrade the database, write
+///   the host registry, or dial the fleet under a running incumbent.
+/// - The ensure-hosts file is ingested BEFORE the manager starts, so the
+///   guaranteed hosts have actors from the first moment rather than after a
+///   reconcile — and so a bad file fails startup before anything is
+///   serving. See [`ensure::ingest`] for its all-or-nothing contract.
+/// - The manager returns as soon as its actors are SPAWNED, not once they
+///   have connected. A down host must never delay the helm's startup: it is
+///   simply a host in a non-connected state, which the API exposes for the
+///   GUI to draw.
+///
+/// Stopping ends serving and drains connection actors, including their local
+/// tunnel processes. Sessions themselves continue on their supervisors.
 ///
 /// The native shell supplies the link opener and Downloads capabilities for
 /// this window's account, including dispatch of an allowlisted completed save to
 /// its default app. An absent Downloads capability leaves saves and opening
 /// refused.
+///
 /// This synchronous entry point owns its runtime; the desktop thread returns
-/// only after runtime teardown, with state ownership retained throughout it.
+/// only after runtime teardown, with state ownership retained throughout it,
+/// including during panic unwind. Call from outside a tokio runtime.
 pub fn run_embedded(
     args: HelmArgs,
     link_opener: Option<LinkOpener>,
@@ -1441,34 +1286,9 @@ pub fn run_embedded(
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    run_with_ready(
-        args,
-        link_opener,
-        downloads,
-        Some(ready),
-        Some(shutdown),
-        ServingMode::Embedded,
-    )
-}
-
-/// Shared process and embedded-app serving path. There is deliberately one
-/// startup sequence so the desktop cannot acquire a weaker auth or transport
-/// boundary than `farhelm helm run`.
-///
-/// Opening links and Downloads saves belong to the embedded window's user.
-/// A standalone helm has no window, so its startup always supplies `None` for
-/// both capabilities; no CLI flag enables either one.
-fn run_with_ready(
-    args: HelmArgs,
-    link_opener: Option<LinkOpener>,
-    downloads: Option<NativeDownloads>,
-    ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
-    shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
-    mode: ServingMode,
-) -> anyhow::Result<()> {
     // Reverse declaration order is the shutdown contract, including unwind:
     // runtime drop joins started blocking work before the claim can be released.
-    // The public entry points own this runtime; callers cannot drop it later.
+    // This entry point owns the runtime; callers cannot drop it later.
     let mut ownership = None;
     let runtime = tokio::runtime::Runtime::new().context("starting helm runtime")?;
     runtime.block_on(serve_with_ready(
@@ -1477,7 +1297,6 @@ fn run_with_ready(
         downloads,
         ready,
         shutdown,
-        mode,
         &mut ownership,
     ))
 }
@@ -1495,32 +1314,17 @@ async fn serve_with_ready(
     args: HelmArgs,
     link_opener: Option<LinkOpener>,
     downloads: Option<NativeDownloads>,
-    ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
-    shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
-    mode: ServingMode,
+    ready: std::sync::mpsc::Sender<EmbeddedReady>,
+    shutdown: tokio::sync::oneshot::Receiver<()>,
     ownership: &mut Option<ownership::OwnershipLock>,
 ) -> anyhow::Result<()> {
-    // Install before actors can spawn SSH. Embedded owners retain their own
-    // process signal policy and stop the helm through the explicit receiver.
-    let standalone_signals = if mode == ServingMode::Standalone {
-        Some((
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?,
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?,
-        ))
-    } else {
-        None
-    };
-    let state_dir = match args.state_dir.clone() {
-        Some(dir) => dir,
-        None => farhelm_supervisor::default_state_dir()?,
-    };
+    let state_dir = args.state_dir.clone();
     // 0700: this directory holds helm.db, the ownership lock, and ssh
     // ControlMaster sockets. Each grants the user's authority when reached.
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
 
-    // Bind before creating anything on a host. A busy port is the likely
-    // failure here (a helm is already running), and failing afterwards
-    // would strand a live agent session on every retry.
+    // Bind before creating anything durable, so a bind failure leaves
+    // nothing behind to strand on a retry.
     // Loopback only — deliberately not configurable in v1 (SPEC.md).
     let bind_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
     let listener = tokio::net::TcpListener::bind(bind_addr)
@@ -1528,7 +1332,8 @@ async fn serve_with_ready(
         .with_context(|| format!("binding {bind_addr}"))?;
     // Use the bound address rather than the requested one. This keeps
     // programmatic callers that request port 0 coherent: Host validation
-    // and the printed URL must name the ephemeral port the OS chose.
+    // and the address handed to the owner must name the ephemeral port the
+    // OS chose.
     let addr = listener
         .local_addr()
         .context("reading bound helm address")?;
@@ -1622,36 +1427,15 @@ async fn serve_with_ready(
     // the watcher can publish, even if it precedes the loop's first tick.
     let checkout_revision = state.store.checkout_config_snapshot(None).await?.revision;
 
-    if let Some(ready) = ready {
-        // Minted only on the embedded path: a `farhelm helm run` has no
-        // in-process owner to hand one to, so it holds none.
-        let _ = ready.send(EmbeddedReady {
-            addr,
-            native_device_secret: state.auth.mint_device()?,
-        });
-    }
-    if let Some(path) = args.test_credential_file.as_deref() {
-        write_test_credential(path, &state.auth.mint_device()?)?;
-    }
+    let _ = ready.send(EmbeddedReady {
+        addr,
+        native_device_secret: state.auth.mint_device()?,
+    });
 
-    // The standalone helm prints the address it bound: with `--port 0` the
-    // kernel chose it, and a caller needs it. The
-    // embedded address stays private to the desktop process that owns it.
-    if mode == ServingMode::Standalone {
-        println!("farhelm helm: http://{addr}/");
-    }
     let requested_shutdown = async move {
-        match (shutdown, standalone_signals) {
-            (Some(receiver), _) => {
-                // Sender cancellation means the desktop owner disappeared;
-                // it is the same lifetime boundary as an explicit signal.
-                let _ = receiver.await;
-            }
-            (None, Some((mut interrupt, mut terminate))) => {
-                tokio::select! { _ = interrupt.recv() => {}, _ = terminate.recv() => {} }
-            }
-            (None, None) => std::future::pending::<()>().await,
-        }
+        // Sender cancellation means the desktop owner disappeared; it is the
+        // same lifetime boundary as an explicit stop.
+        let _ = shutdown.await;
     };
     let serving = tokio::select! {
         result = axum::serve(listener, app) => result.context("serving helm HTTP"),
@@ -1664,24 +1448,6 @@ async fn serve_with_ready(
     state.tunnels.shutdown().await;
     state.manager.shutdown_and_wait().await;
     serving
-}
-
-/// Write the `--test-credential-file` credential: a new file, mode 0600,
-/// refusing to replace anything already at `path`.
-///
-/// Refusing an existing file keeps a mistyped path from overwriting something
-/// that is not the test's, and keeps two helms from sharing one file.
-fn write_test_credential(path: &std::path::Path, secret: &str) -> anyhow::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .with_context(|| format!("creating the test credential file {}", path.display()))?;
-    file.write_all(secret.as_bytes())
-        .with_context(|| format!("writing the test credential file {}", path.display()))
 }
 
 /// The response header carrying this helm's build version to its client
@@ -2017,91 +1783,15 @@ pub(crate) struct SettledCreateUnaccepted;
 mod tests {
     use super::SupervisorError;
 
-    /// A `#[derive(Parser)]` shim purely so this test can call
-    /// `try_parse_from` — `HelmArgs` itself is `#[derive(Args)]`, meant to
-    /// be `#[command(flatten)]`ed into the real `farhelm` CLI, and only a
-    /// top-level `Parser` exposes clap's parsing entry point.
-    #[derive(clap::Parser, Debug)]
-    struct Wrapper {
-        #[command(flatten)]
-        args: crate::HelmArgs,
-    }
-
-    /// The argv session and transport flags are GONE (PLAN_M6.md item 5),
-    /// and `--ensure-hosts` is what replaced the transport half.
-    ///
-    /// Pinned as a test rather than left to the type, because a flag that
-    /// quietly came back would be worse than one that never left: a helm
-    /// now drives every registered host at once, so `--ssh` could only ever
-    /// name one of them, and `--cwd`/`--agent` would be a creation path
-    /// that bypasses the host selection the create API exists to make
-    /// explicit. clap's own grammar is the only thing that catches a
-    /// reintroduction, so it is asserted here directly.
-    #[farhelm_testtrace::test]
-    fn the_dropped_argv_session_flags_are_refused_and_ensure_hosts_replaces_them() {
-        use clap::Parser;
-
-        for dropped in [
-            "--ssh",
-            "--cwd",
-            "--agent",
-            "--title",
-            "--remote-farhelm",
-            "--remote-state-dir",
-        ] {
-            let err = Wrapper::try_parse_from(["farhelm", dropped, "value"])
-                .expect_err("{dropped} must no longer be a helm flag");
-            assert_eq!(
-                err.kind(),
-                clap::error::ErrorKind::UnknownArgument,
-                "{dropped} must be refused as unknown, not merely ignored"
-            );
-        }
-
-        let parsed = Wrapper::try_parse_from(["farhelm", "--ensure-hosts", "/etc/farhelm.json5"])
-            .expect("--ensure-hosts is the flag that replaced them");
-        assert_eq!(
-            parsed.args.ensure_hosts,
-            Some(std::path::PathBuf::from("/etc/farhelm.json5"))
-        );
-    }
-
-    /// `--test-credential-file` writes the credential to a new file that only
-    /// the user can read, and refuses a path that already exists.
-    ///
-    /// Why it matters: the file holds a live credential for the helm's whole
-    /// API, so it must not be readable by other accounts, and a mistyped path
-    /// must not overwrite somebody else's file. Spec: mode 0600 and exactly
-    /// the secret's bytes; a second write to the same path fails and leaves
-    /// the first file's contents alone.
-    #[farhelm_testtrace::test]
-    fn the_test_credential_file_is_private_and_never_replaced() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("credential");
-        crate::write_test_credential(&path, "first-secret").unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(
-            mode, 0o600,
-            "the credential file must be owner-only, got {mode:o}"
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first-secret");
-        crate::write_test_credential(&path, "second-secret")
-            .expect_err("an existing path must be refused");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first-secret");
-    }
-
-    /// A `HelmArgs` with every field at its argument-free default — the
-    /// base every payload-selection test below customizes exactly the
-    /// fields its case is about.
+    /// A `HelmArgs` with every optional field unset, port 0 and a placeholder
+    /// state directory no test serves from — the base every test below
+    /// customizes exactly the fields its case is about.
     fn base_args() -> crate::HelmArgs {
         crate::HelmArgs {
-            port: 7433,
-            state_dir: None,
-            test_credential_file: None,
+            port: 0,
+            state_dir: std::path::PathBuf::from("/nonexistent/helm-state"),
             ensure_hosts: None,
             payload_dir: None,
-            release_base_url: None,
             backstop_refresh_secs: None,
         }
     }
@@ -2167,19 +1857,22 @@ mod tests {
             .await
             .expect("fixture premise: the incumbent owns the directory");
 
+        // Both ends held for the whole call, so a regression that served
+        // keeps serving into the timeout below rather than reading a dropped
+        // sender as its owner asking it to stop.
+        let (ready_tx, _ready_rx) = std::sync::mpsc::channel();
+        let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             crate::serve_with_ready(
                 crate::HelmArgs {
-                    port: 0,
-                    state_dir: Some(dir.path().to_path_buf()),
+                    state_dir: dir.path().to_path_buf(),
                     ..base_args()
                 },
                 None,
                 None,
-                None,
-                None,
-                crate::ServingMode::Standalone,
+                ready_tx,
+                shutdown_rx,
                 &mut None,
             ),
         )
@@ -2240,8 +1933,7 @@ mod tests {
             });
             crate::run_embedded(
                 crate::HelmArgs {
-                    port: 0,
-                    state_dir: Some(state_dir),
+                    state_dir,
                     ..base_args()
                 },
                 None,
@@ -2306,31 +1998,18 @@ mod tests {
         .expect("serving must close its listener before the drain assertion");
     }
 
-    /// Spec (D18): `--payload-dir` wins over `--release-base-url` when both
-    /// are given — asserted at `HelmArgs::payload_selection`'s own contract,
-    /// the type `production_payloads` actually consumes.
+    /// Spec (D13): a payload directory selects `Directory` with exactly that
+    /// path, and no directory selects `Default`, which leaves the choice to
+    /// the build.
     ///
-    /// F7 (review round 1): constructs `HelmArgs` directly rather than
-    /// parsing argv through clap. An earlier version of this test parsed
-    /// `--payload-dir`/`--release-base-url` as explicit CLI flags, which
-    /// clap's own precedence (argv over `env`) made safe from ambient
-    /// environment variables — but the SIBLING test below used to also
-    /// parse a NO-FLAGS invocation through clap to reach `Default`, and
-    /// that case had no such protection: this crate's test binary runs as
-    /// one process, so a developer or CI job that legitimately exports
-    /// `FARHELM_HELM_PAYLOAD_DIR` (say, to run the real helm alongside the
-    /// test suite) would silently flip that assertion. Building the struct
-    /// literal directly is immune to environment by construction — clap
-    /// never runs, so there is nothing for the environment to influence.
-    /// The `env = "..."` wiring itself is proven separately, in a CHILD
-    /// process, by
-    /// [`payload_selection_env_wiring_is_isolated_in_a_child_process`]
-    /// below.
+    /// Why it matters: this is the one place the desktop app's
+    /// `FARHELM_HELM_PAYLOAD_DIR` turns into what provisioning reads, so a
+    /// slip here would make a working-copy build ignore the payloads staged
+    /// for it, or an installed app stop downloading.
     #[farhelm_testtrace::test]
-    fn payload_selection_prefers_directory_over_release_base_url() {
+    fn payload_selection_is_the_directory_when_given_else_the_default() {
         let args = crate::HelmArgs {
             payload_dir: Some(std::path::PathBuf::from("/opt/farhelm-payloads")),
-            release_base_url: Some(url::Url::parse("https://example.invalid/release/").unwrap()),
             ..base_args()
         };
         assert!(matches!(
@@ -2338,351 +2017,10 @@ mod tests {
             crate::provisioning::PayloadSelection::Directory(dir)
                 if dir == std::path::Path::new("/opt/farhelm-payloads")
         ));
-    }
-
-    /// Spec: with no `--payload-dir`, `--release-base-url` alone selects the
-    /// `Release` variant, and neither flag falls back to `Default` — the two
-    /// remaining corners of `payload_selection`'s match that the precedence
-    /// test above does not cover. See that test's docstring (F7) for why
-    /// this constructs `HelmArgs` directly instead of parsing argv.
-    #[farhelm_testtrace::test]
-    fn payload_selection_falls_back_to_release_then_default() {
-        let with_url = crate::HelmArgs {
-            release_base_url: Some(url::Url::parse("https://example.invalid/release/").unwrap()),
-            ..base_args()
-        };
-        assert!(matches!(
-            with_url.payload_selection(),
-            crate::provisioning::PayloadSelection::Release { base_url }
-                if base_url.as_str() == "https://example.invalid/release/"
-        ));
-
         assert!(matches!(
             base_args().payload_selection(),
             crate::provisioning::PayloadSelection::Default
         ));
-    }
-
-    /// Marker set only in the child process
-    /// [`payload_selection_env_wiring_is_isolated_in_a_child_process`]
-    /// re-execs itself as — its presence is what tells that one test
-    /// invocation it is running as the child rather than as the top-level
-    /// test that spawned it.
-    const PAYLOAD_SELECTION_ENV_CHILD: &str = "FARHELM_HELM_PAYLOAD_SELECTION_TEST_CHILD";
-
-    /// Every line the child prints is prefixed with this so the parent can
-    /// find its one answer inside libtest's own `--nocapture` narration
-    /// (`running 1 test`, `test ... ok`, and so on) without having to
-    /// assume the child's stdout is exactly one line.
-    const PAYLOAD_SELECTION_TAG_PREFIX: &str = "PAYLOAD_SELECTION_TAG=";
-
-    /// The three payload-selecting variable names this crate ever reads or
-    /// deliberately does not — the two documented ones plus the retired
-    /// build-time name D18 forbids reusing.
-    const PAYLOAD_SELECTION_ENV_VARS: [&str; 3] = [
-        "FARHELM_HELM_PAYLOAD_DIR",
-        "FARHELM_RELEASE_BASE_URL",
-        "FARHELM_PAYLOAD_DIR",
-    ];
-
-    /// Re-exec this test binary as the env-wiring child with EXACTLY `vars`
-    /// set, and return the one tagged line it printed (see
-    /// [`PAYLOAD_SELECTION_TAG_PREFIX`]), panicking with the child's
-    /// stderr on a non-zero exit so a parse failure surfaces at the call
-    /// site rather than as a confusing empty string.
-    ///
-    /// F8 (review round 2): an earlier version only ADDED `vars` on top of
-    /// whatever this process's own environment already carried, so the
-    /// "retired variable alone" case could still inherit an ambient
-    /// `FARHELM_HELM_PAYLOAD_DIR` or `FARHELM_RELEASE_BASE_URL` from a
-    /// developer's shell or a CI runner and silently select `Directory` or
-    /// `Release` instead of the `Default` the case claims to prove — a
-    /// false pass that would not fail until someone's real environment
-    /// happened to carry one of those names. `env_remove`ing all three
-    /// known variable names before applying each case's own values closes
-    /// that: the child's view of these three names is fully determined by
-    /// what this function sets, never by what it merely forgot to unset.
-    fn run_payload_selection_child(vars: &[(&str, &str)]) -> String {
-        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-        command.args([
-            "--exact",
-            "tests::payload_selection_env_wiring_is_isolated_in_a_child_process",
-            "--nocapture",
-        ]);
-        command.env(PAYLOAD_SELECTION_ENV_CHILD, "1");
-        for name in PAYLOAD_SELECTION_ENV_VARS {
-            command.env_remove(name);
-        }
-        for (name, value) in vars {
-            command.env(name, value);
-        }
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "payload selection child failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        stdout
-            .lines()
-            .find_map(|line| line.strip_prefix(PAYLOAD_SELECTION_TAG_PREFIX))
-            .unwrap_or_else(|| panic!("child printed no tagged line:\n{stdout}"))
-            .to_string()
-    }
-
-    /// Spec (F7/F10, review round 1; F8, review round 2):
-    /// `--payload-dir`/`--release-base-url`'s `env = "..."` attributes, and
-    /// the retired `FARHELM_PAYLOAD_DIR` name's inertness (D18), are facts
-    /// about clap reading THIS PROCESS's real environment — untestable by
-    /// constructing a `HelmArgs` value directly (the two pure precedence
-    /// tests above prove `payload_selection`'s OWN precedence, nothing
-    /// about whether an env var actually reaches either field), and unsafe
-    /// to test by mutating this shared test binary's own environment (this
-    /// project's tests never do that). So this re-execs itself as a child
-    /// process with an EXACTLY-controlled environment (see
-    /// [`run_payload_selection_child`] for how ambient values are kept
-    /// out), covering every corner D18 makes a claim about:
-    ///
-    /// - `--payload-dir`'s variable alone selects `Directory`.
-    /// - `--release-base-url`'s variable alone selects `Release`.
-    /// - Both together select `Directory` — proving the documented
-    ///   precedence through the REAL env path, not merely through
-    ///   `payload_selection`'s match arms.
-    /// - The RETIRED `FARHELM_PAYLOAD_DIR` set ALONE selects `Default` —
-    ///   proving the old build-time variable was not silently reused as
-    ///   the new runtime one.
-    #[farhelm_testtrace::test]
-    fn payload_selection_env_wiring_is_isolated_in_a_child_process() {
-        if std::env::var_os(PAYLOAD_SELECTION_ENV_CHILD).is_some() {
-            use clap::Parser;
-            let parsed = Wrapper::parse_from(["farhelm"]);
-            let tag = match parsed.args.payload_selection() {
-                crate::provisioning::PayloadSelection::Default => "default",
-                crate::provisioning::PayloadSelection::Directory(_) => "directory",
-                crate::provisioning::PayloadSelection::Release { .. } => "release",
-            };
-            println!("{PAYLOAD_SELECTION_TAG_PREFIX}{tag}");
-            return;
-        }
-
-        assert_eq!(
-            run_payload_selection_child(&[("FARHELM_HELM_PAYLOAD_DIR", "/opt/farhelm-payloads")]),
-            "directory",
-            "--payload-dir's env var alone must select Directory"
-        );
-        assert_eq!(
-            run_payload_selection_child(&[(
-                "FARHELM_RELEASE_BASE_URL",
-                "https://example.invalid/release/"
-            )]),
-            "release",
-            "--release-base-url's env var alone must select Release"
-        );
-        assert_eq!(
-            run_payload_selection_child(&[
-                ("FARHELM_HELM_PAYLOAD_DIR", "/opt/farhelm-payloads"),
-                (
-                    "FARHELM_RELEASE_BASE_URL",
-                    "https://example.invalid/release/"
-                ),
-            ]),
-            "directory",
-            "--payload-dir's env var must win over --release-base-url's through real env wiring"
-        );
-        assert_eq!(
-            run_payload_selection_child(&[("FARHELM_PAYLOAD_DIR", "/should/never/be/read")]),
-            "default",
-            "the retired FARHELM_PAYLOAD_DIR name must stay inert at the new runtime flag"
-        );
-    }
-
-    /// Marker set only in the child process
-    /// [`cli_help_names_the_release_url_env_var_but_never_its_value`]
-    /// re-execs itself as.
-    const HELP_LEAK_CHILD: &str = "FARHELM_HELM_HELP_LEAK_TEST_CHILD";
-
-    /// Spec (F5, review round 2, security): `--release-base-url`'s
-    /// `hide_env_values = true` must actually suppress the value clap would
-    /// otherwise print for an `env`-backed argument in `--help` output — a
-    /// fact about clap's real help renderer, not provable by inspecting the
-    /// `#[arg(...)]` attribute text. Runs in a child process with a
-    /// sentinel-bearing URL set ONLY there (this project's tests never
-    /// mutate the shared test binary's own environment), so a leak can
-    /// never bleed into any other test's output either.
-    #[farhelm_testtrace::test]
-    fn cli_help_names_the_release_url_env_var_but_never_its_value() {
-        if std::env::var_os(HELP_LEAK_CHILD).is_some() {
-            use clap::Parser;
-            let error = Wrapper::try_parse_from(["farhelm", "--help"])
-                .expect_err("--help always exits through clap's error path");
-            let output_path =
-                std::env::var("FARHELM_HELM_HELP_LEAK_TEST_OUTPUT").expect("output path is set");
-            std::fs::write(output_path, error.to_string()).expect("writing help text");
-            return;
-        }
-
-        let output_file = tempfile::NamedTempFile::new().unwrap();
-        let sentinel_url =
-            "https://sentinel-user:sentinel-pass@example.invalid/leak?token=sentinel-token";
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tests::cli_help_names_the_release_url_env_var_but_never_its_value",
-                "--nocapture",
-            ])
-            .env(HELP_LEAK_CHILD, "1")
-            .env("FARHELM_RELEASE_BASE_URL", sentinel_url)
-            .env(
-                "FARHELM_HELM_HELP_LEAK_TEST_OUTPUT",
-                output_file.path().as_os_str(),
-            )
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "help-leak child failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let help_text = std::fs::read_to_string(output_file.path()).unwrap();
-        assert!(
-            help_text.contains("FARHELM_RELEASE_BASE_URL"),
-            "help must still name the variable:\n{help_text}"
-        );
-        for secret in [
-            "sentinel-user",
-            "sentinel-pass",
-            "sentinel-token",
-            "example.invalid",
-        ] {
-            assert!(
-                !help_text.contains(secret),
-                "help leaked {secret:?} from the hidden env value:\n{help_text}"
-            );
-        }
-    }
-
-    /// Every `--release-base-url` shape refused at parse time, and why each
-    /// one has to be caught here rather than later.
-    const REFUSED_RELEASE_BASE_URLS: [&str; 7] = [
-        // A query survives `HelmArgs` but not `Url::join`, which replaces it
-        // when asset URLs are built — so a query-routed or signed-URL mirror
-        // would be accepted and then fetched from somewhere other than the
-        // cache key and every error message name.
-        "https://example.invalid/release/?token=abc",
-        // Fragments are never sent to a server at all.
-        "https://example.invalid/release/#frag",
-        // Credentials in argv show up in process listings, and the URL is
-        // rendered into provisioning errors that reach the browser (D3:
-        // release downloads are unauthenticated by design).
-        "https://user:secret@example.invalid/release/",
-        "https://user@example.invalid/release/",
-        // Schemes reqwest cannot fetch. These parse as perfectly good `Url`s
-        // and would otherwise fail deep inside a provisioning run, reported
-        // as the release server being unreachable — a diagnosis pointing at
-        // the network for a URL that could never have worked.
-        "file:///srv/release/",
-        "ftp://example.invalid/release/",
-        "farhelm://example.invalid/release/",
-        // Not a URL at all.
-    ];
-
-    /// Spec: `--release-base-url` refuses every unusable URL shape at PARSE
-    /// time, with one message that names the accepted shape and NEVER quotes
-    /// what was rejected.
-    ///
-    /// The no-echo half is the security-relevant half (F10, review round 2):
-    /// the values most likely to be refused are exactly the ones carrying a
-    /// secret, and clap's ordinary invalid-value diagnostic quotes the raw
-    /// argument back. A validator that printed `invalid value
-    /// 'https://user:hunter2@…'` would leak the password from the check
-    /// written to keep it out.
-    ///
-    /// This does NOT make the flag's `hide_env_values` redundant: `--help`
-    /// renders an env-backed value without ever running this parser, so a
-    /// secret exported into the variable would still print. The two cover
-    /// different moments — see the flag's own docs.
-    ///
-    /// Asserted through the parser rather than by calling the validator
-    /// directly, so the `value_parser` wiring is covered too: a validator
-    /// nothing is wired to would pass its own unit test forever.
-    #[farhelm_testtrace::test]
-    fn release_base_url_refuses_unusable_shapes_without_echoing_them() {
-        use clap::Parser;
-
-        for url in REFUSED_RELEASE_BASE_URLS {
-            let error = Wrapper::try_parse_from(["farhelm", "--release-base-url", url])
-                .expect_err(&format!("{url} must be refused"));
-            let rendered = error.to_string();
-            assert!(
-                rendered.contains(super::RELEASE_BASE_URL_REFUSAL),
-                "{url} must be refused with the settled message: {rendered}"
-            );
-            assert!(
-                !rendered.contains("example.invalid") && !rendered.contains("/srv/release"),
-                "the refusal must not echo the rejected value: {rendered}"
-            );
-        }
-
-        for url in [
-            "https://example.invalid/release/",
-            "http://127.0.0.1:8080/release/",
-        ] {
-            Wrapper::try_parse_from(["farhelm", "--release-base-url", url])
-                .unwrap_or_else(|error| panic!("{url} must parse: {error}"));
-        }
-    }
-
-    /// Marker set only in the child process
-    /// [`a_rejected_release_url_never_reaches_stderr`] re-execs itself as.
-    const URL_LEAK_CHILD: &str = "FARHELM_HELM_URL_LEAK_TEST_CHILD";
-
-    /// Spec (F10, review round 2, security): a rejected `--release-base-url`
-    /// carrying secrets prints NONE of them to stderr.
-    ///
-    /// The unit test above asserts on the `clap::Error` value; this asserts
-    /// on what a terminal actually sees, which is what ends up in CI logs and
-    /// support pastes. It runs in a child process because clap writes the
-    /// refusal to the real stderr on `Parser::parse_from`'s exit path, and
-    /// the sentinel is set only for that child — this project's tests never
-    /// mutate the shared test binary's environment.
-    #[farhelm_testtrace::test]
-    fn a_rejected_release_url_never_reaches_stderr() {
-        const SENTINEL: &str =
-            "https://sentinel-user:sentinel-pass@example.invalid/release/?token=sentinel-token";
-
-        if std::env::var_os(URL_LEAK_CHILD).is_some() {
-            use clap::Parser;
-            // `parse_from` prints the refusal and exits; the parent reads
-            // whatever reached stderr.
-            let _ = Wrapper::parse_from(["farhelm", "--release-base-url", SENTINEL]);
-            return;
-        }
-
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "tests::a_rejected_release_url_never_reaches_stderr",
-                "--nocapture",
-            ])
-            .env(URL_LEAK_CHILD, "1")
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        assert!(
-            stderr.contains(super::RELEASE_BASE_URL_REFUSAL),
-            "the child must have refused the URL:\n{stderr}"
-        );
-        for secret in [
-            "sentinel-user",
-            "sentinel-pass",
-            "sentinel-token",
-            "example.invalid",
-        ] {
-            assert!(
-                !stderr.contains(secret),
-                "the refusal leaked {secret:?} to stderr:\n{stderr}"
-            );
-        }
     }
 
     /// Work handed to `run_owned` finishes even when the request that

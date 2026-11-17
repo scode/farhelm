@@ -1,5 +1,5 @@
-//! `--ensure-hosts <file>`: a JSON5 floor under the host registry
-//! (PLAN_M6.md item 5).
+//! The ensure-hosts file (`HelmArgs::ensure_hosts`): a JSON5 floor under
+//! the host registry (PLAN_M6.md item 5).
 //!
 //! A file of hosts the helm guarantees are registered before it starts
 //! serving, for half-automated setups and agent-driven testing — the shape
@@ -95,9 +95,9 @@ struct EnsureHost {
 pub(crate) async fn ingest(store: &HelmStore, path: &Path) -> anyhow::Result<()> {
     let text = tokio::fs::read_to_string(path)
         .await
-        .with_context(|| format!("reading the --ensure-hosts file {}", path.display()))?;
+        .with_context(|| format!("reading the ensure-hosts file {}", path.display()))?;
     let parsed: EnsureFile = json5::from_str(&text)
-        .with_context(|| format!("parsing the --ensure-hosts file {}", path.display()))?;
+        .with_context(|| format!("parsing the ensure-hosts file {}", path.display()))?;
 
     let entries: Vec<(String, Option<String>, Option<String>)> = parsed
         .hosts
@@ -123,12 +123,12 @@ pub(crate) async fn ingest(store: &HelmStore, path: &Path) -> anyhow::Result<()>
                 .collect(),
         )
         .await
-        .with_context(|| format!("applying the --ensure-hosts file {}", path.display()))?;
+        .with_context(|| format!("applying the ensure-hosts file {}", path.display()))?;
     if !added.is_empty() {
         tracing::info!(
             hosts = ?added,
             file = %path.display(),
-            "registered guaranteed hosts from --ensure-hosts"
+            "registered guaranteed hosts from the ensure-hosts file"
         );
     }
     warn_hosts_needing_correction(store, &entries).await;
@@ -189,7 +189,7 @@ async fn warn_hosts_needing_correction(
     let rows = match store.list_hosts().await {
         Ok(rows) => rows,
         Err(error) => {
-            tracing::warn!(error = %format!("{error:#}"), "could not check --ensure-hosts remote paths");
+            tracing::warn!(error = %format!("{error:#}"), "could not check the remote paths in the ensure-hosts file");
             return;
         }
     };
@@ -199,7 +199,7 @@ async fn warn_hosts_needing_correction(
             destination,
             remote_farhelm = ?remote_farhelm,
             remote_state_dir = ?remote_state_dir,
-            "a host guaranteed by --ensure-hosts has a remote path that is not absolute (a leading \
+            "a host guaranteed by the ensure-hosts file has a remote path that is not absolute (a leading \
              ~ is not expanded); give absolute paths in the file, and repair the stored host with its \
              set up action. Removing the host while the file still has such a path would stop the \
              next start"

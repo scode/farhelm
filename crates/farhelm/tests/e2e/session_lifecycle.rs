@@ -1372,18 +1372,18 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
 
 /// The helm must claim its HTTP port before it touches anything else.
 ///
-/// A busy port is the likely startup failure — another helm is already
-/// running — and it is retryable, so it has to happen before any durable
-/// side effect. This test's subject moved with PLAN_M6.md item 5: the argv
-/// startup session it used to guard is gone, and what a premature failure
-/// would now strand is helm.db and anything registered into it. The
-/// ordering rule is the same one, and it is asserted against the strongest
-/// observable there is — the database file must not exist at all.
+/// A bind failure is retryable, so it has to happen before any durable
+/// side effect. Every production helm binds port 0, so this test is the only
+/// launch that asks for a taken port. This test's subject moved with
+/// PLAN_M6.md item 5: the argv startup session it used to guard is gone, and
+/// what a premature failure would now strand is helm.db and anything
+/// registered into it. The ordering rule is the same one, and it is asserted
+/// against the strongest observable there is — the database file must not
+/// exist at all.
 ///
 /// The helm runs through the desktop app's embedded entry, and the failure
 /// is read from the error that entry returns, which must keep the bind's
-/// context. What a command-line helm prints on stderr for it is not shown
-/// here: the standalone helm is being removed (decided 2026-11-16).
+/// context.
 #[farhelm_testtrace::test]
 async fn helm_bind_failure_happens_before_any_durable_setup() {
     let state = farhelm_teststate::tempdir().expect("state");

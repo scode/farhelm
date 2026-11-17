@@ -1,9 +1,10 @@
 //! The `farhelm` multi-call binary.
 //!
-//! One artifact carries every role — helm serving, `supervisor run`, and the
-//! hidden `internal` namespace — because provisioning copies exactly one
-//! binary to a host and the launch shim must exist inside every session
-//! without separate installation (SPEC_impl.md, "CLI").
+//! One artifact carries every role — the helm's stored configuration,
+//! `supervisor run`, and the hidden `internal` namespace — because
+//! provisioning copies exactly one binary to a host and the launch shim must
+//! exist inside every session without separate installation (SPEC_impl.md,
+//! "CLI").
 //! The two in-session commands keep stdout machine-readable, with every
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
 //! child id, and `farhelm agent`'s is the listing it was asked for
@@ -132,7 +133,8 @@ enum Cmd {
         #[command(subcommand)]
         command: AgentCmd,
     },
-    /// Run the helm: the single control-plane process serving the UI.
+    /// Edit the helm's stored configuration. The helm itself runs inside the
+    /// desktop app; nothing here starts one.
     Helm {
         #[command(subcommand)]
         command: HelmCmd,
@@ -1159,8 +1161,6 @@ fn read_agent_prompt(path: &str) -> Result<String, String> {
 
 #[derive(Subcommand)]
 enum HelmCmd {
-    /// Serve the API on loopback, connected to the registered fleet.
-    Run(farhelm_helm::HelmArgs),
     /// View or change where fresh checkouts are created (the working-copy
     /// root) and what runs after cloning (an optional post-clone command),
     /// globally or per registered host. Edits stored configuration only:
@@ -1748,12 +1748,6 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Cmd::Agent { command } => run_agent(command),
-        Cmd::Helm {
-            command: HelmCmd::Run(args),
-        } => {
-            init_tracing();
-            farhelm_helm::run(args)
-        }
         Cmd::Helm {
             command: HelmCmd::CheckoutConfig { command },
         } => {

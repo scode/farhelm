@@ -14120,9 +14120,9 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "this farhelm was built from source and carries no provisioning payloads; pass \
-             --payload-dir <dir> holding the release files, or install a release build (see \
-             README, \"Install\")"
+            "this farhelm was built from source and carries no provisioning payloads; start the \
+             app with FARHELM_HELM_PAYLOAD_DIR naming a directory that holds the release files, \
+             or install a release build (see README, \"Install\")"
         );
     }
 
@@ -14266,7 +14266,7 @@ mod tests {
         );
 
         // A release-shaped build of main has no release to download: it
-        // refuses before any request, naming --payload-dir and payloads
+        // refuses before any request, naming FARHELM_HELM_PAYLOAD_DIR and payloads
         // from the same commit rather than a release's files.
         let (_state, payloads) = release_default("0.0.0-unreleased");
         assert!(
@@ -14298,8 +14298,8 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             "this farhelm is an unreleased build (version 0.0.0-unreleased), so no published \
-             release carries its provisioning payloads; pass --payload-dir <dir> holding payloads \
-             built from the same commit"
+             release carries its provisioning payloads; start the app with FARHELM_HELM_PAYLOAD_DIR \
+             naming a directory of payloads built from the same commit"
         );
 
         // Both `release_build` values for `Directory`, because the case that
@@ -14347,7 +14347,7 @@ mod tests {
             let described = format!("{payloads:?}");
             assert!(
                 described.starts_with("ReleasePayloadSource"),
-                "--release-base-url must select a download source on any build: {described}"
+                "an explicit base URL must select a download source on any build: {described}"
             );
             assert!(
                 described.contains("http://127.0.0.1:1/"),
@@ -14590,7 +14590,7 @@ mod tests {
         let expected_legacy = expected_legacy_cache.display().to_string();
         let matches = crate::test_capture::matching(
             events,
-            "--payload-dir points at (or inside) the retired embedded-payloads cache",
+            "the payload directory points at (or inside) the retired embedded-payloads cache",
         );
         assert!(
             matches.iter().any(|event| {

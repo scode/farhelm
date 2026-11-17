@@ -1,22 +1,16 @@
-//! Process lifetime proofs for recipe tunnels and standalone helm shutdown.
+//! Process lifetime proofs for recipe tunnels.
 //!
 //! The child owns the production helm client and tunnel worker. The parent
 //! owns a real supervisor and both TCP peers, so SIGKILL cannot accidentally
 //! close a peer that the proof needs to observe after the helm has died.
-//! A separate re-exec fixture keeps SIGINT/SIGTERM on the real standalone
-//! entry point and observes its runtime-owned resources being dropped.
 
 use super::run_relays;
 use crate::{client::SupervisorClient, feed::FleetEvents};
 use farhelm_proto::tensorlake::{TunnelState, TunnelView, recipes::Tunnel};
 use farhelm_supervisor::service::{Supervisor, handle_connection};
 use std::{
-    io::ErrorKind,
-    net::SocketAddr,
-    os::unix::process::ExitStatusExt,
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
+    io::ErrorKind, net::SocketAddr, os::unix::process::ExitStatusExt, path::PathBuf,
+    process::Stdio, time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -30,9 +24,6 @@ const TEST: &str =
     "tensorlake::tunnels::process_tests::tunnel_and_listener_end_when_the_owning_helm_exits";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const SIGNAL_CHILD_DIR: &str = "FARHELM_TEST_STANDALONE_SIGNAL_DIR";
-const SIGNAL_TEST: &str = "tensorlake::tunnels::process_tests::standalone_signals_finish_orderly_shutdown_with_runtime_resources";
-const ORDERLY_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Only the re-executed child receives this configuration. Passing it on
 /// `Command` keeps concurrent tests' environment and destinations untouched.
@@ -279,150 +270,4 @@ async fn tunnel_and_listener_end_when_the_owning_helm_exits() {
         .await
         .expect("supervisor connection did not finish after child SIGKILL")
         .expect("supervisor connection task panicked");
-}
-
-/// Record whether a resource held by a pending task is dropped with a live
-/// Tokio context. The standalone fixture has no outer runtime, so a marker
-/// cannot accidentally describe a test runner's unrelated async context.
-struct RuntimeResourceGuard {
-    dropped: PathBuf,
-}
-
-impl Drop for RuntimeResourceGuard {
-    fn drop(&mut self) {
-        let marker: &[u8] = if tokio::runtime::Handle::try_current().is_ok() {
-            b"dropped-in-runtime"
-        } else {
-            b"dropped-without-runtime"
-        };
-        std::fs::write(&self.dropped, marker).expect("record standalone resource teardown");
-    }
-}
-
-/// Install only a runtime-owned resource through the existing startup hook.
-/// The helm's signal handlers, serving, cleanup and runtime destruction stay
-/// production code. No host, SSH process or alternate shutdown path is added.
-fn serve_standalone_child(dir: &Path) {
-    let resource_ready = dir.join("resource-ready");
-    let dropped = dir.join("resource-dropped");
-    crate::HELM_RUNTIME_TEST_HOOK.with_borrow_mut(|hook| {
-        *hook = Some(Box::new(move || {
-            tokio::spawn(async move {
-                let _guard = RuntimeResourceGuard { dropped };
-                std::fs::write(resource_ready, b"held").unwrap();
-                std::future::pending::<()>().await;
-            });
-        }));
-    });
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-    let ready_file = dir.join("helm-ready");
-    let ready = std::thread::spawn(move || {
-        ready_rx
-            .recv_timeout(STARTUP_TIMEOUT)
-            .expect("real standalone helm serving dependencies ready");
-        std::fs::write(ready_file, b"serving").unwrap();
-    });
-    crate::run_with_ready(
-        crate::HelmArgs {
-            port: 0,
-            state_dir: Some(dir.join("helm")),
-            test_credential_file: None,
-            ensure_hosts: None,
-            payload_dir: None,
-            release_base_url: None,
-            backstop_refresh_secs: None,
-        },
-        None,
-        None,
-        Some(ready_tx),
-        None,
-        crate::ServingMode::Standalone,
-    )
-    .expect("standalone signal shutdown must return success");
-    ready
-        .join()
-        .expect("standalone readiness thread must finish");
-}
-
-/// The signal fixture deliberately has no async test runtime: its child must
-/// enter the standalone runtime directly. Poll only native child/file state
-/// here; socket observations use the asynchronous helper above instead.
-fn poll_standalone_state(deadline: std::time::Instant, mut observed: impl FnMut() -> bool) -> bool {
-    loop {
-        if observed() {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        // sleep-ok: bounded polling of this re-exec child's readiness and native exit, not a startup delay.
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-/// Standalone SIGINT and SIGTERM must finish successfully through the real
-/// serving teardown, with runtime-owned resources dropped during that
-/// standalone runtime's own teardown before a successful process exit.
-/// SIGKILL has its separate relay proof; it cannot run this orderly cleanup.
-#[farhelm_testtrace::test]
-fn standalone_signals_finish_orderly_shutdown_with_runtime_resources() {
-    if let Some(dir) = std::env::var_os(SIGNAL_CHILD_DIR) {
-        serve_standalone_child(Path::new(&dir));
-        return;
-    }
-    for signal in [libc::SIGINT, libc::SIGTERM] {
-        let dir = tempfile::Builder::new()
-            .prefix("fh-signal-")
-            .tempdir_in("/tmp")
-            .unwrap();
-        let mut child = HelmChild(
-            std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", SIGNAL_TEST, "--nocapture"])
-                .env(SIGNAL_CHILD_DIR, dir.path())
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .unwrap(),
-        );
-        let ready = poll_standalone_state(std::time::Instant::now() + STARTUP_TIMEOUT, || {
-            (dir.path().join("helm-ready").exists() && dir.path().join("resource-ready").exists())
-                || child.0.try_wait().unwrap().is_some()
-        });
-        assert!(
-            ready
-                && dir.path().join("helm-ready").exists()
-                && dir.path().join("resource-ready").exists(),
-            "standalone serving/resource readiness failed for signal {signal}; child={:?}",
-            child.0.try_wait()
-        );
-        assert!(
-            child.0.try_wait().unwrap().is_none(),
-            "standalone child must be live before signal {signal}"
-        );
-        assert!(
-            !dir.path().join("resource-dropped").exists(),
-            "runtime resource must still be held before the signal"
-        );
-        // SAFETY: this owned Child has not been reaped; its PID cannot denote
-        // another process between the liveness check and this signal.
-        assert_eq!(unsafe { libc::kill(child.0.id() as i32, signal) }, 0);
-        assert!(
-            poll_standalone_state(std::time::Instant::now() + ORDERLY_SHUTDOWN_TIMEOUT, || {
-                child.0.try_wait().unwrap().is_some()
-            }),
-            "standalone did not finish signal {signal}"
-        );
-        let status = child.0.wait().unwrap();
-        assert!(
-            status.success(),
-            "standalone signal {signal} must run orderly shutdown: {status}"
-        );
-        assert_eq!(
-            std::fs::read(dir.path().join("resource-dropped"))
-                .expect("runtime resource teardown marker"),
-            b"dropped-in-runtime",
-            "resource must drop during the standalone runtime's teardown"
-        );
-    }
 }
