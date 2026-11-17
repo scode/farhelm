@@ -1,7 +1,7 @@
-//! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement, keys, focus and one
-//! highlight, how an open menu follows its button through what the helm pushes, Rename opening the editor for its row,
-//! the question and the precondition each request carries, what a pending or refused Delete shows, the selection while
-//! a Delete runs, and the Delete shortcut.
+//! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement, names, descriptions, keys,
+//! focus and one highlight, another row's button and New pressed while it is open, how an open menu follows its button
+//! through what the helm pushes, Rename opening the editor for its row, the question and the precondition each request
+//! carries, what a pending or refused Delete shows, the selection while a Delete runs, and the Delete shortcut.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the list's own tests do, and reads what the
 //! window sent from the fake and what it drew from GPUI's driver record of the frame. Controls are found by their ids:
@@ -16,20 +16,23 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    TestAppContext, VisualTestContext, px, size,
+    Background, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
+    Role, TestAppContext, VisualTestContext, px, size,
 };
 use serde_json::{Value, json};
 
+use super::host_rail::tests::{node, texts_within};
 use super::pins_tests::away;
 use super::tests::{
-    Fixture, change, listing_meta, open_main, painted, row_order, selected, sent, session,
+    Fixture, change, launcher_drawn, listing_meta, open_main, painted, row_order, selected, sent,
+    session,
 };
 use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
 use crate::hosts::tests::{connected, host, hosts};
+use crate::launcher::view_tests::{search_focused, search_text};
 use crate::operations::OpKey;
 use crate::test_support::{focused_id, frame, meta};
-use crate::{layers, session, test_support};
+use crate::{layers, session, test_support, theme};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -165,6 +168,33 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
     ]
 }
 
+/// The menu items painted with a fill inside the element drawn under `menu`, by id, from a fresh frame's painted quads:
+/// the menu's one highlight, which [`crate::components::MenuItem`] paints from focus alone and only on an available
+/// item. Paint, not focus, because the old `menu-highlight.spec.ts` bug was a second fill under the resting pointer, so
+/// any opaque fill exactly on an item counts, whatever its color (a hover style's included), and an accent fill on no
+/// item comes back as its bounds. The panel's own surface and the focus ring's inset border match no item, and fills
+/// outside the menu (the open session's row) do not count.
+pub(crate) fn lit(cx: &mut VisualTestContext, menu: &'static str) -> Vec<String> {
+    let nodes = frame(cx);
+    let menu = test_support::bounds(cx, menu);
+    let accent = cx.update(|_, cx| Background::from(theme::color(theme::palette(cx).accent_fill)));
+    let (scale, quads) = cx.update(|window, _| (window.scale_factor(), window.painted_quads()));
+    let menu = menu.scale(scale);
+    quads
+        .iter()
+        .filter(|quad| menu.contains(&quad.bounds.origin) && !quad.background.is_transparent())
+        .filter_map(|quad| {
+            let item = nodes.iter().find(|node| {
+                node.role == Some(Role::MenuItem) && node.bounds.scale(scale) == quad.bounds
+            });
+            match item {
+                Some(item) => item.element_id.as_ref().map(ToString::to_string),
+                None => (quad.background == accent).then(|| format!("{:?}", quad.bounds)),
+            }
+        })
+        .collect()
+}
+
 // ---- The menu ------------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Opening and closing" and "Inside a dialog or menu, focus stays inside": a menu the user opened starts on
@@ -232,8 +262,14 @@ fn the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection(cx: &mu
 /// never stays inside something that is no longer drawn. This is the popover-movement acceptance case the layer
 /// manager left to the first real menu. Run under Linux's click rule, where the click focuses b's button, so the button
 /// the menu names as its return target is also what held focus when it opened, and both are gone with the row; the
-/// frame on screen at the close no longer draws the button, so GPUI would never report focus on it as lost. Specified:
-/// with b's menu open, a pushed listing without b closes the menu, and focus is held by something still alive.
+/// frame on screen at the close no longer draws the button, so GPUI would never report focus on it as lost.
+///
+/// The row coming back is the old `sidebar.spec.ts` case "a host-filtered-out row's open menu stays closed when it
+/// returns" (reference commit `24bc0580`): a menu that reappeared with its row would offer commands for a session that
+/// may have changed while it was gone, with nobody having asked. Choosing a host on the rail is itself a press outside
+/// the menu, which closes it before any filter applies, so a push is the one way the row leaves under an open menu.
+/// Specified: with b's menu open, a pushed listing without b closes the menu, and focus is held by something still
+/// alive; a later listing with b again draws b's row with no menu or other layer open.
 #[gpui::test]
 fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -250,6 +286,193 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.focused(cx).is_some()),
         "focus recovered rather than being left on b's button, which went with its row"
     );
+
+    push(&mut fake, &["a", "b"], &[(session("b"), 0)], cx);
+    assert!(drawn(cx, "session-menu-b"), "the premise: b's row is back");
+    assert!(!any_layer(cx), "b's menu did not come back with its row");
+    assert!(!drawn(cx, "session-menu"));
+}
+
+/// Every row has a menu button and the same eight commands, so a screen reader user can only tell which session a menu
+/// acts on from its name, and each command needs its words to say what it does. The old `sidebar.spec.ts` pinned this
+/// in "the actions menu exposes a real menu-button relationship" and "the session flyout sits beside its row with a
+/// titled, described menu" (reference commit `24bc0580`), together with opening the menu not scrolling its row. What
+/// GPUI's driver record cannot show is left out: the button's expanded state, `aria-haspopup`, and the description as
+/// an accessible property apart from the painted line (`components/menu_item.rs` makes the painted line the item's
+/// accessible description). Specified, with a open: b's button is named "Session actions for b"; opening its menu
+/// leaves b's row where it was; the commands sit in a menu, apart from the header, named "Session actions for b"; each
+/// of the eight is a menu item named by its label that paints the old item's description inside itself (the table
+/// below); choosing Delete closes the menu and asks in a dialog that quotes b's title.
+#[gpui::test]
+fn the_menu_and_its_commands_say_whose_they_are_and_what_each_does(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    assert_eq!(
+        label_of(cx, "session-menu-b").as_deref(),
+        Some("Session actions for b")
+    );
+    let row = test_support::bounds(cx, "session-row-b");
+
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(
+        test_support::bounds(cx, "session-row-b"),
+        row,
+        "opening the menu moved no row"
+    );
+    let nodes = frame(cx);
+    let items = node(&nodes, "session-menu-items").expect("the commands are drawn");
+    assert_eq!(items.role, Some(Role::Menu));
+    assert_eq!(items.label.as_deref(), Some("Session actions for b"));
+    for (id, name, description) in [
+        (
+            "session-menu-rename",
+            "Rename",
+            "Give this session a new title",
+        ),
+        ("session-menu-seen", "Mark unread", "Show new output again"),
+        (
+            "session-menu-pin",
+            "Pin to top",
+            "Keep this session above unpinned ones",
+        ),
+        ("session-menu-clone", "Clone", "New session, keep this one"),
+        (
+            "session-menu-replace-with",
+            "Replace with…",
+            "Edit settings, then swap",
+        ),
+        (
+            "session-menu-replace",
+            "Replace",
+            "Fresh conversation, same settings",
+        ),
+        (
+            "session-menu-stop",
+            "Stop",
+            "Ends the agent and its processes, and closes terminal tabs",
+        ),
+        (
+            "session-menu-delete",
+            "Delete",
+            "Removes the session and its state",
+        ),
+    ] {
+        let item = node(&nodes, id).unwrap_or_else(|| panic!("{id} was not drawn"));
+        assert_eq!(item.role, Some(Role::MenuItem), "{id}");
+        assert_eq!(item.label.as_deref(), Some(name), "{id}");
+        let painted: Vec<String> = texts_within(&nodes, id)
+            .into_iter()
+            .map(|text| text.text.to_string())
+            .collect();
+        assert!(
+            painted.iter().any(|text| text == description),
+            "{id} describes itself: {painted:?}"
+        );
+    }
+
+    test_support::click(cx, "session-menu-delete");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "session-menu").is_none(), "the menu closed");
+    assert_eq!(
+        node(&nodes, "prompt").and_then(|prompt| prompt.role),
+        Some(Role::Dialog),
+        "the question is a dialog, not a menu with no commands"
+    );
+    assert_eq!(
+        label_of(cx, "session-delete-title-b").as_deref(),
+        Some("\"b\"")
+    );
+}
+
+/// The menu opens beside its button, past the sidebar's edge, so it covers none of the rows' buttons, and a press on
+/// another row's ⋯ must reach that button rather than only closing the open menu. The old `sidebar.spec.ts` pinned
+/// this with a click at the button's coordinates ("an open menu leaves the other rows' toggles clickable", reference
+/// commit `24bc0580`), since a covering panel would have taken the press, and a covered Delete or Stop could have
+/// started something. Specified, under the Linux click rule: with a's menu open, which does not cover b's button, a
+/// click on b's button leaves exactly one menu open, b's, with its header naming b and focus on its Rename; no
+/// question opens and nothing is sent.
+#[gpui::test]
+fn another_rows_menu_button_takes_a_click_while_a_menu_is_open(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+    test_support::click(cx, "session-menu-a");
+    assert!(
+        label_of(cx, "session-menu-summary-a").is_some(),
+        "the premise: a's menu is open"
+    );
+    let (menu, button) = (
+        test_support::bounds(cx, "session-menu"),
+        test_support::bounds(cx, "session-menu-b"),
+    );
+    assert!(
+        !menu.intersects(&button),
+        "the premise: a's menu {menu:?} leaves b's button {button:?} uncovered"
+    );
+
+    test_support::click(cx, "session-menu-b");
+    let nodes = frame(cx);
+    let menus = nodes
+        .iter()
+        .filter(|node| node.element_id.as_deref() == Some("session-menu"))
+        .count();
+    assert_eq!(menus, 1, "one menu");
+    assert!(
+        label_of(cx, "session-menu-summary-b").is_some(),
+        "b's menu opened"
+    );
+    assert!(
+        label_of(cx, "session-menu-summary-a").is_none(),
+        "a's closed"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert!(!drawn(cx, "prompt"));
+    assert_eq!(sent(&mut fake), []);
+}
+
+/// The old `sidebar.spec.ts` cases "opening the create-session form closes an open row menu" and the row-menu half of
+/// "opening New focuses search and immediate typing lands there, with or without a prior menu" (reference commit
+/// `24bc0580`). The hazard they guarded: the press on New closes the row menu, whose close returns focus to its button,
+/// and a return landing after the launcher took focus leaves the user typing into the list. Both click rules run: under
+/// Linux's the press focuses New first, the old case's path, so the closing menu finds focus already outside it; under
+/// macOS's the press focuses nothing, so the menu's return always runs. Specified, for each rule: with b's menu open
+/// and New not covered by it, a click on New closes the menu and opens the launcher with focus in its search box, and
+/// "xyz" typed at once lands there; Escape then closes every layer.
+#[gpui::test]
+fn new_with_a_row_menu_open_closes_it_and_typing_reaches_the_search_box(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    for focuses in [true, false] {
+        cx.update(|_, cx| crate::focus::set_click_focuses_controls(focuses, cx));
+        test_support::click(cx, "session-menu-b");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("session-menu-rename"),
+            "the premise ({focuses}): b's menu is open and holds focus"
+        );
+        let (menu, new) = (
+            test_support::bounds(cx, "session-menu"),
+            test_support::bounds(cx, super::NEW_ID),
+        );
+        assert!(
+            !menu.intersects(&new),
+            "the premise: {menu:?} leaves New {new:?} uncovered"
+        );
+
+        test_support::click(cx, super::NEW_ID);
+        assert!(!drawn(cx, "session-menu"), "{focuses}: the menu closed");
+        assert!(launcher_drawn(cx), "{focuses}: New opened the launcher");
+        assert!(search_focused(cx), "{focuses}: the search box holds focus");
+        test_support::keys(cx, "x y z");
+        assert_eq!(search_text(cx), "xyz", "{focuses}");
+        // The first Escape may only close the search's results; bounded, so a launcher that never closes fails.
+        for _ in 0..3 {
+            if any_layer(cx) {
+                test_support::keys(cx, "escape");
+            }
+        }
+        assert!(!any_layer(cx), "{focuses}: Escape closed the launcher");
+    }
 }
 
 // ---- The menu through changes underneath ---------------------------------------------------------------------------
@@ -522,7 +745,7 @@ fn launch_action(cx: &mut VisualTestContext) -> String {
 /// "Replace" action. Opening either sends no Replace and nothing to b's routes.
 #[gpui::test]
 fn the_menus_clone_and_replace_with_open_the_launcher_on_their_row(cx: &mut TestAppContext) {
-    use super::host_rail::tests::{hover_help, texts_within};
+    use super::host_rail::tests::hover_help;
     // b is an ordinary folder session: Clone of one in a managed checkout names its new checkout `<title>-clone`
     // instead (`launcher::checkout_tests` covers that), and this test is about which row the launcher opens on.
     let b = session("b").unmanaged().not_launched_as_checkout();
