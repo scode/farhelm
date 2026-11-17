@@ -357,15 +357,16 @@ fn label(nodes: &[DriverNode], id: &str) -> String {
 }
 
 /// The names of `host`'s detail lines in a frame, in order: empty while its row is closed.
-fn details(nodes: &[DriverNode], host: i64) -> Vec<String> {
+pub(crate) fn details(nodes: &[DriverNode], host: i64) -> Vec<String> {
     (0..)
         .map_while(|n| node(nodes, &format!("host-detail-{host}-{n}")))
         .map(|node| node.label.as_deref().unwrap_or_default().to_owned())
         .collect()
 }
 
-/// Whether the Details switch is on, as assistive technology hears it.
-fn details_switch(nodes: &[DriverNode]) -> bool {
+/// Whether the Details switch is on, as assistive technology hears it; fails if it is not drawn with a state. Shared
+/// with the other hosts test modules.
+pub(crate) fn details_switch(nodes: &[DriverNode]) -> bool {
     match node(nodes, "host-details-toggle").and_then(|node| node.toggled) {
         Some(state) => state == Toggled::True,
         None => panic!("the Details switch was not drawn with a state"),
@@ -723,10 +724,15 @@ fn setup_run(status: RunStatus, steps: [StepStatus; 3]) -> ProvisioningView {
 
 /// Push `view` as host 3's progress, replacing whatever was there, and settle.
 fn push_run(fake: &mut FakeHelm, view: &ProvisioningView, cx: &mut VisualTestContext) {
+    push(fake, progress(std::slice::from_ref(view)), cx);
+}
+
+/// Push `state` as the helm pushes a change: every entry it holds upserted, in its order, nothing removed; then settle.
+fn push(fake: &mut FakeHelm, state: CollectionState, cx: &mut VisualTestContext) {
     fake.push(CollectionChanges {
-        collection: Collection::HostProgress,
-        meta: meta(&["3"]),
-        upsert: progress(std::slice::from_ref(view)).entries,
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
         remove: Vec::new(),
     });
     test_support::settle(cx);
@@ -898,6 +904,98 @@ fn a_failed_setup_opens_its_row_with_the_step_and_the_reason(cx: &mut TestAppCon
     );
     assert_eq!(label(&nodes, "host-status-3"), "Connected");
     assert!(!details(&nodes, 3).is_empty(), "the row's details show too");
+}
+
+/// Why this matters: SPEC.md, "Topology": Prepare snapshot shows "with the explanation **Only the first time, and then
+/// at most once every 24 hours or after Farhelm updates.** The explanation stays visible while waiting", a wait long
+/// enough to make the user wonder whether every new host costs it. Every other step's explanation belongs to the
+/// setup's confirmation, and the old panel left it out of the step list (`progress_step_explanation`). Specified: in
+/// an open row's step list, a running Prepare snapshot step (the helm's `prepare-snapshot`) draws its explanation
+/// under its name and above its message; a completed step whose plan carried an explanation draws none.
+#[gpui::test]
+fn the_step_list_explains_snapshot_preparation_and_no_other_step(cx: &mut TestAppContext) {
+    const PREPARATION: &str =
+        "Only the first time, and then at most once every 24 hours or after Farhelm updates.";
+    const CONFIRMATION_ONLY: &str = "Creates ~/.local/share/farhelm and keeps what is there.";
+    let step = crate::hosts::progress::tests::step;
+    let mut running = run(3, ProvisioningOperation::Add, RunStatus::Running);
+    let mut done = step("Create directories", StepStatus::Completed);
+    done.explanation = Some(CONFIRMATION_ONLY.into());
+    let mut preparing = step("Prepare snapshot", StepStatus::Running);
+    assert_eq!(
+        preparing.step, "prepare-snapshot",
+        "the premise: the helm's id"
+    );
+    preparing.explanation = Some(PREPARATION.into());
+    preparing.message = Some("Building the recipe's snapshot".into());
+    running.steps = vec![done, preparing];
+    let (_fake, _, cx) = open_panel(cx, vec![hosts(&reference_hosts()), progress(&[running])]);
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, "host-step-3-1-explanation"), PREPARATION);
+    assert_eq!(
+        label(&nodes, "host-step-3-1-message"),
+        "Building the recipe's snapshot"
+    );
+    // Both lines are drawn (the labels above), so their tops compare; by the driver's nodes, since a host sentence has
+    // an id but no debug selector.
+    let top = |id: &str| node(&nodes, id).map(|node| node.bounds.top());
+    assert!(
+        top("host-step-3-1-explanation") < top("host-step-3-1-message"),
+        "explanation first"
+    );
+    assert!(node(&nodes, "host-step-3-0-explanation").is_none());
+    assert!(
+        !painted(&nodes).contains(CONFIRMATION_ONLY),
+        "the confirmation's words stay out"
+    );
+}
+
+/// Why this matters: the helm registers a host when it accepts its setup, before the setup runs, so the new host's row
+/// must appear with the run's steps as they go, and its menu must hold what would change the host under the run
+/// (`provisioning.spec.ts`, "accepted ADD registers before execution and releases the page lock while running"; the
+/// rail's half is the rail's, and what the menu offers once the run ends is `offers/tests.rs`'
+/// `a_running_run_holds_the_host_until_it_ends`). Specified: a pushed new host 4 with a running setup run gets a row
+/// showing "Setup provisioning Running", whose menu offers no Update and no Re-run, and whose Settings does nothing
+/// when clicked (no dialog, nothing sent, the menu staying).
+#[gpui::test]
+fn an_accepted_setups_host_appears_with_its_run_and_its_menu_waits_for_it(cx: &mut TestAppContext) {
+    let (mut fake, _, cx) = open_panel(cx, vec![hosts(&reference_hosts()), progress(&[])]);
+    // Room for the fourth row with its steps open, and for its menu beside it.
+    cx.simulate_resize(size(px(1600.), px(1000.)));
+    test_support::settle(cx);
+    let mut listed = reference_hosts();
+    listed.push(aliased(
+        host(4, "ssh", connecting(1, None)),
+        "new-box",
+        "dev@new-box",
+    ));
+    let mut setup = setup_run(
+        RunStatus::Running,
+        [
+            StepStatus::Completed,
+            StepStatus::Running,
+            StepStatus::Pending,
+        ],
+    );
+    setup.host_id = 4;
+    setup.run_id = Some("run-4".into());
+    push(&mut fake, hosts(&listed), cx);
+    push(&mut fake, progress(std::slice::from_ref(&setup)), cx);
+    assert_eq!(label(&frame(cx), "host-row-4"), "new-box");
+    assert_eq!(
+        label(&frame(cx), "host-run-title-4"),
+        "Setup provisioning Running"
+    );
+    test_support::click(cx, "host-menu-toggle-4");
+    let nodes = frame(cx);
+    assert!(node(&nodes, "host-menu-update").is_none());
+    assert!(node(&nodes, "host-menu-rerun").is_none());
+    test_support::click(cx, "host-menu-settings");
+    assert!(
+        node(&frame(cx), "host-settings").is_none() && fake.commands().is_empty(),
+        "Settings waits for the run"
+    );
+    assert!(test_support::any_open(cx), "the menu stayed");
 }
 
 /// The text the window painted in its last drawn frame, without drawing another: so only a redraw the app asked for by
@@ -1313,43 +1411,17 @@ fn reveal_focuses_a_far_rows_toggle_and_scrolls_it_into_view(cx: &mut TestAppCon
 
 /// Why this matters: a host's name is unbounded user data, and the old row let the name give way first (its 4em floor
 /// and ellipsis) so the phase words and the toggle's place never left the sidebar (`.host-row-main`'s `nowrap`, a
-/// fixed bug of the old app). Only the real text system measures that, so this lays the panel out with the bundled
-/// fonts in a headless app. Specified: in the sidebar column's 340 pixels, a host with a very long alias keeps its
-/// whole phase words inside the panel, its name cut short with "…" and ending before the words begin.
+/// fixed bug of the old app). Only the real text system measures that ([`laid_out`]). Specified: in the sidebar
+/// column's 340 pixels, a host with a very long alias keeps its whole phase words inside the panel, its name cut short
+/// with "…" and ending before the words begin.
 #[test]
 fn a_long_name_gives_way_before_the_phase_words() {
-    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
-        assets::UI_FONT,
-    ));
-    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
-    cx.update(bootstrap::install).unwrap();
-    let (mut fake, handle, events) = FakeHelm::new();
-    let _connection = cx.update(|cx| session::start(handle, events, None, cx));
     let long = aliased(
         host(2, "ssh", connecting(1, None)),
         "a build machine with a deliberately long alias that cannot fit",
         "dev@build-box.invalid",
     );
-    fake.connect(vec![hosts(&[long])]);
-    cx.run_until_parked();
-    let window = cx
-        .open_window(size(px(340.), px(400.)), |window, cx| {
-            let panel = cx.new(HostsPanel::new);
-            let harness = cx.new(|cx| Harness {
-                panel,
-                root: root::attach(window, cx),
-                column: None,
-            });
-            cx.new(|cx| Root::new(harness, window, cx))
-        })
-        .unwrap();
-    let nodes = cx
-        .update_window(window.into(), |_, window, cx| {
-            window.set_driver_enabled(true);
-            window.draw(cx).clear(cx);
-            window.driver_nodes().to_vec()
-        })
-        .unwrap();
+    let nodes = laid_out(&[long], 340., |_| {});
     let status = node(&nodes, "host-status-2").expect("the status was drawn");
     assert!(
         status.bounds.right() <= px(340.),
@@ -1371,5 +1443,202 @@ fn a_long_name_gives_way_before_the_phase_words() {
         "the name ends before the words: {:?} {:?}",
         name.bounds,
         words.bounds
+    );
+}
+
+/// The Hosts panel over `listed`, `width` pixels wide, laid out once with the bundled fonts in a headless app, after
+/// `before` has run against the app with the hosts in its store: the frame's driver record. The ordinary test windows
+/// measure every glyph alike, so whether a row's words fit beside its controls is only decided here.
+fn laid_out(
+    listed: &[HostView],
+    width: f32,
+    before: impl FnOnce(&mut gpui::App),
+) -> Vec<DriverNode> {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+    cx.update(bootstrap::install).unwrap();
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| session::start(handle, events, None, cx));
+    fake.connect(vec![hosts(listed)]);
+    cx.run_until_parked();
+    cx.update(before);
+    cx.run_until_parked();
+    let window = cx
+        .open_window(size(px(width), px(400.)), |window, cx| {
+            let panel = cx.new(HostsPanel::new);
+            let harness = cx.new(|cx| Harness {
+                panel,
+                root: root::attach(window, cx),
+                column: None,
+            });
+            cx.new(|cx| Root::new(harness, window, cx))
+        })
+        .unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.set_driver_enabled(true);
+        window.draw(cx).clear(cx);
+        window.driver_nodes().to_vec()
+    })
+    .unwrap()
+}
+
+/// Whether `a` and `b` share a horizontal band, as boxes on one line do: a box wrapped onto a line of its own has no
+/// vertical overlap with the ones it left. The boxes need not coincide, since the row centers controls of different
+/// heights.
+fn on_one_line(a: gpui::Bounds<gpui::Pixels>, b: gpui::Bounds<gpui::Pixels>) -> bool {
+    a.top() < b.bottom() && b.top() < a.bottom()
+}
+
+/// The first text painted in `nodes` that is `whole`, or a beginning of it cut short with "…", as text that does not
+/// fit is drawn; fails, listing every painted text, if none is.
+fn painted_as<'a>(nodes: &'a [DriverNode], whole: &str) -> &'a gpui::DriverText {
+    let texts = move || nodes.iter().flat_map(|node| node.texts.iter());
+    let cut_from_whole = |text: &str| {
+        text.strip_suffix('…')
+            .is_some_and(|kept| !kept.is_empty() && whole.starts_with(kept.trim_end()))
+    };
+    match texts().find(|text| text.text.as_ref() == whole || cut_from_whole(&text.text)) {
+        Some(text) => text,
+        None => {
+            let painted: Vec<&str> = texts().map(|text| text.text.as_ref()).collect();
+            panic!("{whole:?} is painted, whole or cut short: {painted:?}")
+        }
+    }
+}
+
+/// Host 2's menu toggle in `nodes`, checked to lie inside the panel, `width` wide, on one line with each of `beside`
+/// (the header's other parts).
+fn toggle_on_the_line(
+    nodes: &[DriverNode],
+    width: f32,
+    beside: &[gpui::Bounds<gpui::Pixels>],
+) -> gpui::Bounds<gpui::Pixels> {
+    let toggle = node(nodes, "host-menu-toggle-2")
+        .expect("the toggle is drawn")
+        .bounds;
+    assert!(
+        toggle.left() >= px(0.) && toggle.right() <= px(width),
+        "the toggle lies inside the panel: {toggle:?} in {width}"
+    );
+    for part in beside {
+        assert!(
+            on_one_line(toggle, *part),
+            "the toggle shares the header's line: {toggle:?}, {part:?}"
+        );
+    }
+    toggle
+}
+
+/// Why this matters: the toggle is the row's only way to its host's actions, and the longest phase words the panel
+/// draws, "Unreachable, retrying", are long enough to push it off the header's line in a narrow sidebar, where a
+/// wrapped toggle would sit apart from its row or outside the sidebar (the old `terminal-multihost.spec.ts`,
+/// "host-menu-survives-the-longest-phase-word", and `ui-plan-regressions.spec.ts`, "an unreachable host keeps its menu
+/// inside the minimum sidebar"). The words and the host's name may be cut short there, as the old `.host-status-label`
+/// and `.host-name` were (`overflow: hidden` with an ellipsis, the name keeping a 4em floor), and the status keeps the
+/// words whole as its name. Specified: in the panel's column at the sidebar's narrowest (the stored width's floor, 296
+/// pixels, less the rail's 56), an unreachable `build-box`'s status is named "Unreachable, retrying"; the words and the
+/// name are each painted whole or cut short with "…"; and its menu toggle lies inside the panel on the same line as
+/// its name and its words.
+#[test]
+fn an_unreachable_hosts_toggle_stays_on_its_line_in_the_narrowest_sidebar() {
+    let width = *farhelm_proto::ui_channel::SIDEBAR_WIDTH_RANGE.start() as f32 - 56.;
+    let unreachable = HostStateView::Unreachable {
+        cause: "transport-failure".to_owned(),
+        last_error: "timed out".to_owned(),
+    };
+    let listed = [aliased(
+        host(2, "ssh", unreachable),
+        "build-box",
+        "dev@build-box.invalid",
+    )];
+    let nodes = laid_out(&listed, width, |_| {});
+    let status = node(&nodes, "host-status-2").expect("the status is drawn");
+    assert_eq!(
+        status.label.as_deref(),
+        Some("Unreachable, retrying"),
+        "the premise: the longest phase words are the status's name"
+    );
+    let words = painted_as(&nodes, "Unreachable, retrying").bounds;
+    let name = painted_as(&nodes, "build-box").bounds;
+    toggle_on_the_line(&nodes, width, &[name, words]);
+}
+
+/// Why this matters: the inline `↑ Update` sits on a row's header line between the name and the menu toggle, and its
+/// progress takes the button's place once pressed; a long name must give way to both rather than wrap either one, or
+/// the toggle would move away from its row (the old `terminal-multihost.spec.ts`, "host-inline-update: ${activation}
+/// starts progress and keeps the header on one line", whose host had a very long name). Specified: in the panel's
+/// column at the sidebar's default width, an older host under a long alias paints its name cut short with "…" and
+/// draws its Update button inside the panel, on one line with the name and the menu toggle; with the Update's plan
+/// request in flight it paints "Updating…" inside the panel, the name still cut short and on the toggle's line.
+#[test]
+fn the_inline_update_and_its_progress_keep_the_header_on_one_line() {
+    const ALIAS: &str = "a build machine with a deliberately long alias that cannot fit";
+    let width = f32::from(crate::theme::metrics::SIDEBAR_WIDTH) - 56.;
+    let old = HostStateView::Connected {
+        identity: Some("id-old".into()),
+        build_version: "0.15.0".into(),
+        old_version: true,
+        newer_version: false,
+        refresh: RefreshView::Ok { sessions: 1 },
+    };
+    let listed = [aliased(host(2, "ssh", old), ALIAS, "dev@build-box.invalid")];
+    let cut_name = |nodes: &[DriverNode]| {
+        let name = painted_as(nodes, ALIAS);
+        assert!(
+            name.text.ends_with('…'),
+            "the name gives way: {:?}",
+            name.text
+        );
+        name.bounds
+    };
+
+    let nodes = laid_out(&listed, width, |_| {});
+    let button = node(&nodes, "host-update-2")
+        .expect("the premise: the inline Update is drawn")
+        .bounds;
+    assert!(
+        button.right() <= px(width),
+        "the button lies inside: {button:?}"
+    );
+    toggle_on_the_line(&nodes, width, &[cut_name(&nodes), button]);
+
+    // The plan request in flight on the host's key, set up directly because this headless app takes no clicks; that
+    // the button's press starts this very work is `hosts::update`'s
+    // `the_inline_update_shows_on_an_older_remote_host_and_starts_the_update`.
+    let nodes = laid_out(&listed, width, |cx| {
+        let Some(operations) = session::current_operations(cx) else {
+            panic!("the premise: a UI session");
+        };
+        let path = ApiPath::api(&["hosts", "2", "update"]).unwrap();
+        let command = Command::new(
+            Work::UpdateHost,
+            Method::Post,
+            path,
+            None,
+            "POST /api/hosts/2/update",
+        );
+        operations.update(cx, |operations, cx| {
+            operations
+                .start(&OpKey::host("2"), command, cx, |_, _| {})
+                .unwrap();
+        });
+    });
+    assert!(
+        node(&nodes, "host-update-2").is_none(),
+        "the premise: progress replaced the button"
+    );
+    toggle_on_the_line(&nodes, width, &[cut_name(&nodes)]);
+    let progress = painted_as(&nodes, "Updating…");
+    assert_eq!(
+        progress.text.as_ref(),
+        "Updating…",
+        "the progress is painted whole"
+    );
+    let progress = progress.bounds;
+    assert!(
+        progress.right() <= px(width),
+        "the progress lies inside: {progress:?}"
     );
 }

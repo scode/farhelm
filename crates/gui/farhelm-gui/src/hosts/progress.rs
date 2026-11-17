@@ -18,8 +18,9 @@
 //!   a progress snapshot is available"); while an uninstall's plan or its confirming request is out, "Uninstalling…"
 //!   (SPEC.md: "Setup and uninstall planning show their action in the folded row while the helm prepares a dialog").
 //! - **The step list** ([`run_section`]) shows under an open row for any retained run, running, failed or completed, as
-//!   the old panel did: each step's number, check or cross on a rail, its name and its result word, and the step's and
-//!   the run's messages, which carry the helm's reason for a failure.
+//!   the old panel did: each step's number, check or cross on a rail, its name and its result word, the snapshot
+//!   preparation step's explanation of how often that wait comes back ([`PREPARATION_STEP`]), and the step's and the
+//!   run's messages, which carry the helm's reason for a failure.
 //! - **Disclosure** ([`opens_row`]): a running setup or uninstall opens its row by itself until the user folds that run
 //!   with Collapse; success closes it again (a finished uninstall takes the row with it), and a failure keeps it open
 //!   whatever the fold said (the Hosts panel's `disclosed` adds the failure rule for every kind of run). A running
@@ -596,9 +597,10 @@ fn look(status: &StepStatus, palette: &Palette) -> Look {
 /// may fold a running run the row opened for), then every step and the run's own message. The running step's ring is at
 /// `pulse`'s opacity.
 ///
-/// Drawn under `host-run-<id>`; each step is a list item named "<step>: <result>" under `host-step-<id>-<n>`, its
-/// message under `host-step-<id>-<n>-message`, and the run's message under `host-run-message-<id>`, which is how the
-/// panel's tests and the agent bridge read a run.
+/// Drawn under `host-run-<id>`; each step is a list item named "<step>: <result>" under `host-step-<id>-<n>`, the
+/// snapshot preparation step's explanation under `host-step-<id>-<n>-explanation`, its message under
+/// `host-step-<id>-<n>-message`, and the run's message under `host-run-message-<id>`, which is how the panel's tests
+/// and the agent bridge read a run.
 pub(crate) fn run_section(
     id: i64,
     run: &ProvisioningView,
@@ -678,8 +680,8 @@ pub(crate) fn run_section(
 /// old card's copy of it (`.host-progress-card .provisioning-step`) did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Surface {
-    /// The open row's step list ([`run_section`]): the step's message under its name, whatever its result. Ids start
-    /// `host-step-`.
+    /// The open row's step list ([`run_section`]): the snapshot preparation step's explanation
+    /// ([`PREPARATION_STEP`]), then the step's message whatever its result, under its name. Ids start `host-step-`.
     Panel,
     /// The progress card ([`card`]): the step's explanation under its name, and its message only for a warning or a
     /// failure (SPEC.md: "every step with its status and explanation, ... and any degraded or failed step's reason");
@@ -697,23 +699,38 @@ impl Surface {
         }
     }
 
-    /// The lines this surface draws under `step`'s name, in order: the step's explanation and its message.
-    fn lines(self, step: &StepView) -> Vec<&str> {
-        match self {
-            Surface::Panel => step.message.as_deref().into_iter().collect(),
-            Surface::Card => {
-                let reason = matches!(step.status, StepStatus::Degraded | StepStatus::Failed)
-                    .then_some(step.message.as_deref())
-                    .flatten();
+    /// The lines this surface draws under `step`'s name, in order, each with what it is (`"explanation"` or
+    /// `"message"`, the end of the panel's ids for it): the step's explanation and its message.
+    fn lines(self, step: &StepView) -> Vec<(&'static str, &str)> {
+        let (explanation, message) = match self {
+            Surface::Panel => (
                 step.explanation
                     .as_deref()
-                    .into_iter()
-                    .chain(reason)
-                    .collect()
-            }
-        }
+                    .filter(|_| step.step == PREPARATION_STEP),
+                step.message.as_deref(),
+            ),
+            Surface::Card => (
+                step.explanation.as_deref(),
+                matches!(step.status, StepStatus::Degraded | StepStatus::Failed)
+                    .then_some(step.message.as_deref())
+                    .flatten(),
+            ),
+        };
+        let explanation = explanation.map(|line| ("explanation", line));
+        explanation
+            .into_iter()
+            .chain(message.map(|line| ("message", line)))
+            .collect()
     }
 }
+
+/// The helm's id for the step that prepares a recipe's snapshot before a sandbox is made from it, the one step whose
+/// explanation the open row's step list draws: it says how often that wait comes back ("Only the first time, and then
+/// at most once every 24 hours or after Farhelm updates"), which SPEC.md keeps visible while the user waits. The old
+/// panel drew only this step's explanation (`progress_step_explanation` at reference commit `24bc0580`); every other
+/// step's explanation belongs to the setup's confirmation, and drawing those would add a line to every SSH setup,
+/// Update and Uninstall step list.
+const PREPARATION_STEP: &str = "prepare-snapshot";
 
 /// Step `n` of host `id`'s run (`.provisioning-step`) on `surface`: its marker on the rail that runs down to the next
 /// step unless it is the `last`, its name and its result word on one line, and the lines the surface shows under the
@@ -783,11 +800,11 @@ fn step_row(
         StepStatus::Failed => palette.danger_strong,
         _ => palette.fg_dim,
     };
-    // The panel's one line keeps its old id, `-message`; the card's lines are numbered.
+    // The panel's lines are named for what they are, `-explanation` and `-message`; the card's are numbered.
     let lines = surface.lines(step);
-    let messages = lines.iter().enumerate().map(|(k, line)| {
+    let messages = lines.iter().enumerate().map(|(k, (what, line))| {
         let id = match surface {
-            Surface::Panel => format!("{ids}-{id}-{n}-message"),
+            Surface::Panel => format!("{ids}-{id}-{n}-{what}"),
             Surface::Card => format!("{ids}-{id}-{n}-line-{k}"),
         };
         div()

@@ -33,8 +33,8 @@
 //! Linux), home.
 //!
 //! On a sandbox or container, Suspend or Resume shows after Retry, at its place in the old order
-//! ([`super::lifecycle`]). Not ported: opening the menu with the arrow keys from the closed toggle, and the flyout's
-//! pointer notch.
+//! ([`super::lifecycle`]). Down and Up on the closed row toggle open the menu on its first or last command, as the old
+//! toggle did ([`MenuStart`]). Not ported: the flyout's pointer notch.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
@@ -47,7 +47,10 @@ use super::identity::{display_name, phase};
 use super::offers::{self, HostKind, Lifecycle, Offers, Rerun, Update};
 use crate::actions::THIS_PLATFORM;
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
+use crate::components::{
+    HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Role, Tier, menu_separator,
+    toggle_arrow_keys,
+};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -87,12 +90,14 @@ pub(super) fn toggle_parts(id: i64, window: &mut Window, cx: &mut App) -> (Ancho
 /// Host `id`'s menu toggle (named after the host's `name`), as a Hosts panel row draws it: the ghost ⋯ in the quiet
 /// ink, always visible (the old `.host-row-menu` had no rule hiding it at rest), drawn pressed while its menu is open
 /// (`open`), over `anchor`, the element the menu opens beside, with `focus` as its focus handle ([`toggle_parts`]).
+/// A click calls `on_toggle`; Down or Up on the closed toggle calls `on_arrow` with the command the menu starts on.
 pub(super) fn toggle(
     id: i64,
     name: &HostText,
     open: bool,
     (anchor, focus): &(Anchor, FocusHandle),
     on_toggle: impl Fn(&mut Window, &mut App) + 'static,
+    on_arrow: impl Fn(MenuStart, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
     let button = IconButton::new(
         format!("host-menu-toggle-{id}"),
@@ -104,6 +109,7 @@ pub(super) fn toggle(
     .tier(Tier::RowMenu { on_fill: false })
     .expanded(open)
     .focus(focus)
+    .on_key_down(toggle_arrow_keys(on_arrow))
     .on_click(move |_, window, cx| on_toggle(window, cx));
     div()
         .relative()
@@ -118,7 +124,8 @@ pub(super) fn toggle(
 /// the entry point the Hosts panel's row toggle calls, and the host rail's avatar menu too. `mark` is the [`Mark`]
 /// taken in that control's handler.
 ///
-/// Focus starts on the menu's first command that can act, and the menu names `opener` as where its closing returns
+/// Focus starts on the menu's first command that can act, or with [`MenuStart::Last`] (Up on the closed toggle) its
+/// last, and the menu names `opener` as where its closing returns
 /// focus, so closing it returns focus to `opener`, and the settings dialog opened from the menu returns it
 /// there too (see the module docs). Nothing opens, and no focus moves, when the user has moved on since `mark`, the
 /// window is inert, the registry does not list the host, or `anchor` is not drawn.
@@ -127,11 +134,14 @@ pub(super) fn toggle(
 /// whenever the host was idle, so it never opened on a greyed command. Here Retry is first too and so is usually where
 /// focus starts; when the host is busy every command but a greyed one may be unavailable, and starting on a greyed
 /// command would put focus where the menu draws no highlight (a greyed item takes none), so the user could not see
-/// where Enter goes. The arrow keys still walk every command, the greyed ones included, as the old menu's did.
+/// where Enter goes. The arrow keys still walk every command, the greyed ones included, as the old menu's did. The
+/// same holds from the other end: Up starts on the last command that can act, which is the destructive group's last
+/// on an idle host. When no command can act, either end falls back to the command drawn there, greyed or not.
 ///
 /// Returns the menu's layer, or `None` when nothing opened.
 pub fn open_menu(
     host: i64,
+    start: MenuStart,
     anchor: Anchor,
     opener: &FocusHandle,
     mark: &Mark,
@@ -147,31 +157,44 @@ pub fn open_menu(
     let rerun_focus = cx.focus_handle().tab_stop(true);
     let update_focus = cx.focus_handle().tab_stop(true);
     let settings_focus = cx.focus_handle().tab_stop(true);
+    let uninstall_focus = cx.focus_handle().tab_stop(true);
+    let remove_focus = cx.focus_handle().tab_stop(true);
+    let delete_focus = cx.focus_handle().tab_stop(true);
     // Focus starts on the first command that can act. Retry is offered in every phase but an environment's deletion
     // and can act whenever the host is idle, so that is almost always Retry, where the old menu always opened; Adopt,
     // which comes next, can act only when Retry can, so it is never where focus starts. While an environment is being
     // deleted (no Retry), it is the first of Re-run, the live Update and Settings that can act. A greyed command (the
     // local host's Update, or its Re-run of a failed Update) is never where it starts while another can act (see
     // `open_menu`'s docs). When none can act (the host is busy), it starts on the first command drawn: Retry, else a
-    // greyed Re-run, Update or Settings.
-    let rerun_drawn = rerun(&view, &offered);
-    let start = if offered.retry == Some(true) {
-        retry_focus.clone()
-    } else if rerun_drawn.is_some_and(|(_, enabled)| enabled) {
-        rerun_focus.clone()
-    } else if offered.update.is_some_and(Update::acts) {
-        update_focus.clone()
-    } else if offered.settings_enabled {
-        settings_focus.clone()
-    } else if offered.retry.is_some() {
-        retry_focus.clone()
-    } else if rerun_drawn.is_some() {
-        rerun_focus.clone()
-    } else if offered.update.is_some() {
-        update_focus.clone()
-    } else {
-        settings_focus.clone()
-    };
+    // greyed Re-run, Update or Settings. Up walks the same commands from the end, so on an idle host it starts on the
+    // destructive group's last (Remove, or the provider's Delete). Adopt and Suspend or Resume are left out: the one
+    // never starts (above), and the other sits between Retry and Adopt, so Up reaches it only when nothing after it
+    // can act and Down never does. Settings can act exactly when the host is idle, as can each destructive command, so
+    // none of those three is where Down starts while Settings, before them, cannot act.
+    let mut walk: Vec<(&FocusHandle, bool)> = [
+        (&retry_focus, offered.retry),
+        (
+            &rerun_focus,
+            rerun(&view, &offered).map(|(_, enabled)| enabled),
+        ),
+        (&update_focus, offered.update.map(Update::acts)),
+        (&settings_focus, Some(offered.settings_enabled)),
+        (&uninstall_focus, offered.uninstall),
+        (&remove_focus, offered.remove),
+        (&delete_focus, offered.delete.map(|(_, enabled)| enabled)),
+    ]
+    .into_iter()
+    .filter_map(|(focus, acts)| acts.map(|acts| (focus, acts)))
+    .collect();
+    if start == MenuStart::Last {
+        walk.reverse();
+    }
+    // Settings is always drawn, so the walk is never empty.
+    let start = walk
+        .iter()
+        .find(|(_, acts)| *acts)
+        .or(walk.first())
+        .map_or_else(|| settings_focus.clone(), |(focus, _)| (*focus).clone());
     let menu = cx.new(|_| HostMenu {
         host,
         opener: opener.clone(),
@@ -181,6 +204,9 @@ pub fn open_menu(
         rerun_focus,
         update_focus,
         settings_focus,
+        uninstall_focus,
+        remove_focus,
+        delete_focus,
         layer: None,
     });
     let layer = layers::open_popover(
@@ -256,6 +282,11 @@ pub(crate) struct HostMenu {
     /// Settings' focus handle, where the menu starts when it offers no Retry and Settings is its first command that
     /// can act, and the last fallback.
     settings_focus: FocusHandle,
+    /// The destructive group's focus handles (Uninstall, Remove, the provider's Delete), where Up on the closed toggle
+    /// starts: on the last of them that is drawn and can act.
+    uninstall_focus: FocusHandle,
+    remove_focus: FocusHandle,
+    delete_focus: FocusHandle,
     /// Set right after the layer opens; what a chosen command closes.
     layer: Option<LayerId>,
 }
@@ -450,6 +481,7 @@ impl Render for HostMenu {
             .description("Forget this host")
             .danger()
             .disabled(!enabled)
+            .focus(&self.remove_focus)
             .on_click(move |_, window, cx| {
                 // The mark of this click, taken before the menu closes. Closing the menu returns focus to its
                 // toggle, which the confirmation then returns focus to when it closes.
@@ -477,6 +509,7 @@ impl Render for HostMenu {
             .description(words.host_delete_help())
             .danger()
             .disabled(!enabled)
+            .focus(&self.delete_focus)
             .on_click(move |_, window, cx| {
                 // As Remove's: the mark of this click, before the menu closes and returns focus to its toggle.
                 let mark = Mark::take(cx);
@@ -497,6 +530,7 @@ impl Render for HostMenu {
             .description("Remove Farhelm from this host, keeping its data")
             .danger()
             .disabled(!enabled)
+            .focus(&self.uninstall_focus)
             .on_click(move |_, window, cx| {
                 // As Update's: the mark of this click, before the menu closes; the confirmation and a refusal open
                 // only through it.
