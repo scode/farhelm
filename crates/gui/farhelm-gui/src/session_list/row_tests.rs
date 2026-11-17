@@ -1,5 +1,6 @@
 //! Tests of what a session row says beyond its title and status mark: its age and timestamp, its last line (host and
-//! directory), its ended wording, the cause a stale row's status is only last-known, the inks of the selected and stale
+//! directory), its ended wording, what a pushed status change does to it (an unclassified status drawing nothing, an
+//! exit replacing the live mark), the cause a stale row's status is only last-known, the inks of the selected and stale
 //! rows, that all of it stays inside the row at the narrowest sidebar, and which technical values are drawn in the
 //! monospace face: the row's, the details bar's beside it, and the program in the row menu's summary.
 //!
@@ -32,7 +33,8 @@ use super::row::{
 };
 use super::status::{self, HostLookup};
 use super::tests::{
-    TEST_NOW, collections, listing, open_main, painted, preferences_state, session,
+    TEST_NOW, change, collections, listing, listing_meta, open_main, painted, preferences,
+    preferences_state, session,
 };
 use crate::main_view::MainView;
 use crate::session_pane::details::{AGE_ID as DETAILS_AGE_ID, COMMAND_ID as DETAILS_COMMAND_ID};
@@ -315,6 +317,96 @@ fn an_exit_without_a_code_says_the_code_is_unknown_on_the_row(cx: &mut TestAppCo
         Some(status::Badge::Ended { line, .. }) => assert_eq!(line.accessible_text(), "Exited"),
         _ => panic!("an exit is an ended badge"),
     }
+}
+
+// ---- Statuses the helm pushes ---------------------------------------------------------------------------------------
+
+/// SPEC.md, "Status": an unclassified status is plumbing, not a status, so a session the supervisor has not classified
+/// yet (one just created) shows none, rather than a guess that the next push contradicts. The old `terminal.spec.ts`
+/// case "create-shows-no-badge-until-a-status-is-classified" (reference commit `24bc0580`) pinned the row's half; the
+/// details bar's half is `details_tests.rs`'s. The live dot is also the row's seen toggle, so drawing none means
+/// offering no toggle either. Specified: a row whose status is unknown paints its title and its directory, and draws
+/// no status mark, no ended line and no seen toggle; a push changing only its directory paints the new directory and
+/// still draws none of them; a push that classifies it running draws its seen toggle.
+#[gpui::test]
+fn an_unclassified_row_draws_no_status_until_a_push_classifies_it(cx: &mut TestAppContext) {
+    let unknown = || session("u").status(json!({"state": "unknown"}));
+    let (mut fake, cx) = open_main(cx, vec![listing(&["u"], &[unknown()])]);
+    let unmarked = |cx: &mut VisualTestContext, directory: &str, step: &str| {
+        let nodes = frame(cx);
+        let texts = row_texts(&nodes, "u");
+        assert!(
+            texts.iter().any(|text| text == "u") && texts.iter().any(|text| text == directory),
+            "{step}: the title and {directory} are painted: {texts:?}"
+        );
+        assert!(
+            node(&nodes, "session-row-u-status").is_none(),
+            "{step}: no ended line"
+        );
+        assert!(
+            node(&nodes, "session-seen-u").is_none(),
+            "{step}: no live mark, so no seen toggle"
+        );
+    };
+    unmarked(cx, "~/src/u", "listed");
+
+    let elsewhere = "/home/user/src/elsewhere";
+    let meta = || listing_meta(&["u"], 1, false);
+    fake.push(change(meta(), &[unknown().cwd(elsewhere)], &[]));
+    test_support::settle(cx);
+    unmarked(cx, "~/src/elsewhere", "moved");
+
+    fake.push(change(meta(), &[session("u").cwd(elsewhere)], &[]));
+    test_support::settle(cx);
+    assert!(
+        node(&frame(cx), "session-seen-u").is_some(),
+        "classified running, it draws its live mark"
+    );
+}
+
+/// The list follows the helm's pushes, so a session stopped elsewhere turns into its ended words on the row the user
+/// is looking at, and a deleted one leaves. The old `terminal.spec.ts` case "list refreshes an existing row from alive
+/// to exited, then drops it on delete" (reference commit `24bc0580`) pinned both; a live row's status change is pinned
+/// elsewhere only from running to idle. Specified: with a running and b open, a push saying a exited with code 0 after
+/// a stop by the user names a's ended line `Exited (code 0) — stopped by user` and takes a's live mark away; a push
+/// removing a drops its row and keeps b's.
+#[gpui::test]
+fn a_pushed_exit_ends_a_live_row_and_a_pushed_removal_drops_it(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![
+            listing(&["a", "b"], &[session("a"), session("b")]),
+            preferences(&["b"], None),
+        ],
+    );
+    assert!(
+        node(&frame(cx), "session-seen-a").is_some(),
+        "the premise: a draws its live mark"
+    );
+
+    let stopped = session("a")
+        .status(json!({"state": "exited", "exit_code": 0}))
+        .annotation("stopped by user");
+    fake.push(change(listing_meta(&["a", "b"], 2, false), &[stopped], &[]));
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert_eq!(
+        node(&nodes, "session-row-a-status").and_then(|node| node.label.as_deref()),
+        Some("Exited (code 0) — stopped by user")
+    );
+    assert!(node(&nodes, "session-seen-a").is_none(), "no live mark");
+
+    fake.push(change(listing_meta(&["b"], 1, false), &[], &["a"]));
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, &format!("{ITEM_ID_PREFIX}a")).is_none(),
+        "a's row went"
+    );
+    assert!(
+        node(&nodes, &format!("{ITEM_ID_PREFIX}b")).is_some(),
+        "b's row stays"
+    );
 }
 
 // ---- Stale rows -------------------------------------------------------------------------------------------------------

@@ -1141,8 +1141,9 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
   session_list/row_marks_tests.rs `every_row_has_one_agent_track_named_once_by_its_description`,
   session_list/row_tests.rs `an_exit_without_a_code_says_the_code_is_unknown_on_the_row` and smoke
   `test_01_the_list_shows_every_seeded_session`.
-- `keyboard activation opens the session, matching a real click`: test to port (raised 2026-11-16); the shared Enter and
-  Space rule is focus_tests.rs `enter_and_space_activate_a_focused_button_and_a_held_key_does_not`.
+- `keyboard activation opens the session, matching a real click`: session_list/tests.rs
+  `enter_or_space_on_a_rows_open_control_opens_it_as_a_click_does`; the shared Enter and Space rule is focus_tests.rs
+  `enter_and_space_activate_a_focused_button_and_a_held_key_does_not`.
 - `alive delete opens an inline confirming state with the is-still-running wording and the session title` and
   `confirming an inline delete prompt deletes the session with exactly one DELETE request`: session_list/menu_tests.rs
   `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it`, and smoke
@@ -1154,7 +1155,9 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
   orchestrator on 2026-11-16): the GPUI app has no markup path. Hidden characters in the question's title are
   prompt_tests.rs `a_title_that_names_a_host_value_is_drawn_and_named_escaped`.
 - `a legal multi-KB, unbroken title keeps the consequence text intact and clips only the title, without disturbing the confirm/cancel buttons`:
-  test to port (raised 2026-11-16).
+  test to port (raised 2026-11-16), waiting for the foundations area's planned height cap for anchored questions (raised
+  2026-11-16): the question wraps its title rather than cutting it (a recorded deviation in `prompt.rs`), and with no
+  cap on its height a title this long pushes Cancel and Confirm out of the window.
 - `an inline confirming state survives a listing refresh; cancel still works afterward` and
   `dispatching cancel and confirm in the same tick never deletes the session`: session_list/menu_tests.rs
   `a_question_answers_once_for_what_it_showed_even_after_the_session_changed`, and prompt_tests.rs
@@ -1167,22 +1170,24 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
 - `an alive-to-exited status change under an open confirm prompt keeps confirming, with the fallback wording`: the
   question stays open, `a_question_answers_once_for_what_it_showed_even_after_the_session_changed`; it keeps its words,
   a deviation below.
-- `a failed listing read while confirming does not clear the confirming state`: test to port (raised 2026-11-16).
-- `create-shows-no-badge-until-a-status-is-classified`: partly, the details bar's half by
-  `the_bar_draws_status_title_host_and_age_in_order_for_each_kind_of_status`; the row's half: test to port (raised
-  2026-11-16).
+- `a failed listing read while confirming does not clear the confirming state`: session_list/menu_tests.rs
+  `a_question_stays_open_and_answers_across_a_failed_listing`.
+- `create-shows-no-badge-until-a-status-is-classified`: the details bar's half by
+  `the_bar_draws_status_title_host_and_age_in_order_for_each_kind_of_status`; the row's half by
+  session_list/row_tests.rs `an_unclassified_row_draws_no_status_until_a_push_classifies_it`.
 - `details preserve ${hostName === undefined ? "a missing legacy host" : "an unknown host " + JSON.stringify(hostName)}`:
   the missing host by session_pane/details_tests.rs `no_host_name_draws_no_host_and_an_unplaced_host_no_mark`; an
-  unknown host's name drawn escaped in the bar and the row: test to port (raised 2026-11-16).
-- `deleting a session with unknown status confirms first, with wording that admits uncertainty`: test to port (raised
-  2026-11-16); the wording is shared with the bulk question, session_list/bulk_tests.rs
-  `a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks`.
+  unknown host's name drawn escaped in the bar and the row by
+  `an_unknown_hosts_name_is_drawn_escaped_in_the_bar_and_the_row`.
+- `deleting a session with unknown status confirms first, with wording that admits uncertainty`:
+  session_list/menu_tests.rs `each_delete_carries_the_precondition_of_what_its_row_showed`; the wording is shared with
+  the bulk question, session_list/bulk_tests.rs `a_bulk_delete_question_lists_each_target_and_cancel_keeps_the_marks`.
 - `stop and delete failures surface in the row's own error line, without disturbing the rest of the list`:
   session_list/lifecycle_tests.rs `a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation` and
   session_list/menu_tests.rs `a_refusal_shows_on_the_row_until_the_next_delete_starts`.
-- `a failed action's error is keyed to its own session, not shared across rows`: partly,
-  `a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation`; another row's success leaving the line alone:
-  test to port (raised 2026-11-16).
+- `a failed action's error is keyed to its own session, not shared across rows`:
+  `a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation`; another row's success leaving the line alone by
+  session_list/lifecycle_tests.rs `a_refusal_stays_on_its_own_row_whatever_another_rows_stops_do`.
 - `stop's in-flight guard keeps navigation and another row's actions usable`:
   `a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actions`.
 - `rapid stop/delete clicks on the same row never let a confirmed delete silently vanish`: session_list/menu_tests.rs
@@ -1193,12 +1198,12 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
   `delete_then_enter_asks_about_a_live_session_and_enter_deletes_it`, components/tests/button.rs
   `enter_or_space_on_a_focused_button_runs_it_once` and focus_tests.rs
   `a_fresh_enter_answers_a_layer_that_opened_after_the_enter_that_closed_one`.
-- `list refreshes an existing row from alive to exited, then drops it on delete`: partly, the removal by
-  `a_pushed_removal_of_the_row_closes_its_menu`; a pushed exit repainting the row: test to port (raised 2026-11-16).
+- `list refreshes an existing row from alive to exited, then drops it on delete`: session_list/row_tests.rs
+  `a_pushed_exit_ends_a_live_row_and_a_pushed_removal_drops_it`, and `a_pushed_removal_of_the_row_closes_its_menu`.
 - `an interrupted session shows its badge and deletes without confirming` and
   `an error session shows its badge with detail and deletes without confirming`: the marks by
   session_list/compact_tests.rs `each_ended_status_draws_its_own_mark_named_and_helped_by_its_full_wording`; the unasked
-  Delete of either: test to port (raised 2026-11-16).
+  Delete of either by session_list/menu_tests.rs `each_delete_carries_the_precondition_of_what_its_row_showed`.
 - `a long error detail wraps completely and compact ended rows stay one line`: session_list/row_tests.rs
   `a_long_title_directory_and_error_stay_inside_the_row_at_the_narrowest_sidebar` and
   `compact_hides_the_last_line_and_the_ended_line_and_shortens_the_row`.
@@ -1214,8 +1219,8 @@ otherwise; the row's Delete question is a prompt beside its row, where the old r
   `a_rows_age_shows_its_bucket_and_its_timestamp_as_hover_help`.
 - `an idle session already seen uses its row's status foreground with the plain word` and
   `an idle session with unseen output uses its row's new-output foreground and accessible words`: the words by
-  `the_dot_toggles_once_without_opening_its_row`; the inks, shown only by the `session-list` golden: test to port
-  (raised 2026-11-16).
+  `the_dot_toggles_once_without_opening_its_row`; the inks by session_list/tests.rs
+  `an_idle_mark_inks_by_whether_its_output_was_seen`, and drawn by the `session-list` golden.
 - `only a reachable running dot pulses in ${palette}`: session_list/tests.rs
   `only_a_running_mark_on_a_connected_host_dims_and_less_when_selected` and `a_stale_running_row_holds_no_pulse`.
 - `truncation banner shows when the listing reports truncated`: session_list/tests.rs
@@ -1350,15 +1355,15 @@ and the launcher's):
   crates/farhelm-helm/src/sessions_tests.rs `every_non_connected_state_refuses_a_session_operation_naming_itself`, and
   the refusal on the row by crates/gui/farhelm-gui/src/session_list/lifecycle_tests.rs
   `a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation`.
-- `a refused Stop leaves the remote agent live after reconnect`: a helm property with no GUI half; a helm test that
-  brings the host back and finds no late Stop: test to port (raised 2026-11-16).
+- `a refused Stop leaves the remote agent live after reconnect`: a helm property with no GUI half;
+  crates/farhelm-helm/src/sessions_tests.rs `a_stop_refused_on_a_down_host_is_not_delivered_when_it_returns`.
 - `reboot-while-open: an attached session settles on the interrupted surface`: card_tests.rs
   `interruption_drops_the_terminal_and_recovery_mounts_a_new_one` and
   crates/gui/farhelm-gui/src/session_pane/unavailable_tests.rs
   `a_host_back_with_the_session_interrupted_hands_focus_to_the_interrupted_card`.
-- `reboot-already-interrupted: opening mounts no terminal, and leaving changes nothing`: partly, card_tests.rs
-  `an_interrupted_session_opens_on_its_card_with_no_terminal`; opening and leaving it sending nothing: test to port
-  (raised 2026-11-16).
+- `reboot-already-interrupted: opening mounts no terminal, and leaving changes nothing`: card_tests.rs
+  `an_interrupted_session_opens_on_its_card_with_no_terminal`, and
+  `opening_and_leaving_an_interrupted_session_asks_the_helm_for_nothing`.
 - `reboot-restart: restart from the interrupted surface attaches the new terminal`: card_tests.rs
   `the_cards_restart_is_one_click_and_its_wait_and_refusal_show_in_the_card` and
   `a_restart_leaves_the_card_on_its_reply_until_the_list_catches_up`.

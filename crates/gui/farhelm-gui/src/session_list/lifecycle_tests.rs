@@ -628,6 +628,58 @@ fn a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation(cx: &mut 
     );
 }
 
+/// Choose Stop from the menu of the row whose menu button is `button`, and answer the one Stop that sends with
+/// `status` and `reply`.
+fn stop_answered(
+    fake: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    button: &'static str,
+    status: u16,
+    reply: Value,
+) {
+    choose(cx, button, "session-menu-stop");
+    let [(id, _, _)] = pending(fake)[..] else {
+        panic!("one Stop was sent from {button}");
+    };
+    fake.reply(id, status, Some(reply));
+    test_support::settle(cx);
+}
+
+/// The operation store files a refusal under its own session, so one row's failure is never another row's, nor
+/// cleared by another row's work. The old `terminal.spec.ts` case "a failed action's error is keyed to its own
+/// session, not shared across rows" (reference commit `24bc0580`) pinned it; this guards the per-session key against
+/// a refactor that shares one slot. Specified: a refused Stop of a shows "Stop: a is busy" on a's row and nothing on
+/// b's; b's Stop succeeding leaves a's line and draws none on b; b's Stop refused shows "Stop: b is busy" on b's row
+/// and leaves a's; a's next Stop, once sent, takes a's line away and leaves b's.
+#[gpui::test]
+fn a_refusal_stays_on_its_own_row_whatever_another_rows_stops_do(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    pending(&mut fake);
+    let lines = |cx: &mut VisualTestContext| {
+        (
+            label_of(cx, "session-outcome-a"),
+            label_of(cx, "session-outcome-b"),
+        )
+    };
+    let a_busy = || Some("Stop: a is busy".to_owned());
+
+    stop_answered(&mut fake, cx, "session-menu-a", 409, json!("a is busy"));
+    assert_eq!(lines(cx), (a_busy(), None), "a's refusal is a's alone");
+    stop_answered(&mut fake, cx, "session-menu-b", 200, json!({}));
+    assert_eq!(lines(cx), (a_busy(), None), "b's success leaves a's");
+    stop_answered(&mut fake, cx, "session-menu-b", 409, json!("b is busy"));
+    let b_busy = Some("Stop: b is busy".to_owned());
+    assert_eq!(lines(cx), (a_busy(), b_busy.clone()), "b's refusal is b's");
+
+    choose(cx, "session-menu-a", "session-menu-stop");
+    assert_eq!(
+        pending(&mut fake).len(),
+        1,
+        "the premise: a's next Stop was sent"
+    );
+    assert_eq!(lines(cx), (None, b_busy), "a's next Stop clears a's alone");
+}
+
 /// SPEC.md, "Lifecycle operations": "A tab that cannot be closed does not prevent the other tabs from closing; the reply
 /// names the failed tabs and the client shows that notice", which the old app put in the row's one slot as "Stop: …"
 /// until the next operation. The completion notes it in the operation store's slot for the session, which must give it

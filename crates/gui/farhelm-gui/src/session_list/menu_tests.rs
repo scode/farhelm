@@ -755,15 +755,30 @@ fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut Tes
 
 /// The precondition is what makes a stale row safe: SPEC.md, "Confirmed 2026-10-01", has the supervisor refuse a
 /// Delete when the session has more alive than the click showed. The old app's `delete-precondition.spec.ts` pinned
-/// three cases. Specified: a running session asks and sends no flag; an ended session with two tabs asks about the
-/// tabs and sends `only_if_agent_ended`; an ended session with no tabs asks nothing and sends `only_if_nothing_alive`
-/// at once.
+/// three cases, and its `terminal.spec.ts` three more (reference commit `24bc0580`): an unknown status confirms first
+/// with words that admit the uncertainty, since the agent may be running after all, while an interrupted session and
+/// one whose agent never started have nothing alive and go at once. Specified: a running session asks and sends no
+/// flag; an ended session with two tabs asks about the tabs and sends `only_if_agent_ended`; an ended session with no
+/// tabs asks nothing and sends `only_if_nothing_alive` at once; a session whose status is unknown asks "Status unknown
+/// — the agent may still be running and will be killed:" above its quoted title, sends nothing until Confirm and then
+/// no flag; an interrupted session and an errored one with no tabs ask nothing and send `only_if_nothing_alive` at
+/// once.
 #[gpui::test]
 fn each_delete_carries_the_precondition_of_what_its_row_showed(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(
         cx,
         snapshot(
-            &[(session("a"), 0), (ended("b"), 2), (ended("c"), 0)],
+            &[
+                (session("a"), 0),
+                (ended("b"), 2),
+                (ended("c"), 0),
+                (session("d").status(json!({"state": "unknown"})), 0),
+                (session("e").status(json!({"state": "interrupted"})), 0),
+                (
+                    session("f").status(json!({"state": "error", "detail": "cannot launch"})),
+                    0,
+                ),
+            ],
             false,
         ),
     );
@@ -790,6 +805,76 @@ fn each_delete_carries_the_precondition_of_what_its_row_showed(cx: &mut TestAppC
             "/api/sessions/c?only_if_nothing_alive=true",
         ]
     );
+    choose_delete(cx, "session-menu-d");
+    assert!(
+        painted(&frame(cx))
+            .iter()
+            .any(|text| text
+                == "Status unknown — the agent may still be running and will be killed:"),
+        "an unknown status admits the agent may be running"
+    );
+    assert_eq!(
+        label_of(cx, "session-delete-title-d").as_deref(),
+        Some("\"d\"")
+    );
+    assert_eq!(deletes(&mut fake), [], "d's Delete waits for Confirm");
+    test_support::click(cx, "prompt-confirm");
+    for (button, what) in [
+        ("session-menu-e", "an interrupted session"),
+        ("session-menu-f", "a session whose agent never started"),
+    ] {
+        choose_delete(cx, button);
+        assert!(!any_layer(cx), "{what} asks nothing");
+    }
+    assert_eq!(
+        paths(&deletes(&mut fake)),
+        [
+            "/api/sessions/d",
+            "/api/sessions/e?only_if_nothing_alive=true",
+            "/api/sessions/f?only_if_nothing_alive=true",
+        ]
+    );
+}
+
+/// A listing the helm could not read is no evidence that anything went, so the list keeps its rows
+/// (`tests::a_failed_listing_keeps_its_rows_and_says_so_until_the_next_listing`), and a question about one of them
+/// must stay too, or the user's answer would be lost to a transient read failure. The old `terminal.spec.ts` case "a
+/// failed listing read while confirming does not clear the confirming state" (reference commit `24bc0580`) pinned it;
+/// `an_open_menu_follows_its_button_through_what_the_helm_pushes` pins the same for an open menu. Specified: with b's
+/// Delete question open, a pushed listing the helm could not read draws the failure line and leaves the question open;
+/// the next listing read takes the line away and leaves it open too; Confirm then sends b's Delete and closes it.
+#[gpui::test]
+fn a_question_stays_open_and_answers_across_a_failed_listing(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    choose_delete(cx, "session-menu-b");
+    assert!(drawn(cx, "prompt"), "the premise: b's question is open");
+
+    let mut failed = listing_meta(&["a", "b"], 2, false);
+    failed.availability = Availability::Unavailable {
+        error: "down".into(),
+    };
+    for (step, meta, fails) in [
+        ("the listing fails", failed, true),
+        (
+            "the listing is read again",
+            listing_meta(&["a", "b"], 2, false),
+            false,
+        ),
+    ] {
+        fake.push(change(meta, &[], &[]));
+        test_support::settle(cx);
+        assert_eq!(
+            label_of(cx, "session-list-error").is_some(),
+            fails,
+            "{step}: the premise: the failure line shows over the failed listing alone"
+        );
+        assert!(drawn(cx, "prompt"), "{step}: the question is still open");
+    }
+    assert_eq!(deletes(&mut fake), [], "nothing was sent before the answer");
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/b"]);
+    assert!(!any_layer(cx));
 }
 
 /// SPEC.md: with **Skip session confirmations** on, a row Delete "runs on the first click through the ordinary action

@@ -7472,6 +7472,87 @@ async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
     }
 }
 
+/// A Stop refused because its host was down is refused for good: it is
+/// not held back and delivered once the host returns, when the user may
+/// long since have decided the agent should keep running.
+///
+/// The test above pins the refusal's words ("nothing was queued"); this
+/// pins the promise they make, the old `terminal-multihost.spec.ts` case
+/// "a refused Stop leaves the remote agent live after reconnect" at
+/// reference commit `24bc0580`, which has no GUI half. The returning host
+/// is a [`silent_supervisor`], which fails on any request the helm sends
+/// it, so a late Stop anywhere in the reconnect or its refresh fails the
+/// test; its observation window starts only once that refresh is done.
+///
+/// Specified: a host with one running session, taken down, refuses a Stop
+/// of it with a 409; brought back and retried, the host reconnects and
+/// refreshes, receives no request at all, and the session lists live (not
+/// stale) and running.
+#[farhelm_testtrace::test]
+async fn a_stop_refused_on_a_down_host_is_not_delivered_when_it_returns() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@returns",
+            rest_harness::HostScript {
+                identity: Some("identity-returns".to_string()),
+                sessions: vec![rest_harness::session("owned", 100)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let (status, body) = post_text(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/owned/stop"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (observe, peer) = silent_supervisor(peer_side);
+    let down = harness
+        .manager
+        .status(host)
+        .expect("the host has a status")
+        .incarnation;
+    harness.fleet.edit(host, |script| {
+        script.reachable = true;
+        script.peer = Some(client_side);
+    });
+    assert!(
+        harness.manager.retry_now(host).await.unwrap(),
+        "the host is registered"
+    );
+    harness.await_refreshed_after(host, down).await;
+
+    // The listing is the harness's script, so these show only that the
+    // host reconnected; what can fail on a late Stop is the silent peer.
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(host, "owned")],
+        "the premise: reconnected"
+    );
+    assert_eq!(
+        value["sessions"][0]["stale"], false,
+        "the premise: reconnected: {value}"
+    );
+    assert_eq!(
+        value["sessions"][0]["status"]["state"], "running",
+        "the premise: reconnected: {value}"
+    );
+    observe.send(()).expect("start post-request observation");
+    peer.await.unwrap();
+}
+
 /// Every one of the six non-connected states must name itself in the
 /// refusal, including the three the integration path above cannot
 /// practically reach.
