@@ -198,12 +198,16 @@ impl HostKind {
         }
     }
 
-    /// Where the host is, as its identity mark says on hover (`Local` or `Remote`), or `None` for a kind this build
-    /// cannot place, which the old row drew no mark for.
+    /// Where the host is, as its identity mark names it (`Local`, `Remote`, or a sandbox's or container's own word), or
+    /// `None` for a kind this build cannot place, which the old row drew no mark for. A sandbox or container is its
+    /// provider's environment ([`HostKind::provider`]), so its mark takes the provider's word, as the session rows in
+    /// it do, rather than `Remote` and its "reached over SSH", which says nothing true of a container on this machine.
     pub(crate) fn locality(self) -> Option<Locality> {
         match self {
             HostKind::Local => Some(Locality::Local),
-            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => Some(Locality::Remote),
+            HostKind::Ssh => Some(Locality::Remote),
+            HostKind::Tensorlake => Some(Locality::Environment(ProviderKind::Tensorlake)),
+            HostKind::Podman => Some(Locality::Environment(ProviderKind::Podman)),
             HostKind::Unrecognized => None,
         }
     }
@@ -212,8 +216,12 @@ impl HostKind {
 /// Where a host is, for its identity mark's word and hover help.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Locality {
+    /// The helm's own machine.
     Local,
+    /// A machine of the user's, reached over SSH.
     Remote,
+    /// A provider's disposable environment: its words are the provider's (`crate::environment_ui::ProviderUi`).
+    Environment(ProviderKind),
 }
 
 /// Whether `host` is the helm's own machine with no supervisor running there: the state SPEC.md ("Topology") answers by
@@ -448,14 +456,16 @@ impl Update {
 ///
 /// The rules, as the old menu had them:
 ///
-/// - **Rerun** of the failed run's operation, unless work is in flight, the host is suspended, the kind offers no
-///   provisioning, or it would rerun an Update on a host running a newer Farhelm (the same downgrade Update is
-///   refused for). A failed uninstall is continued by its own item, never rerun. The rerun of a failed Update is greyed
-///   where the panel cannot update the host (the helm's own machine), as the old menu greyed it; the helm refuses that
-///   Update before any run exists, so only a run an older helm retained can get here.
+/// - **Rerun** of the failed run's operation, unless work is in flight, the host is suspended, its machine is being
+///   deleted or failed to be, the kind offers no provisioning, or it would rerun an Update on a host running a newer
+///   Farhelm (the same downgrade Update is refused for). A failed uninstall is continued by its own item, never rerun.
+///   The rerun of a failed Update is greyed where the panel cannot update the host (the helm's own machine), as the old
+///   menu greyed it; the helm refuses that Update before any run exists, so only a run an older helm retained can get
+///   here.
 /// - **Update** when nothing runs or is in flight, the kind offers provisioning, the host is not the helm's own machine
-///   waiting for the app to start its supervisor, it does not run a newer Farhelm, and it is not suspended. On the helm's own
-///   machine it is [`Update::Greyed`] wherever it would otherwise be offered.
+///   waiting for the app to start its supervisor, it does not run a newer Farhelm, it is not suspended, and its machine
+///   is not being deleted or failed to be. On the helm's own machine it is [`Update::Greyed`] wherever it would
+///   otherwise be offered.
 /// - **Settings** always, chosen only while the host is idle.
 /// - **Uninstall** for a kind the panel uninstalls, chosen only while the host is idle; after a failed uninstall too,
 ///   since choosing it again is how that run is continued.
@@ -488,8 +498,14 @@ pub(crate) fn offers(
     let deleting = matches!(host.state, HostStateView::Deleting { failure: None });
     // The provider's change is under way: Resume shows, unavailable, until it settles.
     let changing = matches!(host.state, HostStateView::TensorlakeChanging { .. });
+    // A machine being deleted, or whose deletion failed, is on its way out: its sessions are being deleted with it
+    // (their actions are unavailable) and Retry finishes the deletion, so installing Farhelm on it again (Update, or a
+    // rerun of its setup or Update) only spends time on a machine the user chose to delete. The old menu offered Update
+    // there; the old row's own rule for Suspend and Resume ("Retry or Delete is what a failed deletion needs") is the
+    // one followed here.
+    let leaving = matches!(host.state, HostStateView::Deleting { .. });
     let rerun = failed_operation(progress)
-        .filter(|_| provisions && !in_flight && !suspended)
+        .filter(|_| provisions && !in_flight && !suspended && !leaving)
         .and_then(|operation| match operation {
             ProvisioningOperation::Add => Some((Rerun::Setup, true)),
             ProvisioningOperation::Update if !too_new => {
@@ -502,7 +518,8 @@ pub(crate) fn offers(
         && provisions
         && !needs_app_supervisor(host)
         && !too_new
-        && !suspended;
+        && !suspended
+        && !leaving;
     let update = update_offered.then(|| {
         if kind.updates_from_panel() {
             Update::Available
