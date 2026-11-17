@@ -222,12 +222,12 @@ linux/text-input-growing--dark.png 20ebfc056dca3cf84d5a9dfa34c6602ed47b7d60
 linux/text-input-growing--light.png 2c7f589a57c5c358eda247c44b03b70f2af42e66
 linux/text-input-line-breaks--dark.png 616ecfec6808b4b4aafc84fb1e8cc5b0ddc94b07
 linux/text-input-line-breaks--light.png 227feb899b41b5f8d7735a7db85d84bccea212f4
-linux/tooltip--dark.png b26d04b7906e9789e74143a49375705161f3199a
-linux/tooltip--light.png f2377f159f84ffd9dd6d61a6e06aec0ef3340cb6
+linux/tooltip--dark.png f7c6e4f3521161d0e2340483586d9874b7619d08
+linux/tooltip--light.png 7b77d3b1cf5ba0a9d61d9d658dfeb15e42cd006f
 linux/tooltip-beside--dark.png f18795197b68d813eb150b448b99b79a049acae2
 linux/tooltip-beside--light.png 892903d24de6c1f3ba2134aca8794ccb50eb857c
-linux/tooltip-paragraphs--dark.png 43abedd0ec04bc0ef7ebda7aeb4614ec9832b275
-linux/tooltip-paragraphs--light.png b7cecf75729a978428ca99af5a23002433fd80b4
+linux/tooltip-paragraphs--dark.png e1fb429fafc03e003c6dc2726ea8302e95c1e996
+linux/tooltip-paragraphs--light.png 2ae40e957518d8d0f810f26d6dfb918010b413d1
 linux/trash-button-empty--dark.png 351fe510bc93c8e02f27e3f9e5165b7f8180a7b3
 linux/trash-button-empty--light.png ec540a57cbd407a14a2d6f3f5b807f4d58593cbd
 linux/trash-button-emptying--dark.png 91556d7e0cce471fbda160d8d6b7021fe8affafb
@@ -242,8 +242,8 @@ linux/version-readout-outcomes--dark.png ab7dff6566bc1e4dbb96651d3835f16e1c56387
 linux/version-readout-outcomes--light.png fb0ee0460745cfe69c86f689b038fbbb34338091
 linux/version-readout-progress--dark.png 5785dba0d53229c64018d55f8c1691588546f6d7
 linux/version-readout-progress--light.png 267678bcf43be46fdb2143bb031e74528edd52ae
-linux/version-readout-tooltip--dark.png aeefb32872edb90f6c755c1af162ebef0348ccce
-linux/version-readout-tooltip--light.png 272ae2711dcc97b40e059d64942817eeddcc0ed9
+linux/version-readout-tooltip--dark.png 8cc2d012d494063a4cb254770f1a42199f466345
+linux/version-readout-tooltip--light.png 9c484ad653d34702cdca6e13300cdd51bb17cb62
 linux/version-readout-update-ready--dark.png 217f0ad55b205daab2ff49057d3fa20df9327c8e
 linux/version-readout-update-ready--light.png f065dc0c509234f55551eea36ffdb6d9ab29324c
 linux/welcome-dialog--dark.png c19ee27856e603f42e40e23247f66b8e17889219

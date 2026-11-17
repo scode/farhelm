@@ -2095,7 +2095,7 @@ fn opening_a_popover_that_lets_the_pointer_through_leaves_the_tooltip_up(cx: &mu
     let tooltip_shown = |cx: &mut VisualTestContext| {
         cx.update(|window, cx| layers::shown_tooltip(window, cx).is_some())
     };
-    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     let at = center(cx, "covered");
     cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), at, window, cx));
     settle(cx);
@@ -3464,7 +3464,7 @@ fn the_pills_are_drawn_above_every_layer_in_the_old_order_and_under_the_tooltip(
     assert!(is_open(cx, dialog), "the premise: the dialog is still open");
 
     // The tooltip shows after the dialog opened, since a layer opening puts it away.
-    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), at, window, cx));
     settle(cx);
     // The driver record is filled as elements are prepared, and GPUI prepares deferred draws in priority order, the
@@ -4221,7 +4221,7 @@ fn a_raised_layers_box_is_drawn_above_the_cards_and_an_ordinary_dialog_under_the
     );
     assert!(focused(cx, &save), "and was Save's");
 
-    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner::default()));
     cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), over, window, cx));
     settle(cx);
     let nodes = frame(cx);
