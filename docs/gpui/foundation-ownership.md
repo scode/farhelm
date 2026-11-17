@@ -199,8 +199,9 @@ Extension points: reported, the whole directory. An area may add, without a requ
 - or keyboard scrolling for a dialog's notices region that holds a question, through `DialogFrame::notices_stop` and a
   label: the region is a stop of its own whenever it holds no tab stop, as a body given `DialogFrame::scroll_stop` is,
   and Page Up, Page Down, Home and End scroll it from a control inside it (`scroll_from_controls`), as the old Trash
-  dialog's global confirmation was scrolled around its focused answer. It is the one region whose controls' keys scroll
-  it; any other region taking keys from a control inside it is a request.
+  dialog's global confirmation was scrolled around its focused answer. Besides it, the one region whose controls' keys
+  scroll it is an anchored question's capped host-value line, which its answers scroll the same way (the prompt's
+  `scroll_from_controls` on the question's card); any other region taking keys from a control inside it is a request.
 
 A drawing-only shared piece (no input, no focus, nothing to name) belongs in the layer too and is exempt from the label,
 hover help and role rule, decided by the migration's orchestrator on 2026-11-14: `pulse.rs` (`pulse_opacity`),

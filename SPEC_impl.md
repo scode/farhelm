@@ -955,7 +955,11 @@ owns it (the launcher's YOLO question in its body, the template editor's leave q
 rules in all three. An inline question is not a layer: its owner decides where it is drawn, and the prompt decides how
 it looks and answers. It takes focus on its starting answer when it opens, unless the user has moved on, and an answer
 returns focus to what held it before, inside the owner's dialog. Escape on it is Cancel and does not reach the owner's
-dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migration's orchestrator on 2026-11-14).
+dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migration's orchestrator on 2026-11-14). An
+anchored question's text stops at about twelve lines so its answers stay in the window, its own words always whole while
+a line naming a host value (a quoted session title) gives up the height and scrolls, with the wheel and with Page Up,
+Page Down, Home and End from the answers, so the keyboard reaches it with no stop of its own (decided by the migration's
+orchestrator on 2026-11-16).
 
 A centered question can be reworded in place while it is open, for SPEC.md's bulk Stop and Delete question, which
 rewords itself when an accepted target changes. Closing it and asking the replacement moved focus back to the starting
@@ -1155,9 +1159,10 @@ since the notices sit inside the footer's padding. Because the region holds a qu
 scrolled by Page Up, Page Down, Home and End from a control inside it, as WebKit scrolled the container around a focused
 button. That is narrower than WebKit, which also scrolled on Up and Down from a button and went on to scroll the
 containers outside once the region reached its end: here the arrows stay the control's and the keys scroll the notices
-only. No other region takes keys from a control inside it. Colors come only from theme tokens, which are copied from the
-old stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons
-pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
+only. The only other region that takes keys from a control inside it is an anchored question's capped host-value line,
+which its answers scroll the same way ("Questions: the prompt"). Colors come only from theme tokens, which are copied
+from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer
+buttons pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
 window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
