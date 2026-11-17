@@ -976,10 +976,10 @@ orchestrator.
 The shortcuts exist in their Command form only in the Mac app, so they were driven once in a real window on the test
 Mac, through the GUI bridge, on 2026-11-15:
 
-- At `1b631967`: ⚡ (Cmd+P), Cmd+1, Cmd+X then 1 and Enter, and Cmd+X then Escape.
-- At `3933498b`: naming after Cmd+P and after Cmd+1; Cmd+X in New's search box giving the apply pill; Cmd+X with a
+- At `851488ee`: ⚡ (Cmd+P), Cmd+1, Cmd+X then 1 and Enter, and Cmd+X then Escape.
+- At `e6b5dad7`: naming after Cmd+P and after Cmd+1; Cmd+X in New's search box giving the apply pill; Cmd+X with a
   selection in the folder field cutting it.
-- At `062c1db8`: the Cmd+J list, its filter, an unseen launch followed by naming, a partial template opening New with
+- At `05f668a0`: the Cmd+J list, its filter, an unseen launch followed by naming, a partial template opening New with
   its banner, nothing with New open, Escape, Enter with no match, and leaving the Hosts panel.
 
 The bridge sends key events as the app's own, so these drives prove the chords' Command forms and their effects, not the

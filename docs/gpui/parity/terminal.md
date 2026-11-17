@@ -411,7 +411,7 @@ inserted, and leaves the page where it was" and "an unsupported drop leaves an e
 event plumbing (a native drop carries files only, an empty one is ignored, and stripping an embedded end marker is the
 supervisor's, `grid_input.rs`); the page-wide half of "a file dropped where no live terminal takes it" (a native window
 has no default action for a drop, so nothing can open the file; the text-field cases went with item H2 of
-docs/gpui/browser-behaviors.md, at commit d352ceb3, since removed); "leaving mid-upload and reopening leaves exactly one
+docs/gpui/browser-behaviors.md, at commit b97cd023, since removed); "leaving mid-upload and reopening leaves exactly one
 set of hooks" (no DOM listeners to stack; its upload half is above); and "a filename and a server error carrying markup
 render as literal text" (the desktop app draws no markup; the strip draws host values through the escaping host-text
 element)
@@ -994,7 +994,7 @@ Tests: 8. Covers: overlap boundary leaves the next key ordinary (${order}, ${key
 
 superseded: none of its cases touches the terminal. Each replays a browser engine's composition event order into a field
 elsewhere (the launcher's template name, the rename dialog, the model combobox, a window shortcut), which is the DOM's
-composition guard that item E6 of docs/gpui/browser-behaviors.md (at commit d352ceb3, since removed) records only and
+composition guard that item E6 of docs/gpui/browser-behaviors.md (at commit b97cd023, since removed) records only and
 the GPUI app does not build. The terminal's committed-text path is covered by
 crates/gui/farhelm-gui/src/terminal/attached/tests.rs `text_an_input_method_commits_reaches_the_program`,
 `a_composition_reaches_the_program_only_when_it_commits` and `a_dead_key_composes_with_the_next_key`,

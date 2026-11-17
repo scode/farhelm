@@ -39,7 +39,7 @@ crops return and the originating checkout records them.
 - The local transport stand-in passed (selection `docs Mac stand-in including cleanup failure`, run
   2fa1d08c-a11e-4e4a-aba9-a21f260538f7). It checked the recorded main revision and PNG checksum, preview with no record
   for edited app source, partial capture with no complete record, and a cleanup failure after a successful fetch.
-- The docs engine and Mac display checks ran against the patch on 85990c44. The rebase onto 1ba2ab0c updated separate
+- The docs engine and Mac display checks ran against the patch on 94bd124e. The rebase onto a34463f6 updated separate
   entries in the check inventory and left the app, scenarios and capture engine unchanged. The later transport fixes
   were checked by the stand-in and final README run. Broader runtime suites were skipped because the patch changes media
   tooling and documentation.

@@ -1,6 +1,6 @@
 # GPUI last mile: launcher and session-pane fixes and the launcher's remaining parity tests
 
-written against main at a260fec5 on 2026-11-17. This is a goal file for an unattended run, executed through the planning
+written against main at 4f6cd2ad on 2026-11-17. This is a goal file for an unattended run, executed through the planning
 system in `plans/AGENTS.md`. You, the executing agent, have none of the conversation that produced it; everything you
 need is here or in the repository files it names. SPEC.md and SPEC_impl.md stay authoritative over anything this file
 says.

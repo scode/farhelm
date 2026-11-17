@@ -4,7 +4,7 @@
 //! Kit supplies the hard part (editing, selection, undo, input methods), which is why SPEC_impl.md keeps Kit for text
 //! inputs. Two things are Farhelm's: the label and hover help every control must have, and Kit's built-in right-click
 //! menu, which is turned off because the old app's release builds had no right-click menu on text (the GPUI
-//! migration's browser behaviors survey, `docs/gpui/browser-behaviors.md` at commit `d352ceb3`, since removed; item B1). The only ways to get an input's state are [`TextInputState::new`],
+//! migration's browser behaviors survey, `docs/gpui/browser-behaviors.md` at commit `b97cd023`, since removed; item B1). The only ways to get an input's state are [`TextInputState::new`],
 //! [`TextInputState::new_masked`], [`TextInputState::new_keeping_line_breaks`] and [`TextInputState::new_growing`], so
 //! no input can skip that.
 //!

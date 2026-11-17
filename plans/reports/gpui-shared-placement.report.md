@@ -25,7 +25,7 @@ None.
 - Passed on the final change: `cargo fmt --all -- --check`,
   `dprint check TODO.md docs/gpui/parity/templates-and-quick-launch.md`, and `git diff --check` before committing. The
   base's foundation check
-  (`git show 7b2dc77e:scripts/check-foundation-paths.py | python3 -I - --repo . --base 7b2dc77e --head b7471ab0`) passed
+  (`git show dc52d486:scripts/check-foundation-paths.py | python3 -I - --repo . --base dc52d486 --head b7471ab0`) passed
   and reported the one expected launcher export.
 - Passed on `e34951bc`: `cargo clippy -p farhelm-gui --all-targets -- -D warnings` and all 793 selected tests from
   `cargo nextest run -p farhelm-gui --lib -E 'test(/^launcher::/) | test(/^templates::/)'` (run

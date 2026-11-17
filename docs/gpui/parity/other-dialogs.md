@@ -438,7 +438,7 @@ the switches are three preference switches in Settings → Notifications under a
 - "initial status baseline does not wait for the first approval reply": superseded. The old sessions listing and
   approval list arrived in separate reads, so either could come first; the pushed snapshot holds both.
 - "touch input resumes real audio and synthetic release stays silent": superseded. It tested the browser's autoplay
-  policy (`docs/gpui/browser-behaviors.md` at commit `d352ceb3`, since removed; item L9), which a native app does not
+  policy (`docs/gpui/browser-behaviors.md` at commit `b97cd023`, since removed; item L9), which a native app does not
   have.
 - The priority among simultaneous events and the switches (`chooseSound`): `sounds::rules::tests`, with
   `the_switches_follow_the_pushed_preference_row` for the owner reading the switches from the pushed row.

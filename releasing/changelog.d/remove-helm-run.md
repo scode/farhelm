@@ -16,7 +16,7 @@ no longer does this for you.
 developers, a desktop app built from a working copy still reads its payload directory from `FARHELM_HELM_PAYLOAD_DIR`;
 an installed app never sees that variable, so it is not worth an entry. The unit name, its directory and the
 `helm run` command line it runs were checked against the code `farhelm helm setup` had before its removal
-(`crates/farhelm-helm/src/units.rs` and `units/farhelm-helm.service.in` at 0de00c7c4^). Neither the installer, which
+(`crates/farhelm-helm/src/units.rs` and `units/farhelm-helm.service.in` at 411249aab^). Neither the installer, which
 refuses Linux, nor the hosts panel, which installs under `~/.local/lib/farhelm`, replaces `~/.local/bin/farhelm` on
 Linux today, so the service breaks when someone replaces that file by hand. That is currently the only way a Linux
 machine gets a newer `farhelm` (the installer refuses Linux and no Linux desktop archive ships), so every Linux setup

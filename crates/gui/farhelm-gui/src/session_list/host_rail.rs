@@ -75,7 +75,7 @@
 //!
 //! NOTE: The old avatar also opened its menu with the keyboard's ContextMenu key. GPUI names no such key on either
 //! platform, so only Shift+F10 is ported; the GPUI migration's browser behaviors survey
-//! (`docs/gpui/browser-behaviors.md` at commit `d352ceb3`, since removed; item B2) lists both.
+//! (`docs/gpui/browser-behaviors.md` at commit `b97cd023`, since removed; item B2) lists both.
 
 pub(crate) mod expansion;
 mod status;

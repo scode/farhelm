@@ -4972,7 +4972,7 @@ Cause: established
 of four on the 18-CPU x86_64 shared development host at a load average around 23, running
 `python3 -B scripts/gui-lifecycle.py` through the recorder in its generic mode (one app run, launched again in order).
 Steps 01 to 07 passed each time and step 08 failed fast on its first check, after a run of about 400 s; it failed alone,
-nothing else in the run did. The first failing run is `de9b328b-fe23-49b3-b1a3-15a8e479be05` (clean commit `db02f02d` of
+nothing else in the run did. The first failing run is `de9b328b-fe23-49b3-b1a3-15a8e479be05` (clean commit `1a97b173` of
 main, Linux 6.8.0-149, Python 3.15.2, C.UTF-8; the recorder scrubbed ambient `FARHELM_*` names and kept only its own
 `FARHELM_TEST_TRACE_DIR`); the other three were a builder's runs, one with the bridge's host-staging change reverted,
 and their ids are unavailable. What else ran on the host is unavailable beyond the load, and so are the Rust toolchain

@@ -2,7 +2,7 @@
 
 NOTE: The landing-step check this file describes (`scripts/check-foundation-paths.py`, with its tests) was removed when
 the GPUI migration ended, so nothing enforces the owned paths and tiers below by script any more; its last copy is at
-commit `d352ceb3`. The table, the tiers and the extension point rules still say who owns what and how to extend it, and
+commit `b97cd023`. The table, the tiers and the extension point rules still say who owns what and how to extend it, and
 the code cites them. The lint exceptions column still mirrors `scripts/check-gui-lints.py`'s own list of owners
 (`EXCEPTION_OWNERS`), which is what that script enforces; editing the column alone changes nothing it checks.
 
