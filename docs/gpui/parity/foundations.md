@@ -169,6 +169,10 @@ scrolling body and its body stop are tested once, on the frame: crates/gui/farhe
   (text-only SSH help scrollports have keyboard entry points)
 - crates/gui/farhelm-gui/src/hosts/remove/tests.rs `the_removal_questions_body_has_a_stop_that_tab_reaches` (remove-host
   scrollports have keyboard entry points)
+- crates/gui/farhelm-gui/src/hosts/settings/tests.rs `tab_walks_down_the_body_while_a_destination_save_is_held`
+  (host-settings scrollports stay reachable while saving: no control goes unavailable while a save runs, so Tab reaches
+  each of the body's controls during a held destination save and scrolls it into view, where the old body took a stop of
+  its own once its controls were disabled)
 
 ### `tests/modal-trap.spec.ts`
 
@@ -255,7 +259,12 @@ partly
   that holds focus. The saves themselves are crates/gui/farhelm-gui/src/hosts/settings/tests.rs
   `escape_while_a_save_is_in_flight_keeps_the_field_open`,
   `a_press_during_another_save_on_the_host_says_why_it_sent_nothing`,
-  `saves_on_the_host_wait_for_each_other_without_locking_the_folder` and `each_permission_saves_its_own_route_and_field`
+  `saves_on_the_host_wait_for_each_other_without_locking_the_folder` and
+  `each_permission_saves_its_own_route_and_field`. The keyboard paths the old cases drove are
+  `tab_walks_down_the_body_while_a_destination_save_is_held` (Tab walks the body's controls down to its last switch
+  while a save is held, each scrolled into view) and `a_space_toggled_switch_keeps_focus_through_its_save` (a switch
+  stays live through its save, so focus never leaves it and Tab goes on to the next switch; the refused destination half
+  is `the_destination_saves_as_typed_and_a_refusal_stays_in_place`)
 - "sending feedback gains a body stop and refusal restores editor entry", its body stop: superseded, decided by the
   migration's orchestrator on 2026-11-16. The old dialog disabled its controls while a send was out, and the body stop
   kept it scrollable; here only Cancel, the header Close and the "Re-use for future feedback" checkbox are disabled,
@@ -272,7 +281,7 @@ and Tab then reaches the contact field (crates/gui/farhelm-gui/src/feedback/test
 
 Tests: 18. Covers: a session's title and open area share its summary card.
 
-partly: crates/gui/farhelm-gui/src/components/tests/hover_help.rs tooltip tests; the session-row cases are in the
+replaced: crates/gui/farhelm-gui/src/components/tests/hover_help.rs tooltip tests; the session-row cases are in the
 sidebar's parity file
 
 - the nine session-row cases, the eight from "a session's title and open area share its summary card" to "moving to the
@@ -305,12 +314,12 @@ sidebar's parity file
   (crates/gui/farhelm-gui/src/layers/tooltip.rs, the second NOTE: every keyboard landing shows help)
 
 "A card follows only its marked step list after every clone" is, in the GPUI app, the host progress card keeping its
-current step in view. Half of it is ported: crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs
+current step in view. crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs
 `a_short_window_previews_only_diagnostics_that_cannot_fit` draws the current step whole in a 300-pixel window
 ([Settings and hosts](settings-and-hosts.md) records it for "An open Update card follows the new current step in a short
-viewport"). Not yet ported: the step staying in view after every clone, that is, as later pushes move the current step
-on, which that test does not do; belongs to settings and hosts ([Settings and hosts](settings-and-hosts.md)), in
-crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs.
+viewport"), and `the_current_step_stays_whole_as_the_run_moves_it` keeps it whole after every clone, in a window too
+short for its steps, as the helm moves that step from late in the run to early. The unmarked list was the old tooltip's
+own markup, with nothing to port.
 
 Deviation, decided by the migration's orchestrator on 2026-11-16: after Escape puts a control's help away, the next
 pointer move over the control brings it back after the delay, where the old app kept it down until the pointer left the
@@ -376,6 +385,15 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
 
 - crates/gui/farhelm-gui/src/session_list/menu_tests.rs `an_open_menu_follows_its_button_through_what_the_helm_pushes`
   (a pushed host registry reorder leaves an open session row menu open and in place)
+- crates/gui/farhelm-gui/src/hosts/menu/tests.rs `an_open_menu_follows_its_row_and_closes_when_its_host_goes` (the six
+  host menu cases, the two that closed the menu inverted: an open host menu stays open and moves with its toggle when a
+  registry reorder moves its row down, and stays in place through a reorder below it and a permutation above it; it
+  moves with its toggle when the details of a row above it grow as a row below shrinks, and stays in place when the rows
+  wholly above or wholly below it trade the lengths of their details; and the remaining case, a host menu closing when
+  the registry stops listing its host)
+
+Not yet ported: "a concealed same-height host reorder leaves the session bell open", with the row bell's other movement
+cases (other dialogs', the bell's owner).
 
 ### `tests/popover-expanded-host-movement.spec.ts`
 
@@ -387,6 +405,16 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
 - crates/gui/farhelm-gui/src/layers_tests.rs `a_popover_follows_its_anchor_and_closes_when_the_anchor_is_gone` (a host
   menu is a popover of the layer manager, so it follows its button when growth above moves it, and closes only when the
   button is gone)
+- crates/gui/farhelm-gui/src/hosts/menu/tests.rs `an_open_menu_follows_its_row_and_closes_when_its_host_goes` (all six
+  cases, the four that closed the menu inverted: an open host menu moves with its toggle when a running Update's step
+  message grows in a row above it, also with the rows kept under a failed registry read's line, when the local host's
+  row above it grows, and when the helm's late refusal of a save under its host's key (as a closed settings dialog's
+  would be) shows under a row above it; it stays in place when a run below it only moves on a step, and when a finished
+  run above it changes only what the row does not draw: its run id, a step's id, paths and explanation)
+
+The old local case grew the manual setup command under the local row. The GPUI row shows the helm's dial failure and a
+fixed remedy instead (the settings and hosts area's decision of 2026-11-14, `hosts.rs` module docs), so the line that
+grows there is the dial failure.
 
 ### `tests/popover-identity-movement.spec.ts`
 
@@ -400,6 +428,18 @@ whose session or anchor is gone closing, is ported by the tests listed at the to
   crates/gui/farhelm-gui/src/layers_tests.rs `a_popover_follows_its_anchor_and_closes_when_the_anchor_is_gone` (content
   above a row growing, as a wrapping pinned title or a growing activity track does, moves an open row menu with its
   button and leaves it open)
+- crates/gui/farhelm-gui/src/session_list/seen_tests.rs
+  `the_menu_item_follows_the_seen_state_and_sends_the_stamp_or_null` (pin wrapping preserves its own actions menu: a
+  push to the menu's own row keeps the menu open and relabels its command)
+- crates/gui/farhelm-gui/src/session_list/attention/tests.rs
+  `menus_below_close_when_the_list_moves_and_stay_through_progress` and
+  crates/gui/farhelm-gui/src/session_list/menu_tests.rs `an_open_menu_follows_its_button_through_what_the_helm_pushes`
+  (pin wrapping below, compact pin, one identity contribution exchange wholly above, and the same displayed title with a
+  new raw spelling: a push that moves nothing leaves the menu open and in place, as does a permutation above it)
+- unpinned delete style, with compact off and on: nothing to port, since the header's Delete cannot start while a row
+  menu is open: a press on it is a press outside the menu, which closes it first, and the Delete shortcut does nothing
+  over a menu (crates/gui/farhelm-gui/src/session_list/menu_tests.rs
+  `the_shortcut_does_nothing_with_no_session_open_or_a_menu_open`); the old test focused the header's button from script
 
 ### `tests/popover-template-movement.spec.ts`
 

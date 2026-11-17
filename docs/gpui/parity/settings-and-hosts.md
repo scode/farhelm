@@ -952,8 +952,9 @@ dialog and shows under its row (`a_refused_plan_after_the_user_moved_on_opens_no
 Deviations); the avatar as the menu's opener is `session_list/host_rail/avatar_menu_tests.rs`
 `a_secondary_click_on_an_avatar_opens_its_hosts_menu_beside_it`. "An open Update card follows the new current step in a
 short viewport" is ported: the card keeps its current step whole however short the window
-(crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs `a_short_window_previews_only_diagnostics_that_cannot_fit`),
-and the running status opens it from the Hosts row (`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
+(crates/gui/farhelm-gui/src/hosts/progress/card/tests.rs `a_short_window_previews_only_diagnostics_that_cannot_fit`, and
+`the_current_step_stays_whole_as_the_run_moves_it` as the step moves), and the running status opens it from the Hosts
+row (`hovering_the_running_status_shows_the_card_beside_the_sidebar`).
 
 ## `tests/provisioning.spec.ts` and `tests/terminal-multihost.spec.ts`, Uninstall
 
@@ -1196,9 +1197,10 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
 - The look: the goldens `host-menu`, `host-settings-dialog` and `host-settings-dialog-end`
   (`crates/gui/farhelm-gui/src/goldens/hosts.rs`).
 
-Not ported here: `modal-layout.spec.ts`'s host settings cases, whose margins and scrolling body are the shared dialog
-frame's (its own tests and goldens), and whose busy-body Tab stop has no counterpart, since no control here goes
-unavailable while a save runs.
+Not ported here: `modal-layout.spec.ts`'s host settings margins and scrolling body, which are the shared dialog frame's
+(its own tests and goldens). Its busy-body Tab stop has no counterpart, since no control here goes unavailable while a
+save runs; that the body stays reachable during a save is `tab_walks_down_the_body_while_a_destination_save_is_held`
+([Foundations](foundations.md), `tests/modal-layout.spec.ts`).
 
 ## `tests/tensorlake-recipes.spec.ts`, replaced
 
