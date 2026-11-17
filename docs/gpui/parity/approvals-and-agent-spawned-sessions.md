@@ -4,51 +4,92 @@ Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
 sections: Agent-spawned sessions, Agents and environments, One GUI at a time.
 
-The end-to-end steps named below are `scripts/gui-e2e-smoke.py`'s; the running app's card is the `app-approval-card`
-scene in `docs/gpui/screenshot-scenes.json`, compared with the old app's pictures at wide, narrow and minimum sizes.
+The end-to-end steps named below are `scripts/gui-e2e-smoke.py`'s; steps 60 and 62 to 64 ran in a full smoke on the test
+Mac on 2026-11-16. The running app's card is the `app-approval-card` scene in `docs/gpui/screenshot-scenes.json`,
+compared with the old app's pictures at wide, narrow and minimum sizes.
 
 ### `tests/approval-layout.spec.ts`
 
 Tests: 28. Covers: explicit host add preserves edited fields and waits for its own answer receipt.
 
-replaced, apart from the deviations below: what every card kind shows and offers, links (the whole URL as data, which
-answers each kind offers), the running prompt, environment launch, host edit and host remove cards, the From line's
-isolated identity and raw Copy ID (`approvals::model_tests`); the expanded card's drawing, its notes and its alert
-(`approvals::card_tests`, goldens `approval-card` and `approval-card-narrow`); the answers, the 700 ms pause after every
-change (so a double click cannot answer the next card), the first answer winning and the late notice
-(`approvals::answers_tests`); placement below the session's tabs, the cap and the whole-window fallback, the
-oldest-first expanded card and the waiting headers, one selection kept across changes, arrival taking no focus with
-Enter answering nothing, answering over an open dialog, the late notice, every kind keeping its heading and answers
-inside the region in 960, 650 and 320 pixel panes with long texts at their minima, and a long queue scrolling in its own
-list below the card and the notice (`approvals::region_tests`); the card staying answerable over the quick switcher and
-its focus outliving a closing dialog (`layers_tests`, and end-to-end step 63); an agent's host add through the Add host
-dialog: prefilled and labelled, opening is not approval, Allow before any probe with the edited destination, only the
-helm's 204 accepted, a refused, unconfirmed or late Allow probing nothing, Deny on Cancel and Escape, the setup
-confirmation always asked (`approvals::host_add_tests`, golden `host-add-dialog-agent`, end-to-end step 64); Tunnel and
-open in the Mac app, its warning opening over another dialog and staying when that dialog closes
-(`approvals::tunnel_tests`). Two cases are superseded: "a link approval opens synchronously with user activation" was a
-browser popup rule, and the window opens no link itself (the helm does, after Allow), which also covers "an invalid URL
-on a card is neither opened nor answered as allowed" on the window's side; "only the winning host add window probes its
-captured edited fields" keeps its single-window half (`approvals::host_add_tests`), the rest gone with one GUI per helm.
-Two cases hold by construction, with no test of their own: "a session without a terminal anchors approval below its top
-row" (the region anchors to the session pane's terminal box, which the pane draws whether or not a terminal is attached)
-and "a requester session title stays on one line with its full hover text" (the card truncates the title and gives it
-the whole title as hover help; the goldens show it). Driven for real on the test Mac on 2026-11-15 against a remote
-host: a session there asking to open its own loopback page showed a link card, whose Tunnel and open asked the tunnel
-warning and, on Allow, opened a tunnel the Mac read the remote page through, the request ending and the agent told it
-opened. A second press while the warning is up could not be driven there: the Mac's screen fits the window so small that
-the warning covers the button
+partly, apart from the deviations below, with the parts not yet tested named in the bullets: what every card kind shows
+and offers, links (the whole URL as data, which answers each kind offers), the running prompt, environment launch, host
+edit and host remove cards, the From line's isolated identity and raw Copy ID (`approvals::model_tests`); the expanded
+card's drawing, its notes and its alert (`approvals::card_tests`, goldens `approval-card` and `approval-card-narrow`);
+the answers, the 700 ms pause after every change (so a double click cannot answer the next card), the first answer
+winning and the late notice (`approvals::answers_tests`); placement below the session's tabs, the cap and the
+whole-window fallback, the oldest-first expanded card and the waiting headers, one selection kept across changes,
+arrival taking no focus with Enter answering nothing, answering over an open dialog, the late notice, every kind keeping
+its heading and answers inside the region in 960, 650 and 320 pixel panes with long texts at their minima, and a long
+queue scrolling in its own list below the card and the notice (`approvals::region_tests`); the card staying answerable
+over the quick switcher and its focus outliving a closing dialog (`layers_tests`, and end-to-end step 63 for the first);
+an agent's host add through the Add host dialog: prefilled and labelled, opening is not approval, Allow before any probe
+with the edited destination, only the helm's 204 accepted, a refused, unconfirmed or late Allow probing nothing, Deny on
+Cancel and Escape, the setup confirmation always asked (`approvals::host_add_tests`, golden `host-add-dialog-agent`,
+end-to-end step 64); Tunnel and open in the Mac app, its warning opening over another dialog and staying when that
+dialog closes (`approvals::tunnel_tests`).
+
+- The card over other dialogs, by `layers_tests`:
+  `a_press_on_an_approval_card_answers_it_and_leaves_the_quick_switcher_open` ("approval remains answerable while the
+  quick switcher is open", with `region_tests::a_card_is_answerable_over_an_open_dialog`),
+  `an_approval_card_stays_usable_over_a_dialog` (a press and Enter on Allow answer it over an ordinary dialog) and
+  `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card` (focus on Allow outlives the dialog
+  closing).
+- "host add preserves a manual draft and defers only an explicit open", "explicit host add waits behind the quick
+  switcher" and "explicit host add opens stay ordered and omit expired queued requests" are the host add deviation
+  below: the GPUI app refuses the open with a reason where the old app queued it. `approvals::host_add_tests`
+  `another_dialog_or_the_pause_keeps_the_dialog_from_opening` (another dialog open: the open is refused and that dialog
+  stays) and `an_answer_or_a_host_change_in_flight_keeps_the_dialog_from_opening` pin the refusal. With no queue, there
+  is no order or expiry to test. Not yet tested: the first case's draft, a destination and alias typed into the ordinary
+  dialog surviving both an agent's add arriving and its refused open.
+- "host add answer <status> starts zero probes", for 200, 409 and 410:
+  `approvals::host_add_tests::a_refused_unconfirmed_or_late_allow_probes_nothing`, which answers with each of the three
+  in turn. What a 410 does to the dialog is a deviation below.
+- "a link denial opens nothing" and "a preapproved link dismiss opens nothing":
+  `approvals::model_tests::link_cards_offer_the_answers_their_kind_and_platform_allow` (a preapproved link's Open and
+  Dismiss are its Allow and Deny). That the window opens no link on either is the supersession below.
+- "placement follows the empty pane, session mount, and approval remount": `region_tests`
+  `the_region_is_centered_below_the_terminal_area_and_capped` (the placement arithmetic) and
+  `the_region_draws_only_while_a_request_waits`. Not yet tested: a mounted session pane handing the region its anchor in
+  a window, and the remount half's GPUI form, a new card placed afresh after the region has had nothing left to draw (it
+  forgets its measurements then).
+- "a short viewport keeps approval content and answers reachable": `region_tests`
+  `a_short_pane_gives_the_region_the_window_and_a_tiny_one_scrolls_it` and
+  `a_short_window_gives_the_region_the_whole_window_without_waiting` pin where the region goes and when it scrolls as a
+  whole. Not yet tested: the old case's other half, scrolling the region with the wheel and then pressing Deny.
+- Superseded: "a link approval opens synchronously with user activation" was a browser popup rule, and the window opens
+  no link itself (the helm does, after Allow), which also covers "an invalid URL on a card is neither opened nor
+  answered as allowed" on the window's side.
+- Superseded: "only the winning host add window probes its captured edited fields" keeps its single-window half
+  (`approvals::host_add_tests::add_answers_allow_with_the_edited_destination_then_probes`), the rest gone with one GUI
+  per helm.
+- Superseded: "a session without a terminal anchors approval below its top row". `SessionPane::render` in
+  `crates/gui/farhelm-gui/src/session_pane.rs` draws the region's anchor (`approvals::region::track_terminal_area`) in
+  the terminal area box whatever the box holds: the terminals, the interrupted or retired card, the unavailable card, or
+  nothing.
+- Not yet tested: "a requester session title stays on one line with its full hover text". The card truncates the title
+  and gives it the whole title as hover help, but no test asserts it.
+- The goldens `approval-card`, `approval-card-narrow` and `host-add-dialog-agent` are scenes of one `#[ignore]`d golden
+  test, which needs the headless renderer and runs through `scripts/check-gui-goldens.py` rather than in ordinary test
+  runs.
+- Driven for real on the test Mac on 2026-11-15 against a remote host: a session there asking to open its own loopback
+  page showed a link card, whose Tunnel and open asked the tunnel warning and, on Allow, opened a tunnel the Mac read
+  the remote page through, the request ending and the agent told it opened. A second press while the warning is up could
+  not be driven there: the Mac's screen fits the window so small that the warning covers the button.
 
 ### `tests/agent-relay.spec.ts`
 
 Tests: 4. Covers: agent relay: an agent clones its own session across hosts.
 
-superseded: the spec ran with every permission on, so it showed no card; what it showed of the GUI, a relayed session's
-row appearing live, end-to-end steps 60 and 62 show for spawns. The relay itself (cloning with the source's own command,
-the target's refusal reaching the agent verbatim, a host named by its alias and not by its raw destination once aliased)
-is the Rust suites': `crates/farhelm/tests/e2e/agent_relay.rs` and `agent_listing_real_stack.rs`, and `farhelm-helm`'s
-`agent_requests` tests (`clone_sends_the_source_launch_verbatim`,
-`a_create_refusal_from_the_target_reaches_the_agent_verbatim`, the alias resolution tests)
+replaced: the relay itself (cloning with the source's own command, the target's refusal reaching the agent verbatim, a
+host named by its alias and not by its raw destination once aliased) is the Rust suites':
+`crates/farhelm/tests/e2e/agent_relay.rs` and `agent_listing_real_stack.rs`, and `farhelm-helm`'s `agent_requests` tests
+(`clone_sends_the_source_launch_verbatim`, `a_create_refusal_from_the_target_reaches_the_agent_verbatim`, the alias
+resolution tests). The spec ran with every permission on, so it showed no card; what it showed of the GUI, a relayed
+session's row appearing live, end-to-end steps 60 and 62 show for spawns
+
+- The alias resolution tests: `create_resolves_by_alias_once_one_is_set` and
+  `create_on_the_raw_destination_is_refused_once_aliased`.
 
 ### `tests/spawn.spec.ts`
 
@@ -62,6 +103,15 @@ turning the host's setting on is `approvals::answers_tests` for the window's ans
 real-Claude case is dropped: it needs vendor credentials and network, which no automated run has, and a real agent's
 request reaches the window the way the fake agent's does
 
+- The window's Always allow sending `always_allow`:
+  `approvals::answers_tests::a_refusal_of_a_waiting_request_stays_on_its_card`.
+- The parent filter: `crates/farhelm-helm/src/sessions_tests.rs` `every_filter_dimension_narrows_the_list_on_its_own`.
+- "explicit inheritance must preserve the parent's own command": `crates/farhelm/tests/e2e/structured_launches.rs`
+  `explicit_spawn_inheritance_relays_the_parents_stored_launch` and the supervisor's
+  `an_inheriting_spawn_is_relayed_with_the_sessions_own_launch` (the parent's launch relayed to the helm), and
+  `agent_requests::an_inherited_spawn_creates_the_supplied_launch_on_its_own_host` (the helm creating the child with
+  it).
+
 ## Approval cases in other areas' specs
 
 These cases sit in spec files whose rows belong to other areas' parity files; this area ported them.
@@ -74,11 +124,32 @@ replaced: the card naming the repository and exact folder (`approvals::model_tes
 (end-to-end steps 60 and 63), and the keyed recovery (`crates/farhelm/tests/e2e/github_checkouts.rs`,
 `agent_create_checkout_replays_and_templates_use_fresh_admission`)
 
+- The repository fact ("managed checkout of", "GitHub: <repo>"):
+  `approvals::model_tests::every_kind_shows_exactly_the_old_cards_content`.
+- Steps 60 and 63 answer Allow and Deny on spawns, not on a managed checkout's create.
+
 ### `tests/provisioning.spec.ts`
 
-Case: host retirement releases before removal and preserves approval focus.
+Case: host retirement releases before removal and preserves approval focus: Remove success.
 
-replaced: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
+partly: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
+
+- Its approval-focus half: focus put on a card's Allow while the host's Remove dialog waits on its removal stays on
+  Allow when the dialog closes. The test closes a generic dialog through its opener, which stands for a dialog closing
+  because its subject went. It does not drive a real host removal, and it puts focus on Allow by pressing it, which
+  answers the card, where the old test focused Allow without answering and asserted that no answer went out. The removal
+  itself is Settings and hosts' half of the case.
+
+### `tests/provisioning.spec.ts`
+
+Case: host retirement releases before removal and preserves approval focus: authoritative Settings disappearance.
+
+partly: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
+
+- Its approval-focus half: focus put on a card's Allow while the host's Settings dialog is open stays on Allow when the
+  dialog closes because the host has gone from the helm's list. The same test covers it, with the same limits: no real
+  host disappearance, and focus put on Allow by a press that answers the card. The dialog's own close is Settings and
+  hosts' half of the case.
 
 ### `tests/provisioning.spec.ts`
 
@@ -91,7 +162,10 @@ replaced: `approvals::host_add_tests` (`an_agents_add_always_asks_the_setup_conf
 
 Case: SSH command arrival preserves an independent approval owner.
 
-replaced: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
+partly: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
+
+- The test puts focus on Allow by a press that answers the card, where the old test focused Allow without answering and
+  asserted that no answer went out.
 
 ### `tests/keyboard-scroll.spec.ts`
 
@@ -100,11 +174,27 @@ Case: an approval's complete initial prompt is keyboard-scrollable.
 replaced: the card's long texts are named scroll boxes (`approvals::card_tests`), which scroll from the keyboard
 (`components::ScrollBox`'s tests)
 
+- The scroll box tests: `crates/gui/farhelm-gui/src/components/tests/scroll_box.rs`
+  `an_approvals_complete_initial_prompt_is_keyboard_scrollable` and
+  `a_labelled_box_is_a_tab_stop_with_its_role_and_every_scroll_key_scrolls_it`.
+- The card's named boxes: `approvals::card_tests::the_card_paints_its_badge_heading_count_from_line_facts_and_answers`.
+
 ### `tests/modal-trap.spec.ts`
 
 Case: Rename wraps Close through Save while a real approval remains usable.
 
 replaced: `layers_tests`, `an_approval_card_stays_usable_over_a_dialog`
+
+### `tests/terminal-replay-rename.spec.ts`
+
+Case: held rename success preserves an unrelated focus destination (its approval half: a card arrives while a submitted
+Rename is held, Allow is focused, Rename closing leaves focus on Allow, and Enter answers).
+
+partly: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card` (focus put on Allow
+while a dialog is open stays there when the dialog closes, though the test puts it there by a press that answers the
+card) and `an_approval_card_stays_usable_over_a_dialog` (Enter on a focused Allow answers it, pressed there while the
+dialog is still open). Not yet tested: Enter after the dialog has closed sending exactly one Allow, as the old test
+checked. The held Rename itself is Sidebar and session view's half of the case
 
 ### `docs-shots/visual-review.spec.ts`
 
@@ -126,6 +216,10 @@ docs media
   open dialog and the request. The old app queued the open behind the current dialog, in click order, dropping one whose
   request expired, and held it while an ordinary add's setup submission was out, so that a refused setup could still
   reopen its draft. The GPUI app has no dialog that waits for the dialog slot yet; with one, this becomes the old queue.
+- On a 410 to an agent host add's Allow, the Add host dialog closes at once and the region's late-answer notice explains
+  why: the request is no longer waiting, so the dialog has nothing left to answer. The old form instead stayed up
+  showing "no longer waiting" in itself until the request left the list (`hosts/add.rs`; the 410 test answers after the
+  request has already left the list, so it does not yet tell the two apart).
 - The old app held every tunnel action behind one claim, from the press through the consent save to the card's answer,
   and a card pressed meanwhile said "Another tunnel action is still waiting". While the old warning was up its backdrop
   covered every card, and a card's own buttons were disabled during its own action, so the old words appeared only while
