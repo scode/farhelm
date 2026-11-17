@@ -609,9 +609,10 @@ check "Linux never downloads" [ ! -e "$HOME_LINUX-download" ]
 check "Linux has no stdout report" [ -z "$OUT" ]
 LINUX_REFUSAL="$(cat <<'MESSAGE'
 ❌ This installer only supports macOS for now.
-   Linux is supported for running a helm and session hosts; only this installer is
-   limited, and that will be fixed. If you want to install on Linux, please open an
-   issue and it will be prioritized: https://github.com/scode/farhelm/issues
+   Linux remains supported for session hosts, and the Farhelm app runs on
+   Linux with its own helm, but no Linux build of the app is released yet.
+   If you want to install on Linux, please open an issue and it will be
+   prioritized: https://github.com/scode/farhelm/issues
 MESSAGE
 )"
 check "Linux refusal matches the approved text" [ "$ERR" = "$LINUX_REFUSAL" ]
@@ -2445,12 +2446,13 @@ check "F15: full-path uninstall command is printed" contains "$(cat "$WORKDIR/f1
 # installer-mirror-var-drops-https-no-signature).
 #
 # Why this matters: the installer used to honour FARHELM_RELEASE_BASE_URL,
-# the helm's documented mirror setting, dropping its HTTPS-only pinning and
-# checking no signature. An operator who exported it for the helm got an
-# unauthenticated install. Spec: only the test-only
-# FARHELM_INSTALL_TEST_BASE_URL redirects the installer; plain HTTP is
-# accepted there only for a loopback fixture; the helm's variable has no
-# effect on the installer at all.
+# the standalone helm's documented mirror setting, dropping its HTTPS-only
+# pinning and checking no signature. An operator who exported it for the
+# helm got an unauthenticated install. The helm and its setting are gone,
+# but the variable can still be exported in someone's shell. Spec: only the
+# test-only FARHELM_INSTALL_TEST_BASE_URL redirects the installer; plain
+# HTTP is accepted there only for a loopback fixture; the old helm variable
+# has no effect on the installer at all.
 # ===========================================================================
 echo
 echo "== M1-M2: installer download source =="
@@ -2465,7 +2467,7 @@ check "M1 (non-loopback http test URL): no install state is created" [ ! -e "$IN
 
 # A curl double records the URL it was asked for and fails, so the check
 # needs no network and proves where the installer would have downloaded
-# from with only the helm's variable set.
+# from with only the old helm variable set.
 TOOLS_M2="$WORKDIR/toolchain-m2"
 mkdir -p "$TOOLS_M2"
 cp -a "$TOOLCHAIN_FULL"/. "$TOOLS_M2/"

@@ -32,11 +32,11 @@ absolutely catastrophically major mistake with huge user impact."
   the local Mac because the app starts its supervisor detached, so quitting the app leaves the supervisor running (the
   helm lives in the app and stops with it). Nothing restarts that local Mac supervisor if it crashes while the app is
   closed, and nothing starts it at login; opening the app does.
-- **Helm**: the single control-plane process. The user runs exactly one helm, normally the one the desktop app embeds,
-  on the Mac or a Linux desktop; a standalone helm (see Topology) serves no UI. It holds the host registry, connects
-  directly to each registered supervisor, aggregates their sessions, and serves the UI through its API. The helm holds
-  no authoritative session state — supervisors are the authority — but its registry and its last-known view of each
-  host's sessions persist across helm restarts, so a helm bounce neither affects sessions nor empties the list.
+- **Helm**: the single control-plane process. The user runs exactly one helm, the one the desktop app embeds, on the Mac
+  or a Linux desktop; there is no other way to run one (see Topology). It holds the host registry, connects directly to
+  each registered supervisor, aggregates their sessions, and serves the UI through its API. The helm holds no
+  authoritative session state — supervisors are the authority — but its registry and its last-known view of each host's
+  sessions persist across helm restarts, so a helm bounce neither affects sessions nor empties the list.
 - **Client**: a UI surface attached to the helm — the desktop app's window. A helm accepts one UI at a time (see
   [One GUI at a time](#one-gui-at-a-time)). Killing a client, or the helm itself, never affects a session.
 - **Session**: the unit of supervision. A session has a working directory, a launch, a title, and a live terminal. A
@@ -82,10 +82,10 @@ process. Keeping that split is what leaves a remote helm possible later.
 There is no web interface: Farhelm serves no browser UI. A remote helm, meaning a desktop app attached to a helm on
 another machine, is not offered now. Decided by the maintainer on 2026-11-12, when the GUI moved to a native app on
 macOS and Linux: "a large part of the point is to drop the entire browser mess", while "we DO still want to keep the
-'helm' concept ... we may still support running a remote helm". A helm started without the desktop app, by
-`farhelm helm run` or through the systemd units `farhelm helm setup` writes on a Linux machine, still manages its hosts
-and serves agents and the command line, but no UI attaches to it. Whether that standalone helm stays is an open
-question.
+'helm' concept ... we may still support running a remote helm". A helm runs only inside the desktop app. The standalone
+helm, started without the app by `farhelm helm run` or through the systemd units `farhelm helm setup` wrote on a Linux
+machine, served no UI and was removed together with both commands: the maintainer decided on 2026-11-13, and confirmed
+on 2026-11-16, that it should go.
 
 NOTE: The Linux desktop app is new. How it runs and keeps its local supervisor is not specified yet; the Mac desktop
 app's rules below apply to the Mac.
@@ -93,18 +93,17 @@ app's rules below apply to the Mac.
 The desktop app has the same capabilities on both platforms: terminal, attachments, lifecycle operations, host
 registration, and launch-template management in the helm-owned catalog.
 
-The Mac is not architecturally special: it runs a normal supervisor that any helm — the app's embedded one, or one on a
-Linux host — can register and drive, and the helm that registers it then owns it (see the ownership rule below). The
-supervisor is a plain command-line process on every platform: `farhelm supervisor run` in a terminal and you have a
-working host — that path always exists, on any platform, and is how you try Farhelm without a bunch of fuss. System
-integration is layered on top of that, not baked in. On Linux, v1 ships that layer as user-level systemd units
-(auto-start at boot, which the durability promises assume) — never system units, never root. The Mac desktop app starts
-its local supervisor and leaves it running when it quits; nothing starts that local supervisor at login or restarts it
-after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead gets a per-user launchd
-job, which runs the supervisor right away and restarts it after a crash. After a reboot, reconnecting over SSH does not
-load the job; choosing Update in the host menu starts it. Automatic loading at screen login is unverified. The desktop
-app has no helmless mode in v1: launching it alongside a standalone helm would start a second helm — the unsupported
-state.
+The Mac is not architecturally special: it runs a normal supervisor that any helm — the Mac app's embedded one, or the
+one the desktop app embeds on a Linux machine — can register and drive, and the helm that registers it then owns it (see
+the ownership rule below). The supervisor is a plain command-line process on every platform: `farhelm supervisor run` in
+a terminal and you have a working host — that path always exists, on any platform, and is how you try Farhelm without a
+bunch of fuss. System integration is layered on top of that, not baked in. On Linux, v1 ships that layer as user-level
+systemd units (auto-start at boot, which the durability promises assume) — never system units, never root. The Mac
+desktop app starts its local supervisor and leaves it running when it quits; nothing starts that local supervisor at
+login or restarts it after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead
+gets a per-user launchd job, which runs the supervisor right away and restarts it after a crash. After a reboot,
+reconnecting over SSH does not load the job; choosing Update in the host menu starts it. Automatic loading at screen
+login is unverified. The desktop app has no helmless mode in v1: it always runs its own helm.
 
 Remote provisioning: the helm can set up a remote supervisor itself, in the style of `herdr --remote`. There is at most
 one supervisor per user per host, and adding a host is discovery-first: the helm connects over SSH and looks for that
@@ -116,66 +115,65 @@ launchd job it will write. On Linux it says the supervisor runs persistently and
 lingering is refused); on a remote Mac it names the job's label, says it runs now and restarts after a crash, and states
 the measured reboot behavior. The user may choose to skip this setup question for later additions from the same helm;
 that choice is shared by every client and does not change discovery of an already-running supervisor. Passwordless SSH
-is the prerequisite on the HOST side, plus, on the helm's own machine, access to the configured release source
-(get.farhelm.io by default) or a staged payload directory (a developer-facing, best-effort option; see
-[Supported host setup](#supported-host-setup)). With that in place, provisioning and everyday operation just work out of
-the box — reaching supervisors needs no port forwards, no opened firewall ports, and no address configuration beyond the
-SSH destination. Downloads go directly to that configured release-asset source — get.farhelm.io by default, whose
-archive links redirect to the project's GitHub releases; neither it, GitHub, nor a configured mirror is a relay or
-rendezvous service for Farhelm sessions or connections, and the no-relay guarantee below still holds. Nothing the
-supervisor does requires root: install, updates, and operation all happen as the SSH user (user-level systemd on Linux
-or launchd on a remote Mac, files in user-owned directories). If some optional step cannot be done without privileges on
-a given host, provisioning says so and continues without it rather than escalating. Before touching the host for initial
-setup, the helm states exactly what it is about to do in concrete terms — the files it will place and where, the
-background service it will create, and its persistence behavior — and proceeds only on confirmation. Remote updates use
-the same one-use plan mechanism behind the same authority, but the user's Update click or explicit automatic-update
-opt-in is the authorization: no plan is shown for confirmation. Update never downgrades a host: it installs the helm's
-own build, so a host whose supervisor reports a newer build is refused with both versions named, and the user updates
-the helm instead. It also refuses a host whose supervisor reports a database schema newer than the helm's build can
-open, which happens after a development build ran there; that host needs a build at least that new. A supervisor below
-this release's upgrade floor is also refused, with a manual recovery remedy: stop its Farhelm supervisor service, then
-remove its dedicated Farhelm installation directory. The remedy names the executable the host reported; its parent may
-be a shared or custom binary directory, in which case only Farhelm-owned files are removed and the shared directory
-stays. Then remove the host from Farhelm and set it up again. Its data directory can stay, without a promise that the
-new release can use every feature's old data, or the user can delete it too if they accept losing it. While an update is
-running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then shows the current
-step, completed-step count, and client-measured elapsed time inline in the status spot. Hovering that status opens the
-same card as a working host in the attention list: the host's mark and name, operation and completed-step count with
-elapsed time, every step with its status and explanation, the current step highlighted, and any degraded or failed
-step's reason. Connection detail follows the steps while the host is not connected, including the attempt and last
-connection error, and the run's own message follows when present. In a short window the step list shrinks, keeping the
-current step in view as it changes. If connection detail or a run message cannot fit beside a readable current step,
-only the oversized text becomes a preview of whole lines from its end and the card says `Full details in Hosts`.
-Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host identity gives access to
-the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the shared hover delay and
-beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label. The sidebar is too
-narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the animated indicator
-with a static one. Remote binary upload appears as a separate step before installation, so the user can tell when
-network transfer is still underway. The row and its hover use the helm's readable names for the same steps in the plan,
-with completed work checked green, the running step pulsing amber (static under reduced motion), pending work grey,
-unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success returns the
-status spot to its normal label and leaves the row folded unless global details are on. Failure or an uncertain outcome
-still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update fails or has an
-uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is opened or a later
-run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated successful action
-does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never opens by itself. The
-Hosts header's `Update all` action makes the same authorized Update request for each remote host whose individual Update
-action is available at the click. A host already busy with setup or another run is skipped rather than queued for a
-later update; the local host is excluded. Each remote host keeps its own validation, progress, and result, so one
-failure does not hide or delay the others. Having an available Update action does not itself mean the host needs an
-update: the rail's update badge and the attention list's Update rows require a compatible older build or a lower
-protocol, as well as an available remote Update action.
+is the prerequisite on the HOST side, plus, on the helm's own machine, access to get.farhelm.io or a staged payload
+directory (a developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in
+place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
+opened firewall ports, and no address configuration beyond the SSH destination. Downloads go directly to get.farhelm.io,
+whose archive links redirect to the project's GitHub releases; there is no other download source to configure. Neither
+get.farhelm.io nor GitHub is a relay or rendezvous service for Farhelm sessions or connections, and the no-relay
+guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all happen as
+the SSH user (user-level systemd on Linux or launchd on a remote Mac, files in user-owned directories). If some optional
+step cannot be done without privileges on a given host, provisioning says so and continues without it rather than
+escalating. Before touching the host for initial setup, the helm states exactly what it is about to do in concrete terms
+— the files it will place and where, the background service it will create, and its persistence behavior — and proceeds
+only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but the user's
+Update click or explicit automatic-update opt-in is the authorization: no plan is shown for confirmation. Update never
+downgrades a host: it installs the helm's own build, so a host whose supervisor reports a newer build is refused with
+both versions named, and the user updates the helm instead. It also refuses a host whose supervisor reports a database
+schema newer than the helm's build can open, which happens after a development build ran there; that host needs a build
+at least that new. A supervisor below this release's upgrade floor is also refused, with a manual recovery remedy: stop
+its Farhelm supervisor service, then remove its dedicated Farhelm installation directory. The remedy names the
+executable the host reported; its parent may be a shared or custom binary directory, in which case only Farhelm-owned
+files are removed and the shared directory stays. Then remove the host from Farhelm and set it up again. Its data
+directory can stay, without a promise that the new release can use every feature's old data, or the user can delete it
+too if they accept losing it. While an update is running, its host row stays folded and shows `Updating…` until a
+progress snapshot is available, then shows the current step, completed-step count, and client-measured elapsed time
+inline in the status spot. Hovering that status opens the same card as a working host in the attention list: the host's
+mark and name, operation and completed-step count with elapsed time, every step with its status and explanation, the
+current step highlighted, and any degraded or failed step's reason. Connection detail follows the steps while the host
+is not connected, including the attempt and last connection error, and the run's own message follows when present. In a
+short window the step list shrinks, keeping the current step in view as it changes. If connection detail or a run
+message cannot fit beside a readable current step, only the oversized text becomes a preview of whole lines from its end
+and the card says `Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts
+through the host identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The
+card uses the shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the
+status label. The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
+replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
+so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
+the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
+motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
+reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
+Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
+setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
+until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
+and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
+Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
+remote host whose individual Update action is available at the click. A host already busy with setup or another run is
+skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
+progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
+itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
+older build or a lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
-updates, even with no interface open. Enabling it also considers hosts that already need an update. The local host, busy
-hosts and newer builds are excluded; busy hosts are reconsidered when their work finishes. Progress and failure are the
-ordinary Update progress and failure in Hosts. A failed automatic attempt is not retried until that host's connection
-incarnation changes after failure or the helm restarts; switching the preference off and on does not clear this memory.
-A planning refusal starts no run: the helm logs the reason and remembers that failed attempt under the same no-retry
-rule. The badge remains, and a manual Update from the host menu can show the refusal. There is no separate automatic
-failure surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not
-cancel an accepted run.
+updates, while Farhelm is open, even with its window in the background. Enabling it also considers hosts that already
+need an update. The local host, busy hosts and newer builds are excluded; busy hosts are reconsidered when their work
+finishes. Progress and failure are the ordinary Update progress and failure in Hosts. A failed automatic attempt is not
+retried until that host's connection incarnation changes after failure or the helm restarts; switching the preference
+off and on does not clear this memory. A planning refusal starts no run: the helm logs the reason and remembers that
+failed attempt under the same no-retry rule. The badge remains, and a manual Update from the host menu can show the
+refusal. There is no separate automatic failure surface. Turning the switch off prevents new automatic starts, including
+planning still in flight; it does not cancel an accepted run.
 
 V1 provisioning targets Linux hosts with a usable systemd user manager on x86_64 or aarch64, and Apple-silicon Macs over
 SSH. An Intel Mac has no payload and cannot be set up this way. On Linux the distribution is not a requirement — nothing
@@ -230,10 +228,9 @@ or uninstalling and shows the step count, current step and elapsed time. Success
 for the step and its reason. It refuses, naming them, while the host has any session that has not ended (an unknown
 status counts) or any open terminal tab, and checks again at confirmation. A session or tab started on the host while
 removal runs may be ended with it: the confirmation-time check is sufficient, though an implementation may check more
-strictly. It also refuses a host it cannot check because it is not connected, a host whose supervisor unit
-`farhelm helm setup` manages there (that host's own `farhelm uninstall` removes it), a supervisor running from anywhere
-other than Farhelm's lib directory, and a lib directory that is itself a symbolic link (removing it would remove only
-the link), naming where the link points; a link further up the path, such as a linked home directory, is not refused.
+strictly. It also refuses a host it cannot check because it is not connected, a supervisor running from anywhere other
+than Farhelm's lib directory, and a lib directory that is itself a symbolic link (removing it would remove only the
+link), naming where the link points; a link further up the path, such as a linked home directory, is not refused.
 Removing the host from the list, which never touches the host, stays available whatever its layout, and the refusal
 points to it as the way to stop using the host without uninstalling; when the host list already shows incompatible
 versions, an unverified or changed identity, or two entries reaching the same machine, uninstall's refusal also explains
@@ -253,16 +250,16 @@ machine remains the prerequisite for remote hosts, and the helm handles connecti
 on no network port except IPv4 loopback ports claimed by a helm for an environment host's configured recipe tunnels.
 Those listeners belong to the claiming connection and close when it ends. The helm limits these claims to environment
 hosts. The supervisor's transport-independent protocol does not know the provider or host kind. The helm's own machine
-is a host without registration: its supervisor (the desktop app's managed local one, or one running beside a Linux helm)
-is reached locally, no SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts,
-minus SSH: a supervisor that answers is discovered and registered like any other, and the panel never touches the unit
-file that runs it. What the panel does NOT do on the helm's own machine is install one. The desktop app starts that
-machine's supervisor itself whenever it opens and none answers, so the local row tells the user to quit Farhelm and open
-it again instead of offering to install, and the panel never builds a second installation beside the app's. Until a
-supervisor exists the local host appears with that instruction, not as a phantom unreachable host; any detail the helm
-gives is shown as evidence, never as the instruction. There is no supervisor-to-supervisor connection or transitive
-aggregation. A container host's supervisor does not relay the container's protocol. The helm sees exactly the hosts in
-its registry, including the session-owned hosts described under [Sandbox sessions](#sandbox-sessions) and
+is a host without registration: its supervisor (on the Mac, the desktop app's managed local one) is reached locally, no
+SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts, minus SSH: a supervisor
+that answers is discovered and registered like any other, and the panel never touches the unit file that runs it. What
+the panel does NOT do on the helm's own machine is install one. The desktop app starts that machine's supervisor itself
+whenever it opens and none answers, so the local row tells the user to quit Farhelm and open it again instead of
+offering to install, and the panel never builds a second installation beside the app's. Until a supervisor exists the
+local host appears with that instruction, not as a phantom unreachable host; any detail the helm gives is shown as
+evidence, never as the instruction. There is no supervisor-to-supervisor connection or transitive aggregation. A
+container host's supervisor does not relay the container's protocol. The helm sees exactly the hosts in its registry,
+including the session-owned hosts described under [Sandbox sessions](#sandbox-sessions) and
 [Container sessions](#container-sessions). Those entries participate in ordinary host management and session
 aggregation, with their permanent rail icons hidden. The machine running the helm must therefore be able to reach every
 registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
@@ -441,9 +438,7 @@ operation. The supervisor's one-viewer-per-session rule (Terminal experience) is
 unchanged: an attach from a new view detaches the previous view's terminals in that session, which is a takeover within
 one helm, not between helms.
 
-The helm is a plain command-line process too, with the same layering as supervisors: on Linux, v1 ships user-level
-systemd units for it, so a reboot of the helm's machine brings the helm back; in the desktop app, the helm lives and
-dies with the app.
+The helm is not a process of its own: it lives and dies with the desktop app, on the Mac and on Linux.
 
 Launch templates belong to the helm: one catalog applies to every host the helm manages, while a command a template
 carries still has to exist on the host that runs it. Farhelm ships no built-in templates; the agent types themselves are
@@ -671,9 +666,9 @@ running/idle status, a settled scope decision rather than a detection gap. Provi
 requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with three v1 carve-outs:
-transport, bringing up the helm's own machine, and recovery from a release below the upgrade floor. Bringing up a
-standalone Linux helm machine is `farhelm helm setup`, run once there: that machine's systemd units are written by one
-owner rather than by whichever surface got there first, so the helm never installs a supervisor on its own machine (see
+transport, bringing up the helm's own machine, and recovery from a release below the upgrade floor. Bringing up the
+helm's own machine means installing the desktop app there (on Linux, running it from a build; see
+[Installation and updates](#installation-and-updates)); the helm never installs a supervisor on its own machine (see
 Topology). On provisionable hosts, install and updates are the helm's job (over the user's SSH access); what may
 legitimately require manual host-side work is that same transport, on hosts provisioning does not cover. Everything else
 — session operations, template management, directory browsing — must work from the client. SSH otherwise remains an
@@ -693,10 +688,11 @@ users can find both the removal procedure and its safety guarantees.
 ### Installation and updates
 
 The standalone installer temporarily supports only a Mac installing the desktop app, on Apple silicon (including
-Rosetta). This limits only the installer: Linux remains supported for running a helm and session hosts, which the helm
-provisions over SSH itself. Other operating systems are refused before any download or filesystem change. The desktop
-app also runs on Linux, but there it has no installer and no updates and is run from a build: the maintainer decided on
-2026-11-15 to defer Linux installation and updates for the desktop app beyond the GPUI migration.
+Rosetta). This limits only the installer: Linux remains supported for session hosts, which the helm provisions over SSH
+itself, and on Linux the desktop app runs its own helm, as it does on the Mac. Other operating systems are refused
+before any download or filesystem change. On Linux the desktop app has no installer and no updates and is run from a
+build: the maintainer decided on 2026-11-15 to defer Linux installation and updates for the desktop app beyond the GPUI
+migration.
 
 The installer runs as the current user without root. On the Mac, `~/Applications/Farhelm.app` is the whole installation
 and, for now, the only user-facing way to launch Farhelm; `~/.local/bin/farhelm` is only a link into it, for using
@@ -812,9 +808,9 @@ get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release ar
 plain-HTTP redirects), and checks archives against those checksums, but it does not itself verify the release signature
 the helm checks when provisioning other hosts, because a fresh machine has no pinned key or verifier to check it with. A
 release get.farhelm.io does not publish is refused, with no fallback to another source; releases from before
-get.farhelm.io existed are not published there. The helm's release mirror setting (`FARHELM_RELEASE_BASE_URL`) has no
-effect on the installer; a mirror that is safe for the helm, which verifies signatures, would not be safe for a download
-that does not.
+get.farhelm.io existed are not published there. `FARHELM_RELEASE_BASE_URL`, the release mirror setting the standalone
+helm had, has no effect on the installer, and a value still exported in a shell must never redirect an install: a mirror
+that was safe for the helm, which verifies signatures, would not be safe for a download that does not.
 
 Installation follows the same ownership rule as removal: a file is not destroyed merely because its name matches
 something the installer writes. The installer changes `Farhelm.app` only when it can show it built it, and replaces
@@ -847,23 +843,19 @@ installation directory or a custom one. It must identify the installation being 
 whichever files happen to be in the default directory are the intended targets. Ambiguous ownership or an unsupported
 installation must produce an actionable refusal before changes begin.
 
-The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
-`--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
-`--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions (including stopping the desktop
-app's own supervisor; see [Operator prerequisites and failure behavior](#operator-prerequisites-and-failure-behavior))
-and any blockers without changing files, stopping processes, or disabling services. Confirmed 2026-10-11: those blockers
-are ownership, recognition and ambiguity refusals, not predictions about locks held at preview time, such as an open
-desktop app or a running installer. The preview warns that an install or upgrade running now makes uninstall refuse; the
-real run refuses with a clear message for any held lock.
+The command shows the files it intends to remove and the data it will retain, then asks for confirmation. `--yes` skips
+that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires `--yes`
+rather than proceeding implicitly. `--dry-run` reports the proposed actions (including stopping the desktop app's own
+supervisor; see [Operator prerequisites and failure behavior](#operator-prerequisites-and-failure-behavior)) and any
+blockers without changing files or stopping processes. Confirmed 2026-10-11: those blockers are ownership, recognition
+and ambiguity refusals, not predictions about locks held at preview time, such as an open desktop app or a running
+installer. The preview warns that an install or upgrade running now makes uninstall refuse; the real run refuses with a
+clear message for any held lock.
 
-Removal covers the recognized installer-created macOS app bundle and its terminal link, the installed CLI on Linux, and
-Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the existing setup
-marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. A unit edited by
-hand is outside this recognition guarantee and may be attributed to another installation; see
-[Supported host setup](#supported-host-setup). Those services are stopped and disabled before their executables are
-removed. Operator-authored services and service drop-ins are not deleted; retained integration files are reported. The
-user must stop services outside Farhelm's removal authority. Basic uninstall does not analyze effective service
-overrides or inspect their processes.
+Removal covers the recognized installer-created macOS app bundle and its terminal link, and the installed CLI on Linux.
+It stops, disables and removes no systemd user service. That includes the units `farhelm helm setup` wrote on a Linux
+machine before it was removed: uninstall leaves them in place, and the installation documentation says how to remove
+them by hand. The user stops any service that runs Farhelm.
 
 Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
 logs, cached payloads, repository caches, and prepared checkouts inside the configured checkout roots. Completion names
@@ -917,44 +909,43 @@ again, and rerunning uninstall finishes it. The CLI remains available until the 
 an ordinary partial failure does not remove the user's retry command. Successful removal does not promise that the
 now-removed command remains invocable.
 
-Uninstall running at the same time as installation, updates, setup, desktop startup, or session creation falls under
+Uninstall running at the same time as installation, updates, desktop startup, or session creation falls under
 [Concurrent and interrupted runs](#concurrent-and-interrupted-runs) like any other overlap: the outcome must be correct,
 and refusing is acceptable. Uninstall takes the locks those operations already use (on macOS the installer's
 installation lock on `~/Applications` together with the lock folder older installers use, and the supervisor's and
-helm's state-directory locks; on Linux the installer's install-directory lock, and setup's unit-directory lock when
-setup's services or unit directory exist) after confirmation, and then re-checks what it is about to remove under them;
-a lock already held, or a plan that changed since confirmation (including a different app put at the same place),
-refuses with nothing removed. Only the installation lock is waited for, a few seconds; the others are taken without
-waiting. An install or update that starts while uninstall holds the locks refuses in its own way, and so does a setup
-whenever uninstall holds setup's lock.
+helm's state-directory locks; on Linux the installer's install-directory lock) after confirmation, and then re-checks
+what it is about to remove under them; a lock already held, or a plan that changed since confirmation (including a
+different app put at the same place), refuses with nothing removed. Only the installation lock is waited for, a few
+seconds; the others are taken without waiting. An install or update that starts while uninstall holds the locks refuses
+in its own way.
 
 ### Concurrent and interrupted runs
 
-Confirmed 2026-09-28: the installer, `farhelm helm setup`, and `farhelm uninstall` must always leave a correct, defined
-state when a run is interrupted at any point (Ctrl-C, a closed terminal, a crash, a reboot) and when two runs of these
-commands overlap, including uninstall overlapping desktop startup or session creation.
+Confirmed 2026-09-28: the installer and `farhelm uninstall` must always leave a correct, defined state when a run is
+interrupted at any point (Ctrl-C, a closed terminal, a crash, a reboot) and when two runs of these commands overlap,
+including uninstall overlapping desktop startup or session creation.
 
 A correct state is one of these: the run completed; the run refused or failed before changing anything; or the run
 stopped partway and the command its message names, normally the same command run again, either finishes the job or
 restores the previous installation. Refusing is always acceptable, including refusing a second run while another holds
 the installation, and refusing to continue until the user runs the recovery command. Doing the wrong thing is not
 acceptable: deleting or replacing a file the command does not own, reporting a result that did not happen, leaving
-binaries, the macOS app bundle and their ownership records disagreeing with each other, leaving the helm and supervisor
-services configured against different state directories, or leaving a state that no documented command recovers from.
-Reach this with the simplest mechanism that works, and prefer a refusal to machinery that tries to carry on.
+binaries, the macOS app bundle and their ownership records disagreeing with each other, or leaving a state that no
+documented command recovers from. Reach this with the simplest mechanism that works, and prefer a refusal to machinery
+that tries to carry on.
 
 Confirmed 2026-10-11: a run killed between two adjacent atomic writes may leave state that rerunning the same command
 repairs. That is an accepted stopped-partway state and the expected recovery, even if the intermediate state is one of
-the wrong outcomes above, such as the helm and supervisor services configured against different state directories.
+the wrong outcomes above.
 
 ### Acceptance coverage
 
 On macOS, automated tests must exercise the actual installer and installed uninstall command through fresh installation
 and update followed by removal. They must verify paths containing spaces and quotes, dry-run and confirmation behavior,
 retained data and unrelated files, foreign artifacts and symlinks, the stopping prerequisite, and partial-failure
-retries. While the installer refuses Linux, end-to-end acceptance coverage of installer-made Linux installations,
-including service-failure ordering during removal, is absent. This does not remove Linux uninstall behavior or its
-lower-level tests. Concurrent lifecycle operations are outside this initial acceptance scope.
+retries. While the installer refuses Linux, end-to-end acceptance coverage of installer-made Linux installations is
+absent. This does not remove Linux uninstall behavior or its lower-level tests. Concurrent lifecycle operations are
+outside this initial acceptance scope.
 
 Filesystem-refusal tests must verify the diagnostic's evidence against the fixture that caused the refusal. An assertion
 that output merely says "unsafe" or names an artifact does not establish this contract.
@@ -2365,7 +2356,7 @@ the respective confirmation is skipped. Turning one off restores that confirmati
 as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch explains the
 current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts also has
 **Update remote hosts automatically**, off unless explicitly enabled, with help explaining that the helm updates remote
-hosts as soon as updates are available, with no window open, and never updates its own machine this way. This shared
+hosts as soon as updates are available while Farhelm is open, and never updates its own machine this way. This shared
 choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the last
 known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts and
 sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
@@ -2798,8 +2789,8 @@ all hosts. Excess alerts and full-queue alerts are dropped; the next permitted a
 the rate cap, but there is no later summary alert. Failed sends are logged without the topic, token or title and
 dropped, never retried. Sending does not hold up host refreshes or terminal interaction. **Send test** bypasses these
 background limits and waits for one send under the short timeout. Anyone who knows an ntfy.sh topic can read it; keep
-the topic private. A standalone helm sends without a window open. The desktop app's helm stops when its window closes,
-so desktop-only alerts need that window open, though it can be in the background.
+the topic private. The desktop app's helm stops when its window closes, so alerts need that window open, though it can
+be in the background.
 
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
 will then be unable to resume it, it says so on that session as a notification rather than only in a log. In this
@@ -3149,25 +3140,25 @@ whatever the agent renders is what you see. There is no composer, no message abs
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
   mismatch warning. The offer applies to `localhost` and its subdomains, `127.0.0.0/8`, `::1`, `0.0.0.0` and `::`, not
   LAN addresses or other single-label names. A tunnel listens on the Mac's `127.0.0.1` at a port the operating system
-  picks, never the remote port number, so a remote service cannot take an address a Mac program or a standalone helm
-  uses. The opened URL uses that IPv4 literal and the actual local port, preserving the rest of the URL. Bytes travel
-  over Farhelm's existing helm-to-supervisor connection to the supervisor's loopback; this is raw TCP, including
-  WebSockets, with no HTTP rewriting. Named localhost and wildcard addresses try IPv4 then IPv6 loopback; an explicit
-  loopback IP is used as given. Sessions on the local host have no offer, and a standalone helm refuses tunnel requests.
-  Before the first tunnel opens, the user must accept the security warning in Security below. This choice is a shared
-  helm preference, off until accepted; Settings shows it and can turn it off, closing existing tunnels. A later tunnel
-  request then needs the warning again. Each tunnel is kept only in helm memory until the session is deleted, Farhelm
-  quits, or the user closes it. Restarting or stopping the agent does not close it. Reopening a link for the same
-  session and loopback target reuses its tunnel. A host disconnect fails new connections until the host returns; an
-  existing TCP stream is never replayed. A distinctively colored pill beside the terminal tabs shows the local-port →
-  host-port mapping for one listener, or a count for several. Both ports remain visible; a long host name ellipsizes,
-  with the full mapping in its tooltip and accessible name. Opening the pill shows a list of mappings with a close
-  button for each listener and Close all. Close all attempts the listeners shown at activation in order, continuing
-  after failures and retaining failed listeners with their reasons. The list and close actions stay available while the
-  host is disconnected. No pill appears when no listeners remain. Read and close failures appear in a dismissible notice
-  below the top row without adding a permanent row, including when no pill is present; refreshing the list does not
-  dismiss a close failure. Escape closes the list and returns focus to the pill; Tab follows its ordinary controls and
-  leaving the list closes it without reclaiming focus. This feature does not forward login callbacks.
+  picks, never the remote port number, so a remote service cannot take an address a Mac program uses. The opened URL
+  uses that IPv4 literal and the actual local port, preserving the rest of the URL. Bytes travel over Farhelm's existing
+  helm-to-supervisor connection to the supervisor's loopback; this is raw TCP, including WebSockets, with no HTTP
+  rewriting. Named localhost and wildcard addresses try IPv4 then IPv6 loopback; an explicit loopback IP is used as
+  given. Sessions on the local host have no offer. Before the first tunnel opens, the user must accept the security
+  warning in Security below. This choice is a shared helm preference, off until accepted; Settings shows it and can turn
+  it off, closing existing tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in
+  helm memory until the session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does
+  not close it. Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new
+  connections until the host returns; an existing TCP stream is never replayed. A distinctively colored pill beside the
+  terminal tabs shows the local-port → host-port mapping for one listener, or a count for several. Both ports remain
+  visible; a long host name ellipsizes, with the full mapping in its tooltip and accessible name. Opening the pill shows
+  a list of mappings with a close button for each listener and Close all. Close all attempts the listeners shown at
+  activation in order, continuing after failures and retaining failed listeners with their reasons. The list and close
+  actions stay available while the host is disconnected. No pill appears when no listeners remain. Read and close
+  failures appear in a dismissible notice below the top row without adding a permanent row, including when no pill is
+  present; refreshing the list does not dismiss a close failure. Escape closes the list and returns focus to the pill;
+  Tab follows its ordinary controls and leaving the list closes it without reclaiming focus. This feature does not
+  forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
@@ -4030,8 +4021,7 @@ asked.
 
 Without the matching permission, Allow and Always allow open the link after the card's ordinary pause. The window opens
 nothing itself: its embedded helm opens the link through the desktop's native opener after approval. With the matching
-permission on, the desktop opens immediately without a card. Dismiss refuses the request. A standalone helm never opens
-a browser on the server.
+permission on, the desktop opens immediately without a card. Dismiss refuses the request.
 
 For a loopback URL from a remote session in the Mac app, the card offers **Tunnel and open** first, alongside the
 ordinary raw-link answer. It names the remote host and port, and explains that opening directly reaches the Mac instead.
@@ -4553,8 +4543,7 @@ a known_hosts file in the helm's state directory, never in the user's own.
   it barely exists for the desktop app: its embedded helm holds the port for the app's whole life, and the app exits
   when its helm ends, so no window is left talking to a port the helm gave up. `docs/security.md` records the reasoning.
   Nothing that establishes the desktop app as a client may rely on anything but the credential the app's own process
-  holds; hardening that keeps other software from passing for the app goes through that credential. A standalone helm
-  (see Topology) accepts no UI connection.
+  holds; hardening that keeps other software from passing for the app goes through that credential.
 - **Helm to supervisor**: ordinary remote supervisors use the user's SSH access. Containers use a Podman exec pipe, with
   SSH to the container host when remote. The helm's own machine's supervisor uses local IPC. These all carry the same
   supervisor protocol. Passwordless SSH authenticates with the user's keys, with the Tensorlake exception below.
@@ -4587,8 +4576,8 @@ Further requirements:
   local ports through SSH forwarding on a connection that stays up around the clock. Explicit localhost tunnels are a
   separate, consented raw-TCP relay inside Farhelm's protocol, from the Mac to the session host's loopback only.
   Accepted: right after an upgrade, a helm started within a minute of the previous version stopping (the desktop app
-  reopened, or a helm run by hand) can attach to a shared ssh connection the previous version left open, and port
-  forwards that connection set up last until it closes.
+  reopened) can attach to a shared ssh connection the previous version left open, and port forwards that connection set
+  up last until it closes.
 
   Environment recipe tunnels are raw-TCP relays over the host's existing supervisor connection, in the other direction.
   The supervisor listens on the configured environment IPv4 loopback ports, and the helm connects only to destinations
@@ -4629,10 +4618,9 @@ Further requirements:
 
 The first usable version is complete when all of the following pass:
 
-1. From the helm on the Mac (desktop app) — with helm-side access to the configured release source (get.farhelm.io by
-   default) or a staged payload directory — given nothing but passwordless SSH to a fresh Ubuntu host, provision it in
-   one action: supervisor installed and started without root, host registered, sessions operable with no further network
-   setup.
+1. From the helm on the Mac (desktop app) — with helm-side access to get.farhelm.io or a staged payload directory —
+   given nothing but passwordless SSH to a fresh Ubuntu host, provision it in one action: supervisor installed and
+   started without root, host registered, sessions operable with no further network setup.
 2. Create and launch an official Claude Code session in one action, in an existing `jj` workspace where Git reports
    detached HEAD.
 3. Create a local (Mac) session the same way; both appear in one list.
@@ -5252,16 +5240,17 @@ restricting a file right after creating it, whether or not this spec names that 
 complexity on defence in depth against a user's broad umask, such as closing the brief window between creating a file
 and restricting it.
 
-On a Linux host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) has one owner. A
-unit without `farhelm helm setup`'s managed-by marker belongs to provisioning: ADD and UPDATE may replace it, and
-uninstall may remove it. A unit that carries the marker belongs to setup on that host: provisioning refuses to touch it,
-both when planning and at the moment of writing or removing, and says setup manages it there, the same hand-off the
-helm's own machine gets. A hand-written unit under that exact name on a host the user asks Farhelm to provision is the
-user's to move aside first; provisioning does not try to tell it apart from its own.
+On a Linux host provisioned from the hosts panel, the supervisor unit (`farhelm-supervisor.service`) belongs to
+provisioning: ADD and UPDATE may replace it, and uninstall may remove it. That includes a unit an earlier release's
+`farhelm helm setup` wrote there, marked `# managed-by: farhelm helm setup`, which provisioning treats like any other
+since that command was removed; the panel's uninstall applies its usual refusals, which normally refuse such a host
+because its supervisor runs a `farhelm` from outside Farhelm's lib directory. A hand-written unit under that exact name
+on a host the user asks Farhelm to provision is the user's to move aside first; provisioning does not try to tell it
+apart from its own.
 
-A remote Mac uses the unmarked `io.farhelm.supervisor` launchd job instead. Its loaded plist must be the planned plist
-before setup replaces a loaded job or uninstall stops it. The desktop-app refusal above keeps those operations from
-sharing the app's installation. A hand-edited plist has the same best-effort status as a hand-edited systemd unit.
+A remote Mac uses the `io.farhelm.supervisor` launchd job instead. Its loaded plist must be the planned plist before
+setup replaces a loaded job or uninstall stops it. The desktop-app refusal above keeps those operations from sharing the
+app's installation. A hand-edited plist has the same best-effort status as a hand-edited systemd unit.
 
 ### First-class harnesses
 
@@ -5370,16 +5359,15 @@ treat the layout they install as their own, including re-applying their backgrou
 at boot and linger, on every run. The rules above about shared directories and unrelated host configuration still hold.
 
 Confirmed 2026-10-14: editing a Farhelm service unit by hand voids Farhelm's guarantees about how operations that read
-that unit identify its owning installation and treat its service. This applies to `farhelm helm setup` (including its
-uninstall), `farhelm uninstall`, and the hosts panel's setup, Update and uninstall. An edited unit may be attributed to
-the wrong installation, causing an operation to overwrite, stop or remove another installation's service. Farhelm need
-not detect or defend against these edits; its ownership and refusal guarantees, including the service-type refusal
-below, do not cover them. The guarantees for unedited Farhelm units remain unchanged. The same hand-edit exception
-applies to a remote Mac's launchd plist.
+that unit identify its owning installation and treat its service. This applies to the hosts panel's setup, Update and
+uninstall. An edited unit may be attributed to the wrong installation, causing an operation to overwrite, stop or remove
+another installation's service. Farhelm need not detect or defend against these edits; its ownership and refusal
+guarantees, including the service-type refusal below, do not cover them. The guarantees for unedited Farhelm units
+remain unchanged. The same hand-edit exception applies to a remote Mac's launchd plist.
 
-Confirmed 2026-10-11: switching a remote host to `farhelm helm setup` or another best-effort setup while a panel setup
-or Update is queued or running is best effort too. The panel run may act on the binary that setup now uses, and a
-visible failure is enough; Farhelm need not re-check for such a switch mid-run.
+Confirmed 2026-10-11: switching a remote host to a best-effort setup while a panel setup or Update is queued or running
+is best effort too. The panel run may act on the binary that setup now uses, and a visible failure is enough; Farhelm
+need not re-check for such a switch mid-run.
 
 Confirmed 2026-10-10: Farhelm's units use systemd's `simple` service type (the default, so a unit may also leave it
 unset) with one start command. Setup and uninstall treat a Farhelm unit changed to any other type as one they do not
@@ -5387,8 +5375,9 @@ recognise, and refuse it, because Farhelm reads a unit's one start command to le
 `oneshot` unit can list several. Such a change is a hand edit, so this refusal is best effort under the exception above:
 an edit that hides the type or a start command from Farhelm's reading may not be refused.
 
-A Linux machine running a helm remains supported, but the standalone installer temporarily does not cover that setup. On
-a Mac the installer supplies the desktop app, which manages its own helm and local supervisor.
+On Linux the desktop app runs its own helm, as on a Mac, but the standalone installer temporarily does not cover it (see
+[Installation and updates](#installation-and-updates)). On a Mac the installer supplies the desktop app, which manages
+its own helm and local supervisor.
 
 ### Upgrade compatibility and client scale
 

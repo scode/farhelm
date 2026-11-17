@@ -2769,14 +2769,15 @@ cannot claim ports or manage either kind of relay. These messages and directiona
 
 The embedded helm owns IPv4 loopback listeners by session, canonical target and remote port. Each listens on a
 kernel-selected port bound without `SO_REUSEADDR` and never on the remote port number: that number could be a port a
-local program expects to use, such as the standalone helm's 7433 (the rule began when a signed-in browser kept its helm
-credential at that origin), and on macOS a reusable `127.0.0.1` bind may shadow another program's wildcard listener.
-Reuse stays off for the kernel-chosen bind as well, since BSD-derived kernels check only exact-address clashes when
-picking a port for a reusable socket. If the kernel hands back the remote number by chance, the helm binds again while
-holding it. Listeners live in memory through agent stop/restart and host disconnect. Every accepted socket resolves the
-current coherent session route again; the original host and any known installation identity must still match. Successful
-deletion or replacement closes the old session's listeners and admitted relays; failed deletion preserves them. Shutdown
-closes them before host connections, and weak application references keep an idle listener from retaining the helm.
+local program expects to use, such as 7433, the removed standalone helm's default (the rule began when a signed-in
+browser kept its helm credential at that origin), and on macOS a reusable `127.0.0.1` bind may shadow another program's
+wildcard listener. Reuse stays off for the kernel-chosen bind as well, since BSD-derived kernels check only
+exact-address clashes when picking a port for a reusable socket. If the kernel hands back the remote number by chance,
+the helm binds again while holding it. Listeners live in memory through agent stop/restart and host disconnect. Every
+accepted socket resolves the current coherent session route again; the original host and any known installation identity
+must still match. Successful deletion or replacement closes the old session's listeners and admitted relays; failed
+deletion preserves them. Shutdown closes them before host connections, and weak application references keep an idle
+listener from retaining the helm.
 
 Helm schema 55 adds nullable `preferences.tunnel_consent`. Only true authorizes publication. The mutation gate orders
 listener creation, consent persistence and successful deletion cleanup; it never covers relay traffic or the native
@@ -3235,8 +3236,9 @@ later stream failure invalidates the whole body.
 The desktop supplies its platform Downloads directory to the embedded helm. A download request with
 `save_to_downloads: true` stages privately on that filesystem and publishes only after successful EOF, returning the
 destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `report (1).pdf`, and so on, preserving the
-final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A standalone
-helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or fallback.
+final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A helm given no
+Downloads directory refuses this save mode (the desktop app gives none only when the platform reports none, and tests
+may give none); there is no server flag or fallback.
 
 The desktop injects a separate file opener alongside its Downloads directory: macOS `open` receives the published path
 as one argument; Linux GIO dispatches its file URI without waiting for the default app to exit. Neither uses a shell or
@@ -3249,8 +3251,8 @@ stat hint, and re-reads it at open time because the choice or file can change af
 local save. JSON always reports the saved path after successful publication, with `opened` and, on refusal or dispatch
 failure, `open_error`; opening cannot turn a successful save into a failed download. Stat includes `can_open` only with
 the native opener, from that same list. This is an authenticated desktop-helm capability: any caller holding that helm's
-device credential can request it, just as it can request a native save, rather than an extra origin gate. The ordinary
-server helm supplies no capability. No quarantine flag is added.
+device credential can request it, just as it can request a native save, rather than an extra origin gate. A helm given
+no Downloads directory, and so no file opener, supplies no capability. No quarantine flag is added.
 
 The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
 without shortening either. Every remote fragment goes through the host-text element: escaped, direction-isolated and
@@ -5145,16 +5147,15 @@ installation it is on, so it follows an open session the sidebar's filter hides
   GUI's Hosts panel and unavailable-session card give that state the app's sentence alone as its remedy and keep the
   helm's dial failure only as evidence (the row's evidence line, the card's diagnostics). That dial failure ends at the
   connection error: `farhelm_supervisor::service::connect` names the socket and no remedy, and the helm adds none for
-  its own machine, whose supervisor the desktop app starts when it opens (or a unit `farhelm helm setup` wrote starts),
-  so a hand-start command would be the wrong fix there. For a remote host with no supervisor, the row's start command is
-  the helm's own, written from the host entry's program and state directory when `internal stdio` exits 75;
-  `internal stdio` also prints a start command of its own, which shows in the helm's log and to someone running it by
-  hand. A separate state exists that is not about the host at all — **retired** — for an entry whose actor has stopped:
-  a panicked task, or one that outlived its own registry row. Without it, an actor's last published status stands
-  forever after the actor is gone, so a task that died mid-connection would leave the entry reading connected, with a
-  routable client, and nothing left running to ever correct it. Each actor is therefore supervised by the task the
-  manager actually holds, which publishes the retired state (client dropped) when the actor it wraps finishes for any
-  reason other than being cancelled on purpose.
+  its own machine, whose supervisor the desktop app starts when it opens, so a hand-start command would be the wrong fix
+  there. For a remote host with no supervisor, the row's start command is the helm's own, written from the host entry's
+  program and state directory when `internal stdio` exits 75; `internal stdio` also prints a start command of its own,
+  which shows in the helm's log and to someone running it by hand. A separate state exists that is not about the host at
+  all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own registry row.
+  Without it, an actor's last published status stands forever after the actor is gone, so a task that died
+  mid-connection would leave the entry reading connected, with a routable client, and nothing left running to ever
+  correct it. Each actor is therefore supervised by the task the manager actually holds, which publishes the retired
+  state (client dropped) when the actor it wraps finishes for any reason other than being cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
@@ -5368,23 +5369,22 @@ installation it is on, so it follows an open session the sidebar's filter hides
   — nothing else ever restarts one, so without that an actor that panicked left its host permanently dark. Adopting
   names the identity the user was shown and is refused if the host has since started reporting a different one, because
   a re-probe between the decision and the request would otherwise adopt something nobody approved.
-- `--ensure-hosts <file>` is a JSON5 floor under the registry, applied through the same registration path as a REST add
-  before serving begins and never consulted again. It adds what is missing and touches nothing else: an already
-  registered destination keeps its fields and its learned identity, because helm.db is the durable authority and a
-  startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a malformed
-  file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
-  since a helm that came up with three of five guaranteed hosts looks healthy and is not.
+- The helm's ensure-hosts file (`HelmArgs::ensure_hosts`, which, outside tests, only the desktop app's agent builds set,
+  from `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`) is a JSON5 floor under the registry, applied through the same registration
+  path as a REST add before serving begins and never consulted again. It adds what is missing and touches nothing else:
+  an already registered destination keeps its fields and its learned identity, because helm.db is the durable authority
+  and a startup file that overwrote user edits every boot would make the two fight. Validation is all-or-nothing — a
+  malformed file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing
+  written, since a helm that came up with three of five guaranteed hosts looks healthy and is not.
 - axum serving: REST for CRUD (sessions, hosts), the UI channel's WebSocket (`GET /api/ui`, which pushes live state; see
   "The UI channel"), and a WebSocket per attached terminal. The helm serves no page; the desktop's embedded helm uses a
   fresh kernel-selected loopback port. Loopback bind enforced — refuses non-loopback per SPEC.md.
-- The desktop app's credential is the only credential the helm accepts in production; there is no browser sign-in. The
-  one other credential is the standalone helm's hidden test hook `--test-credential-file PATH`: the helm mints one in
-  memory the same way and writes it to a new 0600 file, for a helm started from the command line. No end-to-end test
-  uses it: they run the helm in their own process through `run_embedded` and take the credential it returns. The
-  embedded helm mints the desktop's in memory at startup and hands it to the desktop process through `run_embedded`'s
-  readiness channel; it keeps only its SHA-256 digest, in memory, so only the current launch can authenticate. No HTTP
-  route mints one. It dies with the process, so nothing persists or accumulates across launches, and the app keeps none
-  on disk. With nothing to revoke, the desktop has no re-authentication path: a 401 is reported as an error.
+- The desktop app's credential is the only credential the helm accepts; there is no browser sign-in. The end-to-end
+  tests run the helm in their own process through `run_embedded` and take the credential it returns. The embedded helm
+  mints the desktop's in memory at startup and hands it to the desktop process through `run_embedded`'s readiness
+  channel; it keeps only its SHA-256 digest, in memory, so only the current launch can authenticate. No HTTP route mints
+  one. It dies with the process, so nothing persists or accumulates across launches, and the app keeps none on disk.
+  With nothing to revoke, the desktop has no re-authentication path: a 401 is reported as an error.
 - The loopback guard accepts a request only when its `Host` is the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on
   port 80, where clients omit the default port), it carries no `Origin` header, and its `Sec-Fetch-Site`, if any, is
   neither `cross-site` nor `same-site`. Farhelm's own clients never send `Origin`, so any request that carries one came
@@ -5395,10 +5395,10 @@ installation it is on, so it follows an open session the sidebar's filter hides
   to that account's server. Binding `[::1]` as well was rejected: IPv6 loopback can be enabled after the helm starts, so
   the helm cannot hold that address reliably. Every refusal is a plain 403; the helm serves no page, so there is nothing
   to redirect to.
-- The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
-  supervisor is a separate process either way — the app discovers one that already answers and leaves it alone (unless
-  it is the app's own outdated or wedged one), or starts `farhelm supervisor run` detached, and it keeps running after
-  the app quits (see "Side-by-side versions inside Farhelm.app").
+- The native app embeds farhelm-helm in-process, on macOS and Linux alike; nothing else runs a helm. The local
+  supervisor is a separate process — the app discovers one that already answers and leaves it alone (unless it is the
+  app's own outdated or wedged one), or starts `farhelm supervisor run` detached, and it keeps running after the app
+  quits (see "Side-by-side versions inside Farhelm.app").
 - Schema 29 adds the supervisor session column `launch_hooked` (integer, default 0). New spawns record the argv decision
   before the agent's terminal starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision
   before spawn decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored
@@ -6562,10 +6562,10 @@ watchdog, not a tunnel-specific heartbeat or watcher. Disconnecting leaves no in
 sandbox awake. The prior separate-forward design could leave a local SSH forwarded channel open after the gateway's
 sandbox session ended; carrying bytes inside the existing supervisor protocol avoids that extra channel lifetime.
 
-Standalone SIGINT/SIGTERM enter the same serving teardown as an embedded owner's shutdown receiver. Teardown withdraws
-clients, cancels connection actors and joins their supervisors, which await the actors, before returning; connection
-leases therefore drop while the runtime still exists. Sessions continue on their supervisors. No tunnel child,
-parent-death signal or platform-specific lifetime helper remains.
+The embedded owner's shutdown receiver starts the serving teardown. Teardown withdraws clients, cancels connection
+actors and joins their supervisors, which await the actors, before returning; connection leases therefore drop while the
+runtime still exists. Sessions continue on their supervisors. No tunnel child, parent-death signal or platform-specific
+lifetime helper remains.
 
 Protected `/api/tensorlake/orphans` recognizes `farhelm-sess-` alongside the ordinary host, builder and preparer
 prefixes. It lists reserved-name sandboxes not owned by a host row or a deterministic builder/preparer name of a saved
@@ -6698,20 +6698,18 @@ command's own pieces go. The record of either shape is accepted, and so are the 
 `.farhelm-new.*` files, which an install or an uninstall killed mid-write leaves in the app's folders); they are removed
 with the early pieces.
 
-On Linux, setup's existing managed-unit parser and removal machinery select services whose recorded executable resolves
-to this installation. Custom and other-installation units, drop-ins and linger remain untouched. Services are disabled
-and stopped before their unit files or executables are removed. The operation does not examine effective overrides or
-processes. Manual shutdown remains an operator prerequisite. Concurrent install, update and setup (and on macOS desktop
-startup) are excluded by locks (`crates/farhelm/src/uninstall/locks.rs` and `lock_and_recheck` in uninstall.rs), taken
-after the confirmation rather than before it: some of the installers' locks are directories, which nothing removes when
-a process dies, so holding them across the prompt would turn a Ctrl-C there into stale locks. On macOS that is the
-installation lock on `~/Applications` (a kernel lock, waited for a few seconds; the folder is created if missing, so the
-lock is always taken) and the lock folder older installers use (see "Side-by-side versions inside Farhelm.app"); a
-volume where `~/Applications` cannot be locked refuses, saying how to remove Farhelm by hand, because without locks
-uninstall cannot tell what still uses a version. On Linux the install-directory lock earlier installers used, shaped
-like theirs (a 0700 directory holding only `pid`), so an installer that finds it refuses while uninstall runs and clears
-it as stale after a crash. On Linux uninstall checks no runtime locks: it stops setup's services itself, after which
-only a process the user started by hand could hold them, which stopping is already the operator's job.
+On Linux uninstall touches no systemd unit, not even one the removed `farhelm helm setup` wrote (SPEC.md, "Uninstall
+scope and interaction"), and it examines no processes. Manual shutdown remains an operator prerequisite. Concurrent
+install and update (and on macOS desktop startup) are excluded by locks (`crates/farhelm/src/uninstall/locks.rs` and
+`lock_and_recheck` in uninstall.rs), taken after the confirmation rather than before it: some of the installers' locks
+are directories, which nothing removes when a process dies, so holding them across the prompt would turn a Ctrl-C there
+into stale locks. On macOS that is the installation lock on `~/Applications` (a kernel lock, waited for a few seconds;
+the folder is created if missing, so the lock is always taken) and the lock folder older installers use (see
+"Side-by-side versions inside Farhelm.app"); a volume where `~/Applications` cannot be locked refuses, saying how to
+remove Farhelm by hand, because without locks uninstall cannot tell what still uses a version. On Linux the
+install-directory lock earlier installers used, shaped like theirs (a 0700 directory holding only `pid`), so an
+installer that finds it refuses while uninstall runs and clears it as stale after a crash. On Linux uninstall checks no
+runtime locks: stopping whatever still runs from the installation is the operator's job there.
 
 On macOS the runtime locks are taken in two steps, because a supervisor the desktop app started can outlive the app and
 uninstall stops it (SPEC.md, "Operator prerequisites and failure behavior"). The helm locks of both state directories
@@ -6737,10 +6735,10 @@ prerequisite (SPEC.md, "Operator prerequisites and failure behavior"). The previ
 keep running without the desktop app or the supervisor, and uninstall does not end them.
 
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
-not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
-errors, and ask the user to resolve the failure and retry. Tests inject failures at deletion boundaries and run the
-actual installer and compiled CLI in private homes; native macOS executes the same filesystem acceptance harness
-headlessly in on-demand CI and the release gate.
+not interrupt removal midway. Filesystem failures, and a failure to stop the desktop app's supervisor, retain the CLI,
+report concrete paths and operation errors, and ask the user to resolve the failure and retry. Tests inject failures at
+deletion boundaries and run the actual installer and compiled CLI in private homes; native macOS executes the same
+filesystem acceptance harness headlessly in on-demand CI and the release gate.
 
 ## Logging
 
@@ -6784,28 +6782,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   default folder and all-hosts command can also be saved in Settings; host settings exposes each host's folder, while
   per-host command overrides remain CLI-only. The command neither initializes missing state nor migrates an incompatible
   database, and never creates target directories or runs the hook.
-- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ensure-hosts <file>`, `--payload-dir <dir>` (env
-  `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)). The last two select where
-  "Add host" provisioning payloads come from — an operator-staged directory (verified not at all, D3) or a download
-  source other than the default, this build's own release on get.farhelm.io (D2); `--payload-dir` wins if both are given
-  (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and
-  `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host
-  at once, so a flag naming one of them could only ever have meant the wrong thing; the last two live on as per-host
-  registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs.
-- `farhelm helm setup [--state-dir DIR] [--port N] [--no-supervisor] [--dry-run]`, and
-  `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
-  helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
-  resolved from setup's own environment and pinned into both units, so a shell-only `XDG_STATE_HOME` cannot leave the
-  two services on different trees, and both installing and uninstalling refuse when the running user manager reads units
-  from a different directory than the one this environment selects. The units are rendered from the templates in
-  `crates/farhelm-helm/units/`, the same ones remote provisioning fills in, and every file setup writes starts with
-  `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
-  else rather than replacing it. The supervisor unit's `PATH` is the installed `farhelm`'s directory plus a fixed base
-  ("Provisioning"). The matching rule on the helm side is that the hosts panel never installs or updates a supervisor on
-  the helm's own machine at all: an absent one is answered by telling the user to quit Farhelm and open it again (the
-  desktop app starts that machine's supervisor when it opens), a unit already running that same binary is named as
-  setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote
-  one is.
+- No command starts or installs a helm: the helm runs only inside the desktop app. `farhelm helm run` and
+  `farhelm helm setup`, which ran one on its own and wrote systemd user units for it on a Linux machine, were removed
+  (SPEC.md, "Topology"). What their flags set lives on as `HelmArgs` fields the app fills in: the payload directory from
+  `FARHELM_HELM_PAYLOAD_DIR` and, in agent builds only, the ensure-hosts file. The release mirror setting
+  (`--release-base-url`, `FARHELM_RELEASE_BASE_URL`) went with them, so the only download source is this build's own
+  release on get.farhelm.io (D2). The hosts panel never installs or updates a supervisor on the helm's own machine: an
+  absent one is answered by telling the user to quit Farhelm and open it again (the desktop app starts that machine's
+  supervisor when it opens), and a supervisor that ANSWERS is discovered and registered exactly as a remote one is.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
 - `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`
@@ -7305,10 +7289,10 @@ helper replaces itself with the tab's shell, which needs no version afterwards.
 ### The desktop app's updater
 
 The updater is native code in the desktop app (`crates/farhelm-desktop/src/updater.rs`), in the same process as the
-window, which reaches it through its `UpdaterHandle`. It has no helm part: no endpoint, no helm state, nothing a
-standalone helm could see. Its network requests are the app's own reqwest calls. The GUI crate's `update_readout.rs`
-turns its state into the words the window shows; it lives there, not beside the updater, so the updater builds the very
-value the window draws without a copy of its type in the GUI crate, which cannot depend on the desktop crate.
+window, which reaches it through its `UpdaterHandle`. It has no helm part: no endpoint and no helm state. Its network
+requests are the app's own reqwest calls. The GUI crate's `update_readout.rs` turns its state into the words the window
+shows; it lives there, not beside the updater, so the updater builds the very value the window draws without a copy of
+its type in the GUI crate, which cannot depend on the desktop crate.
 
 It is active only when the running program is the main program of `$HOME/Applications/Farhelm.app` (both sides
 canonicalized; `app_bundle::bundle_contents_of_main_program` recognizes the layout), that bundle has
@@ -7535,9 +7519,8 @@ by the Homebrew and system binary directories.
 the supervisor. Setup bootstraps an absent job; an already loaded job must name the planned plist and is kickstarted
 without killing a running process. Update removes the loaded registration with `bootout`, confirms it is absent and
 bootstraps the new plist. Rewriting a plist alone would leave launchd's old loaded configuration in use. Neither path
-uses `launchctl disable`, whose persistent override would prevent a later setup from starting the job. The plist has no
-setup-owned marker because `farhelm helm setup` does not install a Mac job. Launchd actions are explicit members of the
-same frozen action list as Linux actions, without a separate service-manager abstraction.
+uses `launchctl disable`, whose persistent override would prevent a later setup from starting the job. Launchd actions
+are explicit members of the same frozen action list as Linux actions, without a separate service-manager abstraction.
 
 Every remote Darwin `stat` call uses the system `/usr/bin/stat` regardless of PATH, including uninstall.
 
@@ -7570,14 +7553,11 @@ Farhelm-owned files there, preserving the shared parent. A missing data path sta
 from the executable. Development builds and unparseable versions stay exempt. No protocol field, host state or
 automatic-update scheduling rule changes.
 
-The supervisor-unit ownership rule in SPEC.md is enforced twice on remote Linux hosts. The reach check reports whether
-the user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the
-same test `units::is_managed` applies), and such a host gets the `SetupManaged` outcome every operation refuses on,
-before any plan exists, each in its own words (installing or updating there is the host's installer and setup; removing
-is its `farhelm uninstall`). The remote unit write repeats the test in the same shell command that renames the new unit
-into place, and uninstall's unit removal repeats it in the same shell command as the `rm`, because a retained plan is
-confirmed later and setup may have run on the host in between. The local executor branch has no such check: the panel
-never installs a unit on the helm's own machine.
+The supervisor-unit ownership rule in SPEC.md needs no check of its own on remote Linux hosts. While
+`farhelm helm setup` existed, the reach check refused a host whose `farhelm-supervisor.service` began with setup's
+managed-by marker, and the unit write and removal repeated that test in their own shell commands; all of that went with
+the command, so such a unit is replaced or removed like provisioning's own, under the ordinary uninstall refusals. The
+panel never installs a unit on the helm's own machine.
 
 UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
 consumes the plan's id from a body, like update's route, but the user sees and confirms the same numbered plan as setup,
@@ -7653,20 +7633,20 @@ directory that is itself a symlink, since the binary resolves inside the link's 
 removes only the link; so the inspection also reports, per path, whether the path itself is a symlink (`[ -L ]`, which
 sees a dangling link too), and planning refuses a symlinked lib directory before any other check of the inspection, the
 resolution check included, so that a dangling link gets the refusal that points to Remove rather than "cannot tell where
-it leads". The removal command repeats the `-L` test in the same shell as the `rm`, as the unit removal does for setup's
-marker, and refuses a lib directory that became a link after confirmation as a failed step. A row with no recorded state
-directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
-started between the confirmation check and the stop is not locked out and may be ended with the unit. The
-confirmation-time check is sufficient; nothing requires another check during the removal. Local `farhelm uninstall`
-keeps its separate scope and behavior. The state check also compares the spellings from before home normalization. Each
-path is respelled on its own, so the lib directory can come back in the home's spelling while the state directory inside
-it keeps the alias spelling, because its same-file guard failed (below a nested mount the bind lacks, or for a state
-directory that does not exist). The inspection therefore also reports each resolved path before normalization, and the
-state check refuses when the state directory is inside the lib directory in either spelling. The state check also
-refuses on the host's same-folder test, an identity answer it never uses to accept a path: the inspection reports, per
-path, whether its unnormalized resolution or a folder above it is the same folder (`-ef`) as the lib directory, which
-catches the lib and the state reached through two binds of the home with a mount over a folder above the lib visible
-through only one, where no spelling shows the containment and no mount lies inside the lib.
+it leads". The removal command repeats the `-L` test in the same shell as the `rm`, and refuses a lib directory that
+became a link after confirmation as a failed step. A row with no recorded state directory uses the supervisor's default
+as the host's own environment resolves it, `XDG_STATE_HOME` included. A session started between the confirmation check
+and the stop is not locked out and may be ended with the unit. The confirmation-time check is sufficient; nothing
+requires another check during the removal. Local `farhelm uninstall` keeps its separate scope and behavior. The state
+check also compares the spellings from before home normalization. Each path is respelled on its own, so the lib
+directory can come back in the home's spelling while the state directory inside it keeps the alias spelling, because its
+same-file guard failed (below a nested mount the bind lacks, or for a state directory that does not exist). The
+inspection therefore also reports each resolved path before normalization, and the state check refuses when the state
+directory is inside the lib directory in either spelling. The state check also refuses on the host's same-folder test,
+an identity answer it never uses to accept a path: the inspection reports, per path, whether its unnormalized resolution
+or a folder above it is the same folder (`-ef`) as the lib directory, which catches the lib and the state reached
+through two binds of the home with a mount over a folder above the lib visible through only one, where no spelling shows
+the containment and no mount lies inside the lib.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share
@@ -7753,12 +7733,12 @@ marks every directory dedicated or shared: a dedicated one converges on its mode
 existing directory, and that is the point), while a shared one is handed to `install -d` only when it is missing, and
 the confirmation text says an existing one keeps its permissions.
 
-The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux
-and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then
-`/usr/local/bin:/usr/bin:/bin` (`farhelm_helm::units::render_supervisor_unit`). The Mac app bundles none and needs none,
-and hands its managed supervisor no tmux. `FARHELM_TMUX` is no longer passed to a terminal host's child (`host_launch`'s
-`NOT_INHERITED`). Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps
-setting it until its next setup or Update; the supervisor ignores it.
+The supervisor runs no tmux. The supervisor unit provisioning renders names no tmux and puts no tmux directory on
+`PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`
+(`farhelm_helm::units::render_supervisor_unit`). The Mac app bundles none and needs none, and hands its managed
+supervisor no tmux. `FARHELM_TMUX` is no longer passed to a terminal host's child (`host_launch`'s `NOT_INHERITED`).
+Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps setting it until
+its next setup or Update; the supervisor ignores it.
 
 Earlier releases' Linux provisioning required a host tmux at or above a version floor (3.7c at the end) and, on most
 hosts, installed a private static build as `~/.local/lib/farhelm/tmux` to meet it. That directory holds the host's
@@ -7791,9 +7771,9 @@ sweep claims every process carrying a session's markers and has no exemption for
 that runs a bare `systemctl --user import-environment`, or `dbus-update-activation-environment --systemd --all`, copies
 that tab's markers into the user manager; a supervisor started afterwards would inherit them, and deleting that session
 or closing that tab would make it signal itself. A systemd-managed supervisor never legitimately belongs to a session,
-so stripping the markers is free. This covers supervisors started through the generated unit (local setup and
-provisioning share it); one started by hand from an environment carrying markers, and other user services that inherited
-them, are not protected, and the sweep deliberately has no protected-process set.
+so stripping the markers is free. This covers supervisors started through the unit provisioning generates; one started
+by hand from an environment carrying markers, and other user services that inherited them, are not protected, and the
+sweep deliberately has no protected-process set.
 
 The provisioning payloads — linux-musl `farhelm` binaries for both architectures and the Apple-silicon Darwin `farhelm`,
 the only program a host is sent — are no longer embedded in the helm's own distribution (D2). This REVERSES the earlier
@@ -7802,21 +7782,20 @@ the only program a host is sent — are no longer embedded in the helm's own dis
 (`https://get.farhelm.io/v<version>/`, whose archive links redirect to where the archives are hosted, followed over
 https only), verifies them, and caches them under helm state before pushing them over SSH exactly as before. A
 release-shaped build of main, whose version is the development sentinel (see "Version and skew"), has no release to
-download from and refuses by default, naming `--payload-dir` and payloads built from the same commit
-(`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a download,
-and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead — files in an
-explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build, developer or
-release. The desktop app's embedded helm takes the same directory from the same environment variable, so a desktop build
-from a working copy can update hosts with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The
-downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets,
-their extracted binaries, and the signed checksum file under
-`<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
-reuses the previous release's binaries, and by base URL so a mirror or test server can neither read nor poison what the
-real release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own
-artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
-download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
-"provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
-the provisioning helm's own version.
+download from and refuses by default, naming `FARHELM_HELM_PAYLOAD_DIR` and payloads built from the same commit
+(`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to a download.
+`FARHELM_HELM_PAYLOAD_DIR`, which the desktop app reads into `HelmArgs::payload_dir` for its embedded helm, selects an
+operator-staged directory instead — files in an explicitly selected local directory are treated as operator-trusted and
+are not verified, on ANY build, developer or release. That is what lets a desktop build from a working copy update hosts
+with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The downloading source is
+`ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets, their extracted
+binaries, and the signed checksum file under `<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` —
+keyed by version so an upgraded helm never reuses the previous release's binaries, and by base URL so a test server can
+neither read nor poison what the real release wrote. Motivation for reversing the embedding: bundling every target's
+binaries inside every platform's own artifact cost tens of MB per download and coupled a payload's presence to whichever
+platform happened to embed it; a download keeps the size cost where it belongs (paid once, by the host actually being
+provisioned) while keeping the same "provisioned host runs exactly what the provisioning helm expects" property, because
+the default download always names the provisioning helm's own version.
 
 Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
 permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before
@@ -7835,13 +7814,13 @@ must match its listed SHA-256. The helm checks its own version's release this wa
 comment is not decoration: the signature otherwise authenticates only the CONTENTS of `SHA256SUMS`, which name no
 version, so whoever serves the release URL could replay an older release's valid manifest and assets at a newer
 version's URL and downgrade every host that helm provisions. A release tag is `vX.Y.Z` and already carries the `v`, so
-the comment is `farhelm` plus the tag verbatim. `--payload-dir` is the one path that skips all of this — nothing there
-is downloaded, so nothing there is checked. Integrity never depends on where a payload redirect points, so hosting can
-move without touching clients. Releases from before get.farhelm.io are not published there (their checksums were signed
-by a key CI could read), and nothing falls back to GitHub for a release the site does not have. SPEC.md's "no public
-relay, no third-party rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects, are
-download sources the helm's own machine reaches directly, never a relay or rendezvous point sessions or connections pass
-through.
+the comment is `farhelm` plus the tag verbatim. A staged payload directory is the one path that skips all of this —
+nothing there is downloaded, so nothing there is checked. Integrity never depends on where a payload redirect points, so
+hosting can move without touching clients. Releases from before get.farhelm.io are not published there (their checksums
+were signed by a key CI could read), and nothing falls back to GitHub for a release the site does not have. SPEC.md's
+"no public relay, no third-party rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects,
+are download sources the helm's own machine reaches directly, never a relay or rendezvous point sessions or connections
+pass through.
 
 `/advisories` and `/advisories.minisig` extend that permanent site contract without changing `/latest` or any release's
 checksum files. The signature is prehashed minisign, authenticated by any key in the release ring, with trusted comment
@@ -8004,10 +7983,9 @@ why such a bump is required rather than why it is unnecessary.
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a
 release-shaped build refuses its default payload download before any request instead of provisioning hosts with some
-real release's binaries. The refusal says it is an unreleased build and to pass `--payload-dir` with payloads built from
-the same commit, because a 404 for a release that will never exist would tell the user to retry. Any `0.0.0` version
-with a prerelease counts as such a build. `--release-base-url` is still honored on these builds (D18), since it names a
-source explicitly rather than this build's own release.
+real release's binaries. The refusal says it is an unreleased build and to start the app with `FARHELM_HELM_PAYLOAD_DIR`
+naming payloads built from the same commit, because a 404 for a release that will never exist would tell the user to
+retry. Any `0.0.0` version with a prerelease counts as such a build.
 
 The client↔helm edge has no hello to refuse at, and needs none: the desktop app talks only to the helm it embeds, its
 own build. The helm still stamps its build on every reply, failures included (`stamp_build` in
@@ -8864,9 +8842,10 @@ the live connection and identity preconditions of command grants; adoption clear
 Only `run_embedded` receives `LinkOpener`, registered by the desktop shell through `webbrowser::open`; no HTTP route
 exposes that callback. The helm validates and approves before calling it on a blocking worker, then returns the native
 opener's result without exposing its error details. A matching grant skips the card only with this native capability. A
-standalone helm, which has no opener, instead raises a preapproved Open/Dismiss card. That branch dates from the browser
-UI, which needed the user's click to open a window itself; no UI attaches to a standalone helm today. The desktop app's
-cards never open a link themselves: an Open answer goes to the helm, which opens it through the native opener.
+helm started without an opener, which only tests do now that the standalone helm is gone, instead raises a preapproved
+Open/Dismiss card. That branch dates from the browser UI, which needed the user's click to open a window itself. The
+desktop app's cards never open a link themselves: an Open answer goes to the helm, which opens it through the native
+opener.
 
 Protocol 47 adds `SetBrowserForwarding` and its operation-specific `BrowserForwardingSet` acknowledgement. The
 connection manager sends true for SSH rows and false for Local rows only after identity acceptance, including accepted

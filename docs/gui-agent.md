@@ -152,17 +152,17 @@ neither is not staged and keeps the caller's HOME and PATH, until the private en
 
 `start --remote-host DEST` (repeatable) stages a fleet of several hosts, which the README hero, the demo video and the
 docs screenshots need. For each destination `start` starts one more supervisor from the run's `farhelm`, in the run's
-own `r0`, `r1`, ... state directories (logs in `logs/r<N>.log`), and writes `ensure-hosts.json5` in the helm's
-`--ensure-hosts` format, naming each destination with that build's `farhelm` and that state directory. The app's agent
-build hands the file to its embedded helm (`FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, defined in
-`crates/farhelm-desktop/src/agent.rs` and read by the app's startup in `lib.rs`), which registers the hosts before it
-serves, so the window shows them from the start. Each destination must be a different spelling of this machine
-(`localhost`, `you@localhost`), since the helm keys hosts on the destination string, and must take passwordless ssh:
-`start` checks that first and refuses naming the one that failed. Nothing checks that DEST really is this machine; a
-real remote would be dialed at this checkout's `farhelm` and a run directory under `/tmp`, neither of which exists
-there. `stop` ends those supervisors and their terminal hosts, signalling each only while its pid, start time and state
-directory still match the record. Only the agent build reads the variable; no other build of the app registers a host at
-startup.
+own `r0`, `r1`, ... state directories (logs in `logs/r<N>.log`), and writes `ensure-hosts.json5` in the format of the
+helm's ensure-hosts file (`HelmArgs::ensure_hosts` in `crates/farhelm-helm/src/lib.rs`), naming each destination with
+that build's `farhelm` and that state directory. The app's agent build hands the file to its embedded helm
+(`FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, defined in `crates/farhelm-desktop/src/agent.rs` and read by the app's startup in
+`lib.rs`), which registers the hosts before it serves, so the window shows them from the start. Each destination must be
+a different spelling of this machine (`localhost`, `you@localhost`), since the helm keys hosts on the destination
+string, and must take passwordless ssh: `start` checks that first and refuses naming the one that failed. Nothing checks
+that DEST really is this machine; a real remote would be dialed at this checkout's `farhelm` and a run directory under
+`/tmp`, neither of which exists there. `stop` ends those supervisors and their terminal hosts, signalling each only
+while its pid, start time and state directory still match the record. Only the agent build reads the variable; no other
+build of the app registers a host at startup.
 
 A staged run's sessions are launched by an agent harness's bare name (`claude`, `codex`, and every other program the
 helm composes an agent launch with: `STAGED_AGENTS`, which the tests check against
