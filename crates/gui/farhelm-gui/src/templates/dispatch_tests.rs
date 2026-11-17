@@ -31,7 +31,8 @@ use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
 use crate::actions::{QUICK_LAUNCH_CHORD, QUICK_SWITCHER_CHORD, SEQUENCE_PREFIX_CHORD};
-use crate::launcher::environment_launch_tests::{self, answer_except};
+use crate::launcher::environment_launch_tests::{self, answer_except, answer_with};
+use crate::launcher::environment_tests::{account, built_json, ready_key};
 use crate::launcher::launch_tests::{creates_answering, creates_answering_with, is_status};
 use crate::launcher::request::container_reason;
 use crate::launcher::view::BANNER_SHOWS_FOR;
@@ -1155,6 +1156,101 @@ fn a_container_template_on_a_number_key_launches_at_its_place(cx: &mut TestAppCo
         "and shows it in its Recipe and Container host rows"
     );
     assert_eq!(label(cx, "launcher-host"), None, "in place of the Host row");
+}
+
+/// The old app's "a recipe template quick launch asks before one recipe request" (`tensorlake-sandbox-sessions.spec.ts`
+/// at the reference commit): a quick launch that would create a billed sandbox without the launcher on screen reveals
+/// the launcher with "Create a sandbox for this session?" instead of creating, and its answer sends the one create,
+/// confirmed. Until the launcher asked, the key's create went out unconfirmed and the helm refused it. Specified: with
+/// the catalog listing `ready` (built) and number key 1 on `sandbox-go` (a command of `true` in a new sandbox of
+/// `ready`), and an account with an API key, Farhelm's SSH key and the setting that skips the question off, the key
+/// sends no create and brings the launcher back with the question naming `ready`, focus on Cancel; Create and launch
+/// sends exactly one `POST /api/environment-sessions` and no ordinary create, for `ready` on the Tensorlake account,
+/// confirmed, without the naming a quick launch New never showed gets; the helm's refusal brings the launcher back with
+/// "Not launched." and its words.
+#[gpui::test]
+fn a_sandbox_template_on_a_number_key_comes_back_to_ask_before_creating(cx: &mut TestAppContext) {
+    let stored = LaunchTarget::Environment {
+        recipe: "ready".into(),
+        place: Place::TensorlakeAccount,
+    };
+    let usable = account(
+        true,
+        ready_key("tl sbx ssh keys add --name fixture key.pub"),
+    );
+    let catalog = CollectionState {
+        collection: Collection::Recipes,
+        meta: meta(&["ready"]),
+        entries: vec![KeyedEntry {
+            key: "ready".into(),
+            value: built_json("ready"),
+        }],
+    };
+    let (mut helm, _connection) = started(cx);
+    helm.connect(vec![
+        listing(&[], &[]),
+        fixture_hosts(&[0, 1]),
+        bound(None, &[("1", "sandbox-go")]),
+        templates_with(template(
+            "sandbox-go",
+            TemplateFields {
+                target: Some(stored),
+                ..runs_true()
+            },
+        )),
+        catalog,
+    ]);
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, MainView::new);
+    settle(cx);
+    let keep = |command: &FakeCommand| {
+        command.path == "/api/environment-sessions" || command.path == "/api/sessions"
+    };
+    number_key(cx, 1);
+    let sent = answer_with(&mut helm, cx, Some(&usable), keep);
+    assert_eq!(sent, [], "nothing is created before the answer");
+    assert!(any_open(cx), "the launcher came back to ask");
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Create a sandbox for this session?")
+    );
+    assert_eq!(
+        label(cx, "sandbox-question-recipe").as_deref(),
+        Some("Recipe ready")
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+
+    test_support::click(cx, "prompt-confirm");
+    let sent = answer_with(&mut helm, cx, Some(&usable), keep);
+    let [create] = &sent[..] else {
+        panic!("the answer sent one create, not {sent:?}");
+    };
+    assert_eq!(
+        create.path, "/api/environment-sessions",
+        "not an ordinary create"
+    );
+    let body = create.body.clone().unwrap_or_default();
+    assert_eq!(body["recipe"], json!("ready"), "{body}");
+    assert_eq!(
+        body["place"],
+        json!({ "kind": "tensorlake_account" }),
+        "{body}"
+    );
+    assert_eq!(body["confirmed"], json!(true), "{body}");
+    assert!(!any_open(cx), "the launcher hid while its create is out");
+    assert!(!unseen(cx), "the launch revealed New, so no naming follows");
+
+    helm.reply(
+        create.id,
+        409,
+        Some(json!("template recipe fixture refused")),
+    );
+    settle(cx);
+    assert!(any_open(cx), "the refusal brought the launcher back");
+    assert_eq!(
+        label(cx, "launcher-refusal").as_deref(),
+        Some("Not launched. template recipe fixture refused")
+    );
 }
 
 /// The templates collection of [`templates`], available, with `yolo-go` added last: a command launch of `true` asserted

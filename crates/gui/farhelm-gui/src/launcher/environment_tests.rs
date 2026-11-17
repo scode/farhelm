@@ -1,7 +1,7 @@
 //! Tests of a launch into a new environment on the draft and its request, with no window: the Runs on edits and their
 //! effects, the folder rules a recipe target skips, the reasons a new container or sandbox cannot launch, the body it
-//! sends, and New sandbox's registration note. New sandbox's segment, recipe listing and press are
-//! `sandbox_view_tests`'.
+//! sends, New sandbox's registration note, and when "Create a sandbox for this session?" is asked and in what words.
+//! New sandbox's segment, recipe listing, press and question in the launcher are `sandbox_view_tests`'.
 //!
 //! SPEC.md, "Creation" (the Runs on bullet), "Container sessions" and "Sandbox sessions"; the old app's
 //! `create_form/draft.rs` (`select_target`, `choose_target`), `sandbox_reason` in `create_form.rs` and
@@ -604,7 +604,7 @@ fn a_clones_default_name_goes_to_a_new_environment_as_a_base() {
 // ---- New sandbox: the account's prerequisites -----------------------------------------------------------------------
 
 /// [`recipe_json`] on managed Ubuntu with a snapshot built, as a sandbox starts from.
-pub(super) fn built_json(name: &str) -> serde_json::Value {
+pub(crate) fn built_json(name: &str) -> serde_json::Value {
     let mut view = recipe_json(name, json!({ "kind": "tensorlake_ubuntu" }));
     view["snapshot"] = json!({
         "id": "snap", "built_at": 1, "base": { "kind": "tensorlake_ubuntu" }, "disk_gb": 20, "packages": [],
@@ -619,7 +619,7 @@ fn built(name: &str) -> RecipeView {
 }
 
 /// A Tensorlake account as the helm answers it: an API key saved or not, and Farhelm's SSH key as `ssh_key`.
-pub(super) fn account(api_key_set: bool, ssh_key: SshKeyStatus) -> Settings {
+pub(crate) fn account(api_key_set: bool, ssh_key: SshKeyStatus) -> Settings {
     Settings {
         api_key_set,
         create_without_asking: false,
@@ -629,7 +629,7 @@ pub(super) fn account(api_key_set: bool, ssh_key: SshKeyStatus) -> Settings {
 }
 
 /// Farhelm's SSH key, made, with `command` as its registration command.
-pub(super) fn ready_key(command: &str) -> SshKeyStatus {
+pub(crate) fn ready_key(command: &str) -> SshKeyStatus {
     SshKeyStatus::Ready {
         public_key: "ssh-ed25519 AAAA fixture".into(),
         public_key_path: "/state/tensorlake.pub".into(),
@@ -752,4 +752,46 @@ fn the_registration_note_needs_a_readable_key() {
         ProviderUi(ProviderKind::Podman).registration_note(Some(&made)),
         None
     );
+}
+
+/// SPEC.md, "Sandbox sessions": launching a sandbox asks first, "Only Create Tensorlake sandboxes without asking skips
+/// this question", and a container, which bills nothing per create, is never asked about. Asking for an account the
+/// launcher could not read keeps a billed create from going out on a setting nobody saw. Specified: a Tensorlake
+/// recipe of 2 CPUs, 4 GB memory and 20 GB disk is asked about, sized "2 CPU · 4 GB memory · 20 GB disk" and linking
+/// the pricing page, with the account's setting off and with no account read; with the setting on it is not; a
+/// container is never asked about, whatever the account says; and, with the setting off, exactly the providers whose
+/// shared `asks_before_creating` holds (the helm's own check, which refuses their unconfirmed creates) are asked about,
+/// so a provider the helm gates can never launch with no question to answer.
+#[test]
+fn only_a_sandbox_asks_before_creating_unless_its_setting_skips_it() {
+    let tensorlake = ProviderUi(ProviderKind::Tensorlake);
+    let ready = built("ready");
+    let asking = account(true, ready_key("tl sbx ssh keys add"));
+    let mut skipping = asking.clone();
+    skipping.create_without_asking = true;
+    let question = tensorlake
+        .creation_question(&ready, Ok(&asking))
+        .expect("the setting off asks");
+    assert_eq!(question.title, "Create a sandbox for this session?");
+    assert_eq!(question.size, "2 CPU · 4 GB memory · 20 GB disk");
+    assert_eq!(question.link_url, "https://www.tensorlake.ai/pricing");
+    assert_eq!(question.confirm_label, "Create and launch");
+    assert_eq!(
+        tensorlake.creation_question(&ready, Err(LOADING_ACCOUNT)),
+        Some(question),
+        "an account not read asks"
+    );
+    assert_eq!(tensorlake.creation_question(&ready, Ok(&skipping)), None);
+    let podman = ProviderUi(ProviderKind::Podman);
+    assert_eq!(podman.creation_question(&ready, Ok(&asking)), None);
+    assert_eq!(podman.creation_question(&ready, Ok(&skipping)), None);
+    for provider in crate::environment_ui::RUNS_ON {
+        assert_eq!(
+            ProviderUi(provider)
+                .creation_question(&ready, Ok(&asking))
+                .is_some(),
+            provider.asks_before_creating(),
+            "{provider:?} asks exactly when the helm requires consent"
+        );
+    }
 }

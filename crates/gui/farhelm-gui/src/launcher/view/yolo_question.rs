@@ -224,7 +224,9 @@ fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
     let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
     Owner {
         launch: Rc::new(move |mark, window, cx| {
-            let _ = launching.update(cx, |launcher, cx| launcher.submit(true, mark, window, cx));
+            let _ = launching.update(cx, |launcher, cx| {
+                launcher.submit(true, false, mark, window, cx)
+            });
         }),
         current: Rc::new(move |cx| {
             checking
