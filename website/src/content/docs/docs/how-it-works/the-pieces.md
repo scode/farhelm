@@ -1,6 +1,6 @@
 ---
 title: The pieces
-description: "Helm, supervisor, host, and client: what each one is and where it runs."
+description: "The Farhelm app, the helm, supervisors and hosts: what each one is and where it runs."
 sidebar:
   order: 1
   badge:
@@ -14,6 +14,8 @@ This page is planned but not written yet. The text below says what it will cover
 
 :::
 
-The mental model in one diagram and a paragraph per piece: the helm (the one control plane), a supervisor on each host
-(the owner of that host's sessions), hosts, and clients (the desktop app window or a browser tab), and where each one
-runs when you use the desktop app on your Mac.
+The mental model in one diagram and a paragraph per piece: the Farhelm app, on a Mac or on Linux (the installer covers
+Macs only so far), whose window is what you look at and which runs the helm (the one control plane) inside it; a
+supervisor on each host (the owner of that host's sessions); and the hosts themselves, the computer the app runs on and
+the machines you add. Also where each one runs, and that the supervisor on your Mac keeps running after you quit
+Farhelm.
