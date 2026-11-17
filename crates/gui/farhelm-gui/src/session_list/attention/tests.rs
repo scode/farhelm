@@ -1,6 +1,9 @@
 //! Tests of the Hosts attention list: which hosts get a row and in what order, each row's words and action, the
 //! header's actions and what they send, Always update's failure line, dismissal, Details opening Hosts at the host,
-//! the menus below the list, and the list's bounded scroll.
+//! the menus below the list, the list's bounded scroll, and the rows of sandbox and container hosts (their phases,
+//! undelivered credentials and failed forwards). Environment hosts are seeded as the helm lists one, session-owned with
+//! an environment described for it (`session_list::environment_tests::environment_host`); no running app can show
+//! one, since the end-to-end harness seeds no sandbox or container.
 //!
 //! The classification and its words are pure functions and tested as such, over hosts built with the Hosts panel's
 //! fixtures and the [`HostStatus`] the rail reads. The rest runs the real main view over the helm client's fake, as
@@ -16,6 +19,7 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::provisioning::ProvisioningOperation::Add;
 use farhelm_proto::provisioning::{ProvisioningView, RunStatus, StepStatus};
+use farhelm_proto::tensorlake::{LifecycleDirection, TunnelState, TunnelView};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, HostStateView, HostView, Preferences,
 };
@@ -27,6 +31,9 @@ use crate::host_text::HostText;
 use crate::hosts::progress::tests::step;
 use crate::hosts::status::{Activity, HostStatus, Live, Steps, Urgency};
 use crate::hosts::tests::{aliased, connected, host, hosts, progress, run, skew};
+use crate::session_list::environment_tests::{
+    Provider, changing, deleting, environment_host, suspended_at,
+};
 use crate::session_list::host_rail::tests::{
     answer_everything, hover_help, label, node, old_build, pressed, texts_within, unreachable,
 };
@@ -44,6 +51,56 @@ fn remote(id: i64, alias: &str, state: HostStateView) -> HostView {
         alias,
         &format!("ops@{alias}.example.invalid"),
     )
+}
+
+/// Host `id`, the session-owned environment `provider` made, aliased `alias` like [`remote`], in `state`: its identity
+/// reads the same way a remote's does, so the rows' names are checked in one format.
+fn environment(id: i64, alias: &str, provider: Provider, state: HostStateView) -> HostView {
+    let mut view = aliased(
+        environment_host(provider, state),
+        alias,
+        &format!("ops@{alias}.example.invalid"),
+    );
+    view.id = id;
+    view
+}
+
+/// [`environment`] whose helm reports `credentials` as the reason its credentials were not delivered, when given, and
+/// its recipe's forwards in `tunnels`, when given.
+fn troubled(
+    id: i64,
+    state: HostStateView,
+    credentials: Option<&str>,
+    tunnels: Option<TunnelState>,
+) -> HostView {
+    let mut view = environment(id, "env", Provider::Container, state);
+    // Asserted rather than skipped, so a fixture that stopped describing its environment cannot pass the "no words"
+    // cases for the wrong reason.
+    let environment = view
+        .environment
+        .as_mut()
+        .expect("an environment host describes its environment");
+    environment.credential_warning = credentials.map(str::to_owned);
+    environment.tunnels = tunnels.map(|state| TunnelView {
+        tunnels: Vec::new(),
+        state,
+    });
+    view
+}
+
+/// A stopped environment whose last start failed, as a container whose place could not start it is pushed.
+fn stopped() -> HostStateView {
+    HostStateView::Stopped {
+        start_failed: Some("the place refused the start".into()),
+        waiting_for_place: false,
+    }
+}
+
+/// Forwards that failed outright.
+fn tunnels_down() -> TunnelState {
+    TunnelState::Failed {
+        reason: "connection refused".into(),
+    }
 }
 
 /// What the rail reads about a host with nothing going on: no update, no work, no warning.
@@ -351,6 +408,165 @@ fn each_problem_has_its_words_and_healthy_hosts_have_none() {
     ] {
         assert_eq!(words(healthy, idle()), None);
     }
+}
+
+/// Why this matters: a sandbox or container host has no rail avatar to warn with, so this list is how a user finds a
+/// stuck environment (the old `classify` and `problem_words`), while a routine suspension must not read as a fault and a
+/// machine being destroyed is work under way rather than trouble. Specified: a stopped environment reads "Stopped", a
+/// failed deletion "Deleting failed" and a failed resume "Resume failed"; an environment suspended, suspending, resuming,
+/// starting or being deleted without a failure has no problem words; in a registry of an optional update, an
+/// environment being deleted that is also warned and a stopped one, the rows are the stopped one's problem, then a
+/// working row "Deleting" with no steps, then the update.
+#[test]
+fn environment_phases_have_their_rows_and_routine_ones_none() {
+    let env = |id, state| environment(id, "env", Provider::Sandbox, state);
+    let failed_resume = HostStateView::Suspended {
+        observed_at: 1,
+        suspended_by_farhelm_at: Some(1),
+        resume_failed: Some("the provider refused".into()),
+    };
+    let cases = [
+        (stopped(), "Stopped"),
+        (deleting(Some("quota exceeded")), "Deleting failed"),
+        (failed_resume, "Resume failed"),
+    ];
+    for (state, expected) in cases {
+        assert_eq!(
+            problem_words(&env(2, state.clone()), &idle()).as_deref(),
+            Some(expected),
+            "{state:?}"
+        );
+    }
+    let starting = HostStateView::TensorlakeChanging {
+        starting: true,
+        direction: LifecycleDirection::Resuming,
+        requested_at: 0,
+    };
+    for routine in [
+        suspended_at(1),
+        changing(LifecycleDirection::Suspending),
+        changing(LifecycleDirection::Resuming),
+        starting,
+        deleting(None),
+    ] {
+        assert_eq!(
+            problem_words(&env(2, routine.clone()), &idle()),
+            None,
+            "{routine:?}"
+        );
+    }
+
+    let listed = [
+        (remote(2, "older", old_build()), behind(Urgency::Optional)),
+        (
+            env(3, deleting(None)),
+            HostStatus {
+                warned: true,
+                ..idle()
+            },
+        ),
+        (env(4, stopped()), idle()),
+    ];
+    let rows = classify(listed.iter().map(|(host, status)| (host, status)), false);
+    let shape: Vec<(i64, Kind, &str)> = rows
+        .iter()
+        .map(|row| (row.host.id, row.kind, row.words.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (4, Kind::Problem, "Stopped"),
+            (3, Kind::Working, "Deleting"),
+            (2, Kind::Update { required: false }, "Update available"),
+        ]
+    );
+    assert_eq!(rows[1].steps, None, "a destruction has no steps to show");
+}
+
+/// Why this matters: an agent in an environment whose credentials were not delivered, or whose recipe's forwards failed,
+/// may run without its keys or its inference endpoint while the connection looks fine, so the row says so beside
+/// whatever else is wrong; forwarding health is only current while the host is connected (the old `tunnels::failed`).
+/// Specified: a connected container with undelivered credentials reads "Credentials not delivered", with failed forwards
+/// as well "Credentials not delivered; Tunnels failed", and warned too, those then "Setup or update needs attention";
+/// forwards retrying after a failure count and forwards retrying with no failure yet do not; an unreachable container
+/// keeps its own words first and drops "Tunnels failed", a suspended one with failed forwards has no words, a stopped
+/// one reads "Stopped; Credentials not delivered"; and a connected one with failed forwards and an optional update is a
+/// problem row, not an update row.
+#[test]
+fn credentials_and_tunnels_join_a_rows_words() {
+    let words = |host: HostView, status: HostStatus| problem_words(&host, &status);
+    let credentials = Some("could not install the agent settings");
+    assert_eq!(
+        words(troubled(2, connected(), credentials, None), idle()).as_deref(),
+        Some("Credentials not delivered")
+    );
+    assert_eq!(
+        words(
+            troubled(2, connected(), credentials, Some(tunnels_down())),
+            idle()
+        )
+        .as_deref(),
+        Some("Credentials not delivered; Tunnels failed")
+    );
+    let warned = HostStatus {
+        warned: true,
+        ..idle()
+    };
+    assert_eq!(
+        words(
+            troubled(2, connected(), credentials, Some(tunnels_down())),
+            warned
+        )
+        .as_deref(),
+        Some("Credentials not delivered; Tunnels failed; Setup or update needs attention")
+    );
+    let retrying = |reason: Option<&str>| TunnelState::Retrying {
+        reason: reason.map(str::to_owned),
+        delay_secs: 5,
+    };
+    assert_eq!(
+        words(
+            troubled(2, connected(), None, Some(retrying(Some("refused")))),
+            idle()
+        )
+        .as_deref(),
+        Some("Tunnels failed")
+    );
+    assert_eq!(
+        words(troubled(2, connected(), None, Some(retrying(None))), idle()),
+        None,
+        "forwards still starting claim nothing"
+    );
+    assert_eq!(
+        words(
+            troubled(2, unreachable(), credentials, Some(tunnels_down())),
+            idle()
+        )
+        .as_deref(),
+        Some("Unreachable, retrying; Credentials not delivered")
+    );
+    assert_eq!(
+        words(
+            troubled(2, suspended_at(1), None, Some(tunnels_down())),
+            idle()
+        ),
+        None
+    );
+    assert_eq!(
+        words(troubled(2, stopped(), credentials, None), idle()).as_deref(),
+        Some("Stopped; Credentials not delivered")
+    );
+
+    let listed = [(
+        troubled(2, old_build(), None, Some(tunnels_down())),
+        behind(Urgency::Optional),
+    )];
+    let rows = classify(listed.iter().map(|(host, status)| (host, status)), false);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].kind, rows[0].words.as_str()),
+        (Kind::Problem, "Tunnels failed")
+    );
 }
 
 /// Why this matters: SPEC.md: "A close control dismisses only the optional Update rows; required updates, problems and
@@ -1034,4 +1250,96 @@ fn many_rows_scroll_inside_a_bounded_list(cx: &mut TestAppContext) {
         "{last:?} in {body:?}"
     );
     assert_eq!(test_support::bounds(cx, "host-attention-list"), list);
+}
+
+// ---- Sandbox and container hosts in the window ----------------------------------------------------------------------
+
+/// Why this matters: the rows must be drawn with what the old list offered for an environment (Details on its trouble,
+/// a bare bar while it is destroyed) and go once the environment recovers or is gone, or the list keeps pointing at
+/// trouble that is over. Specified: over the local host, a sandbox being deleted and a stopped container, the list says
+/// "2 hosts need attention" and draws the container, then the sandbox; the container's row is named "<identity>:
+/// Stopped; open Hosts for details" and offers Details alone; the sandbox's is named "<identity>: Deleting; open Hosts
+/// for details", has that as its plain hover help with no progress card, a bar and no button. Details on the container
+/// shows Hosts with its menu toggle focused and sends nothing. Back on Sessions, the sandbox leaving the registry takes
+/// its row, and the container reading connected again takes the list away.
+#[gpui::test]
+fn environment_rows_offer_details_and_go_when_the_environment_recovers(cx: &mut TestAppContext) {
+    let mut listed = vec![
+        host(1, "local", connected()),
+        environment(2, "sandbox", Provider::Sandbox, deleting(None)),
+        environment(3, "container", Provider::Container, stopped()),
+    ];
+    let (mut fake, cx) = open(cx, &listed, &[], &[], true);
+    assert_eq!(row_ids(cx), [3, 2]);
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "host-attention-heading"),
+        "2 hosts need attention"
+    );
+    let name = |alias: &str, state: &str| {
+        format!("{alias} (ops@{alias}.example.invalid): {state}; open Hosts for details")
+    };
+    assert_eq!(
+        label(&nodes, "host-attention-open-3"),
+        name("container", "Stopped")
+    );
+    assert_eq!(
+        label(&nodes, "host-attention-open-2"),
+        name("sandbox", "Deleting")
+    );
+    let present = |id: &str| node(&nodes, id).is_some();
+    assert!(present("host-attention-details-3") && !present("host-attention-update-3"));
+    assert!(present("host-attention-progress-2"));
+    assert!(!present("host-attention-details-2") && !present("host-attention-update-2"));
+    assert_eq!(
+        hover_help(cx, "host-attention-open-2"),
+        Some(name("sandbox", "Deleting"))
+    );
+    assert!(
+        node(&frame(cx), "host-card-2").is_none(),
+        "no run, so no progress card"
+    );
+
+    test_support::click(cx, "host-attention-details-3");
+    test_support::settle(cx);
+    assert!(drawn(cx, "hosts-panel"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-3"));
+    assert_eq!(sent(&mut fake), []);
+    test_support::click(cx, "hosts-panel-toggle");
+    test_support::settle(cx);
+    assert_eq!(row_ids(cx), [3, 2], "the premise: back on Sessions");
+
+    listed.remove(1);
+    push_hosts(&mut fake, &listed, &[2], cx);
+    assert_eq!(row_ids(cx), [3]);
+    listed[1].state = connected();
+    push_hosts(&mut fake, &listed, &[], cx);
+    assert!(!drawn(cx, "host-attention-list"));
+}
+
+/// Why this matters: failed forwards are a problem only while the host reads connected (the old `tunnels::failed`), so a
+/// container that drops its connection must not keep a "Tunnels failed" row on stale health, nor lose it for good once
+/// it is back. Specified: a connected container whose forwards failed has the row "<identity>: Tunnels failed; open
+/// Hosts for details" with Details; pushed as connecting with the same forwards, it has no row and the list is gone;
+/// connected again, the row is back.
+#[gpui::test]
+fn failed_tunnels_show_only_while_the_host_reads_connected(cx: &mut TestAppContext) {
+    let mut listed = vec![
+        host(1, "local", connected()),
+        troubled(2, connected(), None, Some(tunnels_down())),
+    ];
+    let (mut fake, cx) = open(cx, &listed, &[], &[], true);
+    assert_eq!(row_ids(cx), [2]);
+    assert_eq!(
+        label(&frame(cx), "host-attention-open-2"),
+        "env (ops@env.example.invalid): Tunnels failed; open Hosts for details"
+    );
+    assert!(drawn(cx, "host-attention-details-2"));
+
+    listed[1].state = crate::hosts::tests::connecting(1, None);
+    push_hosts(&mut fake, &listed, &[], cx);
+    assert!(!drawn(cx, "host-attention-list"));
+    listed[1].state = connected();
+    push_hosts(&mut fake, &listed, &[], cx);
+    assert_eq!(row_ids(cx), [2]);
 }
