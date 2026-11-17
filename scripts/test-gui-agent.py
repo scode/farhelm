@@ -394,8 +394,9 @@ class StagedRunTest(unittest.TestCase):
         """Specified: HOME, PATH and SHELL are the run's (HOME and the wrappers inside the run directory, the wrappers
         first on PATH, then only system directories); every variable that names the caller's configuration
         (STAGED_DROPPED_ENV) and every credential or vendor variable (a vendor's prefix, or a name ending like a key or
-        a token) is gone; whatever else the caller set passes through, `SSH_AUTH_SOCK` included, since the helm's ssh
-        to a staged host may need the caller's agent; and the caller's own dictionary is left as it was."""
+        a token) is gone, and so is the caller's ssh agent (`SSH_AUTH_SOCK`), since the staged hosts are reached with
+        the run's own key through its private sshd; whatever else the caller set passes through; and the caller's own
+        dictionary is left as it was."""
         before = dict(self.caller)
         env = gui_agent.staged_env(self.caller, self.staging)
         self.assertEqual(self.caller, before)
@@ -403,12 +404,12 @@ class StagedRunTest(unittest.TestCase):
         self.assertEqual(env["PATH"], f"{self.run_dir / 'staging' / 'bin'}:{gui_agent.STAGED_SYSTEM_PATH}")
         self.assertEqual(env["SHELL"], gui_agent.STAGED_SHELL)
         dropped = (*gui_agent.STAGED_DROPPED_ENV, "CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTHROPIC_API_KEY",
-                   "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AWS_PROFILE")
+                   "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AWS_PROFILE",
+                   "SSH_AUTH_SOCK")
         for name in dropped:
             self.assertNotIn(name, env)
             self.assertNotIn(name, self.env)
         self.assertEqual(env["LANG"], "C.UTF-8")
-        self.assertEqual(env["SSH_AUTH_SOCK"], "/tmp/agent.sock")
         self.assertNotIn(str(self.real_home), json.dumps(env))
         self.assertNotIn(str(self.real_bin), json.dumps(env))
         # The bridge's own command line and the app get it too, under the bridge's display and renderer variables.
@@ -640,6 +641,115 @@ class RemoteSupervisorTest(unittest.TestCase):
                          (ours.pid, start))
         self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": ours.pid, "start": "x"}))
         self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": 2**22 + 1, "start": "1"}))
+
+
+def command_lines() -> list[str]:
+    """Every process's command line, from `ps` (the same call on Linux and macOS)."""
+    return subprocess.run(["ps", "-A", "-ww", "-o", "args="], capture_output=True, text=True, check=True).stdout.split("\n")
+
+
+class PrivateSshdTest(unittest.TestCase):
+    """A staged run reaches its remote hosts, which are this machine, through a private sshd of its own and an `ssh`
+    shim first on its PATH, so it needs no passwordless ssh to itself and touches no account's `~/.ssh`. These start the
+    machine's real `sshd` and `ssh` (the arrangement is only as good as the real programs' reading of the files the run
+    writes), and pin what the shim reaches, what it refuses, and that `stop` leaves nothing of it running."""
+
+    def setUp(self):
+        for program in ("ssh", "ssh-keygen"):
+            if not shutil.which(program):
+                self.skipTest(f"SKIPPED: no {program} on this machine")
+        if not (shutil.which("sshd") or pathlib.Path("/usr/sbin/sshd").is_file()):
+            self.skipTest("SKIPPED: no sshd on this machine")
+        # Short, because macOS limits a unix socket path to 104 bytes and the client's connection socket lives here.
+        self.run_dir = pathlib.Path(tempfile.mkdtemp(prefix="ga-ssh-", dir="/tmp"))
+        (self.run_dir / "logs").mkdir()
+        self.bin = self.run_dir / "bin"
+        self.bin.mkdir()
+        self.addCleanup(shutil.rmtree, self.run_dir)
+        self.user = gui_agent.pwd.getpwuid(os.getuid()).pw_name
+        self.records: list[dict] = []
+
+        def started(record: dict) -> None:
+            # Cleanup is registered the moment an sshd exists, so one that `start_private_sshd` leaves by failing
+            # later (a readiness timeout) is stopped too; setUp's failure skips tearDown, never addCleanup.
+            if not self.records:
+                self.addCleanup(gui_agent.stop_private_sshd, record)
+            self.records.append(dict(record))
+
+        self.sshd = gui_agent.start_private_sshd(
+            self.run_dir, ["localhost", f"{self.user}@localhost"], self.bin, started
+        )
+
+    def shim(self, *args: str, timeout: float = 30) -> subprocess.CompletedProcess:
+        """The run's shim with BatchMode on, as the helm dials (a password prompt would hang the test otherwise)."""
+        return subprocess.run([str(self.bin / "ssh"), "-o", "BatchMode=yes", *args], stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=timeout)
+
+    def test_the_staged_destinations_reach_the_private_sshd_with_the_runs_own_files(self):
+        """Specified: both staged spellings of this machine log in without a password through the shim, as the caller's
+        own user, at the run's sshd (its port on 127.0.0.1); ssh resolves them to the run's key, known_hosts and no
+        agent, so nothing in the account's `~/.ssh` is read; and the shim is the one the sshd record names. The sshd is
+        recorded before `start` waits on it."""
+        self.assertEqual(self.sshd["shim"], str(self.bin / "ssh"))
+        self.assertTrue(gui_agent.running(self.records[0]["pid"], self.records[0]["start"]))
+        for destination in ("localhost", f"{self.user}@localhost"):
+            with self.subTest(destination=destination):
+                result = self.shim(destination, "id", "-un")
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, self.user), result.stderr)
+                resolved = self.shim("-G", destination).stdout.lower().splitlines()
+                directory = str(self.run_dir / "sshd").lower()
+                for line in ("hostname 127.0.0.1", f"port {self.sshd['port']}", "identityagent none",
+                             f"identityfile {directory}/client_key", f"userknownhostsfile {directory}/known_hosts",
+                             "globalknownhostsfile /dev/null", "identitiesonly yes"):
+                    self.assertIn(line, resolved)
+
+    def test_every_other_destination_is_refused(self):
+        """The helm's dials from a staged run must reach only the run's sshd, also for a host an agent driving the window
+        adds. Specified: a destination that is not one of the staged spellings fails through the shim without connecting
+        anywhere."""
+        result = self.shim("elsewhere.example", "true")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("a staged run reaches only its staged hosts", result.stderr)
+
+    def test_stop_leaves_nothing_of_the_sshd_or_its_clients(self):
+        """The helm's shared connections detach from the app (`ControlPersist`) and could outlive it. Specified: with a
+        detached shared connection open through the shim, `stop_private_sshd` ends the sshd and its connection's
+        processes and reports no problem, and the detached client, which `stop` never signals, ends by itself within 10
+        seconds because its connection is gone; nothing naming the run directory is left running."""
+        control = self.run_dir / "c"
+        opened = self.shim("-o", "ControlMaster=auto", "-o", f"ControlPath={control}", "-o", "ControlPersist=60",
+                           "localhost", "true")
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        self.assertTrue(any(line.startswith(f"ssh: {control}") for line in command_lines()),
+                        "premise: a detached shared connection is running")
+        self.assertEqual(gui_agent.stop_private_sshd(self.sshd), [])
+        deadline = time.monotonic() + 10
+
+        def left() -> list[str]:
+            return [line for line in command_lines() if str(self.run_dir) in line]
+
+        while time.monotonic() < deadline and left():
+            time.sleep(0.05)  # sleep-ok: polling for processes the kernel is still reaping; there is no event
+        self.assertEqual(left(), [])
+        self.assertFalse(gui_agent.running(self.sshd["pid"], self.sshd["start"]))
+
+    def test_the_configurations_name_only_the_runs_files(self):
+        """The written files are the whole arrangement. Specified: the sshd listens on loopback only, lets in only the
+        caller's user by public key with the run's authorized key (marked `restrict`), and offers no forwarding or
+        terminal; the client file sends exactly the staged hosts (each host part once) to that port; and the shim runs
+        the real ssh with that file and every argument."""
+        directory = self.run_dir / "sshd"
+        config = (directory / "sshd_config").read_text().splitlines()
+        for line in ("ListenAddress 127.0.0.1", f"AllowUsers {self.user}", "PasswordAuthentication no",
+                     f"AuthorizedKeysFile {directory}/authorized_keys", "AllowTcpForwarding no", "PermitTTY no"):
+            self.assertIn(line, config)
+        self.assertTrue((directory / "authorized_keys").read_text().startswith("restrict ssh-ed25519 "))
+        client = gui_agent.ssh_client_config_text(directory, 4022, ["localhost", "me@localhost", "127.0.0.1"])
+        self.assertEqual(client.splitlines()[1], "Host localhost 127.0.0.1")
+        self.assertIn("  Port 4022", client.splitlines())
+        shim = (self.bin / "ssh").read_text()
+        self.assertIn(f"-F {directory}/ssh_config \"$@\"", shim)
+        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
 
 
 # Stand-ins for `systemctl` and `podman`, for what `stop` runs in a user-session run. `systemctl --user list-units ...`
@@ -1450,6 +1560,219 @@ class ScenarioTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "reach its status: readme rewrite=running$"):
             gui_agent.stage_scenario(run, plan, "/fx", lambda: self.window_of(created), request=helm, timeout=0.2,
                                      interval=0)
+
+
+def rect(x: float, y: float, w: float, h: float) -> dict:
+    """A rectangle as the bridge reports one."""
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def png_header(width: int, height: int) -> bytes:
+    """The start of a PNG of the given size: its signature and IHDR chunk, all `png_size` reads."""
+    import struct
+    import zlib
+
+    body = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + struct.pack(">I", len(body)) + b"IHDR" + body
+            + struct.pack(">I", zlib.crc32(b"IHDR" + body)))
+
+
+class CaptureTest(unittest.TestCase):
+    """`capture` writes a scenario's picture only when nothing can spoil it (a pointer's tooltip or highlight, a
+    terminal still replaying), nothing in it names the machine, and it has the scenario's size."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def test_the_readiness_line_is_the_transcripts_last_printed_line(self):
+        """The open session is settled when its terminal shows its transcript's last printed line. Specified: the hero's
+        `Running…` line, trimmed and without escapes; comments and blanks skipped; a silent transcript refused."""
+        self.assertEqual(gui_agent.last_transcript_line(HERO.parent / "transcript.txt"), "⎿  Running…")
+        path = self.dir / "t.txt"
+        path.write_text("## comment\n\\e[1mfirst\\e[0m\n\n## trailing comment\n")
+        self.assertEqual(gui_agent.last_transcript_line(path), "first")
+        path.write_text("## only a comment\n\n")
+        with self.assertRaisesRegex(gui_agent.UsageError, "prints nothing"):
+            gui_agent.last_transcript_line(path)
+
+    def test_the_pointer_parks_only_where_nothing_reacts_to_it(self):
+        """A pointer over a row or a link draws a highlight or a tooltip into the picture. Specified: a target qualifies
+        only with its centre outside every drawn hover or tooltip element (an undrawn one counts for nothing), never
+        without a drawn area itself, and only as the first entry of its id path, which `id:<path>` resolves to."""
+        tree = {"nodes": [
+            {"visible": rect(0, 0, 100, 100), "flags": {"hover": True}},
+            {"visible": rect(200, 0, 50, 50), "flags": {"tooltip": True}},
+            {"visible": rect(300, 0, 0, 0), "flags": {"hover": True}},
+            {"visible": rect(400, 0, 50, 50), "flags": {"mouse": True}},
+        ]}
+        entries = [
+            {"key": {"path": "rows/row"}, "visible": rect(10, 10, 20, 20)},
+            {"key": {"path": "rail/help"}, "visible": rect(210, 10, 20, 20)},
+            {"key": {"path": "brand"}, "visible": rect(300, 0, 40, 40)},
+            {"key": {"path": "brand"}, "visible": rect(0, 0, 20, 20)},
+            {"key": {"path": "hidden"}, "visible": rect(500, 0, 0, 0)},
+            {"key": {"path": "plain"}, "visible": rect(400, 0, 50, 50)},
+            {"key": {"path": ""}, "visible": rect(600, 0, 50, 50)},
+        ]
+        self.assertEqual(gui_agent.park_targets(entries, tree), ["id:brand", "id:plain"])
+
+    def needles(self) -> tuple[list[str], list[str]]:
+        """The needles for a run in this test's directory, reached through a symlink so its two spellings differ."""
+        real = self.dir / "real"
+        (real / "run").mkdir(parents=True)
+        (self.dir / "link").symlink_to(real)
+        self.run_dir = self.dir / "link" / "run"
+        record = {"binaries": {"farhelm": "/build/target/debug/farhelm"}}
+        return gui_agent.capture_needles(self.run_dir, record, "someone", "/home/someone",
+                                         ["localhost", "someone@localhost"], "box.example")
+
+    def test_the_needles_are_the_machines_paths_anywhere_and_its_names_where_drawn(self):
+        """Specified: refused anywhere are the run directory as given and as resolved, the checkout, the build
+        directory and the account's home; refused where drawn are each staged destination naming the account, the
+        account followed by `@`, and the hostname with and without its domain, never `localhost` itself."""
+        anywhere, drawn = self.needles()
+        self.assertEqual(anywhere, [str(self.run_dir), str(self.dir.resolve() / "real" / "run"), str(REPO),
+                                    *([str(REPO.resolve())] if REPO.resolve() != REPO else []), "/build/target",
+                                    "/home/someone"])
+        self.assertEqual(drawn, ["someone@localhost", "someone@", "box.example", "box"])
+
+    def test_a_leak_is_refused_where_the_picture_could_show_it(self):
+        """Specified: a machine path is refused in drawn and hidden text, labels, field values and the terminal; the
+        account's ssh spelling, `user@` and the hostname (as a whole word) where drawn and in the terminal, but not in
+        labels or text out of view; source locations are not looked at."""
+        anywhere, drawn = self.needles()
+        run = str(self.run_dir)
+        clean = {"title": "", "texts": [{"text": "gpu-1 in the sandbox", "visible": rect(0, 0, 9, 9)},
+                                        {"text": "someone@localhost", "visible": rect(0, 0, 0, 0)}],
+                 "nodes": [{"label": "gpu-1 (someone@localhost): Connected", "visible": rect(0, 0, 9, 9),
+                            "source": "/home/someone/.cargo/registry/x.rs:1"}]}
+        self.assertEqual(gui_agent.leaks(clean, "> fix the test", anywhere, drawn), [])
+        cases = [
+            ("drawn text", {"texts": [{"text": f"cd {run}/work/0", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("drawn text", {"texts": [{"text": "gpu-1 (someone@localhost)", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("drawn text", {"texts": [{"text": "box.example", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("drawn text", {"texts": [{"text": "ssh someone@elsewhere", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("drawn text", {"texts": [{"text": "on box", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("hidden text", {"texts": [{"text": "/home/someone/src", "visible": rect(0, 0, 0, 0)}]}, ""),
+            ("accessible label", {"nodes": [{"label": f"Folder {run}/work/2", "visible": rect(0, 0, 0, 0)}]}, ""),
+            ("field value", {"nodes": [{"value": "someone@localhost", "visible": rect(0, 0, 9, 9)}]}, ""),
+            ("terminal", {}, f"$ ls {run}"),
+            ("terminal", {}, "someone@localhost:~$"),
+        ]
+        for where, tree, terminal in cases:
+            with self.subTest(where=where, tree=tree, terminal=terminal):
+                found = gui_agent.leaks({"title": "", "texts": [], "nodes": [], **tree}, terminal, anywhere, drawn)
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith(f"{where}: "), found)
+
+    def test_a_picture_of_the_wrong_size_is_refused_quoting_the_window(self):
+        """The publish script checks the size again, but a wrong-size picture must not get that far looking like the
+        hero. Specified for the hero (1280x800 at scale 2): 2560x1600 passes; anything else, and an unreadable shot, is
+        refused with the size found, the size declared, and the window's points and scale, which tell a small display
+        from a Linux run."""
+        plan = gui_agent.load_scenario(HERO, "someone")
+        self.assertEqual(gui_agent.expected_capture_size(plan), (2560, 1600))
+        mac = {"width": 1280.0, "height": 800.0, "scale": 2.0}
+        self.assertIsNone(gui_agent.size_problem((2560, 1600), plan, mac))
+        shrunk = gui_agent.size_problem((2048, 1360), plan, dict(mac, width=1024.0, height=680.0))
+        for part in ("2048x1360 pixels", "declares 2560x1600", "window is 1024x680 points at scale 2.0",
+                     "display is too small"):
+            self.assertIn(part, shrunk)
+        linux = gui_agent.size_problem((1280, 800), plan, {"width": 1322.0, "height": 876.0, "scale": 1.0})
+        self.assertIn("at scale 1.0", linux)
+        self.assertIn("no readable PNG", gui_agent.size_problem(None, plan, mac))
+
+    def stand_in_bridge(self, shot_size: tuple[int, int], window: dict, drawn: str = "gpu-1"):
+        """A stand-in for the bridge's command line for `capture`, and the verbs it was asked for: the terminal holds no
+        focus until it is clicked and then shows the hero transcript's end; the frame has one hover region with a
+        target inside it and one plain target; `drawn` is the one drawn text; a screenshot writes a PNG header of
+        `shot_size`."""
+        asked: list[list[str]] = []
+        state = {"focused": False}
+        tree = {"title": "", "texts": [{"text": drawn, "visible": rect(0, 0, 9, 9)}],
+                "nodes": [{"visible": rect(0, 0, 100, 100), "flags": {"hover": True}}]}
+        entries = [{"key": {"path": "rows"}, "visible": rect(10, 10, 9, 9)},
+                   {"key": {"path": "brand"}, "visible": rect(200, 0, 40, 40)}]
+
+        def bridge(_run, _record, args, capture=False):
+            asked.append(args)
+            out = ""
+            if args[:2] == ["get", "probe"]:
+                out = json.dumps("...\n  ⎿  Running…\n") if state["focused"] else "null"
+            elif args[0] == "click":
+                state["focused"] = True
+            elif args[0] == "snapshot":
+                out = json.dumps({"entries": entries})
+            elif args[0] == "tree":
+                out = json.dumps(tree)
+            elif args[0] == "windows":
+                out = json.dumps([window])
+            elif args[0] == "screenshot":
+                pathlib.Path(args[1]).write_bytes(png_header(*shot_size))
+            return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
+
+        return bridge, asked
+
+    def capture_with(self, bridge) -> tuple[pathlib.Path, pathlib.Path]:
+        """Run `capture` on a hero scenario run in this test's directory against `bridge`, as on a Mac (no frame to
+        crop); returns the run directory and the output path."""
+        run = self.dir / "run"
+        run.mkdir()
+        record = {"scenario": {"file": str(HERO)}, "binaries": {"farhelm": "/build/target/debug/farhelm"}}
+        output = self.dir / "out" / "hero.png"
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            gui_agent.capture(run, record, [str(output)], platform="darwin", bridge_cli=bridge)
+        return run, output
+
+    def test_capture_settles_parks_checks_and_writes_only_a_right_sized_picture(self):
+        """Specified against a stand-in bridge: the pointer is parked on the target outside the hover region before
+        anything else (on a Mac the real pointer may rest on a terminal link whose tooltip covers the terminal); the
+        terminal is then clicked for focus because the probe said none held it, and only then waited on; the pointer is
+        parked again after the click and before the last idle wait; the leak check reads the frame before and after
+        the shot; and a picture of the scenario's size is written to the output, byte for byte the shot."""
+        bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0})
+        run, output = self.capture_with(bridge)
+        verbs = [args[0] if args[0] != "get" else "probe" for args in asked]
+        click = verbs.index("click")
+        self.assertEqual(asked[click], ["click", "id:terminal-grid"])
+        hovers = [index for index, verb in enumerate(verbs) if verb == "hover"]
+        self.assertEqual([asked[index] for index in hovers], [["hover", "id:brand"]] * 2)
+        self.assertLess(hovers[0], click, "parked before the click, which a tooltip could otherwise cover")
+        self.assertLess(click, verbs.index("probe", click), "the terminal is waited on after the click")
+        self.assertLess(click, hovers[1], "parked again after the click")
+        last_wait = max(index for index, verb in enumerate(verbs) if verb == "wait")
+        self.assertLess(hovers[1], last_wait)
+        shot = verbs.index("screenshot")
+        self.assertIn("tree", verbs[last_wait:shot])
+        self.assertIn("tree", verbs[shot:])
+        self.assertEqual(output.read_bytes(), (run / gui_agent.CAPTURE_FILE).read_bytes())
+
+    def test_capture_writes_nothing_when_a_check_fails(self):
+        """A wrong picture must never land where the publish step looks. Specified: a shrunk shot fails and leaves the
+        output unwritten, the shot kept in the run directory; a drawn account spelling fails before any shot."""
+        bridge, _ = self.stand_in_bridge((2048, 1360), {"width": 1024.0, "height": 680.0, "scale": 2.0})
+        with self.assertRaisesRegex(RuntimeError, "display is too small") as raised:
+            self.capture_with(bridge)
+        self.assertIn("Nothing was written", str(raised.exception))
+        self.assertFalse((self.dir / "out").exists())
+        self.assertTrue((self.dir / "run" / gui_agent.CAPTURE_FILE).exists())
+
+        shutil.rmtree(self.dir / "run")
+        bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0},
+                                             drawn=f"gpu-1 ({gui_agent.pwd.getpwuid(os.getuid()).pw_name}@localhost)")
+        with self.assertRaisesRegex(RuntimeError, "machine detail before the shot"):
+            self.capture_with(bridge)
+        self.assertNotIn("screenshot", [args[0] for args in asked])
+        self.assertFalse((self.dir / "out").exists())
+
+    def test_capture_refuses_a_run_without_a_scenario(self):
+        """Only a scenario says what the picture's size and open session are."""
+        with self.assertRaisesRegex(gui_agent.UsageError, "start this run with --scenario"):
+            gui_agent.capture(self.dir, {}, [str(self.dir / "x.png")])
 
 
 class ProcessIdentityTest(unittest.TestCase):

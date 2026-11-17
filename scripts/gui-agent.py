@@ -11,6 +11,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
                                        [--remote-host DEST ... | --user-session (Linux)]
     scripts/gui-agent.py RUN_DIR snapshot -i         # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
+    scripts/gui-agent.py RUN_DIR capture OUT.png       # a --scenario run's picture, once every check passes
     scripts/gui-agent.py RUN_DIR stop
 
 `start` builds `farhelm-desktop` with the `agent` feature (the test-automation bridge), the `farhelm` CLI the app
@@ -58,10 +59,12 @@ machine with other agents"). The bridge socket is unauthenticated, so it sits in
 Staged runs (docs/gui-agent.md, "Staged runs", has the whole arrangement and why). A staged run launches its sessions
 by an agent harness's bare name, so it always runs the app, its supervisor and every remote supervisor with a private
 HOME and PATH inside the run, where every harness name is a wrapper around the fake agent, and with the scripted
-provisioning backend on, since a staged remote host is this machine. `staged_start` says which runs are staged.
+provisioning backend on, since a staged remote host is this machine. Its remote hosts are reached through a private sshd
+of the run's own ("The private sshd" below), never the machine's own ssh setup. `staged_start` says which runs are
+staged.
 
-Scenario runs (docs/gui-agent.md, "Scenario runs"). `load_scenario` checks the whole file before anything starts;
-`stage_scenario` stages it through the helm's API once the app is up.
+Scenario runs (docs/gui-agent.md, "Scenario runs" and "Scenario captures"). `load_scenario` checks the whole file before
+anything starts; `stage_scenario` stages it through the helm's API once the app is up; `capture` takes its picture.
 
 User-session runs (docs/gui-agent.md, "User-session runs"). Everything else about the run stays private: its state,
 its compositor (which keeps its own runtime directory and bus), the caller's `FARHELM_*` variables kept out. The one
@@ -84,6 +87,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Callable
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -243,8 +247,11 @@ STAGED_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 # Variables that point a program at the caller's own configuration rather than at HOME, dropped from a staged run's
 # environment so that nothing the app starts can find the caller's shell startup files or an agent's configuration.
+# `SSH_AUTH_SOCK` is the caller's ssh agent, which holds the caller's real keys: a staged run reaches its hosts through
+# its private sshd with a key of its own ("The private sshd" below), so nothing in it has a use for the agent.
 STAGED_DROPPED_ENV = (
-    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "ZDOTDIR", "BASH_ENV", "ENV"
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "ZDOTDIR", "BASH_ENV", "ENV",
+    "SSH_AUTH_SOCK",
 )
 
 # Credentials and vendor settings, dropped from a staged run's environment by name pattern (`staged_drops`): a vendor's
@@ -351,12 +358,12 @@ def parse_remote_hosts(destinations: list[str]) -> list[str]:
     return destinations
 
 
-def check_ssh(destination: str) -> None:
-    """Refuse a destination this machine cannot ssh to without a password, so a missing key fails `start` naming the
-    destination instead of leaving the host unreachable in the window. The options are the old browser staging's probe,
-    at least as strict as the helm's own dial (which sets `BatchMode` too)."""
+def check_ssh(destination: str, ssh: str) -> None:
+    """Refuse a destination the run cannot reach through `ssh` (the run's shim, `start_private_sshd`), so a broken
+    connection fails `start` naming the destination instead of leaving the host unreachable in the window. The options
+    are the old browser staging's probe, at least as strict as the helm's own dial (which sets `BatchMode` too)."""
     result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", destination,
+        [ssh, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", destination,
          "true"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -364,9 +371,185 @@ def check_ssh(destination: str) -> None:
     )
     if result.returncode != 0:
         raise UsageError(
-            f"passwordless ssh to {destination!r} failed; a staged remote host is this machine reached over ssh: "
-            f"{result.stderr.strip()}"
+            f"ssh to {destination!r} through the run's private sshd failed: {result.stderr.strip()}; its log is "
+            f"logs/sshd.log in the run directory. Run `stop` to clean up."
         )
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Staged runs: the private sshd
+#
+# A staged remote host is this machine reached over ssh. The helm dials each one with `ssh` from its PATH, so a staged
+# run puts a shim of that name first on the private PATH (`staging/bin/ssh`). The shim runs the real ssh with a client
+# configuration of the run's own (`ssh -F`, so neither `~/.ssh/config` nor the system's is read) that sends every staged
+# destination to a private sshd: started by the run as the caller's own user, listening on 127.0.0.1 at a port the
+# kernel picked, with a host key and an authorized key generated into `<run>/sshd/`, and stopped by `stop`. The
+# configuration refuses every other destination the helm dials. It is not a sandbox: options given on ssh's command
+# line win over the file, and the helm passes none that change the host. No account's `~/.ssh` is read or written, the
+# caller's ssh agent is not used, and the machine needs no passwordless ssh to itself, which the shared test Mac does not
+# have. Linux runs use it too, so a staged run works the same on any machine, whatever keys it holds.
+#
+# The remote end is still the caller's own account: sshd runs the helm's command (`farhelm internal stdio`, which joins
+# the run's remote supervisor) through the account's login shell with the account's real HOME, as a real `ssh
+# localhost` did before. That command starts nothing a session runs; the sessions are the remote supervisors', which
+# `start` launched with the staged HOME and PATH.
+
+# The name the client knows the private sshd's host key by, whatever spelling of this machine it dials (`HostKeyAlias`),
+# so one line of the run's known_hosts file covers every staged destination.
+SSHD_HOST_KEY_ALIAS = "farhelm-staged-sshd"
+
+# How long the private sshd gets to listen.
+SSHD_READY_SECONDS = 15
+
+
+def sshd_dir(run: Path) -> Path:
+    """The private sshd's directory: its configuration, both key pairs, the authorized key and known_hosts."""
+    return run / "sshd"
+
+
+def destination_host(destination: str) -> str:
+    """The host part of an ssh destination (`me@localhost` -> `localhost`), which is what an ssh config `Host` matches."""
+    return destination.rpartition("@")[2]
+
+
+def sshd_config_text(directory: Path, port: int, user: str) -> str:
+    """The private sshd's configuration: loopback only, public-key login for `user` alone with the run's own key, and
+    nothing else a session could use (no forwarding, no terminal, no environment from the client).
+
+    `StrictModes no` because the files live under the run directory, below a world-writable `/tmp`, which sshd's
+    ownership checks would refuse; the directory itself is private (0700). `UsePAM no` because a non-root sshd cannot
+    use PAM; public-key login does not need it."""
+    return "".join(f"{line}\n" for line in (
+        "# A staged run's private sshd (scripts/gui-agent.py, \"The private sshd\").",
+        f"Port {port}",
+        "ListenAddress 127.0.0.1",
+        "AddressFamily inet",
+        f"HostKey {directory / 'host_key'}",
+        f"AuthorizedKeysFile {directory / 'authorized_keys'}",
+        f"PidFile {directory / 'sshd.pid'}",
+        f"AllowUsers {user}",
+        "PubkeyAuthentication yes", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "UsePAM no",
+        "StrictModes no", "PermitRootLogin no", "AllowAgentForwarding no", "AllowTcpForwarding no", "X11Forwarding no",
+        "PermitTunnel no", "PermitTTY no", "PermitUserEnvironment no", "PermitUserRC no", "PrintMotd no",
+    ))
+
+
+def ssh_client_config_text(directory: Path, port: int, destinations: list[str]) -> str:
+    """The client configuration the run's ssh shim hands ssh with `-F`: each staged destination's host sent to the
+    private sshd with the run's key and known_hosts and nothing of the caller's (no agent, no default identities, no
+    global known hosts, no proxy), and every other host refused through a proxy command that fails.
+
+    The helm's own `-o` options (its connection sharing, `BatchMode`, its overrides) come on the command line and win
+    over this file, as they win over a user's config. The refusal block is last because ssh takes the first value it
+    finds for each keyword, which is also why the staged block sets `ProxyCommand none`."""
+    hosts = " ".join(dict.fromkeys(destination_host(destination) for destination in destinations))
+    refusal = "echo 'a staged run reaches only its staged hosts' >&2; exit 1"
+    return "".join(f"{line}\n" for line in (
+        "# A staged run's ssh client configuration (scripts/gui-agent.py, \"The private sshd\").",
+        f"Host {hosts}",
+        "  HostName 127.0.0.1",
+        f"  Port {port}",
+        f"  HostKeyAlias {SSHD_HOST_KEY_ALIAS}",
+        f"  UserKnownHostsFile {directory / 'known_hosts'}",
+        "  GlobalKnownHostsFile /dev/null", "  StrictHostKeyChecking yes", f"  IdentityFile {directory / 'client_key'}",
+        "  IdentitiesOnly yes", "  IdentityAgent none", "  ProxyCommand none", "  ProxyJump none",
+        "Host *",
+        f"  ProxyCommand /bin/sh -c {shlex.quote(refusal)}",
+    ))
+
+
+def ssh_shim_script(ssh: str, config: Path) -> str:
+    """The `ssh` a staged run's PATH finds first: the real one (`ssh`, an absolute path found outside the run) with the
+    run's client configuration, every argument passed on."""
+    return (
+        "#!/bin/sh\n"
+        "# A staged run's ssh (scripts/gui-agent.py, \"The private sshd\"): the helm's dials reach only the run's sshd.\n"
+        f'exec {shlex.quote(ssh)} -F {shlex.quote(str(config))} "$@"\n'
+    )
+
+
+def start_private_sshd(run: Path, destinations: list[str], bin_dir: Path, on_started: Callable[[dict], None]) -> dict:
+    """Start the run's private sshd for `destinations` and write the ssh shim into `bin_dir` (the staged PATH's first
+    directory); return the run's record of the sshd (`pid`, `start`, `config`, `port`, `shim`).
+
+    `on_started` receives the record as soon as the sshd process exists, before the wait, so `stop` can end an sshd that
+    `start` left behind by failing or being killed later. The programs are the machine's own `sshd`, `ssh` and
+    `ssh-keygen`; a missing one fails naming it. The port is one the kernel picked a moment earlier (bound to port 0 and
+    released); an sshd that exits or does not listen within SSHD_READY_SECONDS fails the start naming its log
+    (`logs/sshd.log`), the port taken in between included, which is rare enough to leave to a second `start`."""
+    import shutil
+    import socket
+
+    found = {}
+    for name, fallback in (("sshd", "/usr/sbin/sshd"), ("ssh", None), ("ssh-keygen", None)):
+        path = shutil.which(name) or fallback
+        if not path or not Path(path).is_file():
+            raise UsageError(f"a staged run with remote hosts needs `{name}` (OpenSSH) on this machine")
+        # sshd re-executes itself and refuses to run from a relative path.
+        found[name] = str(Path(path).resolve())
+    directory = sshd_dir(run)
+    directory.mkdir(mode=0o700)
+    for key in ("host_key", "client_key"):
+        made = subprocess.run(
+            [found["ssh-keygen"], "-q", "-t", "ed25519", "-N", "", "-C", SSHD_HOST_KEY_ALIAS, "-f",
+             str(directory / key)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        )
+        if made.returncode != 0:
+            raise RuntimeError(f"ssh-keygen could not make the run's {key}: {made.stderr.strip()}")
+    # `restrict` turns off everything a key may otherwise grant (forwarding, a terminal, `~/.ssh/rc`); the helm's
+    # command needs none of it.
+    client_public = (directory / "client_key.pub").read_text().strip()
+    (directory / "authorized_keys").write_text(f"restrict {client_public}\n")
+    host_public = " ".join((directory / "host_key.pub").read_text().split()[:2])
+    (directory / "known_hosts").write_text(f"{SSHD_HOST_KEY_ALIAS} {host_public}\n")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    config, client, log = directory / "sshd_config", directory / "ssh_config", run / "logs" / "sshd.log"
+    config.write_text(sshd_config_text(directory, port, pwd.getpwuid(os.getuid()).pw_name))
+    with log.open("wb") as output:
+        child = subprocess.Popen(
+            [found["sshd"], "-D", "-e", "-f", str(config)],
+            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+    record = {"pid": child.pid, "start": proc_start(child.pid), "config": str(config), "port": port}
+    on_started(record)
+    deadline = time.monotonic() + SSHD_READY_SECONDS
+    while True:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            break
+        except OSError:
+            pass
+        if child.poll() is not None:
+            raise RuntimeError(f"the run's private sshd exited with status {child.returncode} (log {log})")
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"the run's private sshd did not listen within {SSHD_READY_SECONDS} s (log {log})")
+        time.sleep(0.1)  # sleep-ok: polling for a listener another process opens; there is no event to wait on
+    client.write_text(ssh_client_config_text(directory, port, destinations))
+    # ssh refuses a configuration file others could write; 0600 like the keys.
+    client.chmod(0o600)
+    shim = bin_dir / "ssh"
+    shim.write_text(ssh_shim_script(found["ssh"], client))
+    shim.chmod(0o700)
+    record["shim"] = str(shim)
+    on_started(record)
+    return record
+
+
+def stop_private_sshd(record: dict) -> list[str]:
+    """Stop the run's private sshd and every process under it; return the problems.
+
+    The sshd is signalled only while its recorded pid and start time match and its command line names the run's sshd
+    configuration (sshd rewrites its process title, which keeps the path in it). The processes under it are each
+    connection's and the helm's `farhelm internal stdio` commands they ran. The run's ssh clients, the helm's detached
+    shared connections (`ControlPersist`) among them, end by themselves once their connection is gone: the shim reaches
+    nothing but this sshd."""
+    pid, start = record.get("pid"), record.get("start")
+    if not (pid and start and running(pid, start) and record["config"] in " ".join(command_line(pid) or [])):
+        return []
+    return [f"a process of the run's private sshd (pid {left}) did not stop" for left in stop_tree(pid, start, 5)]
 
 
 def remote_state_dir(run: Path, index: int) -> Path:
@@ -1203,6 +1386,265 @@ def stage_scenario(
     return ids
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Scenario captures: the picture of a staged scenario, and what has to hold before it is taken
+#
+# `capture OUT.png` on a scenario run takes the docs-media picture (docs/gui-agent.md, "Scenario captures"), the GPUI
+# counterpart of the browser capture's last steps (`e2e/readme-hero/capture.spec.ts`, removed in #3401). OUT is written
+# only when every check passed. The README hero is the first caller (`scripts/readme-screenshot.sh`); the docs
+# screenshots and the demo video are meant to reuse these helpers when they are rebuilt.
+
+# The element id of an open session's terminal (`attached.rs` in crates/gui/farhelm-gui/src/terminal), clicked to give
+# it focus when the `terminal_text` probe says no terminal holds it: a fresh window's focus is on New session.
+TERMINAL_ELEMENT = "terminal-grid"
+
+# Where `capture` keeps the window's shot in the run directory, cropped on Linux, whatever its checks found.
+CAPTURE_FILE = "capture.png"
+
+# How long the open session's terminal gets to show its transcript's last line, and the window to stop changing.
+TRANSCRIPT_SECONDS = 30
+IDLE_MILLISECONDS = 15000
+
+
+def last_transcript_line(path: Path) -> str:
+    """The last line a replay transcript prints, as the terminal shows it (comment and blank lines skipped, written
+    escapes removed, trimmed): the open session's readiness check, as the browser staging's `lastTranscriptLine`."""
+    import re
+
+    printed = []
+    for line in Path(path).read_text().split("\n"):
+        if line.startswith("##") or not line.strip():
+            continue
+        printed.append(re.sub(r"\x1b\[[0-9;]*m", "", line.replace("\\e", "\x1b")).strip())
+    if not printed or not printed[-1]:
+        raise UsageError(f"{path} prints nothing")
+    return printed[-1]
+
+
+def _inside(rect: dict, x: float, y: float) -> bool:
+    """Whether the point lies in the bridge's rectangle (`x`, `y`, `w`, `h` in window pixels)."""
+    return rect["x"] <= x < rect["x"] + rect["w"] and rect["y"] <= y < rect["y"] + rect["h"]
+
+
+def _drawn(rect: dict) -> bool:
+    """Whether a bridge rectangle covers any of the window (a clipped or scrolled-out element's is empty)."""
+    return rect["w"] > 0 and rect["h"] > 0
+
+
+def park_targets(entries: list[dict], tree: dict) -> list[str]:
+    """The `hover` targets that park the pointer where nothing in the window reacts to it, best first, as `id:` paths
+    from a `snapshot -a --json`'s `entries`, judged against the same frame's raw `tree`.
+
+    A target qualifies when the centre the bridge aims at lies outside every drawn element with a `hover` or `tooltip`
+    flag, which would draw a highlight or a tooltip into the picture (a terminal link's tooltip once showed the run's
+    real path). Only the first entry of each id path is offered: the bridge resolves `id:<path>` to that one."""
+    hot = [node["visible"] for node in tree.get("nodes", [])
+           if _drawn(node["visible"]) and (node["flags"].get("hover") or node["flags"].get("tooltip"))]
+    targets, seen = [], set()
+    for entry in entries:
+        path = (entry.get("key") or {}).get("path", "")
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        box = entry["visible"]
+        x, y = box["x"] + box["w"] / 2, box["y"] + box["h"] / 2
+        if _drawn(box) and not any(_inside(rect, x, y) for rect in hot):
+            targets.append(f"id:{path}")
+    return targets
+
+
+def capture_needles(run: Path, record: dict, user: str, home: str | None, hosts: list[str],
+                    hostname: str | None) -> tuple[list[str], list[str]]:
+    """What a capture refuses to find in the window: `(anywhere, drawn)`.
+
+    `anywhere`, refused in drawn text, accessible labels and the terminal alike: the run directory, the checkout, the
+    build directory and the account's home, each as given and as resolved (a Mac's `/tmp` is `/private/tmp`).
+
+    `drawn`, refused only where the picture shows it: each staged destination naming the account (`user@localhost`),
+    the account followed by `@`, and the hostname. Accessible labels may hold them, since they are never drawn, and the
+    host rail names each host by its destination there. The bare account name is not refused: a short one is an
+    ordinary word."""
+    places = [run, REPO, Path(record["binaries"]["farhelm"]).parent.parent]
+    if home:
+        places.append(Path(home))
+    anywhere = []
+    for place in places:
+        for spelling in (str(place), os.path.realpath(place)):
+            if spelling not in anywhere and spelling != "/":
+                anywhere.append(spelling)
+    drawn = [host for host in hosts if "@" in host and host.partition("@")[0] == user]
+    drawn.append(f"{user}@")
+    if hostname:
+        for name in (hostname, hostname.split(".")[0]):
+            if name and name not in drawn and name != "localhost":
+                drawn.append(name)
+    return anywhere, drawn
+
+
+def leaks(tree: dict, terminal: str, anywhere: list[str], drawn: list[str]) -> list[str]:
+    """Each place the window shows a needle of `capture_needles`, as `<where>: <needle> in <text>`.
+
+    Drawn text is the frame's visible text runs and field values, the window title and the focused terminal's text;
+    text out of view and accessible labels get only the `anywhere` needles. Ids and source locations (which name the
+    build machine's crate cache) are not drawn and not looked at. A `drawn` name matches only as a whole word, so a
+    hostname `mac` does not refuse "this machine". Each text is reported once."""
+    import re
+
+    found = []
+
+    def holds(text: str, needle: str, word: bool) -> bool:
+        if not word:
+            return needle in text
+        # A boundary only where the needle has a word character at that end: `someone@` must still match
+        # `someone@elsewhere`.
+        before = r"(?<![\w.-])" if re.match(r"\w", needle) else ""
+        after = r"(?![\w-])" if re.search(r"\w$", needle) else ""
+        return re.search(before + re.escape(needle) + after, text) is not None
+
+    def look(where: str, text: str | None, needles: list[str]) -> None:
+        for needle in needles:
+            if text and holds(text, needle, needle not in anywhere):
+                found.append(f"{where}: {needle!r} in {text[:200]!r}")
+                return
+
+    for run in tree.get("texts", []):
+        look("drawn text" if _drawn(run["visible"]) else "hidden text", run.get("text"),
+             anywhere + (drawn if _drawn(run["visible"]) else []))
+    for node in tree.get("nodes", []):
+        look("accessible label", node.get("label"), anywhere)
+        look("field value", node.get("value"), anywhere + (drawn if _drawn(node["visible"]) else []))
+    look("window title", tree.get("title"), anywhere + drawn)
+    look("terminal", terminal, anywhere + drawn)
+    return found
+
+
+def expected_capture_size(plan: dict) -> tuple[int, int]:
+    """The pixel size a scenario's picture must have: its viewport times its scale, the check the publish script
+    repeats (`expected_size` in scripts/publish-readme-hero.sh)."""
+    viewport = plan["viewport"]
+    scale = viewport.get("scale", 1)
+    return viewport["width"] * scale, viewport["height"] * scale
+
+
+def size_problem(actual: tuple[int, int] | None, plan: dict, window: dict) -> str | None:
+    """Why a capture of `actual` pixels is not the scenario's picture, or None when it is. `window` is the bridge's
+    `windows` entry, quoted so the message shows the cause: the app fits a first window to its screen, so a window
+    smaller than the viewport means the display is too small, and scale 1 means a Linux run (headless Mutter). The
+    capture stops there; it never resizes the window or rescales the picture."""
+    want = expected_capture_size(plan)
+    if actual == want:
+        return None
+    viewport = plan["viewport"]
+    got = "no readable PNG" if actual is None else f"{actual[0]}x{actual[1]} pixels"
+    return (
+        f"the capture is {got}, but the scenario declares {want[0]}x{want[1]} ({viewport['width']}x"
+        f"{viewport['height']} at scale {viewport.get('scale', 1)}); the window is {window.get('width', 0):.0f}x"
+        f"{window.get('height', 0):.0f} points at scale {window.get('scale')}. A window smaller than the viewport "
+        "means the display is too small for the scenario (the app fits its first window to the screen); scale 1 "
+        "means a Linux run, which is for checking the staging and the picture's content, never for the picture"
+    )
+
+
+def capture(run: Path, record: dict, args: list[str], platform: str = sys.platform, bridge_cli=None) -> int:
+    """`capture OUT.png`: the scenario run's picture, written to OUT only if every check passes (see the section
+    comment above). Each step says what it waits for or what it found; a failure raises a RuntimeError naming the step,
+    and the shot taken so far stays at CAPTURE_FILE in the run directory. `platform` decides the Linux frame crop and
+    `bridge_cli` is `cli` unless a test hands in a stand-in bridge."""
+    import argparse
+    import shutil
+
+    parser = argparse.ArgumentParser(prog="gui-agent.py RUN_DIR capture")
+    parser.add_argument("output", type=Path, help="where to write the PNG once every check passed")
+    options = parser.parse_args(args)
+    if not record.get("scenario"):
+        raise UsageError("capture takes the picture of a scenario run; start this run with --scenario")
+    bridge_cli = bridge_cli or cli
+    # The account from the user database, for the scenario's `$USER` and the needles alike, whatever `$USER` says.
+    account = pwd.getpwuid(os.getuid())
+    plan = load_scenario(Path(record["scenario"]["file"]), account.pw_name)
+    opened = next(session for session in plan["sessions"] if session["open"])
+    batch = _sibling("gui-screenshot-batch.py")
+
+    def bridge(*verb: str) -> str:
+        result = bridge_cli(run, record, list(verb), capture=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"the bridge's `{' '.join(verb)}` failed: {result.stderr.strip()}")
+        return result.stdout
+
+    def terminal() -> str | None:
+        answer = bridge_cli(run, record, ["get", "probe", "terminal_text"], capture=True)
+        return None if answer.returncode != 0 or answer.stdout.strip() == "null" else probe_text(answer.stdout)
+
+    def park() -> None:
+        # The bridge aims at an element's centre, so each candidate is tried in turn: one that something else covers
+        # at its centre is refused by the bridge, and the next is tried.
+        entries = json.loads(bridge("snapshot", "-a", "--json", "--no-source"))["entries"]
+        for target in park_targets(entries, json.loads(bridge("tree"))):
+            if bridge_cli(run, record, ["hover", target], capture=True).returncode == 0:
+                print(f"capture: pointer parked on {target}", flush=True)
+                break
+        else:
+            raise RuntimeError("no spot in the window is clear of hover and tooltip reactions to park the pointer on")
+        bridge("wait", "--idle", "--timeout", str(IDLE_MILLISECONDS))
+
+    # Park first: on a Mac the pointer is the real one, wherever it was left on the screen, and resting on a link in the
+    # terminal it opens a tooltip naming the link's real target, which covers the terminal and refuses the click.
+    park()
+    # Settle: the open session's terminal holds focus and shows the end of its transcript.
+    if terminal() is None:
+        bridge("click", f"id:{TERMINAL_ELEMENT}")
+    if opened.get("transcript") is not None:
+        line = last_transcript_line(opened["transcript"])
+
+        def replayed():
+            text = terminal()
+            return (text if text is not None and line in text else None), f"it shows {text!r}"
+
+        poll(f"the open session's terminal to show {line!r}", replayed, TRANSCRIPT_SECONDS, 0.25)
+    print("capture: the open session's terminal holds focus and shows its transcript's last line", flush=True)
+    # And again, since the click left the pointer in the middle of the terminal.
+    park()
+
+    # Leak check, around the shot: what the window draws and holds may not name the machine.
+    host_names = scenario_remote_hosts(plan)
+    needles = capture_needles(run, record, account.pw_name, account.pw_dir, host_names, os.uname().nodename)
+
+    def leak_check(when: str) -> None:
+        tree = json.loads(bridge("tree"))
+        found = leaks(tree, terminal() or "", *needles)
+        if found:
+            raise RuntimeError(f"the window shows a machine detail {when} the shot, so it is not taken:\n  " +
+                               "\n  ".join(found))
+        # Counts, not the needles: they are this machine's paths and names, and this output gets pasted.
+        print(f"capture: leak check {when} the shot passed: {len(tree.get('texts', []))} text runs, "
+              f"{len(tree.get('nodes', []))} elements and the terminal hold none of {len(needles[0])} machine paths, "
+              f"and nothing drawn holds any of {len(needles[1])} account and host names", flush=True)
+
+    leak_check("before")
+    shot = run / CAPTURE_FILE
+    shot.unlink(missing_ok=True)
+    bridge("screenshot", str(shot))
+    leak_check("after")
+    window = json.loads(bridge("windows", "--json"))[0]
+    if platform.startswith("linux"):
+        problem = batch.crop_frame(shot, batch.LINUX_FRAME_MARGIN, batch.LINUX_FRAME_BORDER, batch.LINUX_TITLE_BAR)
+        if problem:
+            raise RuntimeError(f"the Linux window frame could not be cropped off {shot}: {problem}")
+    actual = batch.png_size(shot)
+    print(f"capture: the shot is {actual[0]}x{actual[1]} pixels" if actual else "capture: the shot is unreadable",
+          flush=True)
+    problem = size_problem(actual, plan, window)
+    if problem:
+        raise RuntimeError(f"{problem}. Nothing was written to {options.output}; the shot is kept at {shot} to look "
+                           "at, and it is not the scenario's picture")
+    options.output.parent.mkdir(parents=True, exist_ok=True)
+    staged = options.output.with_name(options.output.name + ".partial")
+    shutil.copyfile(shot, staged)
+    os.replace(staged, options.output)
+    print(options.output)
+    return 0
+
+
 # Process identity. Linux reads /proc; macOS has no /proc, so there the same facts come from `ps`. Both give a start
 # time that, together with the pid, names one process.
 
@@ -1786,16 +2228,14 @@ def start(run: Path, args: list[str]) -> int:
     if options.scenario is not None:
         if options.remote_host:
             raise UsageError("--scenario stages the scenario's own hosts; it does not take --remote-host")
-        scenario = load_scenario(options.scenario, os.environ.get("USER"))
+        scenario = load_scenario(options.scenario, pwd.getpwuid(os.getuid()).pw_name)
     remote_hosts = parse_remote_hosts(scenario_remote_hosts(scenario) if scenario else options.remote_host)
     # An explicit --window-size wins over the scenario's viewport.
     window_size = options.window_size or (scenario_window_size(scenario) if scenario else None)
     # A staged run always has the private HOME and PATH and the scripted provisioning backend; nothing turns either off.
     staged = staged_start(options)
-    # Before the ssh checks, so a refused combination fails without dialing anything.
+    # Before anything is created or dialed, so a refused combination leaves nothing behind.
     user_session = check_user_session(dict(os.environ), sys.platform, staged) if options.user_session else None
-    for destination in remote_hosts:
-        check_ssh(destination)
     mac = sys.platform == "darwin"
     if mac:
         # The window opens in the console's GUI session, so this must run as the user logged in there (SSH is fine:
@@ -1853,6 +2293,10 @@ def start(run: Path, args: list[str]) -> int:
     }
     record["binaries"] = binaries
     save()
+    missing = [path for path in binaries.values() if not Path(path).is_file()]
+    if missing:
+        # Before anything else starts (a staged run's sshd, Mutter), so `--no-build` on an empty target dir fails clean.
+        raise UsageError(f"not built: {', '.join(missing)}; build them or drop --no-build. Run `stop` to clean up.")
     if staged:
         shadows = shadowing_agents(Path(binaries["farhelm"]).parent)
         if shadows:
@@ -1862,6 +2306,17 @@ def start(run: Path, args: list[str]) -> int:
             )
         record["staging"] = prepare_staging(run, binaries["fixtures"])
         save()
+    if remote_hosts:
+        # The staged hosts' sshd and the shim the helm dials them with ("The private sshd"), recorded before the wait so
+        # `stop` finds an sshd that a failing or killed `start` left; then each destination is dialed once through the
+        # shim, the way the helm will.
+        def record_sshd(sshd: dict) -> None:
+            record["sshd"] = sshd
+            save()
+
+        sshd = start_private_sshd(run, remote_hosts, Path(record["staging"]["bin"]), record_sshd)
+        for destination in remote_hosts:
+            check_ssh(destination, sshd["shim"])
     if not mac:
         display = display_name(uuid.uuid4().hex[:8])
         record.update({"runtime": str(run / "runtime"), "display": display})
@@ -1918,7 +2373,8 @@ def start(run: Path, args: list[str]) -> int:
         ids = stage_scenario(run, scenario, binaries["fixtures"], snapshot=lambda: window_entries(run, record))
         # What a capture step needs to find the staged sessions again: each one's helm key by its scenario title.
         record["scenario"] = {
-            "file": str(options.scenario),
+            # Absolute, so `capture` reads the same file whatever directory it is run from.
+            "file": str(options.scenario.resolve()),
             "sessions": {scenario["sessions"][index]["title"]: key for index, key in ids.items()},
             "open": ids[scenario_creation_order(scenario)[0]],
         }
@@ -1987,17 +2443,18 @@ def probe_text(stdout: str) -> str:
 
 
 def stop(run: Path, record: dict) -> int:
-    """Take down everything `start` started: the app, its supervisor and terminal hosts, a staged run's remote
-    supervisors and their terminal hosts, then Mutter and its bus (on Linux), and last the lock holder. The shared lock
-    is released only when every earlier step succeeded: if part of the run may still be running, the lock is kept (the
+    """Take down everything `start` started: the app, its supervisor and terminal hosts, a staged run's private sshd,
+    its remote supervisors and their terminal hosts, then Mutter and its bus (on Linux), and last the lock holder. The
+    shared lock is released only when every earlier step succeeded: if part of the run may still be running, the lock is kept (the
     message says so) and a second `stop` retries everything.
 
     Each step runs even if an earlier one failed, and each acts only on processes it can tie to this run: the app
     through the pid and start time recorded after launch, the supervisor through the app's record of it plus the state
-    directory on its command line, a remote supervisor through its recorded pid and start time plus its state directory
-    on its command line, Mutter through the pid and start time recorded when it started. A pid that has since been
-    reused by another process is never signalled. A user-session run's containers and units on the caller's account
-    are removed after the terminal hosts, by the names recorded from its helm before the app quit
+    directory on its command line, a staged run's private sshd through its recorded pid and start time plus its
+    configuration on its command line (`stop_private_sshd`), a remote supervisor through its recorded pid and start
+    time plus its state directory on its command line, Mutter through the pid and start time recorded when it started.
+    A pid that has since been reused by another process is never signalled. A user-session run's containers and units
+    on the caller's account are removed after the terminal hosts, by the names recorded from its helm before the app quit
     (`record_user_session_objects`, `remove_user_session_objects`).
     """
     problems = []
@@ -2027,6 +2484,10 @@ def stop(run: Path, record: dict) -> int:
     farhelm = record.get("binaries", {}).get("farhelm")
     if not stop_terminal_hosts(farhelm, state):
         problems.append("stop-terminal-hosts could not confirm every terminal host stopped")
+    # Once the app (and with it the helm's ssh clients) is down, and before the remote supervisors: the sshd's
+    # connections ran the `farhelm internal stdio` commands that joined them.
+    if record.get("sshd"):
+        problems += stop_private_sshd(record["sshd"])
     for remote in record.get("remotes", []):
         found = remote_supervisor_to_stop(remote)
         if found and not stop_process(found[0], found[1], 20):
@@ -2065,6 +2526,12 @@ def main(argv: list[str]) -> int:
             return stop(run, record)
         if verb == "terminal-text":
             return terminal_text(run, record, rest)
+        if verb == "capture":
+            try:
+                return capture(run, record, rest)
+            except RuntimeError as error:
+                print(f"gui-agent: capture: {error}", file=sys.stderr)
+                return 1
         return cli(run, record, [verb, *rest]).returncode
     except UsageError as error:
         print(f"gui-agent: {error}", file=sys.stderr)

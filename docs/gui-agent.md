@@ -21,11 +21,11 @@ end-to-end GUI tests are built on.
 - `scripts/gui-agent.py /tmp/farhelm-tmp/<id>/run1 stop`: quits the app and stops its supervisor, its terminal hosts and
   the compositor. Always run it, also after a failed `start`.
 
-Every verb other than `start`, `stop` and `terminal-text` goes to the vendored `gpui-agent` command line unchanged, so
-its README (`vendor/gpui-agent/README.md`, "Commands") is the full list. `gpui-agent skills get core`, run the same way,
-prints its usage guide. `terminal-text` prints the focused terminal's text. While no terminal holds focus (after a click
-on a button, say) it fails saying so rather than guessing which terminal was meant: click the terminal or Tab back into
-it first. `terminal-text --wait TEXT` asks again until the focused terminal shows TEXT (30 seconds, or
+Every verb other than `start`, `stop`, `terminal-text` and `capture` goes to the vendored `gpui-agent` command line
+unchanged, so its README (`vendor/gpui-agent/README.md`, "Commands") is the full list. `gpui-agent skills get core`, run
+the same way, prints its usage guide. `terminal-text` prints the focused terminal's text. While no terminal holds focus
+(after a click on a button, say) it fails saying so rather than guessing which terminal was meant: click the terminal or
+Tab back into it first. `terminal-text --wait TEXT` asks again until the focused terminal shows TEXT (30 seconds, or
 `--timeout SECONDS`), and is the way to know a terminal you just opened has caught up: its screen arrives after the
 click returns.
 
@@ -52,10 +52,11 @@ payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of t
 pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run.
 `--remote-host DEST`, given once per host, makes the run a staged one with remote hosts (see "Staged runs").
 `--scenario FILE`, instead of `--sessions` or `--fleet`, stages the hosts and sessions a docs-media `scenario.json5`
-describes (see "Scenario runs"). `--user-session` (Linux only) gives the app your own runtime directory and session bus,
-so that its helm's Podman check works and New container shows; such a run shares your systemd user manager and Podman
-storage (see "User-session runs"). It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is
-interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock included.
+describes (see "Scenario runs"), and `capture OUT.png` then takes its picture (see "Scenario captures").
+`--user-session` (Linux only) gives the app your own runtime directory and session bus, so that its helm's Podman check
+works and New container shows; such a run shares your systemd user manager and Podman storage (see "User-session runs").
+It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
+whatever `start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
@@ -157,12 +158,12 @@ helm's ensure-hosts file (`HelmArgs::ensure_hosts` in `crates/farhelm-helm/src/l
 that build's `farhelm` and that state directory. The app's agent build hands the file to its embedded helm
 (`FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`, defined in `crates/farhelm-desktop/src/agent.rs` and read by the app's startup in
 `lib.rs`), which registers the hosts before it serves, so the window shows them from the start. Each destination must be
-a different spelling of this machine (`localhost`, `you@localhost`), since the helm keys hosts on the destination
-string, and must take passwordless ssh: `start` checks that first and refuses naming the one that failed. Nothing checks
-that DEST really is this machine; a real remote would be dialed at this checkout's `farhelm` and a run directory under
-`/tmp`, neither of which exists there. `stop` ends those supervisors and their terminal hosts, signalling each only
-while its pid, start time and state directory still match the record. Only the agent build reads the variable; no other
-build of the app registers a host at startup.
+a different spelling of this machine (`localhost`, `you@localhost`, `127.0.0.1`), since the helm keys hosts on the
+destination string. The helm reaches them through the run's private sshd (see "The private sshd"), so the machine needs
+no passwordless ssh to itself; `start` dials each one through it before the app starts and refuses naming the one that
+failed. `stop` ends those supervisors and their terminal hosts, signalling each only while its pid, start time and state
+directory still match the record. Only the agent build reads the variable; no other build of the app registers a host at
+startup.
 
 A staged run's sessions are launched by an agent harness's bare name (`claude`, `codex`, and every other program the
 helm composes an agent launch with: `STAGED_AGENTS`, which the tests check against
@@ -172,15 +173,16 @@ session with a private HOME and PATH inside the run directory (`staging/home` an
 the login shell. The variables that point at the caller's configuration (`XDG_CONFIG_HOME`, `ZDOTDIR` and a few more)
 are removed, and so are credentials and vendor settings, by name pattern: anything starting with a vendor's prefix
 (`ANTHROPIC_`, `CLAUDE_`, `OPENAI_`, `CODEX_`, `AWS_`, which covers the cloud credentials Claude Code's Bedrock mode
-uses, and a few more) or ending in `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD`. There is no option to turn any of that
-off. `staging/bin` holds a wrapper for every harness name that runs the fake agent: the script `.staged-agent` in the
-session's working directory with `sh` when there is one (that is how a scenario gives each session its own replay), and
-the basic script otherwise, with every argument passed on. The private HOME's login profile puts the wrappers first on
-PATH again after the system's profile, because the supervisor starts sessions through a login shell and a system profile
-may rebuild PATH (macOS's `path_helper` does). `start` refuses a build directory that holds a program of a harness's
-name, because the launch shim puts the directory of the supervisor's `farhelm` ahead of everything else on a session's
-PATH. `scripts/test-gui-agent.py` resolves every name through a staged run's PATH and through the machine's own login
-shell and checks each reaches its wrapper.
+uses, and a few more) or ending in `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD`, and the caller's ssh agent
+(`SSH_AUTH_SOCK`), which nothing in the run needs since the private sshd has a key of its own. There is no option to
+turn any of that off. `staging/bin` holds a wrapper for every harness name that runs the fake agent: the script
+`.staged-agent` in the session's working directory with `sh` when there is one (that is how a scenario gives each
+session its own replay), and the basic script otherwise, with every argument passed on. The private HOME's login profile
+puts the wrappers first on PATH again after the system's profile, because the supervisor starts sessions through a login
+shell and a system profile may rebuild PATH (macOS's `path_helper` does). `start` refuses a build directory that holds a
+program of a harness's name, because the launch shim puts the directory of the supervisor's `farhelm` ahead of
+everything else on a session's PATH. `scripts/test-gui-agent.py` resolves every name through a staged run's PATH and
+through the machine's own login shell and checks each reaches its wrapper.
 
 A staged run also turns `--scripted-hosts` on, with no way to turn it off, also when `scripts/gui-lifecycle.py`
 relaunches it (every launch through the bridge, `start`'s and a relaunch's, decides from the run's record;
@@ -190,9 +192,30 @@ uninstall of a staged host would act on this machine's own Farhelm installation,
 connection to each host's supervisor stays real.
 
 The seeded `--sessions` and `--fleet` sessions run on the local host as before, their command an absolute path to the
-fake agent; only a scenario's sessions are launched by a harness's name. A staged run on a Mac has not been tried; there
-the vendors' credentials also live in the login Keychain, which a private HOME does not hide. On Linux it was checked
-with two remote hosts, and with the README hero's scenario.
+fake agent; only a scenario's sessions are launched by a harness's name. On a Mac the vendors' credentials also live in
+the login Keychain, which a private HOME does not hide; the README hero's staged run on the test Mac (2026-11-16)
+checked every session's process tree and found only the fake agent. On Linux it was checked with two remote hosts, and
+with the README hero's scenario.
+
+## The private sshd
+
+A staged remote host is this machine reached over ssh, and the helm dials it with the `ssh` its PATH finds. With the
+machine's own ssh that needs passwordless ssh to the machine itself, which the shared test Mac does not have, so every
+staged run with remote hosts gets a private sshd and an `ssh` shim first on its private PATH (`staging/bin/ssh`), on
+Linux too: one code path, whatever keys the machine holds.
+
+`start` generates a host key and a client key into `<run>/sshd/`, authorizes the client key (marked `restrict`), and
+starts the machine's `sshd` as the caller's own user on 127.0.0.1 at a port the kernel picked, letting in only that user
+by that key, with no forwarding or terminal (log in `logs/sshd.log`). The shim runs the real `ssh` with
+`-F <run>/sshd/ssh_config`, so no user or system ssh configuration is read: each staged destination goes to the private
+sshd with the run's key and known_hosts and no agent, and every other destination the helm dials is refused. It is not a
+sandbox (options on ssh's command line win over the file), and no account's `~/.ssh` is read or written. The far end is
+the caller's account all the same: sshd runs the helm's `farhelm internal stdio` through the account's login shell with
+its real HOME, as `ssh localhost` did; that starts no session.
+
+`stop` ends the sshd after the app, while its pid, start time and command line (naming the run's sshd configuration)
+match the record, with every process under it; the helm's ssh clients, its detached shared connections included, end
+once their connection is gone. The machine needs OpenSSH's `sshd`, `ssh` and `ssh-keygen`.
 
 ## Scenario runs
 
@@ -247,6 +270,34 @@ start time stays real, so it reads later than the pinned last activity.
 The window starts at the viewport's size as the app's own drawing: on Linux `start` asks for a window larger by the
 frame and title bar the screenshot batch crops off (1322x876 for the hero's 1280x800), unless `--window-size` says
 otherwise. No scenario names a theme; pass `--appearance` (the old captures were dark, except the demo video).
+
+## Scenario captures
+
+NOTE: A capture refuses rather than repairs. It never resizes the window, rescales the picture or crops into the app's
+drawing; a picture it cannot take at the scenario's size is no picture.
+
+`capture OUT.png` on a scenario run takes the scenario's picture: `scripts/readme-screenshot.sh` runs it for the README
+hero, and the docs screenshots and the demo video are meant to reuse it, or the helpers under it in
+`scripts/gui-agent.py`, when they are rebuilt. In order, it:
+
+- settles the open session: when no terminal holds focus it clicks the open session's terminal, then waits (30 seconds)
+  until it shows the last line its transcript prints;
+- parks the pointer on an element whose centre is outside everything that reacts to a resting pointer (the bridge's
+  `hover` and `tooltip` flags), before the click and again after it, and waits until the window stops changing. On a Mac
+  the pointer is the real one, and resting on a terminal link it opens a tooltip naming the link's real target;
+- checks for leaks before and after the shot, in the bridge's raw frame (`tree`) and the terminal's text. Machine paths
+  (the run directory, the checkout, the build directory, the account's home) are refused anywhere, accessible labels and
+  text out of view included. The account's ssh spelling (`$USER@localhost`, `$USER@`) and the hostname are refused only
+  where drawn: the host rail's accessible labels name each host by its destination. The bare account name is not
+  refused, since a short one is an ordinary word;
+- takes the bridge's screenshot (window content, at the window's scale) into `capture.png` in the run directory, and on
+  Linux crops the window frame and title bar off (the screenshot batch's `crop_frame`);
+- checks the size against the viewport times its scale, as the publish script does, and only then copies it to OUT.
+
+Any failure stops with the step and the reason, writes nothing to OUT, and leaves the shot in the run directory to look
+at. A size failure quotes the window's points and scale: a window smaller than the viewport means the display is too
+small (see "On a Mac"), and scale 1 means a Linux run, which renders on headless Mutter and so is for developing the
+staging and checking the picture's content, never for the picture.
 
 ## User-session runs
 
@@ -376,3 +427,8 @@ Things that differ from a headless run:
 - macOS may show a privacy or permission dialog (screen recording, accessibility, automation) the first time something
   captures the screen or posts input. The bridge itself needs none of these. If one appears, it is the machine owner's
   to answer; do not click it from a script.
+- The app fits its first window to the screen, so a display smaller than a scenario's viewport shrinks the window and
+  every picture with it. At 1024x768 points the README hero's 1280x800 window opens at 1024x680 and its picture comes
+  out 2048x1360 instead of 2560x1600; `capture` stops at its size check. The test Mac's display was that small in two
+  runs on 2026-11-16 and large enough in one between them; why it changes is not known, so until it reliably fits, a
+  README hero refresh may stop there. This is the one place that story is kept; the hero's other documents point here.
