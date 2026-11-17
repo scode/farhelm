@@ -8,6 +8,9 @@
 //! client's fake, with the region installed as the main view installs it and the shared harness's focus and overlay
 //! checks after every step. Layout here runs on this test context's one-width text; the region's look in the real
 //! fonts is the running app's `app-approval-card` screenshot scene.
+//!
+//! Several tests drive the region as a user does, where the old app's layout spec did: with the keyboard, the wheel and
+//! window resizes, with a dialog open, and in the real main window.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
@@ -17,21 +20,28 @@ use farhelm_proto::approvals::{
 };
 use farhelm_proto::launcher::TemplateFields;
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
-use farhelm_proto::{CommandLaunch, DeleteGuard, LaunchHarness, SessionLaunch};
+use farhelm_proto::{
+    CommandLaunch, DeleteGuard, LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch,
+};
 use gpui::{
-    Bounds, Context, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _,
-    TestAppContext, VisualTestContext, Window, div, point, px, size,
+    Bounds, Context, DriverNode, FocusHandle, IntoElement, Modifiers, ParentElement as _, Pixels,
+    Render, ScrollDelta, ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div,
+    point, px, size,
 };
 use serde_json::json;
 
 use super::answers::ARM_DELAY;
 use super::card::BOX_MIN_HEIGHT;
+use super::card_tests::texts_within;
+use super::model::OWN_HOST_HELP;
 use super::region::{self, Place, place};
-use crate::layers::Anchor;
+use crate::host_text::tests::paints_isolated;
+use crate::layers::{self, Anchor};
 use crate::notices::{self, Notice};
 use crate::root;
 use crate::test_support::{
-    self, any_open, button, click, focused, frame, keys, label, meta, one_command, settle, started,
+    self, any_open, button, center, click, focused, focused_id, frame, keys, label, meta,
+    one_command, settle, started,
 };
 
 // ---- Placement -------------------------------------------------------------------------------------------------------
@@ -393,9 +403,47 @@ fn long_command() -> SessionLaunch {
     })
 }
 
+/// An agent launch whose agent-supplied wrapper words, command and resume command each run past their box's cap at
+/// the usual card width, so a wrapper launch with a long prompt has four long boxes competing for space: the old
+/// two-step resize's boxes, built from the old `layoutRequests()`'s wrapper launch.
+fn wrapped_agent_launch() -> SessionLaunch {
+    let wrapper = vec![
+        "env".to_owned(),
+        format!("WRAPPER={}", "wrapper".repeat(90)),
+    ];
+    let command = format!("agent {}", "--review-long-command-argument ".repeat(60));
+    let words = |tail: &[&str]| -> Vec<String> {
+        wrapper
+            .iter()
+            .cloned()
+            .chain(tail.iter().map(|word| (*word).to_owned()))
+            .collect()
+    };
+    SessionLaunch::Agent {
+        selection: LaunchSelection {
+            harness: LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            wrapper_prefix: Some(wrapper.clone()),
+            container: None,
+            workspace_trust: None,
+        },
+        start: words(&["claude", "{farhelm_args}", command.as_str()]),
+        resume: Some(words(&[
+            "claude",
+            "{farhelm_args}",
+            "--resume",
+            "{conversation}",
+            command.as_str(),
+        ])),
+    }
+}
+
 /// One request of every kind the helm sends, each with the longest values its card shows (a deep folder, a long
-/// command, a prompt of many lines, a long URL), so a card that lets any of them push its header or answers out of the
-/// region is caught. The ids name the kinds.
+/// command, long wrapper words, a prompt of many lines, a long URL), so a card that lets any of them push its header or
+/// answers out of the region is caught. The ids name the kinds.
 fn every_kind() -> Vec<PendingApproval> {
     let folder = format!("/srv/{}", "nested-folder/".repeat(12));
     let prompt = (1..=40)
@@ -432,7 +480,7 @@ fn every_kind() -> Vec<PendingApproval> {
             cwd: folder.clone(),
             repo: None,
             title: None,
-            launch: long_command(),
+            launch: wrapped_agent_launch(),
             source: Some(session("source")),
             prompt: Some(prompt.clone()),
         },
@@ -609,12 +657,6 @@ fn every_kind_keeps_its_heading_and_answers_inside_the_region_at_the_old_pane_wi
             let region =
                 bounds_of(&nodes, "approval-region").unwrap_or_else(|| panic!("{at}: drawn"));
             let window = Bounds::new(point(px(0.), px(0.)), size(px(width), px(height)));
-            let inside = |outer: Bounds<gpui::Pixels>, inner: Bounds<gpui::Pixels>| {
-                inner.origin.x >= outer.origin.x - px(1.)
-                    && inner.origin.y >= outer.origin.y - px(1.)
-                    && inner.bottom_right().x <= outer.bottom_right().x + px(1.)
-                    && inner.bottom_right().y <= outer.bottom_right().y + px(1.)
-            };
             assert!(
                 inside(window, region),
                 "{at}: the region is inside the window"
@@ -686,63 +728,686 @@ fn every_kind_keeps_its_heading_and_answers_inside_the_region_at_the_old_pane_wi
     );
 }
 
+/// The region over `queue` with the plain late-answer notice posted, in a window `width` by `height`, settled: the
+/// long-queue test's start in each of its windows. Returns the window's bounds beside the usual parts.
+fn queued_with_the_late_notice<'a>(
+    cx: &'a mut TestAppContext,
+    queue: &[PendingApproval],
+    width: f32,
+    height: f32,
+) -> (FakeHelm, &'a mut VisualTestContext, Bounds<Pixels>) {
+    let (helm, cx, _terminal) = open(cx, queue);
+    cx.update(|_, cx| notices::post(Notice::LateAnswer { always: false }, cx));
+    let window = Bounds::new(point(px(0.), px(0.)), size(px(width), px(height)));
+    cx.simulate_resize(window.size);
+    settle(cx);
+    (helm, cx, window)
+}
+
 /// SPEC.md: the other waiting requests are listed below the card in a list of their own, which scrolls by itself, and
-/// the late-answer notice sits above the card; neither may push the card's answers out of reach. The old app checked a
-/// long queue below a tall card ("waiting requests scroll independently below a tall card and fixed late notice") and
-/// the same in a narrow pane ("a narrow short queue and late notice keep every answer reachable"). Specified: with the
-/// notice posted, a long-prompt card expanded and eleven more requests waiting, in a 960 by 900 and a 320 by 800
-/// window, the notice is above the card and inside the region, every answer is inside the region, and the waiting list
-/// is inside the region while its last header lies below the list's bottom, where only the list's own scroll reaches
-/// it. A window too short for the notice, the list and the card's fixed parts together makes the whole region scroll
-/// instead, which the old test accepted too; that fallback is the placement tests'. (In this test context's
-/// one-width text the 296-pixel notice alone takes 174 pixels, so a 500-pixel window already falls back.)
+/// the late-answer notice sits above the card; neither may push the card's answers out of reach, and in a window too
+/// short even for those the region scrolls as a whole. The old app checked a long queue below a tall card ("waiting
+/// requests scroll independently below a tall card and fixed late notice") and the same in a short, narrow window ("a
+/// narrow short queue and late notice keep every answer reachable"), and in both scrolled the list to its end for real
+/// and chose its last request, which must be choosable, not merely drawn. Each window gets an app of its own, since the
+/// press changes which card is open. Both start with the notice posted, a long-prompt card expanded and eleven more
+/// requests waiting.
+///
+/// Specified, in a 960 by 900 window: the region lies inside the window, below its top; the notice is above the card,
+/// and the notice, Allow, Deny and the waiting list are inside the region, the list below the card with its last header
+/// past the list's bottom; a wheel over the list scrolls the last header inside it while the region, the notice, the
+/// card, its heading and its Allow and Deny stay where they were, inside the region; a press on the last header opens
+/// its card, and the notice still shows.
+///
+/// Specified, in a 320 by 430 window, where the region's parts do not fit even the window: the region lies inside the
+/// window and its content runs past its bottom; after a wheel over it, every answer (Allow, Always allow and Deny) is
+/// inside the region and the window while the last header still lies past the list's bottom; after a wheel over the
+/// list, the last header is inside the list, the region and the window; and a press on it opens its card, the notice
+/// still showing.
 #[gpui::test]
-fn a_long_queue_scrolls_in_its_own_list_below_the_card_and_the_notice(cx: &mut TestAppContext) {
+fn a_long_queue_scrolls_in_its_own_list_below_the_card_and_the_notice(
+    wide: &mut TestAppContext,
+    narrow: &mut TestAppContext,
+) {
     let tall = every_kind()
         .into_iter()
         .find(|approval| approval.id == "launch-with-prompt")
         .expect("the fixtures hold a launch with a prompt");
     let mut queue = vec![tall.clone()];
     queue.extend((1..=11).map(|n| stop(&format!("waiting-{n}"), "build-box")));
-    let (_helm, cx, _terminal) = open(cx, &queue);
-    cx.update(|_, cx| notices::post(Notice::LateAnswer { always: false }, cx));
-    for (width, height) in [(960., 900.), (320., 800.)] {
-        cx.simulate_resize(size(px(width), px(height)));
-        settle(cx);
-        let at = format!("a {width}x{height} window");
-        let nodes = frame(cx);
-        let found =
-            |id: &str| bounds_of(&nodes, id).unwrap_or_else(|| panic!("{at}: {id} is drawn"));
-        let region = found("approval-region");
-        let within = |inner: Bounds<gpui::Pixels>| {
-            inner.origin.y >= region.origin.y - px(1.)
-                && inner.bottom_right().y <= region.bottom_right().y + px(1.)
-        };
-        let notice = found("approval-late");
-        let card = found(&format!("approval-{}-card", tall.id));
-        assert!(
-            region.origin.y > px(0.),
-            "{at}: premise: the region is placed below the top, not the whole-window fallback"
+    let id = |part: &str| format!("approval-{}-{part}", tall.id);
+    let last = "approval-waiting-11-waiting";
+    let chosen_with_the_notice = |cx: &mut VisualTestContext, at: &str| {
+        click(cx, last);
+        assert_eq!(
+            expanded(cx).as_deref(),
+            Some("waiting-11"),
+            "{at}: the last header opened its card"
         );
-        assert!(within(notice), "{at}: the notice is inside the region");
-        assert!(
-            notice.origin.y < card.origin.y,
-            "{at}: the notice is above the card"
+        assert_eq!(
+            label(cx, "approval-late"),
+            Some(Notice::LateAnswer { always: false }.text().to_string()),
+            "{at}: the notice still shows"
         );
-        for word in ["allow", "deny"] {
-            let answer = found(&format!("approval-{}-answer-{word}", tall.id));
-            assert!(within(answer), "{at}: {word} is inside the region");
-        }
-        let list = found("approval-waiting-list");
-        assert!(within(list), "{at}: the waiting list is inside the region");
+    };
+
+    let (_helm, cx, window) = queued_with_the_late_notice(wide, &queue, 960., 900.);
+    let before = frame(cx);
+    let region = drawn_at(&before, "approval-region");
+    let notice = drawn_at(&before, "approval-late");
+    let card = drawn_at(&before, &id("card"));
+    assert!(
+        inside(window, region),
+        "wide: the region is inside the window"
+    );
+    assert!(
+        region.top() > px(0.),
+        "wide: premise: the region is placed below the top, not the whole-window fallback"
+    );
+    assert!(
+        inside(region, notice),
+        "wide: the notice is inside the region"
+    );
+    assert!(
+        notice.top() < card.top(),
+        "wide: the notice is above the card"
+    );
+    for word in ["allow", "deny"] {
+        let answer = drawn_at(&before, &id(&format!("answer-{word}")));
+        assert!(inside(region, answer), "wide: {word} is inside the region");
+    }
+    let list = drawn_at(&before, "approval-waiting-list");
+    assert!(
+        inside(region, list),
+        "wide: the waiting list is inside the region"
+    );
+    assert!(
+        list.top() > card.top(),
+        "wide: the waiting list is below the card"
+    );
+    assert!(
+        drawn_at(&before, last).top() >= list.bottom(),
+        "wide: the last header is past the list's bottom, for the list's own scroll to reach"
+    );
+    wheel(cx, list, px(5000.));
+    let after = frame(cx);
+    assert!(
+        inside(
+            drawn_at(&after, "approval-waiting-list"),
+            drawn_at(&after, last)
+        ),
+        "wide: the wheel scrolled the list to its last header"
+    );
+    let region = drawn_at(&after, "approval-region");
+    let held = [
+        "approval-region".to_owned(),
+        "approval-late".to_owned(),
+        id("card"),
+        id("heading"),
+        id("answer-allow"),
+        id("answer-deny"),
+    ];
+    for part in &held {
+        let (was, is) = (drawn_at(&before, part), drawn_at(&after, part));
         assert!(
-            list.origin.y > card.origin.y,
-            "{at}: the waiting list is below the card"
+            same_place(was, is),
+            "wide: {part} stayed put: {was:?} then {is:?}"
         );
-        let last = found("approval-waiting-11-waiting");
+        assert!(inside(region, is), "wide: {part} is inside the region");
+    }
+    chosen_with_the_notice(cx, "wide");
+
+    // The region scrolls as a whole here, and the list keeps its own scroll inside it, as the old narrow case had it.
+    let (_helm, cx, window) = queued_with_the_late_notice(narrow, &queue, 320., 430.);
+    let nodes = frame(cx);
+    let region = drawn_at(&nodes, "approval-region");
+    assert!(
+        inside(window, region),
+        "narrow: the region is inside the window"
+    );
+    assert!(
+        overflow_below(&nodes, "approval-region") > px(1.),
+        "narrow: premise: the region's parts run past it, so it scrolls as a whole"
+    );
+    wheel(cx, region, px(5000.));
+    let nodes = frame(cx);
+    let region = drawn_at(&nodes, "approval-region");
+    for word in ["allow", "always-allow", "deny"] {
+        let answer = drawn_at(&nodes, &id(&format!("answer-{word}")));
         assert!(
-            last.origin.y >= list.bottom_right().y,
-            "{at}: the last header is past the list's bottom, for the list's own scroll to reach"
+            inside(region, answer) && inside(window, answer),
+            "narrow: after the region's own scroll, {word} is inside the region and the window: {answer:?}"
         );
     }
+    let list = drawn_at(&nodes, "approval-waiting-list");
+    assert!(
+        drawn_at(&nodes, last).top() >= list.bottom(),
+        "narrow: premise: the region's scroll left the last header past the list's bottom, for the list's own scroll"
+    );
+    wheel(cx, list, px(5000.));
+    let nodes = frame(cx);
+    let header = drawn_at(&nodes, last);
+    for (what, outer) in [
+        ("list", drawn_at(&nodes, "approval-waiting-list")),
+        ("region", drawn_at(&nodes, "approval-region")),
+        ("window", window),
+    ] {
+        assert!(
+            inside(outer, header),
+            "narrow: the last header is inside the {what}: {header:?} in {outer:?}"
+        );
+    }
+    chosen_with_the_notice(cx, "narrow");
+}
+
+// ---- Driving the region as a user does ------------------------------------------------------------------------------
+
+/// Whether `inner` lies inside `outer`, with a pixel of rounding allowed on every side.
+fn inside(outer: Bounds<Pixels>, inner: Bounds<Pixels>) -> bool {
+    inner.left() >= outer.left() - px(1.)
+        && inner.top() >= outer.top() - px(1.)
+        && inner.right() <= outer.right() + px(1.)
+        && inner.bottom() <= outer.bottom() + px(1.)
+}
+
+/// Whether `a` and `b` start at the same point, to half a pixel: an element that did not move.
+fn same_place(a: Bounds<Pixels>, b: Bounds<Pixels>) -> bool {
+    (a.left() - b.left()).abs() < px(0.5) && (a.top() - b.top()).abs() < px(0.5)
+}
+
+/// The bounds of the element drawn as `id` in `nodes`, which the test needs drawn.
+fn drawn_at(nodes: &[DriverNode], id: &str) -> Bounds<Pixels> {
+    bounds_of(nodes, id).unwrap_or_else(|| panic!("{id} is drawn"))
+}
+
+/// How far the content of the element drawn as `id` runs past its bottom: the lowest bottom among its own children less
+/// its own bottom, the driver record's stand-in for the old `scrollHeight - clientHeight`. Positive when the content
+/// overflows. Only direct children count, so a box that clips its own long text inside the element does not read as
+/// the element overflowing.
+fn overflow_below(nodes: &[DriverNode], id: &str) -> Pixels {
+    let Some(at) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        panic!("{id} is drawn");
+    };
+    let lowest = nodes
+        .iter()
+        .filter(|node| node.parent == Some(at))
+        .map(|node| node.bounds.bottom())
+        .fold(nodes[at].bounds.top(), |lowest, bottom| lowest.max(bottom));
+    lowest - nodes[at].bounds.bottom()
+}
+
+/// Turn the wheel `by` pixels toward the end of whatever scrolls under the middle of `over`, the pointer resting there
+/// first, as a wheel or a trackpad does, and settle. Every scrolling element under the pointer takes the turn.
+fn wheel(cx: &mut VisualTestContext, over: Bounds<Pixels>, by: Pixels) {
+    let at = over.center();
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), -by)),
+        modifiers: Modifiers::none(),
+        ..Default::default()
+    });
+    settle(cx);
+}
+
+/// Whether the element drawn as `id` has a click listener, which an answer button draws only while it answers: a busy
+/// one, paused or with an answer out, draws none ([`crate::components::Button::busy`]).
+fn answers_presses(cx: &mut VisualTestContext, id: &str) -> bool {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("{id} is drawn"))
+        .flags
+        .click
+}
+
+/// SPEC.md: the other waiting requests are headers that open their card, every control is reachable from the
+/// keyboard, and the answers pause whenever the expanded request changes. The old app chose a header from the keyboard
+/// ("one request stays selected across refreshes and rapid switches rearm the buttons": the second header focused, then
+/// Enter), and the choice must pause the answers as a click on a header does, or an Enter or a press already aimed at
+/// the card shown before could answer the one that replaced it. Specified: with first, second and third waiting and
+/// first's answers armed, Tab reaches second's header; Enter there opens second's card; a press on its Deny right away
+/// sends nothing; once the pause has run out, the same press sends second's Deny.
+#[gpui::test]
+fn a_header_chosen_from_the_keyboard_opens_its_card_and_pauses_the_answers(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _terminal) = open(
+        cx,
+        &[
+            stop("first", "box"),
+            stop("second", "laptop"),
+            stop("third", "box"),
+        ],
+    );
+    assert_eq!(
+        expanded(cx).as_deref(),
+        Some("first"),
+        "premise: the oldest is open"
+    );
+    assert!(
+        answers_presses(cx, "approval-first-answer-deny"),
+        "premise: the answers are armed before the choice"
+    );
+    // Bounded: the stand-in terminal, the card's Copy buttons and its answers come before the headers in Tab's order.
+    for _ in 0..20 {
+        if focused_id(cx).as_deref() == Some("approval-second-waiting") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("approval-second-waiting"),
+        "premise: Tab reaches the waiting header"
+    );
+    keys(cx, "enter");
+    settle(cx);
+    assert_eq!(
+        expanded(cx).as_deref(),
+        Some("second"),
+        "Enter on the header opened its card"
+    );
+    click(cx, "approval-second-answer-deny");
+    assert!(
+        helm.commands().is_empty(),
+        "the choice paused the answers: nothing sent"
+    );
+    cx.executor().advance_clock(ARM_DELAY);
+    settle(cx);
+    click(cx, "approval-second-answer-deny");
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/approvals/second");
+    assert_eq!(body, json!({ "answer": "deny" }));
+}
+
+/// SPEC.md: inside the region's cap the card's body gives way first, its boxes shrinking toward two lines and only then
+/// its fact list scrolling, so the header and the answer bar stay. The old app checked it in two steps ("long boxes
+/// shrink to their computed minima before the body scrolls"): a first resize takes away half of what the boxes can give
+/// up, which a card that scrolled its body at once, its boxes still at their caps, cannot pass; a second exhausts it,
+/// and the body then scrolls with the answers pinned. Specified, 1280 pixels wide, over the wrapper launch's four long
+/// boxes: at 2400 high each box overflows above its minimum and nothing else gives way; at the height whose cap takes
+/// half the boxes' allowance off the card, the boxes shrink by more than a quarter of it, none below its minimum, and
+/// the body does not overflow; at 500 high every box is at its minimum and the body overflows, and the wheel scrolls it
+/// while Deny stays put. The heading, Allow and Deny stay inside the region throughout.
+#[gpui::test]
+fn long_boxes_give_way_before_the_body_scrolls_and_then_the_answers_stay(cx: &mut TestAppContext) {
+    let wrapper = every_kind()
+        .into_iter()
+        .find(|approval| approval.id == "launch-with-agent-wrapper")
+        .expect("the fixtures hold a wrapper launch");
+    let (_helm, cx, _terminal) = open(cx, &[wrapper]);
+    let id = |part: &str| format!("approval-launch-with-agent-wrapper-{part}");
+    let boxes = |nodes: &[DriverNode]| -> Vec<Bounds<Pixels>> {
+        (0..)
+            .map_while(|index| bounds_of(nodes, &id(&format!("box-{index}"))))
+            .collect()
+    };
+    let total = |boxes: &[Bounds<Pixels>]| {
+        boxes
+            .iter()
+            .fold(px(0.), |sum, text_box| sum + text_box.size.height)
+    };
+    let fixed_inside_region = |nodes: &[DriverNode], at: &str| {
+        let region = drawn_at(nodes, "approval-region");
+        assert!(
+            region.top() > px(0.),
+            "{at}: the region is placed below the top, not the whole-window fallback"
+        );
+        for part in ["heading", "answer-allow", "answer-deny"] {
+            let drawn = drawn_at(nodes, &id(part));
+            assert!(
+                inside(region, drawn),
+                "{at}: {part} is inside the region: {drawn:?} in {region:?}"
+            );
+        }
+    };
+
+    let window = |height: f32| Bounds::new(point(px(0.), px(0.)), size(px(1280.), px(height)));
+    cx.simulate_resize(size(px(1280.), px(2400.)));
+    settle(cx);
+    let tall = frame(cx);
+    let initial = boxes(&tall);
+    assert_eq!(
+        initial.len(),
+        4,
+        "premise: the wrapper, the command, the resume command and the prompt compete for space"
+    );
+    for (index, text_box) in initial.iter().enumerate() {
+        assert!(
+            overflow_below(&tall, &id(&format!("box-{index}-scroller"))) > px(1.),
+            "premise: box {index}'s text overflows it even at its cap"
+        );
+        assert!(
+            text_box.size.height > BOX_MIN_HEIGHT + px(1.),
+            "premise: box {index} is above its minimum"
+        );
+    }
+    let cap = place(window(2400.), None, px(2400.), px(0.)).cap;
+    assert!(
+        drawn_at(&tall, "approval-region").size.height < cap - px(1.),
+        "premise: the tall window holds nothing back"
+    );
+    assert!(
+        overflow_below(&tall, &id("body")) <= px(1.),
+        "premise: the facts and the capped boxes fit"
+    );
+    fixed_inside_region(&tall, "the tall window");
+
+    // The first step: the window whose cap takes half the boxes' allowance off the card, found through the placement's
+    // own share of the pane, as the old test divided by the measured cap's share.
+    let allowance = initial.iter().fold(px(0.), |sum, text_box| {
+        sum + text_box.size.height - BOX_MIN_HEIGHT
+    });
+    let wanted = drawn_at(&tall, &id("card")).size.height - allowance / 2.;
+    let share = f32::from(cap) / 2400.;
+    let height = (f32::from(wanted) / share).round();
+    cx.simulate_resize(size(px(1280.), px(height)));
+    settle(cx);
+    let middle = frame(cx);
+    let shrunk = boxes(&middle);
+    assert!(
+        total(&shrunk) < total(&initial) - allowance / 4.,
+        "the boxes gave up height to the smaller cap: {:?} from {:?}",
+        total(&shrunk),
+        total(&initial)
+    );
+    for (index, text_box) in shrunk.iter().enumerate() {
+        assert!(
+            text_box.size.height >= BOX_MIN_HEIGHT - px(1.),
+            "box {index} is {:?} high, below its minimum",
+            text_box.size.height
+        );
+    }
+    assert!(
+        overflow_below(&middle, &id("body")) <= px(1.),
+        "boxes still above their minima keep the fact list from scrolling"
+    );
+    fixed_inside_region(&middle, "the first step");
+
+    cx.simulate_resize(size(px(1280.), px(500.)));
+    settle(cx);
+    let short = frame(cx);
+    assert!(
+        overflow_below(&short, &id("body")) > px(1.),
+        "only with every box at its minimum does the body overflow"
+    );
+    for (index, text_box) in boxes(&short).iter().enumerate() {
+        assert!(
+            (text_box.size.height - BOX_MIN_HEIGHT).abs() < px(1.),
+            "box {index} is {:?} high, not at its minimum",
+            text_box.size.height
+        );
+    }
+    fixed_inside_region(&short, "the second step");
+    let first = boxes(&short)[0];
+    let deny = drawn_at(&short, &id("answer-deny"));
+    wheel(cx, drawn_at(&short, &id("body")), px(5000.));
+    let scrolled = frame(cx);
+    assert!(
+        boxes(&scrolled)[0].top() < first.top() - px(1.),
+        "the overflowing body really scrolls"
+    );
+    assert!(
+        same_place(deny, drawn_at(&scrolled, &id("answer-deny"))),
+        "Deny stayed where it was"
+    );
+    fixed_inside_region(&scrolled, "scrolled");
+}
+
+/// SPEC.md: the answer bar wraps in a narrow pane with every answer visible. The old app checked an 80-character host
+/// name ending in a direction control in both Always allow buttons of a 320-pixel pane (the long-host half of "a
+/// compact card follows the main pane and keeps the answer buttons visible"): a row that wraps whole buttons can still
+/// leave one host token wider than the card, which runs the button's words past the card's edge where nothing scrolls
+/// them back. The buttons' escaped names are `card_tests`'. Specified: in a 320 by 800 window, a launch from host
+/// `remote-`, 80 x's and U+202E, eligible for the narrow grant, shows four answers; each Always allow button paints the
+/// whole escaped host, isolated, and lies inside the card and the region with all its words inside it; the card lies
+/// inside the region and the region inside the window; and the narrow grant's hover help names the escaped host twice.
+#[gpui::test]
+fn a_long_host_stays_whole_inside_both_always_allow_buttons_in_a_narrow_pane(
+    cx: &mut TestAppContext,
+) {
+    let raw = format!("remote-{}\u{202e}", "x".repeat(80));
+    let shown = farhelm_proto::text::escaped(&raw);
+    assert_eq!(
+        shown,
+        format!("remote-{}<U+202E>", "x".repeat(80)),
+        "premise: the host's direction control is spelled out"
+    );
+    let mut approval = every_kind()
+        .into_iter()
+        .find(|approval| approval.id == "launch")
+        .expect("the fixtures hold a launch");
+    approval.host_name = raw;
+    assert!(
+        approval.own_host_session_action,
+        "premise: the launch is eligible for the narrow grant"
+    );
+    let (_helm, cx, _terminal) = open(cx, &[approval]);
+    let window = Bounds::new(point(px(0.), px(0.)), size(px(320.), px(800.)));
+    cx.simulate_resize(window.size);
+    settle(cx);
+
+    let nodes = frame(cx);
+    for word in ["allow", "always-allow-own-host", "always-allow", "deny"] {
+        drawn_at(&nodes, &format!("approval-launch-answer-{word}"));
+    }
+    let region = drawn_at(&nodes, "approval-region");
+    let card = drawn_at(&nodes, "approval-launch-card");
+    assert!(inside(window, region), "the region is inside the window");
+    assert!(inside(region, card), "the card is inside the region");
+    for word in ["always-allow-own-host", "always-allow"] {
+        let id = format!("approval-launch-answer-{word}");
+        let button = drawn_at(&nodes, &id);
+        let texts = texts_within(&nodes, &id);
+        assert!(
+            texts.iter().any(|text| paints_isolated(&text.text, &shown)),
+            "{word} paints the whole escaped host, isolated: {texts:?}"
+        );
+        assert!(inside(card, button), "{word} is inside the card");
+        assert!(inside(region, button), "{word} is inside the region");
+        for text in &texts {
+            assert!(
+                text.bounds.left() >= button.left() - px(0.5)
+                    && text.bounds.right() <= button.right() + px(0.5),
+                "{word}'s words at {:?} stay inside the button {button:?}",
+                text.bounds
+            );
+        }
+    }
+
+    let at = center(cx, "approval-launch-answer-always-allow-own-host");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    settle(cx);
+    test_support::advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string()),
+        Some(format!(
+            "{}{shown}{}{shown}{}",
+            OWN_HOST_HELP[0], OWN_HOST_HELP[1], OWN_HOST_HELP[2]
+        )),
+        "the narrow grant's help names the escaped host twice"
+    );
+}
+
+/// SPEC.md: below the minimum its fixed parts need, the region scrolls as a whole, so the request and its answers stay
+/// reachable however short the window. The old app checked a 48-pixel window, whose top row and margins once used up
+/// the whole region ("a short viewport keeps approval content and answers reachable"); a region with some height could
+/// still hold Deny out of reach, so it turned the wheel over the region and pressed Deny. The fallback's arithmetic is
+/// the placement tests'. Specified: in a 1200 by 48 window with a stop request waiting, the region has a height and
+/// lies inside the window; a wheel over it scrolls it (its heading moves up), and Deny then lies inside the window and
+/// the region; a press on Deny sends exactly that answer, and once the helm removes the request and accepts the answer,
+/// the region draws nothing.
+#[gpui::test]
+fn in_a_tiny_window_the_wheel_scrolls_the_region_to_deny_and_deny_answers(cx: &mut TestAppContext) {
+    let (mut helm, cx, _terminal) = open(cx, &[stop("a", "box")]);
+    let window = Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(48.)));
+    cx.simulate_resize(window.size);
+    settle(cx);
+    let before = frame(cx);
+    let region = drawn_at(&before, "approval-region");
+    assert!(
+        region.size.height > px(0.),
+        "a short window does not collapse the region"
+    );
+    assert!(
+        inside(window, region),
+        "the region is inside the window: {region:?}"
+    );
+    let heading = drawn_at(&before, "approval-a-heading");
+
+    wheel(cx, region, px(2000.));
+    let after = frame(cx);
+    assert!(
+        drawn_at(&after, "approval-a-heading").top() < heading.top() - px(1.),
+        "the wheel scrolled the region"
+    );
+    let deny = drawn_at(&after, "approval-a-answer-deny");
+    assert!(
+        inside(window, deny) && inside(drawn_at(&after, "approval-region"), deny),
+        "Deny is in view: {deny:?}"
+    );
+    click(cx, "approval-a-answer-deny");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/approvals/a");
+    assert_eq!(body, json!({ "answer": "deny" }));
+    push(&mut helm, &[], &["a"]);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert!(!drawn(cx), "the answered card went");
+}
+
+/// SPEC.md: the region draws nothing while nothing waits, and it places its card from what the card's fixed parts need
+/// as they are drawn. The old app's region went when the last request did, and the next request's region came back
+/// "with a fresh measured anchor" (the remount half of "placement follows the empty pane, session mount, and approval
+/// remount"). This region is never removed: once it has had nothing to draw, the settled placement of the next card
+/// must follow that card's own measurements, not hold it in the whole-window fallback for what earlier, taller
+/// occupants needed. (The region also resets its measurements when it empties; that only spares the first frame after
+/// the card arrives, which this test cannot observe.) Specified: in a 320 by 500 window, a long-host launch with four
+/// more requests waiting needs more than the cap, so the region takes the window from its top; once every one of them
+/// is gone the region draws nothing; a stop request arriving alone then puts the region 12 pixels below the pane's top.
+#[gpui::test]
+fn a_card_after_the_region_emptied_is_placed_by_its_own_needs(cx: &mut TestAppContext) {
+    let mut tall = every_kind()
+        .into_iter()
+        .find(|approval| approval.id == "launch")
+        .expect("the fixtures hold a launch");
+    tall.host_name = format!("remote-{}\u{202e}", "x".repeat(80));
+    let mut first = vec![tall];
+    first.extend((0..4).map(|n| stop(&format!("queued-{n}"), "box")));
+    let (mut helm, cx, _terminal) = open(cx, &first);
+    cx.simulate_resize(size(px(320.), px(500.)));
+    settle(cx);
+    assert_eq!(
+        drawn_at(&frame(cx), "approval-region").top(),
+        px(0.),
+        "premise: the first occupants need more than the cap, so the region took the whole window"
+    );
+    let gone: Vec<&str> = first.iter().map(|approval| approval.id.as_str()).collect();
+    push(&mut helm, &[], &gone);
+    settle(cx);
+    assert!(!drawn(cx), "premise: nothing is left to draw");
+
+    push(&mut helm, &[stop("later", "box")], &[]);
+    settle(cx);
+    assert_eq!(
+        drawn_at(&frame(cx), "approval-region").top(),
+        px(12.),
+        "the new card is placed below the pane's top by what it needs itself"
+    );
+}
+
+/// SPEC.md: the card is centered at the top of the main area below the session's tabs. The old app moved the card
+/// below a newly mounted session's terminal (the session-mount half of "placement follows the empty pane, session
+/// mount, and approval remount"); the placement tests give the region an area's top as a number, and only a window
+/// shows the session pane handing its terminal area over as the region's anchor. Specified: in the real main window,
+/// 1200 by 900, with a session open on a reachable host, its terminal live and a request waiting, the session's tab
+/// strip lies above its terminal, and the region starts at least 12 pixels below the strip's bottom and at most 12
+/// below the terminal's top: 12 below the terminal area's top, which lies between the two.
+#[gpui::test]
+fn with_a_session_open_the_region_starts_below_its_tabs(cx: &mut TestAppContext) {
+    let mut collections = crate::session_list::menu_tests::snapshot(
+        &[(crate::session_list::tests::session("a"), 0)],
+        false,
+    );
+    collections.push(crate::hosts::tests::hosts(&[crate::hosts::tests::host(
+        2,
+        "ssh",
+        crate::hosts::tests::connected(),
+    )]));
+    collections.push(waiting(&[stop("req", "box")]));
+    let mut main = test_support::open_main(cx, collections);
+    main.terminal_live();
+    let cx = main.cx;
+    cx.simulate_resize(size(px(1200.), px(900.)));
+    settle(cx);
+    let nodes = frame(cx);
+    let strip = drawn_at(&nodes, crate::terminal::set::STRIP_ID);
+    let grid = drawn_at(&nodes, "terminal-grid");
+    let region = drawn_at(&nodes, "approval-region");
+    assert!(
+        strip.bottom() <= grid.top(),
+        "premise: the tabs are drawn above the terminal: {strip:?}, {grid:?}"
+    );
+    assert!(
+        region.top() >= strip.bottom() + px(12.),
+        "the region starts 12 pixels clear of the tabs: {region:?} under {strip:?}"
+    );
+    assert!(
+        region.top() <= grid.top() + px(12.5),
+        "and no further than 12 below the terminal's top: {region:?}, {grid:?}"
+    );
+}
+
+/// SPEC.md, "Keyboard focus": a request arriving moves no focus and opens nothing, and "an existing draft or another
+/// modal is kept". The old app let an agent's host add arrive while the user typed into the ordinary Add host dialog
+/// (the arrival half of "host add preserves a manual draft and defers only an explicit open"): the card shows, and the
+/// draft is untouched. The explicit open's half is the host add tests'. Specified: with the ordinary Add host open and
+/// a destination and an alias typed into it, an agent's host add arriving draws its card, and the dialog stays open
+/// with both typed values as they were and focus still in the alias.
+#[gpui::test]
+fn an_agents_host_add_arriving_leaves_a_typed_add_host_draft_alone(cx: &mut TestAppContext) {
+    use crate::hosts::add::tests::{alias, alias_focused, destination, type_text};
+    let (mut helm, cx, terminal) = open(cx, &[]);
+    let opened = cx.update(|window, cx| {
+        let mark = crate::focus::Mark::take(cx);
+        crate::hosts::add::open(&terminal, &mark, window, cx)
+    });
+    settle(cx);
+    assert!(opened.is_some(), "premise: the ordinary Add host opened");
+    type_text(cx, "user@manualdraft.invalid");
+    keys(cx, "tab");
+    assert!(alias_focused(cx), "premise: Tab reached the alias");
+    type_text(cx, "manualalias");
+    let typed = (
+        "user@manualdraft.invalid".to_owned(),
+        "manualalias".to_owned(),
+    );
+    assert_eq!(
+        (destination(cx), alias(cx)),
+        typed,
+        "premise: the draft is typed"
+    );
+
+    let mut add = stop("add-1", "build");
+    add.action = ApprovalAction::HostAdd {
+        destination: "ops@new.example".to_owned(),
+        alias: Some("newbox".to_owned()),
+    };
+    push(&mut helm, &[add], &[]);
+    settle(cx);
+    assert_eq!(
+        expanded(cx).as_deref(),
+        Some("add-1"),
+        "the request's card shows"
+    );
+    assert!(any_open(cx), "the dialog stays open");
+    assert_eq!(
+        (destination(cx), alias(cx)),
+        typed,
+        "the draft is untouched"
+    );
+    assert!(alias_focused(cx), "the arrival left focus in the alias");
 }

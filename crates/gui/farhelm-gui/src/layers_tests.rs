@@ -3931,16 +3931,23 @@ fn an_approval_card_stays_usable_over_a_dialog(cx: &mut TestAppContext) {
     assert!(in_dialog(cx), "the card going sent focus into the dialog");
 }
 
-/// Why this matters: the old "host retirement releases before removal and preserves approval focus" and "SSH command
-/// arrival preserves an independent approval owner". A user answering a card must not have focus pulled off it by the
-/// dialog behind finishing on its own; and a card going with no dialog open must leave focus where keys still work.
+/// Why this matters: the old "host retirement releases before removal and preserves approval focus", "SSH command
+/// arrival preserves an independent approval owner" and "held rename success preserves an unrelated focus
+/// destination". A user answering a card must not have focus pulled off it by the dialog behind finishing on its own,
+/// keeping focus there must answer nothing, and the answer the user then gives from the keyboard must go out once; and
+/// a card going with no dialog open must leave focus where keys still work.
 ///
-/// A dialog whose subject goes (the retired host's) closes through the same close as one its opener closes, so the
-/// opener's close stands for both.
+/// A dialog whose subject goes (the retired host's) or whose work finishes (the held rename's) closes through the same
+/// close as one its opener closes, so the opener's close stands for all of them.
 ///
-/// Specified, where a click focuses controls: with focus put on Allow while a dialog is open, a late move the dialog
-/// makes inside itself does nothing, and the dialog closing leaves focus on Allow; with no dialog open, the card going
-/// sends focus home.
+/// The old cases focused Allow without answering. With a dialog open, Tab stays inside the dialog and never reaches the
+/// card; the GUI crates' lints ban moving focus directly, and the test seam that forces it is kept for states no user
+/// reaches, while a user reaches this one: a press on Allow released off it focuses it (a click focuses controls here)
+/// without the click that answers.
+///
+/// Specified, where a click focuses controls: with focus put on Allow while a dialog is open, answering nothing, a late
+/// move the dialog makes inside itself does nothing, and the dialog closing leaves focus on Allow, still with nothing
+/// answered; Enter then answers Allow exactly once; with no dialog open, the card going sends focus home.
 #[gpui::test]
 fn focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card(
     cx: &mut TestAppContext,
@@ -3955,10 +3962,25 @@ fn focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card(
 
     let save = handle(cx);
     let (dialog, _, _) = open_dialog(cx, vec![("save", save.clone())], &save);
-    click(cx, "card-allow");
+    // Released on the card's own padding, clear of Allow: GPUI clicks only when the release lands on what was pressed.
+    let off_allow = bounds(cx, "card").origin + point(px(2.), px(2.));
+    assert!(
+        !bounds(cx, "card-allow").contains(&off_allow),
+        "the premise: the release point is off Allow"
+    );
+    let on_allow = center(cx, "card-allow");
+    cx.simulate_mouse_down(on_allow, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(off_allow, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(off_allow, MouseButton::Left, Modifiers::none());
+    settle(cx);
     assert!(
         focused(cx, &card.allow),
         "the premise: Allow has focus, with the dialog open"
+    );
+    assert_eq!(
+        card.answers.get(),
+        0,
+        "the premise: the press released off Allow answered nothing"
     );
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
@@ -3973,6 +3995,13 @@ fn focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card(
     settle(cx);
     assert!(!is_open(cx, dialog), "the premise: the dialog closed");
     assert!(focused(cx, &card.allow), "and focus stayed on Allow");
+    assert_eq!(
+        card.answers.get(),
+        0,
+        "keeping focus on Allow answered nothing"
+    );
+    keys(cx, "enter");
+    assert_eq!(card.answers.get(), 1, "Enter on Allow answered it once");
 
     card.shown.set(false);
     redraw(cx);
