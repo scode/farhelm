@@ -453,6 +453,50 @@ fn a_failed_send_says_so_and_keeps_the_text_for_a_retry(cx: &mut TestAppContext)
     assert_eq!(label(cx, "feedback-thanks").as_deref(), Some(THANKS));
 }
 
+/// Under macOS's click rule a click on Send focuses no control, so focus rests on the dialog itself, and after a refusal
+/// the user's keys would go nowhere; the old dialog gave focus back to the message then (its `refocus`). Specified:
+/// with "keep" typed and Send clicked, focus is on the dialog itself; after the helm refuses, it is in the message, and
+/// typing " on" continues the text there.
+#[gpui::test]
+fn a_refused_send_clicked_on_a_mac_gives_focus_back_to_the_message(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle) = open_bar(cx, None);
+    open_dialog(cx);
+    keys(cx, "k e e p");
+    let (id, _) = send(&mut helm, cx);
+    let on_dialog = cx.update(|window, cx| {
+        layers::top_container(window, cx).is_some_and(|dialog| dialog.is_focused(window))
+    });
+    assert!(on_dialog, "the premise: the click left focus on the dialog");
+    answer(&mut helm, cx, id, 502, json!(UNREACHABLE));
+    assert!(message_focused(cx), "focus went back to the message");
+    keys(cx, "space o n");
+    assert_eq!(message(cx), "keep on");
+}
+
+/// The other half of the old `refocus` rule: a refusal never takes focus from a control that holds it. A press that
+/// focuses Send has not moved the user on, so only the dialog's own check keeps an unconditional move to the message
+/// from taking focus off Send. Specified: under Linux's click rule, a click on Send focuses Send, and Send keeps focus
+/// through the helm's refusal.
+#[gpui::test]
+fn a_refused_send_leaves_focus_on_the_send_that_holds_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, _toggle) = open_bar(cx, None);
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    open_dialog(cx);
+    keys(cx, "h i");
+    let (id, _) = send(&mut helm, cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("feedback-send"),
+        "the premise"
+    );
+    answer(&mut helm, cx, id, 502, json!(UNREACHABLE));
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("feedback-send"),
+        "focus stayed"
+    );
+}
+
 /// The old app's `may_close`, and the stay-open rule of the operation's busy state: closing while the send is out
 /// would drop its outcome and lose the text, and a second send would file a second issue. The dialog reads whether a
 /// send is out from the operation store, never a copy of its own, so the first part starts feedback work on the
