@@ -186,9 +186,9 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
   preserves edits and renames", its second half: an edit to a field other than the name kept across reopening, and
   reopening the row after a save keeping a typed rename)
 - `templates::editor_tests::the_busy_editor_scrolls_back_to_its_name_by_keyboard` ("templates busy root stays
-  keyboard-scrollable", what is left of its scrolling: with a save out, Shift+Tab back to the name field scrolls the
-  body until the field shows; its Home back to the top is the deviation "Home and the page keys do not scroll the
-  Templates editor")
+  keyboard-scrollable": with a save out, Shift+Tab back to the name field scrolls the body until the field shows, and
+  Home from Save, a button in the scrolled body, scrolls back until the name field shows whole, where the old case
+  checked the scroll offset back at zero)
 - `templates::save_tests::a_refused_save_leaves_focus_on_an_approval_card` ("save as template refusal respects
   ${focusOwner} focus", its approval-card half: with a real approval card beside the open launcher, a refusal leaves
   focus on the card the user moved to while the save was out; its other halves are above, and its lost-focus half is
@@ -702,14 +702,6 @@ orchestrator.
   Tab stop. Here the text fields turn read-only, the buttons (Save, the rows, "+ New template", ✕, "+ Add field") turn
   busy, keeping focus and ignoring presses, and the choices ignore presses without changing their look, so focus never
   falls out of the control the user was on.
-- **Home and the page keys do not scroll the Templates editor.** The old busy editor made the dialog itself a stop, and
-  Home there scrolled it back to the top ("templates busy root stays keyboard-scrollable"). Here focus stays on a
-  control while a save is in flight (the deviation above), and Home, End, Page Up and Page Down scroll nothing from a
-  control in the Templates dialog's body, at any time: the dialog frame lets a dialog opt in to those keys only for its
-  notices region (`DialogFrame::notices_stop`, which the Trash dialog uses), not for its body, so the Templates code
-  alone cannot opt in. Focus moving onto a field scrolls it into view, so Tab and Shift+Tab still reach and show every
-  control of the editor while a save is out. Tested by
-  `templates::editor_tests::the_busy_editor_scrolls_back_to_its_name_by_keyboard`.
 - **The editor's small controls.** The model suggestions are neutral buttons with the neutral fill where the old ones
   had none, and the add menu's entries have the template rows' padding (10 by 12 pixels) where the old ones had 8.
   "Replace name" has hover help ("Clear the name so a new one can be typed"), which the old button lacked and every
