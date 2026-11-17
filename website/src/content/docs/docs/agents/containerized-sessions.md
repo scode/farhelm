@@ -69,9 +69,11 @@ rebuilt. Existing containers keep their software. Rebuild affects future launche
 
 ## Start a session
 
-Open **+** (New session). In [the session launcher](/docs/using/start-a-session/), when a container host is available,
-**Runs on** offers **Existing host** and **New container**. Choose **New container**, then **Recipe** and **Container
-host**. The host defaults to the one you used last. Recipes that cannot run there show why.
+Open **+** (New session). In [the session launcher](/docs/using/start-a-session/#choose-where-it-runs), when a container
+host is available, **Runs on** offers **New container** beside **Existing host**. (**New sandbox**, for
+[Tensorlake](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), shows there once a Tensorlake API key
+is saved, whether or not you have a container host.) Choose **New container**, then **Recipe** and **Container host**.
+The host defaults to the one you used last. Recipes that cannot run there show why.
 
 Choose a **Managed checkout** to clone a GitHub repository inside the new container. **Folder** is fixed to the
 container user's home directory. Directory browsing and recent host directories are unavailable for this destination.
@@ -84,7 +86,7 @@ available for explicit deletion in **Hosts** or **Containers not on this helm**.
 when Farhelm starts.
 
 A [launch template](/docs/using/launch-templates/) that holds a recipe and container host applies both, for
-[quick launch](/docs/using/launch-templates/#quick-launch) too. **Save as template** is unavailable for a new container.
+[quick launch](/docs/using/launch-templates/#quick-launch) too. **Save as template** is not offered for a new container.
 A template whose recipe or container host is gone is refused, and nothing from it applies.
 
 ## Working inside the container
@@ -124,7 +126,10 @@ including extra mounts or environment settings you configure yourself.
 
 **Stop** ends the chosen agent and its tabs, leaving the container running. **Suspend** pauses the whole container.
 Processes freeze and their memory stays allocated on the host. **Resume** continues them. **Stop and suspend** stops the
-chosen session first, then pauses the whole container, including any other sessions in it.
+chosen session first, then pauses the whole container, including any other sessions in it. The container's entry in
+**Hosts** has the same **Suspend** and **Resume** in its menu, and a paused container shows **Resume** on its row.
+**Suspend** in Hosts asks first, unless Farhelm is connected to the container and can see that no session in it is
+running.
 
 A host reboot, external `podman stop` or an out-of-memory kill leaves the container **Stopped**, with files retained.
 When Farhelm is connected to the container host, it attempts to start a stopped container once. Failure shows the reason
