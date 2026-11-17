@@ -17,19 +17,23 @@
 //!   permission only when the user chose it (a remembered permission New starts with must not hide recents), each
 //!   narrowing only once set; and its destination, a folder (matched through the history's canonical paths) or a chosen
 //!   repository. The strip shows at most three.
-//!
-//! NOTE: Not built yet: launches into a disposable environment (their recipe and place) come with the environments
-//! work; until then they are left out of the rows.
+//! - **Launches into a new environment** come from the helm's own history of them, which outlives the disposable host
+//!   they ran on, merged into the chosen host's ([`merged`]). Such a setup carries its recipe and place, which group it
+//!   like its choices and which its row names in place of a host ([`placement`]). It is offered for any folder, since
+//!   its folder is the environment's home, but under a chosen repository only with that repository (the old
+//!   `ranked_recents`). It never becomes a host's remembered folder ([`remembered_folder`]).
 
 use std::cmp::Reverse;
 
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
+use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{
-    GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
     join_permission_flags,
 };
 
 use super::draft::harness_label;
+use crate::host_text::HostText;
 use crate::permission::words::{effort_label, permission_display};
 
 /// The strip's row count (`matching_recents`' `take(3)`).
@@ -89,13 +93,15 @@ fn canonical_destination(history: &LaunchHistoryReply, cwd: &str) -> String {
         .map_or_else(|| cwd.to_owned(), |folder| folder.canonical_cwd.clone())
 }
 
-/// What makes launches one setup: their choices as the helm reads them, and their destination. The strip keys a row's
-/// keyboard focus by it, so focus follows the setup when the rows change under it (a fill re-filters them), and Enter
-/// never launches a setup the user did not move to.
+/// What makes launches one setup: their choices as the helm reads them, their destination, and the new environment's
+/// recipe and place for a launch that made one, so the same choices in a container and on a host are two setups. The
+/// strip keys a row's keyboard focus by it, so focus follows the setup when the rows change under it (a fill re-filters
+/// them), and Enter never launches a setup the user did not move to.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetupKey {
     choices: LaunchSelection,
     destination: LaunchDestination,
+    target: Option<LaunchTarget>,
 }
 
 /// `entry`'s setup.
@@ -103,6 +109,7 @@ pub fn setup_key(entry: &LaunchHistoryEntry) -> SetupKey {
     SetupKey {
         choices: normalized(&entry.selection),
         destination: launch_destination(entry),
+        target: entry.target.clone(),
     }
 }
 
@@ -151,20 +158,21 @@ pub fn ranked<'a>(
             Some(DraftDestination::RepositoryInput) => false,
             Some(DraftDestination::Repository(repo)) => entry.github_repo.as_ref() == Some(repo),
             // With repository launches in the history, a folder destination still offers them (the old
-            // `destination_recents`), so a setup that launched into a checkout stays one press away.
+            // `destination_recents`), so a setup that launched into a checkout stays one press away. A new
+            // environment's setup started in its own home, which says nothing about the folder the draft holds.
             Some(DraftDestination::Folder(cwd)) => {
-                (has_repositories && entry.github_repo.is_some())
+                entry.target.is_some()
+                    || (has_repositories && entry.github_repo.is_some())
                     || launch_destination(entry)
                         == LaunchDestination::Folder(canonical_destination(history, cwd))
             }
         }
     };
-    // Grouped by choices and destination; the first (newest) occurrence is the row, and its index breaks ties. The
-    // helm keeps the history short, so a scan per entry is cheap.
+    // Grouped by setup; the first (newest) occurrence is the row, and its index breaks ties. The helm keeps the history
+    // short, so a scan per entry is cheap.
     let mut groups: Vec<(&LaunchHistoryEntry, SetupKey, usize)> = Vec::new();
     for entry in history.launches.iter() {
-        // Environment launches come with the environments work (module docs).
-        if entry.target.is_some() || !wanted(entry) || !matches_filter(&entry.selection, filter) {
+        if !wanted(entry) || !matches_filter(&entry.selection, filter) {
             continue;
         }
         let key = setup_key(entry);
@@ -189,6 +197,46 @@ pub fn strip<'a>(
     rows
 }
 
+/// The history recent setups are drawn from: the chosen host's (`ordinary`, while it is read and current) with the
+/// helm's launches into new environments (`environment`) merged in, or `None` while there is neither. Only the
+/// launches change: the saved folders and the checkout configuration's revision stay the host's, and with no host's
+/// history there are none, so an environment's home never reads as a host's folder.
+///
+/// Each source keeps its own order, which is its own sequence and may disagree with its timestamps after a clock jump;
+/// the timestamps only pick between the two sources' next launches, a tie going to the host's. This is the old
+/// `merge_recent_launches`; the two clocks may be skewed, which the old launcher accepted too.
+pub fn merged(
+    ordinary: Option<&LaunchHistoryReply>,
+    environment: &[LaunchHistoryEntry],
+) -> Option<LaunchHistoryReply> {
+    if ordinary.is_none() && environment.is_empty() {
+        return None;
+    }
+    let mut reply = ordinary.cloned().unwrap_or(LaunchHistoryReply {
+        launches: Vec::new(),
+        folders: Vec::new(),
+        checkout_config_revision: 0,
+    });
+    let mut ordinary = std::mem::take(&mut reply.launches).into_iter().peekable();
+    let mut environment = environment.iter().peekable();
+    loop {
+        let from_environment = match (ordinary.peek(), environment.peek()) {
+            (Some(host), Some(new)) => new.created_at > host.created_at,
+            (None, Some(_)) => true,
+            (_, None) => false,
+        };
+        let next = if from_environment {
+            environment.next().cloned()
+        } else {
+            ordinary.next()
+        };
+        let Some(entry) = next else {
+            return Some(reply);
+        };
+        reply.launches.push(entry);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // A row's words
 // ---------------------------------------------------------------------------------------------------------------------
@@ -198,6 +246,22 @@ pub fn destination_label(entry: &LaunchHistoryEntry) -> String {
     match &entry.github_repo {
         Some(repo) => format!("gh:{}/{}", repo.owner, repo.name),
         None => entry.cwd.clone(),
+    }
+}
+
+/// Where `entry` ran, as its row names it (the old `recent_placement_label`): a new environment by its recipe and place
+/// as the footer names the one a draft would make, less its "new" ([`crate::environment_ui::launch_target_label`],
+/// over the registry's `hosts`: "web container on host1"), so the row needs no host of the draft's; any other launch
+/// by the chosen host's name, `host`, since only that host's history holds it. `None` for such a launch with no host
+/// to name.
+pub fn placement(
+    entry: &LaunchHistoryEntry,
+    host: Option<&HostText>,
+    hosts: &[HostView],
+) -> Option<HostText> {
+    match &entry.target {
+        Some(target) => Some(crate::environment_ui::launch_target_label(target, hosts)),
+        None => host.cloned(),
     }
 }
 

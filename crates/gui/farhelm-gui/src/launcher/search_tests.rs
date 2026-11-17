@@ -105,7 +105,8 @@ impl Draft {
             catalog_pending: self.catalog_pending,
             hosts: &self.hosts,
             templates: self.templates.as_deref(),
-            history: self.history.as_ref().zip(Some(&placement)),
+            history: self.history.as_ref(),
+            host: Some(&placement),
             repositories: &[],
         })
     }
@@ -876,6 +877,31 @@ fn recent_setups_are_ranked_and_uncapped() {
     assert_eq!(
         draft.rows("recent:/"),
         vec![recent(often), recent(newest), recent(older), recent(oldest)]
+    );
+}
+
+/// A recent setup that made a new environment names that environment's recipe and place, not the chosen host, beside
+/// the host's own setup naming the host. Why: SPEC.md, "Creation", recent setups restore "recipe and place together",
+/// and taking the row goes there, so a row naming the chosen host would say it launches somewhere it does not (the old
+/// search row's `recent_placement_label`).
+#[test]
+fn an_environment_setup_names_its_own_placement() {
+    let mut sandbox = launch("~", LaunchHarness::Codex, None);
+    sandbox.target = Some(farhelm_proto::LaunchTarget::Environment {
+        recipe: "web".into(),
+        place: farhelm_proto::Place::TensorlakeAccount,
+    });
+    let plain = launch("~", LaunchHarness::Claude, None);
+    let draft = with_history(None, vec![sandbox.clone(), plain.clone()], &[]);
+    assert_eq!(
+        draft.rows("recent:"),
+        vec![
+            Row::Recent {
+                entry: Box::new(sandbox),
+                placement: HostText::from_host("web sandbox"),
+            },
+            recent(plain),
+        ]
     );
 }
 

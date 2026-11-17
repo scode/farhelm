@@ -9,21 +9,25 @@
 //! (`list/create_form.rs` and `list/create_form/draft.rs` at reference commit `24bc0580`). Here's the TLDR:
 //!
 //! - **Shown only with rows.** No heading and no space while nothing matches, and never in Restart with, which keeps
-//!   its setup. The rows read the draft as it stands, on either tab, so they narrow as the user chooses.
-//! - **A row** shows the agent type, where it started, the chosen host, and what it set explicitly ("Defaults" when it
-//!   set nothing but the agent's default Guarded mode; YOLO in the danger ink), with "⏎ Launch" ("⏎ Replace" in Replace
-//!   with) at its end while it has keyboard focus. Its accessible name and hover help say the whole setup. The cells
-//!   are fixed tracks that cut their text short, so the columns line up from row to row.
+//!   its setup. The rows read the draft as it stands, on either tab, so they narrow as the user chooses, and they show
+//!   while a new environment is chosen as on a host.
+//! - **A row** shows the agent type, where it started, where it ran (the chosen host, or a new environment's recipe and
+//!   place, which needs no host connected: [`crate::launcher::recents::placement`]), and what it set explicitly
+//!   ("Defaults" when it set nothing but the agent's default Guarded mode; YOLO in the danger ink), with "⏎ Launch" ("⏎
+//!   Replace" in Replace with) at its end while it has keyboard focus. Its accessible name and hover help say the whole
+//!   setup. The cells are fixed tracks that cut their text short, so the columns line up from row to row.
 //! - **Focus follows the setup**, not the row's place: taking a row re-filters the rows, and a row keeps its keyboard
 //!   focus only while it still shows the same setup, so a fill never leaves Enter on a setup the user did not move to.
 //!   (A setup that leaves the strip takes its focus with it, and the focus coordinator recovers it as for any control
 //!   that goes away.)
-//! - **Taking a row** (a click, or Enter on a focused row) makes the setup's choices the draft's through the draft's own
-//!   method ([`LaunchDraft::restore_recent`](crate::launcher::draft::LaunchDraft::restore_recent)) and its folder or
-//!   repository the destination, on the Agent tab. A click stops there; Enter then presses the main action, so the
-//!   setup launches, or says why not, exactly as a press of Launch would. A held Enter does nothing. A setup carrying a
-//!   retired container choice is refused under the agent choices with the shared reason, and a row whose setup is no
-//!   longer in the history (the host changed under it) does nothing.
+//! - **Taking a row** (a click, or Enter on a focused row) makes the setup's placement, choices and folder or
+//!   repository the draft's through the draft's own methods
+//!   ([`LaunchDraft::choose_placement`](crate::launcher::draft::LaunchDraft::choose_placement),
+//!   [`LaunchDraft::restore_recent`](crate::launcher::draft::LaunchDraft::restore_recent)), on the Agent tab. A click
+//!   stops there; Enter then presses the main action, so the setup launches, or says why not, exactly as a press of
+//!   Launch would. A held Enter does nothing. A setup carrying a retired container choice is refused under the agent
+//!   choices with the shared reason, and so is a new environment's in Replace with, which keeps the existing one; a row
+//!   whose setup is no longer in the history (the host changed under it) does nothing.
 
 use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
@@ -38,13 +42,17 @@ use super::{Launcher, host_name_with_phase};
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus;
 use crate::host_text::{HostSentence, HostText};
-use crate::launcher::draft::{Field, Mode, RunsOn, harness_label};
+use crate::launcher::draft::{DestinationKind, Field, Mode, harness_label};
 use crate::launcher::recents::{
     ALL_DEFAULTS, DraftDestination, RecentFilter, SetupKey, destination_label,
-    explicit_before_permissions, permission_value, selection_summary, setup_key, strip,
+    explicit_before_permissions, permission_value, placement, selection_summary, setup_key, strip,
     uses_guarded_default,
 };
 use crate::theme::{self, metrics};
+
+/// Why a new environment's setup is not taken in Replace with, the old launcher's words for a placement where the mode
+/// keeps the source's (decided by the launcher area on 2026-11-16: the row is shown and refused, not left out).
+pub(super) const KEEPS_ENVIRONMENT: &str = "Restart and Replace keep the existing environment";
 
 /// `.launch-composer-recent-slots > button`'s tracks, in the strip's 13-pixel text: the agent's name (`9ch`), the folder
 /// (at least `12ch`, taking what is left), the host (`22ch`, shrinking only when the row is narrow), the explicit choices
@@ -91,6 +99,9 @@ pub(super) enum RecentRefusal {
     Stale,
     /// This launcher holds the agent type and destination the setup would change (Restart with).
     Held,
+    /// The setup made a new environment, and this launcher keeps the source's host (Replace with):
+    /// [`KEEPS_ENVIRONMENT`].
+    KeepsEnvironment,
 }
 
 impl Launcher {
@@ -106,12 +117,13 @@ impl Launcher {
         }
     }
 
-    /// The strip's rows now: none in Restart with, else up to three setups matching the draft.
-    fn recent_rows(&self, cx: &App) -> Vec<LaunchHistoryEntry> {
+    /// The strip's rows now, each with where it ran as its row names it: none in Restart with, else up to three setups
+    /// matching the draft.
+    fn recent_rows(&self, cx: &App) -> Vec<(LaunchHistoryEntry, HostText)> {
         if matches!(self.draft.mode, Mode::RestartWith(_)) {
             return Vec::new();
         }
-        let Some(history) = self.launch_history(cx) else {
+        let Some(history) = self.recent_history(cx) else {
             return Vec::new();
         };
         let destination = match &self.draft.checkout {
@@ -121,9 +133,11 @@ impl Launcher {
                 None => DraftDestination::RepositoryInput,
             },
         };
-        strip(history, &self.recent_filter(), destination)
+        let host = self.chosen_host(cx).map(host_name_with_phase);
+        let hosts = self.hosts(cx);
+        strip(&history, &self.recent_filter(), destination)
             .into_iter()
-            .cloned()
+            .filter_map(|entry| Some((entry.clone(), placement(entry, host.as_ref(), &hosts)?)))
             .collect()
     }
 
@@ -139,17 +153,16 @@ impl Launcher {
         }
         // The row was drawn from the history as it was; a host change since has dropped that history, and with it the
         // row's claim to this host's folders.
-        let offered = self
-            .launch_history(cx)
-            .is_some_and(|history| history.launches.contains(entry));
-        if !offered {
+        if !self.recent_offered(entry, cx) {
             return Some(RecentRefusal::Stale);
         }
         // Restart with holds the agent type and destination a setup would change; the strip is not drawn there, and
         // the search refuses the row before it gets here, so this only guards.
-        self.draft
-            .holds(Field::AgentType)
-            .then_some(RecentRefusal::Held)
+        if self.draft.holds(Field::AgentType) {
+            return Some(RecentRefusal::Held);
+        }
+        (entry.target.is_some() && self.draft.holds(Field::Host))
+            .then_some(RecentRefusal::KeepsEnvironment)
     }
 
     /// Take `entry`: fill the draft with its setup (see the module docs), or change nothing and say why
@@ -163,18 +176,21 @@ impl Launcher {
         if let Some(refusal) = self.recent_refusal(entry, cx) {
             return Err(refusal);
         }
-        // A recent setup carries its place (SPEC.md, "Creation": recipe and place together). Every setup listed now
-        // ran on an existing host, so taking one while a new environment is chosen goes back to Existing host, as the
-        // old launcher's did, rather than filling a setup whose folder the environment cannot use.
-        self.draft.choose_runs_on(RunsOn::ExistingHost, None);
+        // A recent setup carries its place (SPEC.md, "Creation": recipe and place together): a new environment's
+        // restores that recipe and place, and any other goes back to Existing host on the host whose history it came
+        // from, as the old launcher's did, rather than filling a host's folder into an environment that cannot use it.
+        self.draft.choose_placement(entry.target.clone());
         self.draft
             .restore_recent(&entry.selection, self.catalog.as_deref());
         // A setup taken replaces the agent choices, so the escalation banner goes, as the old strip took it away: its
         // Undo would throw this setup away.
         self.follow_escalation(true, None, None, cx);
-        match &entry.github_repo {
-            Some(repo) => self.draft.choose_repository(repo.clone()),
-            None => {
+        match (&entry.github_repo, &entry.target) {
+            (Some(repo), _) => self.draft.choose_repository(repo.clone()),
+            // The placement just made the folder the new environment's home, which binds no installation; only a
+            // managed checkout chosen before gives way to it.
+            (None, Some(_)) => self.draft.choose_destination(DestinationKind::Folder),
+            (None, None) => {
                 self.take_history_folder(entry.cwd.clone(), cx);
                 self.folder_picked();
             }
@@ -186,22 +202,22 @@ impl Launcher {
     }
 
     /// Take a strip row's `entry`: a retired container choice is said under the agent choices, where the old strip said
-    /// it; a stale row does nothing. Returns whether it filled.
+    /// it, and so is a new environment's in Replace with; a stale row does nothing. Returns whether it filled.
     fn take_strip_recent(
         &mut self,
         entry: &LaunchHistoryEntry,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        match self.take_recent(entry, window, cx) {
-            Ok(()) => true,
-            Err(RecentRefusal::Retired) => {
-                self.notice = Some(RETIRED_CONTAINER_REASON.to_owned());
-                cx.notify();
-                false
-            }
-            Err(RecentRefusal::Stale | RecentRefusal::Held) => false,
-        }
+        let words = match self.take_recent(entry, window, cx) {
+            Ok(()) => return true,
+            Err(RecentRefusal::Retired) => RETIRED_CONTAINER_REASON,
+            Err(RecentRefusal::KeepsEnvironment) => KEEPS_ENVIRONMENT,
+            Err(RecentRefusal::Stale | RecentRefusal::Held) => return false,
+        };
+        self.notice = Some(words.to_owned());
+        cx.notify();
+        false
     }
 
     /// The recent setups strip, or `None` while it has no rows (it then takes no room: SPEC.md).
@@ -215,8 +231,6 @@ impl Launcher {
         if rows.is_empty() {
             return None;
         }
-        // Rows come only from a connected chosen host's history, so the host is there to name.
-        let placement = self.chosen_host(cx).map(host_name_with_phase)?;
         let replacing = matches!(self.draft.mode, Mode::ReplaceWith { .. });
         let verb = if replacing { "Replace" } else { "Launch" };
         let mut slots = div()
@@ -227,8 +241,8 @@ impl Launcher {
             .border_1()
             .border_color(theme::color(palette.border))
             .bg(theme::color(palette.well));
-        let drawn: Vec<SetupKey> = rows.iter().map(setup_key).collect();
-        for (index, entry) in rows.into_iter().enumerate() {
+        let drawn: Vec<SetupKey> = rows.iter().map(|(entry, _)| setup_key(entry)).collect();
+        for (index, (entry, placement)) in rows.into_iter().enumerate() {
             let handle = self.recents.handle_for(drawn[index].clone(), cx);
             // The hint, like the ring, shows for keyboard focus only.
             let focused = focus::shows_ring(&handle, window, cx);
