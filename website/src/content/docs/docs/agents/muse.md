@@ -42,7 +42,11 @@ verified, so they may look idle while Muse waits for you.
 - Muse's switch in [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts) can skip its
   directory-trust question for directories Farhelm manages, on every host. It is off by default. Farhelm passes a trust
   argument for each new launch without changing Muse's saved configuration; trusting the directory allows the
-  repository's own hooks, settings and commands to run as if you had approved them.
+  repository's own hooks, settings and commands to run as if you had approved them. While the switch is off and Muse
+  asks this in a managed checkout, a
+  [note above the session's terminal](/docs/using/start-a-session/#trust-in-managed-checkouts) says Farhelm can answer
+  it, and its **Settings** opens **Agent trust** at Muse's switch. Sessions started from the **Command** tab show no
+  note.
 - YOLO also makes Muse trust the session's directory. Turning the setting off cannot take back trust granted by YOLO or
   Muse's own configuration. Directories outside managed checkouts keep Muse's own trust behavior.
 

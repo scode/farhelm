@@ -35,7 +35,9 @@ this session: **New container** when you have a host that can run containers, an
 key is saved. [Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host;
 [sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your Tensorlake
 account, and Farhelm asks before creating the billed sandbox. Either can clone a managed checkout inside or start in
-the new environment's home. The host and directory controls below apply to **Existing host**.
+the new environment's home. Opening **+** (New session) while a sandbox or container session is open preselects a new one from
+that session's recipe, on the same Tensorlake account or container host. The host and directory controls below apply to
+**Existing host**.
 
 With no session open, the **Host** menu starts on the machine you are using, listed as **Local (this machine)**. A host
 that is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch
@@ -209,7 +211,7 @@ back to an ordinary directory.
 **Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
 in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
 taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **Folder**
-restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
+restores the source's directory and name; for a new sandbox or container it stays at the home directory. **Replace with** and **Replace** keep the existing directory.
 
 When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
@@ -298,11 +300,14 @@ a Claude session exiting at the same instant can lose either program's update, a
 how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
 trust allows the repository's own Claude hooks and commands to run.
 
-While that setting is off and Claude asks its question in a managed checkout, a note above the session's terminal says
-that Farhelm can answer it for you. **Settings and caveats** opens **Agent trust** at the setting, × hides the note
-until the question leaves the screen, and **Don't show again** stops it for every session. To bring it back, turn on
-**Show the hint when Claude asks about a managed checkout** in **Agent trust**. The note goes away once you turn the
-setting on. Farhelm answers nothing from the note itself; the question waits in the terminal as before.
+While Claude, Codex or Muse asks its trust question in a managed checkout and that agent's switch is off, a note above
+the session's terminal says, in that agent's words, that Farhelm can answer it for you. Its button, **Settings and
+caveats** for Claude and **Settings** for Codex and Muse, opens **Agent trust** at that agent's switch. × hides the note
+until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
+other agents' notes alone. To bring one back, turn on **Show the hint when Claude asks about a managed checkout**, or
+the Codex or Muse one, in **Agent trust**. The note goes away once you turn the agent's switch on. Farhelm answers
+nothing from the note itself; the question waits in the terminal as before. A Codex or Muse session started from the
+**Command** tab shows no note, and neither does Pi.
 
 ### Checkout management
 
