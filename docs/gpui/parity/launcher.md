@@ -722,27 +722,44 @@ settling, refusal and the pending row in `launcher::restart_with_tests::restart_
 `launcher::launch_tests::a_held_enter_in_a_field_never_launches`; superseded by the focus coordinator and layer manager:
 the backdrop, stray-focus, inert-page and tab-gone focus cases, and the container Enter half of "restart with keeps gap
 focus and container Enter uses its enabled action" (the launcher keeps focus on an empty-space click, so its container
-never takes it); not yet ported: a named conversation alone being enough to restart, sent beside the stored selection
-("named restart with requires a target when no conversation was captured"), the helm's refusal holding hidden characters
-shown escaped ("Restart with escapes and isolates peer refusal text"), Guarded chosen over an older own-setting launch
-counting as an edit ("restart with upgrades an older own-setting launch to guarded"), the YOLO question's answers
-resending the restart ("a YOLO restart-with requires confirmation inside the dialog", "restart with can answer the YOLO
-question by restarting guarded", "a YOLO command restart-with asks inside the dialog, worded for an assertion"; the
-question itself is tested), the old model escaped in its changed marker ("restart with escapes the old model in its
-changed marker"), an omitted permission compared by its effective mode ("restart with compares an older omitted
-permission by its effective mode"), an edited resume command with its resume and YOLO markers ("restart with edits a
-command launch's command, resume command and YOLO answer"; the command's own marker, shown for an edited command and for
-nothing else, is `launcher::restart_with_tests::restart_with_marks_an_edited_command`), a stored trust being no edit and
-left out of the body ("restart with choice Enter applies effort and permissions without old trust"), a command template,
-the shortcut batches and the bolt in Restart with ("restart with applies an allowed partial command template", "restart
-with refuses held shortcut batches and bolt templates", "restart with applies matching bolt and shortcut templates
-without restarting"; their tests would sit in `templates::apply_tests` and `templates::launcher_modes_tests`), and the
-catalog's Retry keeping an edit made before it ("restart with retries the catalog without reseeding its draft")
+never takes it); not yet ported: a command template, the shortcut batches and the bolt in Restart with ("restart with
+applies an allowed partial command template", "restart with refuses held shortcut batches and bolt templates", "restart
+with applies matching bolt and shortcut templates without restarting"; their tests would sit in `templates::apply_tests`
+and `templates::launcher_modes_tests`)
 
+- "named restart with requires a target when no conversation was captured", its sending half: a named conversation alone
+  restarting the stored launch, sent beside it, in
+  `launcher::request_tests::a_named_conversation_alone_restarts_the_stored_launch`.
+- "Restart with escapes and isolates peer refusal text":
+  `launcher::restart_with_tests::a_restart_refusal_spells_out_hidden_characters`.
+- "restart with upgrades an older own-setting launch to guarded":
+  `launcher::restart_with_tests::guarded_over_an_older_own_setting_launch_is_an_edit`.
+- "a YOLO restart-with requires confirmation inside the dialog", "restart with can answer the YOLO question by
+  restarting guarded" and "a YOLO command restart-with asks inside the dialog, worded for an assertion": the answers
+  resending the restart in
+  `launcher::restart_with_tests::{the_one_time_yolo_answer_resends_the_restart, the_guarded_answer_restarts_guarded, a_command_restarts_yolo_question_speaks_of_the_assertion}`;
+  the question inside the launcher, without the helm's own sentence, with Cancel focused, and Cancel sending nothing,
+  the same in every mode, in
+  `launcher::yolo_tests::{a_yolo_refusal_asks_the_question_with_cancel_focused, cancel_starts_nothing_and_keeps_the_launcher}`,
+  and a keyboard answer returning focus inside the launcher in
+  `prompt_tests::an_inline_question_answers_once_and_returns_focus_inside_its_dialog` (to Launch, where the old dialog
+  returned it to Cancel); the old dialog's look while the guarded restart was out (Guarded pressed and marked) has no
+  counterpart, since the launcher hides while its restart is out, as it does while a create is out (Deviations).
+- "restart with escapes the old model in its changed marker":
+  `launcher::restart_with_tests::the_changed_marker_spells_out_the_old_models_hidden_characters`.
+- "restart with compares an older omitted permission by its effective mode":
+  `launcher::restart_with_tests::an_omitted_permission_is_compared_by_the_mode_it_ran_with`.
+- "restart with edits a command launch's command, resume command and YOLO answer": each marked on its own as it is
+  edited, and the three edits sent whole, in `launcher::restart_with_tests::restart_with_marks_an_edited_command`.
+- "restart with choice Enter applies effort and permissions without old trust", the stored trust left out of the
+  restart: `launcher::restart_with_tests::restart_with_stops_a_working_agent_with_consent` (the choice Enter itself is
+  the shared Enter rule's).
 - "restart with model Enter refuses an unselected draft and held keys": the unselected draft in
   `launcher::view_tests::restart_with_model_enter_chooses_without_restarting`, and a held Enter in
   `launcher::restart_with_tests::a_held_enter_in_the_model_field_does_nothing`; not yet ported: its composing Enter, an
-  input method's Enter while composing in the model field
+  input method's Enter while composing in the model field.
+- "restart with retries the catalog without reseeding its draft":
+  `launcher::restart_with_tests::the_catalog_retry_keeps_an_edit`.
 - "restart with keeps gap focus and container Enter uses its enabled action", the gap half:
   `layers_tests::the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus`.
 - "don't ask again from restart with keeps focus in the dialog and marks before restarting" (the question and its host

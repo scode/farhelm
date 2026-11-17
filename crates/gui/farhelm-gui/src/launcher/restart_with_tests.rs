@@ -1,9 +1,11 @@
 //! Tests of Restart with in the real main view over the helm client's fake: when it is offered and why not, what its
-//! main action says and sends, and how its reply settles, alike with plain Restart's; plus the YOLO question's guarded
-//! answer, which Restart with offers only when it still changes the stored launch.
+//! main action says and sends, how its reply settles, alike with plain Restart's, and what each answer to the YOLO
+//! question sends; how it shows and compares a stored launch (escaped stored values, older or omitted permissions, the
+//! changed markers); and a held Enter in its model field.
 //!
 //! The fleet is the entry tests' (`entry_tests::window_with`): session `a` runs on host9, launched as the helm
-//! fixture's Codex launch (gpt-5, high effort, YOLO) with its conversation captured, so Restart with is offered.
+//! fixture's Codex launch (gpt-5, high effort, YOLO, and workspace trust on, which no restart may send back) with its
+//! conversation captured, so Restart with is offered. `a_stores` replaces a's stored launch where a test needs another.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::SessionRow;
@@ -14,7 +16,9 @@ use serde_json::{Value, json};
 use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
 use super::entry_tests::window_with;
+use super::folder_default_tests::edit_draft;
 use super::view_tests::{draft, name_of, shown_refusal};
+use super::yolo_tests::refuse_for_yolo;
 use crate::layers;
 use crate::local_state;
 use crate::operations::Work;
@@ -53,15 +57,7 @@ fn restarts(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand>
 
 /// Change the open Restart with's effort to Medium, an edit, so its main action is not inactive.
 fn edit_effort(cx: &mut VisualTestContext) {
-    cx.update(|_, cx| {
-        let launcher =
-            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
-        launcher.update(cx, |launcher, cx| {
-            launcher.draft.choose_effort(Some(LaunchEffort::Medium));
-            cx.notify();
-        });
-    });
-    settle(cx);
+    edit_draft(cx, |draft| draft.choose_effort(Some(LaunchEffort::Medium)));
 }
 
 /// Press the main action and return the one restart it sent, checking that it sent exactly one and hid.
@@ -142,8 +138,10 @@ fn restart_with_names_why_it_is_not_offered() {
 /// stops the agent first, and a press is the consent to that stop; Restart with sends the edited launch through the
 /// session's own restart route. Specified: with a running, Restart with of a after an effort edit marks the effort
 /// "● Changed · was high" and nothing else, draws "Stop and restart" and the working warning, and Launch sends one
-/// `POST /api/sessions/a/restart` whose `with` carries the Medium effort and whose `stop_if_running` is set; the pill
-/// then says "Restarting on host9…" and a's row waits.
+/// `POST /api/sessions/a/restart` whose `with` carries the Medium effort and not the stored workspace trust (SPEC.md,
+/// "Creation": the old remembered trust value is neither read nor written; restart-with.spec's "restart with choice
+/// Enter applies effort and permissions without old trust") and whose `stop_if_running` is set; the pill then says
+/// "Restarting on host9…" and a's row waits.
 #[gpui::test]
 fn restart_with_stops_a_working_agent_with_consent(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -170,6 +168,10 @@ fn restart_with_stops_a_working_agent_with_consent(cx: &mut TestAppContext) {
     assert_eq!(restart.path, "/api/sessions/a/restart");
     let body = restart.body.expect("a restart carries a body");
     assert_eq!(body["with"]["effort"], json!("medium"));
+    assert!(
+        body["with"]["workspace_trust"].is_null(),
+        "the stored trust is no choice to send: {body}"
+    );
     assert_eq!(body["stop_if_running"], json!(true));
     test_support::advance(cx, std::time::Duration::from_millis(2_100));
     assert_eq!(
@@ -293,30 +295,49 @@ fn the_yolo_question_of_a_restart_with_leaves_no_failure_on_the_session(cx: &mut
 
 /// The command tab marks its edits too, with the old bare "● Changed", and Restart with of a resumable session is
 /// offered (no greyed reason). Specified: `restart_with_unavailable` says nothing for e, a resumable command launch;
-/// Restart with of e marks nothing until its command is edited, then marks the command and nothing else.
+/// Restart with of e marks nothing until its command is edited, then marks the command and nothing else; an edited
+/// resume command then marks the resume command too, and a changed YOLO answer the answer; Restart sends all three
+/// edits (restart-with.spec's "restart with edits a command launch's command, resume command and YOLO answer").
 #[gpui::test]
 fn restart_with_marks_an_edited_command(cx: &mut TestAppContext) {
-    let (_helm, cx) = window_with(cx, Some("a"));
+    let (mut helm, cx) = window_with(cx, Some("a"));
     assert_eq!(cx.update(|_, cx| restart_with_unavailable("e", cx)), None);
     assert!(restart_with(cx, "e"));
     assert_eq!(name_of(cx, "launcher-changed-command"), None, "the premise");
-    cx.update(|_, cx| {
-        let launcher =
-            layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
-        launcher.update(cx, |launcher, cx| {
-            launcher
-                .draft
-                .edit_command("make watch --fast {farhelm_args}".into());
-            cx.notify();
-        });
+    edit_draft(cx, |draft| {
+        draft.edit_command("make watch --fast {farhelm_args}".into())
     });
-    settle(cx);
     assert_eq!(
         name_of(cx, "launcher-changed-command").as_deref(),
         Some("● Changed")
     );
     assert_eq!(name_of(cx, "launcher-changed-resume"), None);
     assert_eq!(name_of(cx, "launcher-changed-yolo"), None);
+    // The resume command and the YOLO answer are marked as they are edited, each on its own.
+    edit_draft(cx, |draft| {
+        draft.edit_command_resume("make watch --fast --resume {conversation} {farhelm_args}".into())
+    });
+    assert_eq!(
+        name_of(cx, "launcher-changed-resume").as_deref(),
+        Some("● Changed")
+    );
+    assert_eq!(name_of(cx, "launcher-changed-yolo"), None);
+    edit_draft(cx, |draft| draft.choose_command_yolo(true));
+    assert_eq!(
+        name_of(cx, "launcher-changed-yolo").as_deref(),
+        Some("● Changed")
+    );
+    let body = pressed(&mut helm, cx).body.expect("a body");
+    let sent = &body["with_command"];
+    assert_eq!(
+        (&sent["command"], &sent["resume"], &sent["yolo"]),
+        (
+            &json!("make watch --fast {farhelm_args}"),
+            &json!("make watch --fast --resume {conversation} {farhelm_args}"),
+            &json!(true)
+        ),
+        "the three edits are sent whole: {body}"
+    );
 }
 
 // ---- Stored command values shown escaped ---------------------------------------------------------------------------
@@ -436,6 +457,281 @@ fn restart_with_sends_the_stored_resume_beside_an_edited_command(cx: &mut TestAp
         "{body}"
     );
     assert_eq!(body["with_command"]["resume"], json!(RAW_RESUME), "{body}");
+}
+
+// ---- Stored agent launches, refusals and the YOLO question's answers ------------------------------------------------
+
+/// The helm lists `a` idle (so Restart with asks no consent) as an agent launch of `selection` with a stored resume
+/// command, keeping its recorded install, so Restart with edits that selection.
+fn a_stores(helm: &mut FakeHelm, cx: &mut VisualTestContext, selection: Value) {
+    let a = session("a")
+        .host(9)
+        .status(json!({"state": "idle"}))
+        .launch(json!({
+            "kind": "agent",
+            "selection": selection,
+            "start": ["agent", "{farhelm_args}"],
+            "resume": ["agent", "resume", "{conversation}", "{farhelm_args}"],
+        }));
+    let mut changes = change(listing_meta(&["a", "b", "c", "d"], 5, false), &[a], &[]);
+    changes.upsert[0].value["host_identity"] = json!("identity9");
+    helm.push(changes);
+    settle(cx);
+}
+
+/// Whether a fresh frame paints `shown`, a host value's escaped spelling, inside its own direction isolate within the
+/// element `id`, as every host value in a sentence is drawn (`host_text`), so its hidden characters cannot reorder the
+/// words around it. Scoped to the element because the same host words can be painted elsewhere in the window: a refused
+/// restart's words are also on the session's row and in its header.
+fn paints_isolated_in(cx: &mut VisualTestContext, id: &str, shown: &str) -> bool {
+    crate::session_list::host_rail::tests::texts_within(&test_support::frame(cx), id)
+        .iter()
+        .any(|text| crate::host_text::tests::paints_isolated(&text.text, shown))
+}
+
+/// The one restart `helm` received since the last look, with no host write beside it.
+fn one_restart_and_no_host_write(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Value {
+    cx.run_until_parked();
+    let commands = helm.commands();
+    assert!(
+        !commands
+            .iter()
+            .any(|command| command.path.ends_with("yolo-without-asking")),
+        "no answer here writes the host setting"
+    );
+    let restarts: Vec<_> = commands
+        .iter()
+        .filter(|command| command.path.ends_with("/restart"))
+        .collect();
+    let [restart] = &restarts[..] else {
+        panic!("one restart, not {}", restarts.len());
+    };
+    restart.body.clone().expect("a restart carries a body")
+}
+
+/// An older launch stored no permission, which for Codex is the agent's own setting, so choosing Guarded is an edit:
+/// marked with what it was, and sent (restart-with.spec's "restart with upgrades an older own-setting launch to
+/// guarded"). Specified: a stores Codex, gpt-6-astra, high, no permission; Guarded marks "● Changed · was agent's own
+/// setting", and the restart sends that model and effort with Guarded.
+#[gpui::test]
+fn guarded_over_an_older_own_setting_launch_is_an_edit(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    a_stores(
+        &mut helm,
+        cx,
+        json!({"harness": "codex", "model": "gpt-6-astra", "effort": "high", "permissions": null}),
+    );
+    assert!(restart_with(cx, "a"));
+    assert_eq!(
+        draft(cx).agent.permissions,
+        None,
+        "the premise: own setting"
+    );
+    test_support::click(cx, "launcher-permissions-Guarded");
+    assert_eq!(
+        name_of(cx, "launcher-changed-permissions").as_deref(),
+        Some("● Changed · was agent's own setting")
+    );
+    let body = pressed(&mut helm, cx).body.expect("a body");
+    assert_eq!(
+        (
+            &body["with"]["model"],
+            &body["with"]["effort"],
+            &body["with"]["permissions"]
+        ),
+        (&json!("gpt-6-astra"), &json!("high"), &json!("guarded"))
+    );
+}
+
+/// An omitted permission is compared by the mode it ran with, not as a mode of its own: an OMP launch stored with none
+/// ran YOLO, so YOLO chosen again after another mode is no edit (restart-with.spec's "restart with compares an older
+/// omitted permission by its effective mode"). Specified: a stores OMP with nothing chosen; it shows YOLO; Approve
+/// marks the permission; YOLO again takes the marker away, and a press sends nothing, refused as unchanged.
+#[gpui::test]
+fn an_omitted_permission_is_compared_by_the_mode_it_ran_with(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    a_stores(
+        &mut helm,
+        cx,
+        json!({"harness": "omp", "model": null, "effort": null, "permissions": null}),
+    );
+    assert!(restart_with(cx, "a"));
+    assert_eq!(
+        draft(cx).agent.permissions,
+        Some(LaunchPermission::Yolo),
+        "the premise: shown as the YOLO it ran with"
+    );
+    test_support::click(cx, "launcher-permissions-Approve");
+    assert!(name_of(cx, "launcher-changed-permissions").is_some());
+    test_support::click(cx, "launcher-permissions-YOLO");
+    assert_eq!(name_of(cx, "launcher-changed-permissions"), None);
+    restarts(&mut helm, cx);
+    test_support::click(cx, "launcher-launch");
+    assert!(
+        restarts(&mut helm, cx).is_empty(),
+        "an unchanged launch has nothing to restart with"
+    );
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Restart error. Change a setting before restarting"),
+        "refused as unchanged"
+    );
+}
+
+/// The old model in a changed marker is the host's text, so a hidden character in it is spelled out
+/// (restart-with.spec's "restart with escapes the old model in its changed marker"). Specified: a stores Codex with the
+/// model `gpt\u{202e}5x`; choosing the default model marks "● Changed · was gpt<U+202E>5x", the old model painted
+/// inside its own direction isolate.
+#[gpui::test]
+fn the_changed_marker_spells_out_the_old_models_hidden_characters(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    a_stores(
+        &mut helm,
+        cx,
+        json!({"harness": "codex", "model": "gpt\u{202e}5x", "effort": null, "permissions": "guarded"}),
+    );
+    assert!(restart_with(cx, "a"));
+    edit_draft(cx, LaunchDraft::choose_default_model);
+    assert_eq!(
+        name_of(cx, "launcher-changed-model").as_deref(),
+        Some("● Changed · was gpt<U+202E>5x")
+    );
+    assert!(
+        paints_isolated_in(cx, "launcher-changed-model", "gpt<U+202E>5x"),
+        "the old model is drawn in its own isolate"
+    );
+}
+
+/// The helm's refusal can quote a peer's hidden characters, which Restart with spells out beside its action, the
+/// launcher staying open with the edit (restart-with.spec's "Restart with escapes and isolates peer refusal text").
+/// Specified: a refusal "refused \u{202e}host\u{200b}" reads "Restart error. refused <U+202E>host<U+200B>", the helm's
+/// words painted inside their own direction isolate.
+#[gpui::test]
+fn a_restart_refusal_spells_out_hidden_characters(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    edit_effort(cx);
+    let restart = pressed(&mut helm, cx);
+    helm.reply(restart.id, 400, Some(json!("refused \u{202e}host\u{200b}")));
+    settle(cx);
+    assert!(any_open(cx), "the launcher came back");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Restart error. refused <U+202E>host<U+200B>")
+    );
+    assert!(
+        paints_isolated_in(cx, "launcher-refusal", "refused <U+202E>host<U+200B>"),
+        "the helm's words are drawn in their own isolate"
+    );
+}
+
+/// Restart with asks the YOLO question as New does, and its one-time answer sends the same restart again with consent
+/// (restart-with.spec's "a YOLO restart-with requires confirmation inside the dialog"). Specified: after a YOLO refusal
+/// of an edited Restart with of a, "Start YOLO session anyway" sends one restart with the same `with` and stop consent,
+/// and `confirm_yolo` set.
+#[gpui::test]
+fn the_one_time_yolo_answer_resends_the_restart(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    edit_effort(cx);
+    let first = pressed(&mut helm, cx);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    test_support::click(cx, "prompt-confirm");
+    let retry = one_restart_and_no_host_write(&mut helm, cx);
+    let first = first.body.expect("a body");
+    assert_eq!(retry["confirm_yolo"], json!(true));
+    assert_eq!(retry["with"], first["with"]);
+    assert_eq!(retry["stop_if_running"], first["stop_if_running"]);
+}
+
+/// With YOLO shown, the question's guarded answer restarts with the edit made guarded, without consent or a host write
+/// (restart-with.spec's "restart with can answer the YOLO question by restarting guarded"). Specified: Medium effort
+/// chosen on a, whose stored launch is YOLO, refused for YOLO: "Start guarded session instead" sends one restart with
+/// Medium and Guarded and no `confirm_yolo`.
+#[gpui::test]
+fn the_guarded_answer_restarts_guarded(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    edit_effort(cx);
+    let first = pressed(&mut helm, cx);
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert_eq!(
+        name_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Start guarded session instead")
+    );
+    test_support::click(cx, "prompt-alternative-0");
+    let retry = one_restart_and_no_host_write(&mut helm, cx);
+    assert_eq!(retry["confirm_yolo"], json!(false));
+    assert_eq!(
+        (&retry["with"]["effort"], &retry["with"]["permissions"]),
+        (&json!("medium"), &json!("guarded"))
+    );
+}
+
+/// A command restart asserted YOLO gets the question worded for an assertion, and its one-time answer resends the
+/// edited command launch whole (restart-with.spec's "a YOLO command restart-with asks inside the dialog, worded for an
+/// assertion"). Specified: e's YOLO answer changed to yes, refused for YOLO: the question says the command was asserted
+/// to bypass its safety checks, and "Start YOLO session anyway" sends one restart with the same `with_command` and
+/// `confirm_yolo`.
+#[gpui::test]
+fn a_command_restarts_yolo_question_speaks_of_the_assertion(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    e_stores_invisible_characters(&mut helm, cx);
+    assert!(restart_with(cx, "e"));
+    test_support::click(cx, "launcher-yolo-Yes (YOLO)");
+    let first = pressed(&mut helm, cx);
+    assert_eq!(
+        first.body.as_ref().expect("a body")["with_command"]["yolo"],
+        json!(true),
+        "the premise: the restart asserted YOLO"
+    );
+    refuse_for_yolo(&mut helm, cx, first.id);
+    assert_eq!(
+        name_of(cx, "yolo-reason").as_deref(),
+        Some("This command was asserted to bypass its safety checks.")
+    );
+    test_support::click(cx, "prompt-confirm");
+    let retry = one_restart_and_no_host_write(&mut helm, cx);
+    assert_eq!(retry["confirm_yolo"], json!(true));
+    assert_eq!(
+        retry["with_command"],
+        first.body.expect("a body")["with_command"]
+    );
+}
+
+// ---- The catalog -------------------------------------------------------------------------------------------------
+
+/// The catalog's Retry reads the catalog again without seeding the draft again, so an edit made while the read had
+/// failed is kept and sent (restart-with.spec's "restart with retries the catalog without reseeding its draft").
+/// Specified: the first read fails and says so; Guarded is chosen; Retry's read answers with a's model; the failure
+/// line goes, Guarded stays, and the restart sends it with the stored model and effort.
+#[gpui::test]
+fn the_catalog_retry_keeps_an_edit(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    assert!(restart_with(cx, "a"));
+    super::view_tests::answer_catalog(&mut helm, cx, None);
+    assert!(
+        name_of(cx, "launcher-catalog-error").is_some(),
+        "the premise: the read failed"
+    );
+    test_support::click(cx, "launcher-permissions-Guarded");
+    test_support::click(cx, "launcher-catalog-retry");
+    super::view_tests::answer_catalog(
+        &mut helm,
+        cx,
+        Some(json!([{ "id": "gpt-5", "harness": "codex", "efforts": ["high", "low"] }])),
+    );
+    assert_eq!(name_of(cx, "launcher-catalog-error"), None);
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
+    let body = pressed(&mut helm, cx).body.expect("a body");
+    assert_eq!(
+        (
+            &body["with"]["model"],
+            &body["with"]["effort"],
+            &body["with"]["permissions"]
+        ),
+        (&json!("gpt-5"), &json!("high"), &json!("guarded"))
+    );
 }
 
 // ---- Held keys ---------------------------------------------------------------------------------------------------

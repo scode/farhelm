@@ -396,8 +396,8 @@ fn push_host(
     settle(cx);
 }
 
-/// Edit the open launcher's draft directly, and let it draw.
-fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
+/// Edit the open launcher's draft directly, and let it draw. Shared with the Restart with tests.
+pub(super) fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
     cx.update(|_, cx| {
         let launcher =
             layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");
