@@ -47,9 +47,12 @@ template's trust ignored and a retired container refused
 `a_retired_container_template_is_refused_and_changes_nothing`); a recent setup keeping the typed prompt
 (`launcher::draft_tests::a_recent_setup_keeps_the_typed_prompt`; a prompt cannot leak into the next Clone or Replace
 with, since each opening builds a new draft from a session, which holds none); Launch held during Save as template's
-save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_the_save_is_out_and_keeps_its_focus`).
+save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_the_save_is_out_and_keeps_its_focus`);
+"initial prompt launcher template stacking and save selection"'s invisible-character half, a prompt holding U+202E and a
+line break shown escaped and read-only until cleared
+(`launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped`), beside its stacking half above.
 Needs a person with a real input method: Save as template's composing Enter and Escape in its name field, which no test
-harness can drive
+harness can drive.
 
 ### `tests/quick-launch.spec.ts`
 
@@ -308,6 +311,25 @@ count as moving on, so the refusal leaves the "launch not started" notice instea
 through its Open launcher. The `[inert]` check has no counterpart: the pill is a layer that takes neither focus nor the
 pointer, and there is no inert page
 
+### `tests/tensorlake-sandbox-sessions.spec.ts`
+
+Its file: launcher.
+
+Template cases: "template placement keeps Host editable after leaving an environment" and "a recipe template quick
+launch asks before one recipe request". The spec's other cases are the launcher's.
+
+partly: "template placement keeps Host editable after leaving an environment" is ported whole (a legacy recipe template
+opening on New sandbox, Existing host leaving an empty Host to choose, the chosen segment changing nothing, the save
+storing the host alone, and a Host added to another template starting empty), with the editor's other placement rules
+beside it. The quick launch's question waits for the launcher's New sandbox ("A sandbox template's quick launch is
+refused until New sandbox is ported", below).
+
+- `templates::editor_tests::leaving_an_environment_keeps_the_host_editable`
+- `templates::editor_tests::entering_an_environment_chooses_its_first_recipe_and_place` (the old authoring mode's
+  starting recipe and place, an unusable host and an unbuilt recipe choosable, the target saved without a host)
+- `templates::editor_tests::retained_choices_and_an_unusable_only_host_stay_in_reach` (a recipe and host no longer
+  listed kept as retained, and New container offered when its only host is unusable)
+
 ## Deviations
 
 Differences from the old app at the reference commit, each with its reason, and each also reported to the migration's
@@ -381,11 +403,19 @@ orchestrator.
 - **Host names in the Host select.** The select's options are the app's own words, so a host's name is shown as its
   escaped presentation (hidden characters as `<U+…>`) but is not direction-isolated from the words around it, as host
   text elsewhere is; the select has no host-text option labels yet.
-- **A stored environment placement.** The old Host field offered environments beside hosts. Environment placements come
-  with the launcher's environments work, so the Host select offers hosts only; a template that stores a recipe and place
-  shows "Choose a host" with the line "This template places sessions in an environment, which this editor cannot show
-  yet. It stays as stored unless you choose a host or remove this field.", and the placement is saved unchanged until a
-  host is chosen or the field removed.
+- **No build note under Container host.** The old editor drew the launcher's status line under a container template's
+  Container host too: the place's reason, or "Preparing…", "Ready on <host>", "Builds on first launch here (a few
+  minutes)" or "Checking build status…" for the recipe there. The GPUI editor draws none: the launcher's note is drawn
+  by the launcher's own view, and sharing it would mean changing that view's code for the editor. The Container host
+  select still names each host's reason after its name, as the old one did, and the launcher draws the note once the
+  template is applied there. The editor also starts no Podman check: the old editor's read of the places asked the helm
+  to check every host never checked, while the GPUI editor shows each host's last pushed reason ("this host needs a
+  Podman check" until the launcher or Settings asks for one).
+- **The Runs on switch's two small differences.** A chosen segment that has nowhere to enter (New container on a
+  container template while no listed host can hold containers) is drawn enabled and does nothing when pressed, where the
+  old one was drawn disabled. A new environment entered with no recipe the provider can run shows "Choose a recipe" in
+  its Recipe select, where the old select showed "Unavailable recipe (retained)" for the empty name. Tested by
+  `templates::editor_tests::retained_choices_and_an_unusable_only_host_stay_in_reach` (the empty recipe).
 - **A rename's bindings are read from the pushed preferences.** The old rename read the preferences again after saving
   the new name and said "shortcut bindings could not be read" when that read failed. Here the store is that read, so the
   message is said while the helm reports its preferences unavailable, or before they have arrived. Tested by

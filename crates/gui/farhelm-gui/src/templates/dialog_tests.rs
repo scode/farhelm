@@ -182,11 +182,24 @@ pub(super) fn open_header<'a>(
     templates: &[LaunchTemplate],
     marked: Option<&str>,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
+    open_header_with(cx, templates, marked, Vec::new())
+}
+
+/// [`open_header`], with `more` collections in the helm's first snapshot (hosts, recipes): the store ignores a push to
+/// a collection that snapshot did not install.
+pub(super) fn open_header_with<'a>(
+    cx: &'a mut TestAppContext,
+    templates: &[LaunchTemplate],
+    marked: Option<&str>,
+    more: Vec<CollectionState>,
+) -> (FakeHelm, &'a mut VisualTestContext) {
     let (mut helm, _connection) = started(cx);
-    helm.connect(vec![
+    let mut snapshot = vec![
         templates_state(templates, Availability::Available),
         preferences_state(marked),
-    ]);
+    ];
+    snapshot.extend(more);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let (_, window) = test_support::open_view(cx, Header::new);
     // Tall enough that the editor's whole pane, its status line under the panes included, fits the dialog's height
