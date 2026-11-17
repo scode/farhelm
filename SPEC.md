@@ -91,6 +91,10 @@ on 2026-11-16, that it should go.
 NOTE: The Linux desktop app is new, and how it is packaged is not specified yet: for now it has no installer and no
 updates and is run from a build (see [Installation and updates](#installation-and-updates)).
 
+A second launch of the Linux app that reaches the app open on the same state directory brings its window forward and
+exits without starting anything; one that cannot reach it (the open app still starting, already quitting, or not
+listening) refuses at the app lock as before.
+
 The desktop app has the same capabilities on both platforms: terminal, attachments, lifecycle operations, host
 registration, and launch-template management in the helm-owned catalog.
 
@@ -5282,6 +5286,10 @@ is zsh, and inside containers that run wrapped agents.
 
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.
+
+The Linux desktop app needs a Wayland session: launched without one, an X11-only session included, it prints a line to
+stderr saying so and exits 1 before starting anything, unless the app is already open, which such a launch brings
+forward like any second launch.
 
 A tmux the user runs in a session is one of their own programs, like any other they run there; Farhelm neither requires
 nor looks for one on any machine.

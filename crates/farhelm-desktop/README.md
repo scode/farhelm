@@ -14,8 +14,9 @@ at startup and hands it over through its readiness channel; nothing is written t
 
 The local supervisor is not in this process. On startup the app probes for one that is already answering and reuses it
 untouched; only if none answers does it start `farhelm supervisor run` from its own version of the CLI (its sibling, or
-in the installed app `Contents/Versions/<version>/farhelm`), as a separate child whose lifetime it then owns. A
-supervisor it found rather than started is somebody else's, and the app neither tethers to nor stops it.
+in the installed app `Contents/Versions/<version>/farhelm`), as a detached process in a session of its own, which keeps
+running after the app quits so the next launch can reuse it. A supervisor it found rather than started is somebody
+else's, and the app neither tethers to nor stops it.
 
 ## Building and running
 
