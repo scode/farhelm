@@ -332,6 +332,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **Rank contiguous Cmd+K matches above scattered ones.** The quick switcher has no relevance ranking within its groups:
+  a title where the query's characters are scattered across words is listed above a title holding the query as a
+  contiguous substring whenever its session was more recently active. Agreed rules, Cmd+K session matching only (the
+  `tl:` and Cmd+J template searches are already plain substring matches and stay as they are):
+  - Keep the groups: every title match before every match only in the host name or directory.
+  - Within each group, three tiers: the query at a word start (the start of the value, or right after a character that
+    is not a letter or digit; no camelCase boundaries), then the query as a substring anywhere, then a scattered
+    subsequence. A row goes in its best tier; in the second group, the better of host name and directory decides.
+  - Most recent activity breaks ties within a tier, as it orders the groups today.
+  - The marked (highlighted) characters are the occurrence that earned the row's tier: the first word-start occurrence,
+    otherwise the first substring occurrence, otherwise the leftmost scattered alignment used today.
+
+  This changes behavior SPEC.md specifies (the Cmd+K paragraph), so the spec changes with it.
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
