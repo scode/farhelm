@@ -42,7 +42,45 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tests first, which would save perhaps 100 to 150 lines, still be over 1,000, and likely shorten the explanation of why
   a stale suspended state right after a Resume is not a new suspension.
 
+## GPUI last mile
+
+What the GPUI migration left when its area sessions ended on 2026-11-17, planned for the planning system.
+
+- **Launcher and session-pane fixes and the launcher's remaining parity tests.** A launch onto a suspended sandbox or
+  container is refused with the generic "Choose a connected host before launching"; it should name the host and say to
+  resume it (the full resume before create is the Near term entry below). The suspended session card says "Asked the
+  environment ..." where Hosts names the provider. A Clone's copied folder and session name holding a hidden character
+  are not spelled out as the old app did. About forty old launcher test cases are still listed as not yet ported in
+  `docs/gpui/parity/launcher.md`. Plan: `plans/queue/gpui-last-mile-fixes.md`.
+
+- **One shared placement picker.** The template editor's environment choice is a near-copy of the launcher's Runs on
+  controls (about 130 lines), differing only in authoring rules; the old app had one picker. Share it, with no visible
+  change. Plan: `plans/queue/gpui-shared-placement.md`.
+
+- **Docs screenshots on the test Mac.** The docs screenshot runner works locally only; give it the README hero's Mac
+  path and prove both captures fit on the test Mac's 4K display. Mechanism only: shots back in pages are a normal docs
+  refresh. Plan: `plans/queue/gpui-docs-shots-mac.md`.
+
+- **Docs for environment recent setups and the suspended-host launch refusal.** Both landed or change after the docs
+  rewrite. Plan: `plans/queue/gpui-docs-followups.md`.
+
 ## Near term
+
+- **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
+  resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
+  (interim, decided 2026-11-17). Tensorlake suspends an idle sandbox after 30 minutes, including once the app quits, so
+  this is the usual first launch after a break. Scoped at the migration's end at about 660 production and 1,340 test
+  lines: the launcher's wake over pushed host state (Resume, wait for a fresh connection within the same minute, retry
+  while another operation holds the host, fail on a new suspension), the preparation pill, the fresh-checkout folder
+  allocation once the host is ready, quick launch, and "this launch is waking that host" refusing Hosts' Suspend, Resume
+  and Settings and a session's own Suspend and Resume. The old app's 13 launch-after-wake cases (tensorlake-lifecycle)
+  are the spec. Design the wake with an opus consult.
+
+- **A link click should be refused when another Farhelm surface covers its panel.** SPEC asks this; nothing checks it in
+  the GPUI app. It needs a hit test in the layer manager, which today cannot see popovers that pass the pointer through
+  (`layers::Popover::passes_pointer`; see `terminal/disclosure.rs`, `fully_visible`). Parity rows in
+  `docs/gpui/parity/terminal.md`: terminal-files' covered-hover cases, terminal-links' covered-display refusal,
+  grid-attach 1099 and 1464.
 
 - **An exited session without a terminal keeps "reconnecting" forever.** When a session's terminal host has died (for
   example after a container was stopped and started from outside Farhelm), the session correctly reads "Exited", but its
