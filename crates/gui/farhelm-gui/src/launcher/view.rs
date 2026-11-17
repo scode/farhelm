@@ -30,8 +30,10 @@
 //!   operation and its target, as the old one did.
 //! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), including a quick
 //!   launch's prepared out of sight ([`prepare_unseen`]), and again on Retry after a failed read. A template batch that
-//!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
-//!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
+//!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). The Tensorlake account is read once beside
+//!   it (`GET /api/tensorlake`, `placement`), for New sandbox's segment and prerequisites, and a quick launch waits for
+//!   both reads before it applies its templates. Hosts, sessions and the remembered permission are read from the store
+//!   while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the rest of managed checkouts (`checkout` says which); and
 //! keyboard scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one
@@ -67,7 +69,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
-use super::request::{Recipes, SELECT_REPOSITORY, Target, capitalized};
+use super::request::{Account, Recipes, SELECT_REPOSITORY, Target, capitalized};
 use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
@@ -178,6 +180,7 @@ pub(in crate::launcher) fn open_noted(
     let layer = show(&launcher, mark, window, cx)?;
     read_catalog(launcher.downgrade(), cx);
     placement::check_container_hosts(cx);
+    placement::read_account(launcher.downgrade(), cx);
     #[cfg(test)]
     layers::record_opened(&launcher, cx);
     Some(layer)
@@ -294,10 +297,11 @@ pub enum Prepared {
 }
 
 /// Prepare a quick launch out of sight, from the handler of the shortcut's press: make the launcher on `draft` (New's
-/// prefill), hold it in the launch slot while it reads its model catalog, then let `finish` apply the templates to its
-/// draft against that catalog and say what happens next ([`Prepared`]); a launch then still waits out of sight for New's
-/// folder default or a managed checkout's preview when it needs one ([`Launcher::start_or_wait_for_folder`]). SPEC.md, "Quick launch": a shortcut "starts it
-/// directly ... without showing the launcher on success", through "exactly New's defaults and ordinary launch path".
+/// prefill), hold it in the launch slot while it reads its model catalog and the Tensorlake account, then let `finish`
+/// apply the templates to its draft against that catalog and say what happens next ([`Prepared`]); a launch then still
+/// waits out of sight for New's folder default or a managed checkout's preview when it needs one
+/// ([`Launcher::start_or_wait_for_folder`]). SPEC.md, "Quick launch": a shortcut "starts it directly ... without showing
+/// the launcher on success", through "exactly New's defaults and ordinary launch path".
 ///
 /// The catalog read is the launcher's own, and the template rules need it (a model-only template picks the one agent
 /// type that offers its model; a model the chosen agent type does not offer is refused). While it runs, the slot holds
@@ -306,8 +310,12 @@ pub enum Prepared {
 /// `mark` is the press: the launch's completion counts from it ("Quick launches use their dispatch as that answer"),
 /// and a launcher shown after the user moved on waits behind a notice instead. A read that fails leaves the catalog
 /// unread, as it does for a launcher opened by hand, and preparation goes on; a read that cannot be sent at all empties
-/// the slot again, so New is not held up. The second half waits on the launcher itself ([`Launcher::after_catalog`]),
+/// the slot again, so New is not held up. The second half waits on the launcher itself ([`Launcher::after_reads`]),
 /// so the slot is the launcher's only owner and a reset drops the read and the launcher with it.
+///
+/// It also waits for the Tensorlake account read ([`after_reads`]): a sandbox draft decided before it answers would show
+/// New with "Loading Tensorlake settings…" instead of launching. Every quick launch waits, since whether the draft ends
+/// in a sandbox is only known once its templates apply; the read is the helm's own state, answered without a host.
 ///
 /// It asks every container host for a Podman check as an opened launcher does ([`open_noted`]), because a quick launch
 /// may be the first thing after a helm restart to want one, and the helm has no result for a host until something
@@ -334,7 +342,7 @@ pub fn prepare_unseen(
     let launcher = cx.new(|cx| {
         let mut launcher = Launcher::new(draft, &store, window, cx);
         launcher.quick_launch_unseen = true;
-        launcher.after_catalog = Some(Box::new(move |launcher: Entity<Launcher>, cx: &mut App| {
+        launcher.after_reads = Some(Box::new(move |launcher: Entity<Launcher>, cx: &mut App| {
             prepared(launcher, mark, finish, handle, cx)
         }));
         launcher
@@ -344,6 +352,7 @@ pub fn prepare_unseen(
         launch::abandon_prepared(&launcher, cx);
     }
     placement::check_container_hosts(cx);
+    placement::read_account(launcher.downgrade(), cx);
     true
 }
 
@@ -410,7 +419,8 @@ impl Launcher {
     }
 }
 
-/// [`prepare_unseen`]'s second half, once the catalog read answered: apply, then start or show.
+/// [`prepare_unseen`]'s second half, once its catalog and Tensorlake account reads have answered: apply, then start or
+/// show.
 fn prepared(
     launcher: Entity<Launcher>,
     mark: Mark,
@@ -456,9 +466,9 @@ fn prepared(
 /// "Model catalog unavailable", so a failed read never makes the user reopen the launcher and lose its draft).
 ///
 /// Once it answers, either way, the template batches that waited for it are applied in the order they arrived, and
-/// then the launcher's [`Launcher::after_catalog`] runs (a quick launch's preparation). The callback holds the
-/// launcher weakly, as `operations::send` asks. Returns whether the read was sent; it is not without a UI session, or
-/// if the constant path ever failed to build.
+/// then the launcher's [`Launcher::after_reads`] runs (a quick launch's preparation), if the account has answered too
+/// ([`after_reads`]). The callback holds the launcher weakly, as `operations::send` asks. Returns whether the read was
+/// sent; it is not without a UI session, or if the constant path ever failed to build.
 fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
     let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
         return false;
@@ -487,19 +497,33 @@ fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
                         launcher.update(cx, |launcher, cx| launcher.apply_now(batch, window, cx));
                 });
             }
-            let Some(launcher) = launcher.upgrade() else {
-                return;
-            };
-            let after = launcher.update(cx, |launcher, _| launcher.after_catalog.take());
-            if let Some(after) = after {
-                after(launcher, cx);
+            if let Some(launcher) = launcher.upgrade() {
+                after_reads(launcher, cx);
             }
         },
     )
 }
 
-/// What a launcher prepared out of sight does once its catalog read has answered ([`Launcher::after_catalog`]).
-type AfterCatalog = Box<dyn FnOnce(Entity<Launcher>, &mut App)>;
+/// Run `launcher`'s [`Launcher::after_reads`] (a quick launch's second half) once both its reads have answered, the
+/// model catalog and the Tensorlake account, each either way. Called as each one answers, so whichever comes last runs
+/// it, once: it is taken as it runs.
+pub(super) fn after_reads(launcher: Entity<Launcher>, cx: &mut App) {
+    let after = launcher.update(cx, |launcher, _| {
+        let answered = (launcher.catalog.is_some() || launcher.catalog_error.is_some())
+            && !matches!(launcher.account, Account::Reading);
+        if answered {
+            launcher.after_reads.take()
+        } else {
+            None
+        }
+    });
+    if let Some(after) = after {
+        after(launcher, cx);
+    }
+}
+
+/// What a launcher prepared out of sight does once its reads have answered ([`Launcher::after_reads`]).
+type AfterReads = Box<dyn FnOnce(Entity<Launcher>, &mut App)>;
 
 /// One template batch for [`Launcher::apply_batch`]: the edits it makes to the draft against the catalog, reading the
 /// store through the `App` it is given, and what it leaves the launcher saying (the notice under the agent choices and
@@ -531,6 +555,8 @@ pub(crate) struct Launcher {
     catalog: Option<Vec<LaunchCatalogModel>>,
     /// Why the last catalog read failed, until a retry starts.
     catalog_error: Option<HostText>,
+    /// The Tensorlake account as read when the launcher opened (`placement::read_account`), the launcher's one copy.
+    account: Account,
     /// What the last agent-choice edit cleared or refused, said under the agent choices until the next one.
     notice: Option<String>,
     /// Whether the main action was pressed since the draft last changed, which shows its reason beside it.
@@ -608,10 +634,9 @@ pub(crate) struct Launcher {
     /// reset drops the launcher with it. A press of Launch that sends its create drops what is still waiting, since those
     /// batches spoke of the draft just launched and must not edit it while its create is out.
     waiting_batches: Vec<(AnyWindowHandle, Batch)>,
-    /// A quick launch's second half, set by [`prepare_unseen`] and taken and run by its catalog read's callback once
-    /// the batches have gone (`prepared`): kept here rather than in the callback so the launch slot stays the hidden
-    /// launcher's only owner.
-    pub(super) after_catalog: Option<AfterCatalog>,
+    /// A quick launch's second half, set by [`prepare_unseen`] and run once both reads have answered ([`after_reads`],
+    /// `prepared`): kept here rather than in a callback so the launch slot stays the hidden launcher's only owner.
+    pub(super) after_reads: Option<AfterReads>,
     /// The Save as template panel, while it is open (`crate::templates::save_panel`): drawn at the end of the body,
     /// and holding the launcher's Launch, and while it saves, its Cancel, Close and Escape too.
     save_panel: Option<Entity<SavePanel>>,
@@ -856,7 +881,8 @@ impl Launcher {
             note: None,
             banner_expiry: None,
             waiting_batches: Vec::new(),
-            after_catalog: None,
+            after_reads: None,
+            account: Account::Reading,
             save_panel: None,
             save_refusal: None,
             _fields: fields,
@@ -1131,6 +1157,7 @@ impl Launcher {
             catalog: self.catalog.as_deref(),
             preview: self.checkout_preview(cx),
             recipes: &recipes,
+            account: &self.account,
         };
         // A `gh:` query not yet answered by a pick (`checkout`), after the place's own reasons.
         if self.search_holds_repository_query(cx) {
@@ -1224,6 +1251,7 @@ impl Launcher {
             catalog: self.catalog.as_deref(),
             preview: self.checkout_preview(cx),
             recipes: &recipes,
+            account: &self.account,
         };
         if self.refusal(cx).is_some() {
             None
@@ -2290,6 +2318,7 @@ impl Render for Launcher {
             .children(checkout_rows)
             .child(row("launcher-folder-row", "Folder", folder, palette))
             .children(environment_note)
+            .children(self.registration_note(palette))
             .children(self.folder_problem_line(palette, cx))
             .children(name);
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());

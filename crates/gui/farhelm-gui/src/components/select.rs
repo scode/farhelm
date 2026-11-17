@@ -39,7 +39,9 @@
 //! keys pass over it. A select whose stored value is no longer among its options can keep showing it, chosen, until the
 //! user picks another ([`Select::retained`]), as the old environment selects did with "Unavailable recipe (retained)".
 //! And a select with nothing chosen shows a placeholder in the closed control ([`Select::placeholder`]), as the old
-//! "Choose a host" and "Choose a recipe" options did.
+//! "Choose a host" and "Choose a recipe" options did. An option can carry a mark drawn before its label, in the list and
+//! in the closed control while it is chosen ([`SelectOption::mark`]), for SPEC.md's New sandbox recipes "with a cube
+//! mark"; a native `<option>` could hold no image, so the old selects had none.
 //!
 //! NOTE: Deviations from the old native control, all decided or accepted as part of the GPUI migration. The pop-up was
 //! the platform's own menu, which on macOS opened over the control with the chosen option on top of it and was at
@@ -83,6 +85,8 @@ pub struct SelectOption {
     help: HoverHelp,
     /// Why it cannot be chosen, if it cannot.
     unavailable: Option<SharedString>,
+    /// The mark drawn before its label, if any ([`SelectOption::mark`]).
+    mark: Option<Icon>,
 }
 
 impl SelectOption {
@@ -98,7 +102,15 @@ impl SelectOption {
             label: label.into(),
             help,
             unavailable: None,
+            mark: None,
         }
+    }
+
+    /// Draw `mark` before the option's label: in the open list, after the slot the chosen option's tick takes, and in
+    /// the closed control while this option is chosen. Decoration only: the label stays the option's whole name.
+    pub fn mark(mut self, mark: Icon) -> Self {
+        self.mark = Some(mark);
+        self
     }
 
     /// An option that cannot be chosen now, for `reason` ("Needs setup"): drawn dimmed with the reason after its label,
@@ -345,10 +357,12 @@ impl RenderOnce for Select {
             }
         }
 
-        let shown = self
+        let chosen_entry = self
             .chosen
             .as_ref()
-            .and_then(|chosen| choices.entry(chosen))
+            .and_then(|chosen| choices.entry(chosen));
+        let shown_mark = chosen_entry.and_then(|entry| entry.mark);
+        let shown = chosen_entry
             .map(SelectOption::shown)
             .or_else(|| self.placeholder.clone())
             .unwrap_or_default();
@@ -376,6 +390,17 @@ impl RenderOnce for Select {
             .rounded(metrics::RADIUS_SM)
             .text_size(metrics::TEXT_MD)
             .text_color(theme::color(palette.fg_0))
+            .when_some(shown_mark, |control, mark| {
+                let id = format!("{}-mark", self.id);
+                control.child(
+                    svg()
+                        .path(mark.path())
+                        .size(px(14.))
+                        .flex_none()
+                        .debug_selector(move || id)
+                        .text_color(theme::color(palette.fg_1)),
+                )
+            })
             .child(div().flex_1().min_w_0().truncate().child(shown))
             .child(
                 svg()
@@ -596,6 +621,7 @@ impl Render for SelectList {
                     is_chosen,
                 )
                 .disabled(entry.unavailable.is_some())
+                .when_some(entry.mark, |item, mark| item.mark(mark))
                 .when_some(entry.unavailable, |item, reason| item.suffix(reason))
                 .focus(&handle)
                 .on_click(move |_, window, cx| choose(&list, &value, window, cx))

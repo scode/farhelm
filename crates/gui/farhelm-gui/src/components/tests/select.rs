@@ -431,6 +431,69 @@ fn a_select_keeps_showing_a_retained_value_until_another_is_chosen(cx: &mut Test
     assert_eq!(*picker.heard.borrow(), ["low"]);
 }
 
+/// A window drawing a 320-pixel select, `recipe`, of two options, `cube` (marked with the sandbox mark) and `bare`
+/// (unmarked), its owner keeping whichever was chosen last, `cube` first.
+fn open_marked(cx: &mut TestAppContext) -> &mut VisualTestContext {
+    let chosen = Rc::new(RefCell::new(SharedString::from("cube")));
+    open(cx, move |_, _| {
+        let help = |words: &'static str| HoverHelp::tooltip(words);
+        let choose = chosen.clone();
+        div()
+            .w(px(320.))
+            .child(
+                Select::new(
+                    "recipe",
+                    "Recipe",
+                    help("Recipe: what to start from"),
+                    Role::ComboBox,
+                )
+                .options([
+                    SelectOption::new("cube", "Cube", help("A marked option"))
+                        .mark(crate::assets::Icon::EnvironmentSandbox),
+                    SelectOption::new("bare", "Bare", help("An unmarked option")),
+                ])
+                .chosen(chosen.borrow().clone())
+                .on_choose(move |value, _, _| {
+                    choose.replace(value.clone());
+                }),
+            )
+            .into_any_element()
+    })
+}
+
+/// Why this matters: SPEC.md's New sandbox "lists recipes with a cube mark", and the closed control shows the chosen
+/// option, so a mark drawn only in the list would vanish once chosen, while one that stayed after choosing an unmarked
+/// option would mislabel it; an unmarked option must stay unmarked, or every option would look like a sandbox's.
+///
+/// Specified: with `cube` chosen, the closed control draws its mark and keeps its label as its value; the open list draws
+/// the mark on `cube` and none on `bare`; once `bare` is chosen, the closed control draws no mark.
+#[gpui::test]
+fn a_marked_option_draws_its_mark_in_the_list_and_while_chosen(cx: &mut TestAppContext) {
+    let cx = open_marked(cx);
+    assert!(
+        cx.debug_bounds("recipe-mark").is_some(),
+        "the closed control's mark"
+    );
+    let value = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("recipe"))
+        .and_then(|node| node.value);
+    assert_eq!(
+        value.as_deref(),
+        Some("Cube"),
+        "the mark is no part of the value"
+    );
+    click(cx, "recipe");
+    assert!(cx.debug_bounds("recipe-option-cube-mark").is_some());
+    assert!(cx.debug_bounds("recipe-option-bare-mark").is_none());
+    click(cx, "recipe-option-bare");
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("recipe-mark").is_none(),
+        "the mark follows the choice"
+    );
+}
+
 /// Why this matters: a select with nothing chosen must say so rather than look chosen, as the old "Choose a host" did;
 /// a list that marked or started on some option would suggest a value the owner does not hold.
 ///

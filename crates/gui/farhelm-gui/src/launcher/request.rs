@@ -20,13 +20,14 @@
 //! (SPEC.md, "Creation").
 //!
 //! A launch into a new environment (New container, New sandbox) has no host yet: in place of the host's reasons it is
-//! checked against the pushed recipe catalog and the container host's pushed Podman check, in the old launcher's words
-//! and, among themselves, its order (`sandbox_reason` in `create_form.rs`). Together they take the host's place, first,
-//! where the old launcher checked them after the agent tab's reasons: a deliberate departure, so a draft that cannot
-//! name its environment says so before anything else. A managed checkout there needs only a chosen repository and no
-//! named conversation: the environment has no installation to verify and no folder to preview yet, and the helm takes
-//! the repository and naming intent until the new Farhelm connects (SPEC.md, "Managed checkouts": "A recipe-target
-//! environment launch is another exception"). It sends its own body to its own route
+//! checked against the pushed recipe catalog, the Tensorlake account the launcher read (a sandbox's API key and SSH
+//! key) and the container host's pushed Podman check, in the old launcher's words and, among themselves, its order
+//! (`sandbox_reason` in `create_form.rs` and `recipe_refusal` in `sandbox_sessions.rs`). Together they take the host's
+//! place, first, where the old launcher checked them after the agent tab's reasons: a deliberate departure, so a draft
+//! that cannot name its environment says so before anything else. A managed checkout there needs only a chosen
+//! repository and no named conversation: the environment has no installation to verify and no folder to preview yet,
+//! and the helm takes the repository and naming intent until the new Farhelm connects (SPEC.md, "Managed checkouts": "A
+//! recipe-target environment launch is another exception"). It sends its own body to its own route
 //! ([`LaunchDraft::environment_body`]), never the ordinary create, which an older helm would run on its own machine.
 //!
 //! A managed checkout launches only with a current preview of its folder in hand (SPEC.md, "Managed checkouts":
@@ -41,6 +42,7 @@ use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::session_requests::{
     CreateSessionBody, EnvironmentCreateBody, ReplaceSessionBody, RestartSessionBody,
 };
+use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use farhelm_proto::{
     AcceptedGithubPreview, CommandLaunch, DeleteGuard, GithubCheckoutRequest, LaunchPermission,
@@ -55,8 +57,8 @@ use super::draft::{
 use crate::environment_ui::ProviderUi;
 use crate::hosts::offers::HostKind;
 
-/// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog as the
-/// launcher read it, and a managed checkout's preview.
+/// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog and the
+/// Tensorlake account as the launcher read them, and a managed checkout's preview.
 #[derive(Clone, Copy, Debug)]
 pub struct Target<'a> {
     pub hosts: &'a [HostView],
@@ -67,7 +69,39 @@ pub struct Target<'a> {
     /// The recipe catalog as the store holds it, which a new environment's recipe is checked against. Ignored on an
     /// existing host, for which the view copies none ([`Recipes::for_draft`]).
     pub recipes: &'a Recipes,
+    /// The Tensorlake account as the launcher read it, which a new sandbox's prerequisites are checked against. Only a
+    /// provider whose account it is looks at it ([`ProviderUi::recipe_refusal`]).
+    pub account: &'a Account,
 }
+
+/// The Tensorlake account as the launcher read it (`GET /api/tensorlake`, once as it opens): whether an API key is
+/// saved, Farhelm's SSH key, and whether creating a sandbox skips its question. Not a pushed collection, so it is read
+/// rather than followed, as Settings → Tensorlake and Add host read it once per opening; the launcher holds the one
+/// copy, and every check and row reads it there.
+#[derive(Clone, Debug)]
+pub enum Account {
+    /// The read is out.
+    Reading,
+    /// The read failed or could not be sent, in words already escaped for showing (the helm's are host text).
+    Unreadable(String),
+    /// The account as the helm answered.
+    Read(Settings),
+}
+
+impl Account {
+    /// The account, or the words for why there is none yet: [`LOADING_ACCOUNT`] while the read is out, else the read's
+    /// own failure. What [`ProviderUi`]'s account answers take.
+    pub fn settings(&self) -> Result<&Settings, &str> {
+        match self {
+            Account::Reading => Err(LOADING_ACCOUNT),
+            Account::Unreadable(reason) => Err(reason.as_str()),
+            Account::Read(settings) => Ok(settings),
+        }
+    }
+}
+
+/// Why a new sandbox cannot launch while the account read is out, in Add host's words for the same wait.
+pub const LOADING_ACCOUNT: &str = "Loading Tensorlake settings…";
 
 /// The pushed recipe catalog as a launch into a new environment sees it, taken once per draw or press.
 #[derive(Clone, Debug)]
@@ -622,7 +656,8 @@ impl LaunchDraft {
 }
 
 /// A new environment's reason, if it has one, in the old launcher's order: the catalog has arrived and can be read, it
-/// lists the recipe, the provider can run it ([`ProviderUi::recipe_refusal`]), and a container's host can hold it.
+/// lists the recipe, the provider can run it with the account as read ([`ProviderUi::recipe_refusal`]: a sandbox's API
+/// key, SSH key and snapshot), and a container's host can hold it.
 fn environment_refusal(environment: &LaunchTarget, target: Target<'_>) -> Option<String> {
     let recipes = match target.recipes {
         Recipes::Loading => return Some(LOADING_RECIPES.to_owned()),
@@ -638,7 +673,9 @@ fn environment_refusal(environment: &LaunchTarget, target: Target<'_>) -> Option
     let Some(recipe) = recipes.iter().find(|recipe| recipe.name == name) else {
         return Some(format!("Recipe \"{name}\" is unavailable"));
     };
-    if let Some(reason) = ProviderUi(environment.provider()).recipe_refusal(recipe) {
+    if let Some(reason) =
+        ProviderUi(environment.provider()).recipe_refusal(recipe, target.account.settings())
+    {
         return Some(reason);
     }
     // A place on a container host needs that host; another place has no host of the user's to check.

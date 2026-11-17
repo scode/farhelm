@@ -10,10 +10,12 @@
 //! (`host_delete_label`, `delete_consequence`, `deleting_detail`, `locality_label`). The session list's and the session
 //! view's environment session rows, controls and suspended card take theirs from the section on a session's own
 //! environment below. The launcher's Runs on switch, its note and its refusals take their words from here (`segment`,
-//! `launch_help`, `recipe_refusal`, [`target_label`]), and so does the template editor's copy of the switch, with its
-//! own authoring rules (`template_place`, `base_refusal`).
+//! `launch_help`, `recipe_refusal`, [`target_label`]), and so do New sandbox's account prerequisites, its recipes' mark
+//! and size and its SSH-key registration note (`launch_place`, `recipe_listing`, `registration_note`), and the template
+//! editor's copy of the switch, with its own authoring rules (`template_place`, `base_refusal`).
 
 use farhelm_proto::recipes::{RecipeBase, RecipeView};
+use farhelm_proto::tensorlake::{Settings, SshKeyStatus};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchTarget, Place, ProviderKind};
 
@@ -220,12 +222,22 @@ impl ProviderUi {
     /// when it has no usable place, which hides the segment (SPEC.md: "A segment with no usable place is hidden").
     /// `container_hosts` are the hosts whose Podman is usable now, in the registry's order, and `last` the container host
     /// last launched on (the pushed preferences' `last_container_host`). A container goes to the last container host
-    /// while it is usable, else the first usable one (the old `PlacementPicker`'s default). The Tensorlake account's
-    /// prerequisites (its API key) come from the Tensorlake settings read, which the launcher's New sandbox brings;
-    /// until then the account offers no usable place, so New sandbox stays hidden.
-    pub(crate) fn launch_place(self, container_hosts: &[i64], last: Option<i64>) -> Option<Place> {
+    /// while it is usable, else the first usable one (the old `PlacementPicker`'s default).
+    ///
+    /// `account` is the Tensorlake account as the launcher read it (`GET /api/tensorlake`), `None` while that read is
+    /// out or after it failed. The account is a usable place once it has an API key, the old switch's whole rule for
+    /// showing New sandbox: a missing SSH key or snapshot still shows the segment, and the recipe's refusal then says
+    /// what to fix ([`ProviderUi::recipe_refusal`]). A container place needs no account.
+    pub(crate) fn launch_place(
+        self,
+        container_hosts: &[i64],
+        last: Option<i64>,
+        account: Option<&Settings>,
+    ) -> Option<Place> {
         match self.0 {
-            ProviderKind::Tensorlake => None,
+            ProviderKind::Tensorlake => account
+                .filter(|account| account.api_key_set)
+                .map(|_| Place::TensorlakeAccount),
             ProviderKind::Podman => last
                 .filter(|last| container_hosts.contains(last))
                 .or_else(|| container_hosts.first().copied())
@@ -266,15 +278,68 @@ impl ProviderUi {
         }
     }
 
-    /// Why the launcher cannot create this provider's environment from `recipe`, or `None` when it can: a base the
-    /// provider cannot run, then the provider's own prerequisites. The old app's `ProviderUi::recipe_refusal`, worded as
-    /// it was. A Tensorlake recipe needs a built snapshot ("No snapshot yet"); its account prerequisites (an API key,
-    /// Farhelm's local SSH key) need the Tensorlake settings read, which comes with the launcher's New sandbox. A
-    /// container place builds a missing image on first launch, so Podman has none.
-    pub(crate) fn recipe_refusal(self, recipe: &RecipeView) -> Option<String> {
-        if let Some(reason) = self.base_refusal(recipe) {
-            return Some(reason);
+    /// Why the launcher cannot create this provider's environment from `recipe`, or `None` when it can, in the old
+    /// app's order (`ProviderUi::recipe_refusal` and `sandbox_sessions::recipe_refusal` at the reference commit, worded
+    /// as they were): a base the provider cannot run, then what the provider's account still lacks, then what the
+    /// recipe itself lacks. A Tensorlake sandbox needs an API key, Farhelm's local SSH key and a built snapshot ("No
+    /// snapshot yet"); a container place builds a missing image on first launch, so Podman needs nothing more.
+    ///
+    /// `account` is the Tensorlake account as the launcher read it, or the words for why it has none yet (its read is
+    /// still out, or the read's own failure), which a provider that needs it gives as its reason. Whether the user has
+    /// registered the key with the account cannot be read from here, so it never refuses (SPEC.md: "Farhelm cannot
+    /// check account registration"); the launcher's note says so instead ([`ProviderUi::registration_note`]).
+    pub(crate) fn recipe_refusal(
+        self,
+        recipe: &RecipeView,
+        account: Result<&Settings, &str>,
+    ) -> Option<String> {
+        self.base_refusal(recipe)
+            .or_else(|| self.account_refusal(account))
+            .or_else(|| self.artifact_refusal(recipe))
+    }
+
+    /// Whether entering this provider's Runs on segment may choose `recipe`: what [`ProviderUi::recipe_refusal`] says
+    /// of the recipe itself, its account left out. The old switch entered New sandbox on the first recipe with a built
+    /// snapshot even while Farhelm's SSH key was missing, so the chosen recipe's refusal then names the key to create
+    /// rather than leaving no recipe chosen (kept by the launcher area on 2026-11-16).
+    pub(crate) fn recipe_pickable(self, recipe: &RecipeView) -> bool {
+        self.base_refusal(recipe).is_none() && self.artifact_refusal(recipe).is_none()
+    }
+
+    /// What this provider's account must hold before the launcher creates anything there. A sandbox needs the
+    /// account's API key and Farhelm's own SSH key, in that order; the key's unavailable reason is the helm's, so it is
+    /// written escaped, as a host value. A container needs no account, so it never waits for the account's read.
+    fn account_refusal(self, account: Result<&Settings, &str>) -> Option<String> {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                let account = match account {
+                    Ok(account) => account,
+                    Err(reason) => return Some(reason.to_owned()),
+                };
+                if !account.api_key_set {
+                    return Some("Set a Tensorlake API key in Settings".to_owned());
+                }
+                match &account.ssh_key {
+                    SshKeyStatus::NotCreated => {
+                        Some("Create Farhelm's SSH key in Settings → Tensorlake".to_owned())
+                    }
+                    SshKeyStatus::Unavailable { reason } => Some(
+                        HostSentence::new("launcher-ssh-key-unavailable")
+                            .text("Farhelm's local SSH key is unavailable: ")
+                            .host(&HostText::from_host(reason.as_str()))
+                            .accessible_name()
+                            .to_string(),
+                    ),
+                    SshKeyStatus::Ready { .. } => None,
+                }
+            }
+            ProviderKind::Podman => None,
         }
+    }
+
+    /// What `recipe` must have built before this provider can start from it: a sandbox starts from the recipe's
+    /// snapshot, which the account holds; a container's place builds its own image on first launch.
+    fn artifact_refusal(self, recipe: &RecipeView) -> Option<String> {
         match self.0 {
             ProviderKind::Tensorlake => recipe
                 .snapshot
@@ -304,6 +369,49 @@ impl ProviderUi {
         match self.0 {
             ProviderKind::Tensorlake => Some(Place::TensorlakeAccount),
             ProviderKind::Podman => container_hosts.first().copied().map(Place::PodmanHost),
+        }
+    }
+
+    /// How the launcher's Recipe select lists a recipe for this provider: with the provider's mark and the recipe's
+    /// CPU and memory, or by name alone (`None`). SPEC.md, "Sandbox sessions": New sandbox "lists recipes with a cube
+    /// mark and CPU and memory size", which the old select did not draw; SPEC.md names neither for a container's
+    /// recipes, so they keep the old names alone. The size uses the words a sandbox host's details line uses.
+    pub(crate) fn recipe_listing(self, recipe: &RecipeView) -> Option<RecipeListing> {
+        match self.0 {
+            ProviderKind::Tensorlake => Some(RecipeListing {
+                mark: self.mark(),
+                size: format!(
+                    "{} CPUs · {} GB memory",
+                    recipe.size.cpus, recipe.size.memory_gb
+                ),
+            }),
+            ProviderKind::Podman => None,
+        }
+    }
+
+    /// What the launcher says under a chosen recipe about registering Farhelm's SSH key with the provider's account,
+    /// once that key exists (`account`, as the launcher read it; `None` while it is out or failed): the old launcher's
+    /// note, its command and its copy button's words. SPEC.md, "Sandbox sessions": "The selected recipe shows the
+    /// existing copyable SSH-key registration command and explains that Farhelm cannot check account registration".
+    /// A container has no account to register with.
+    pub(crate) fn registration_note(
+        self,
+        account: Option<&Settings>,
+    ) -> Option<RegistrationNote<'_>> {
+        match self.0 {
+            ProviderKind::Tensorlake => match &account?.ssh_key {
+                SshKeyStatus::Ready {
+                    register_command, ..
+                } => Some(RegistrationNote {
+                    words: "Register Farhelm's SSH key with Tensorlake before launching. Farhelm cannot check \
+                            account registration.",
+                    command: register_command,
+                    copy_label: "Copy registration command",
+                    copy_help: "Copy the command that registers Farhelm's SSH key with your Tensorlake account",
+                }),
+                SshKeyStatus::NotCreated | SshKeyStatus::Unavailable { .. } => None,
+            },
+            ProviderKind::Podman => None,
         }
     }
 
@@ -727,6 +835,28 @@ pub(crate) struct LaunchPlaceNote {
     pub(crate) first_launch: &'static str,
     /// While the place's state for the recipe has not been pushed.
     pub(crate) checking: &'static str,
+}
+
+/// How the launcher's Recipe select lists one recipe, as [`ProviderUi::recipe_listing`] chooses it: the mark drawn
+/// before the option and the size words after its name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecipeListing {
+    pub(crate) mark: Icon,
+    /// "2 CPUs · 4 GB memory".
+    pub(crate) size: String,
+}
+
+/// The launcher's note on registering Farhelm's SSH key with the provider's account, as
+/// [`ProviderUi::registration_note`] words it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RegistrationNote<'a> {
+    /// The note's sentences, the app's own.
+    pub(crate) words: &'static str,
+    /// The command that registers the key, as the helm wrote it (host text, copied byte for byte).
+    pub(crate) command: &'a str,
+    /// The copy button's label and hover help.
+    pub(crate) copy_label: &'static str,
+    pub(crate) copy_help: &'static str,
 }
 
 /// A provider's words for a recipe's per-place line, as [`ProviderUi::recipe_place`] chooses them.
