@@ -2128,21 +2128,9 @@ fn a_failing_confirming_answer_keeps_a_centered_question_up_with_the_reason(
         );
         open_on(cx, "in flight", "prompt-confirm");
 
-        let veil = point(px(2.), px(2.));
-        assert!(
-            !bounds(cx, "prompt").contains(&veil),
-            "{ending}, the premise: the press lands on the veil, outside the dialog"
-        );
-        cx.simulate_click(veil, Modifiers::none());
-        check(cx);
+        press_veil(cx);
         open_on(cx, "after a press on the veil", "prompt-confirm");
-        // The body's padding is the question's empty space.
-        let body = bounds(cx, "prompt-body");
-        cx.simulate_click(
-            point(body.left() + px(4.), body.top() + px(4.)),
-            Modifiers::none(),
-        );
-        check(cx);
+        press_empty_space(cx);
         open_on(cx, "after a press on its empty space", "prompt-confirm");
         keys(cx, "escape");
         cx.update(|window, cx| layers::dismiss(layer, window, cx));
@@ -2215,6 +2203,152 @@ fn a_failing_confirming_answer_keeps_a_centered_question_up_with_the_reason(
         );
         assert_eq!(*ran.borrow(), twice, "{ending}: and nothing else ran");
     }
+}
+
+/// A press a test makes on the window while an attempt is in flight: a key, a click, a press on the veil.
+type Press = fn(&mut VisualTestContext);
+
+/// One run of the refusal-focus table: its name, each press with the control it must leave focused, and where focus
+/// must be after the refusal.
+type RefusalCase = (&'static str, Vec<(Press, &'static str)>, &'static str);
+
+/// A press on the veil, outside the dialog.
+fn press_veil(cx: &mut VisualTestContext) {
+    let veil = point(px(2.), px(2.));
+    assert!(
+        !bounds(cx, "prompt").contains(&veil),
+        "the premise: the press lands on the veil, outside the dialog"
+    );
+    cx.simulate_click(veil, Modifiers::none());
+    check(cx);
+}
+
+/// A press on the question's empty space: its body's padding.
+fn press_empty_space(cx: &mut VisualTestContext) {
+    let body = bounds(cx, "prompt-body");
+    cx.simulate_click(
+        point(body.left() + px(4.), body.top() + px(4.)),
+        Modifiers::none(),
+    );
+    check(cx);
+}
+
+/// Ask the host remove confirmation's shape ([`ask_removal`]), start its confirming answer's attempt with Enter, run
+/// `presses` in turn, each followed by a check that focus is on the named control, then refuse the attempt; where focus
+/// is then. The question is closed again afterwards, so a caller can run the next case on the same window.
+fn focus_after_refusal(
+    cx: &mut VisualTestContext,
+    case: &str,
+    presses: &[(Press, &str)],
+) -> Option<String> {
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    click(cx, "opener");
+    let layer = ask_removal(cx, None, &ran, &attempts);
+    keys(cx, "enter");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "{case}, the premise: the attempt runs with focus on the pressed answer"
+    );
+    for (press, then_on) in presses {
+        press(cx);
+        assert!(
+            is_open(cx, layer),
+            "{case}, the premise: the question stays up"
+        );
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(*then_on),
+            "{case}, the premise: where the press left focus"
+        );
+    }
+    let refusal = HostSentence::new("prompt-reason").text("Farhelm refused the removal");
+    settle_attempt(cx, &attempts, Some(refusal));
+    let landed = focused_id(cx);
+    cx.update(|window, cx| layers::close(layer, window, cx));
+    settle(cx);
+    landed
+}
+
+/// Why this matters: SPEC.md, "Who may move focus": a result that arrives after the user moved on must not move focus.
+/// A refusal of a centered question's attempt sends focus to Cancel (the old remove dialog's rule, so Enter does not
+/// send the refused action again), but a user who tabbed or clicked to another control while the helm took its time
+/// must keep their place. A press that acts on the question alone (its veil, its empty space, which keeps focus on the
+/// busy answer, an Escape it holds) leaves focus on the answer the refusal re-arms, so the move must still happen then,
+/// and must not after the user also moved focus first.
+///
+/// Specified, under the Linux click rule: on the host remove confirmation's shape, Enter on the confirming answer
+/// starts an attempt, focus on it. With nothing pressed, or after a press on the veil, a press on the empty space or
+/// Escape (each leaving focus on the confirming answer), the refusal moves focus to Cancel. After Shift-Tab to the
+/// extra answer, a click on it, or Shift-Tab followed by a press on the veil or by Escape (each leaving focus on the
+/// extra answer), the refusal leaves focus on the extra answer.
+#[gpui::test]
+fn a_refusal_moves_focus_to_cancel_only_while_focus_stayed_on_the_answer(cx: &mut TestAppContext) {
+    let (cx, _row) = open_row(cx);
+    let shift_tab: Press = |cx| keys(cx, "shift-tab");
+    let escape: Press = |cx| keys(cx, "escape");
+    let click_extra: Press = |cx| click(cx, "prompt-alternative-0");
+    let (on_confirm, on_extra) = ("prompt-confirm", "prompt-alternative-0");
+    let cases: [RefusalCase; 8] = [
+        ("nothing pressed", vec![], "prompt-cancel"),
+        (
+            "a press on the veil",
+            vec![(press_veil, on_confirm)],
+            "prompt-cancel",
+        ),
+        (
+            "a press on the empty space",
+            vec![(press_empty_space, on_confirm)],
+            "prompt-cancel",
+        ),
+        ("Escape", vec![(escape, on_confirm)], "prompt-cancel"),
+        ("Shift-Tab", vec![(shift_tab, on_extra)], on_extra),
+        (
+            "a click on the extra answer",
+            vec![(click_extra, on_extra)],
+            on_extra,
+        ),
+        (
+            "Shift-Tab, then the veil",
+            vec![(shift_tab, on_extra), (press_veil, on_extra)],
+            on_extra,
+        ),
+        (
+            "Shift-Tab, then Escape",
+            vec![(shift_tab, on_extra), (escape, on_extra)],
+            on_extra,
+        ),
+    ];
+    for (case, presses, lands_on) in cases {
+        assert_eq!(
+            focus_after_refusal(cx, case, &presses).as_deref(),
+            Some(lands_on),
+            "{case}: where focus is after the refusal"
+        );
+    }
+}
+
+/// Why this matters: under the macOS click rule a click focuses no control, so a click on another answer during the
+/// attempt leaves focus on the answer pressed, which the refusal re-arms; moving focus to Cancel is then what keeps
+/// Enter from sending the refused action again (SPEC_impl.md, "Questions: the prompt").
+///
+/// Specified, under the macOS click rule: on the host remove confirmation's shape, Enter on the confirming answer
+/// starts an attempt; a click on the extra answer leaves focus on the confirming answer; the refusal moves focus to
+/// Cancel.
+#[gpui::test]
+fn under_the_macos_click_rule_a_click_elsewhere_keeps_the_move_to_cancel(cx: &mut TestAppContext) {
+    let (cx, _row) = open_row(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    let click_extra: Press = |cx| click(cx, "prompt-alternative-0");
+    assert_eq!(
+        focus_after_refusal(
+            cx,
+            "a click on the extra answer",
+            &[(click_extra, "prompt-confirm")]
+        )
+        .as_deref(),
+        Some("prompt-cancel")
+    );
 }
 
 /// Why this matters: the host remove confirmation closes when the registry stops listing the host, and a successful
