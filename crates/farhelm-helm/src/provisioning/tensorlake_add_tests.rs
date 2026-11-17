@@ -596,6 +596,64 @@ async fn recipe_session_fresh_checkpoint_refuses_missing_or_unreadable_key_befor
     }
 }
 
+/// A sandbox launch's progress says SPEC.md's sandbox words ("Sandbox
+/// sessions"): **Creating a <recipe> sandbox…** and **Starting Farhelm in the
+/// sandbox…**, under the step ids every provider shares. Why: the launcher's
+/// pill shows these names as they are, and the shared launch used to show
+/// provider-neutral ones. Specified on the run's listed steps once it ends;
+/// the missing local key only ends the launch early (the names are fixed at
+/// admission), and the fresh prepared source keeps preparation's step hidden.
+/// So **Preparing <recipe> for sessions…** is not covered here; the container
+/// launch's test covers the path that names a revealed preparation step.
+#[farhelm_testtrace::test]
+async fn recipe_session_progress_names_its_steps_in_sandbox_words() {
+    let mut f = fixture(false).await;
+    f.seed_prepared().await;
+    f.bind_session_launch().await;
+    assert!(
+        f.tensorlake
+            .builds()
+            .fresh_prepared_snapshot("test-recipe")
+            .await
+            .unwrap()
+            .is_some(),
+        "premise: the fresh prepared source needs no preparation step"
+    );
+    std::fs::remove_file(f.root.path().join("tensorlake/ssh-key/id_ed25519")).unwrap();
+    assert!(!matches!(
+        f.tensorlake.settings().await.unwrap().ssh_key,
+        farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+    ));
+    let (host, run) = f.admitted(true).await;
+    let outcome = f.launch_outcome(host, &run).await;
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert!(
+        outcome
+            .message
+            .as_deref()
+            .is_some_and(|reason| reason.contains("SSH key")),
+        "premise: the missing key ended the launch: {outcome:?}"
+    );
+    let names: Vec<_> = outcome
+        .steps
+        .iter()
+        .map(|step| (step.step.as_str(), step.name.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("build-snapshot", "Select the recipe source"),
+            ("create-sandbox", "Creating a test-recipe sandbox…"),
+            (
+                "configure-agents",
+                "Configure credentials and agent endpoints"
+            ),
+            ("attach-supervisor", "Starting Farhelm in the sandbox…"),
+            ("create-session", "Launch the session"),
+        ]
+    );
+}
+
 /// Recipe launch must refuse before billing when its software has not been
 /// built. The same fixture's ordinary Add path may build, so this distinguishes
 /// the new launch contract from merely reusing Add without a preflight.
