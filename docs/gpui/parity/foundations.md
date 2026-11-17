@@ -72,6 +72,8 @@ replaced: screenshot goldens `buttons--{light,dark}`
 - the `buttons` golden ("normal, neutral, danger, and exempt buttons keep their deliberate tiers": its scene, `buttons`
   in `crates/gui/farhelm-gui/src/goldens/foundations.rs`, draws every tier but the outlined danger one, which the
   `inline-prompt` golden pins at rest)
+- `launcher::view_tests::the_footer_keeps_launch_primary_and_reset_neutral` checks the real launcher's painted fills and
+  borders in both appearances. Launch is primary when ready, and Reset choices is neutral.
 - crates/gui/farhelm-gui/src/components/tests/button.rs `a_heading_button_takes_the_heading_bands_padding` and the
   `session-list` golden (sidebar heading buttons retain their hierarchy and compact sizing)
 - crates/gui/farhelm-gui/src/session_list/row_tests.rs
@@ -80,12 +82,6 @@ replaced: screenshot goldens `buttons--{light,dark}`
 - "the row kebab stays revealed at rest under Playwright's touch emulation": a recorded deviation of
   [Sidebar and session view](sidebar-and-session-view.md), "Deviations from the old app": touch screens get no
   always-shown button, since GPUI reports no coarse pointer to ask about
-
-Not yet ported: of the second case, the real launcher footer's tiers, Launch primary while it can launch and Reset
-choices neutral (the launcher area's). Nothing pins them: the `dialog-launcher-frame` golden builds its own buttons, so
-it pins how the tiers look rather than that the launcher picks them, and the `app-launcher-scrolled-end` app scene is a
-side-by-side capture that nothing compares. The port is adding no new committed goldens, so the case waits for a test
-that reads the drawn tiers or a later golden of the real launcher.
 
 ### `tests/chrome.spec.ts`
 
