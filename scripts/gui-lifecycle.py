@@ -305,7 +305,7 @@ def relaunch() -> None:
                 "launch",
                 "--timeout",
                 str(gui_agent.LAUNCH_TIMEOUT_SECONDS),
-                *gui_agent.app_env_args(RUN, run["binaries"]),
+                *gui_agent.launch_env_args(RUN, run),
                 "--",
                 run["binaries"]["desktop"],
             ],

@@ -439,6 +439,28 @@ fn init_tracing() {
         .init();
 }
 
+/// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port (`port` is 0 in the
+/// app), the payload directory a development launch hands in, and the hosts an agent build's staged run registers.
+///
+/// `ensure_hosts` is `None` in every build but an agent build given `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`
+/// (`agent::ENSURE_HOSTS_ENV`), so an installed app never registers a host the user did not add. Split out of
+/// [`DesktopBootstrap::start`] so a test can start a helm from exactly the arguments the app passes.
+fn embedded_helm_args(
+    port: u16,
+    state_dir: PathBuf,
+    ensure_hosts: Option<PathBuf>,
+) -> farhelm_helm::HelmArgs {
+    farhelm_helm::HelmArgs {
+        port,
+        state_dir: Some(state_dir),
+        test_credential_file: None,
+        ensure_hosts,
+        payload_dir: helm_payload_dir(),
+        release_base_url: None,
+        backstop_refresh_secs: None,
+    }
+}
+
 /// The app-owned processes and authentication state kept alive by `main`.
 pub struct DesktopBootstrap {
     /// Loopback origin of the embedded helm, e.g. `http://127.0.0.1:41233`.
@@ -474,6 +496,12 @@ impl DesktopBootstrap {
     /// is monitored only until startup is done.
     pub fn start() -> anyhow::Result<Self> {
         let state_dir = desktop_state_dir()?;
+        // The hosts a staged agent run registers before the helm serves (`agent::ENSURE_HOSTS_ENV`). Every other build
+        // registers no hosts at startup.
+        #[cfg(feature = "agent")]
+        let ensure_hosts = std::env::var_os(agent::ENSURE_HOSTS_ENV).map(PathBuf::from);
+        #[cfg(not(feature = "agent"))]
+        let ensure_hosts = None;
         let runtime =
             tokio::runtime::Runtime::new().context("starting desktop bootstrap runtime")?;
         runtime.block_on(farhelm_supervisor::ensure_private_dir(&state_dir))?;
@@ -597,15 +625,7 @@ impl DesktopBootstrap {
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
                 farhelm_helm::run_embedded(
-                    farhelm_helm::HelmArgs {
-                        port,
-                        state_dir: Some(helm_state),
-                        test_credential_file: None,
-                        ensure_hosts: None,
-                        payload_dir: helm_payload_dir(),
-                        release_base_url: None,
-                        backstop_refresh_secs: None,
-                    },
+                    embedded_helm_args(port, helm_state, ensure_hosts),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
                     })),
@@ -1688,6 +1708,83 @@ mod tests {
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// The README hero and the docs screenshots need the app's window to show several hosts, and an installed app's
+    /// helm never registers any at startup; a staged agent run's ensure-hosts file is the only way it gets its fleet.
+    /// Specified: a helm started from exactly the arguments the app builds ([`embedded_helm_args`]) with such a file
+    /// lists every host the file names, under its destination and with the remote state directory the file gives,
+    /// beside the local host. The file has the shape `scripts/gui-agent.py`'s `ensure_hosts_body` writes.
+    ///
+    /// Not covered here: that an agent build's `DesktopBootstrap::start` reads the variable and passes it on, which
+    /// needs the variable in the test process's environment; the harness's end-to-end staged run shows that. The
+    /// destinations are under `.invalid`, which never resolves, so the helm's dials fail at once and reach no machine;
+    /// the listing does not depend on a host being reachable.
+    #[farhelm_testtrace::test]
+    fn a_helm_started_with_an_ensure_hosts_file_lists_its_hosts() {
+        const STEP: Duration = Duration::from_secs(60);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("ensure-hosts.json5");
+        std::fs::write(
+            &file,
+            serde_json::json!({"hosts": [
+                {"ssh": "build-box.invalid", "remote_farhelm": "/opt/fh/farhelm", "remote_state_dir": "/run/r0"},
+                {"ssh": "gpu-1.invalid", "remote_farhelm": "/opt/fh/farhelm", "remote_state_dir": "/run/r1"},
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let args = embedded_helm_args(0, dir.path().join("state"), Some(file));
+        let (ready_tx, ready) = mpsc::channel();
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let helm = std::thread::spawn(move || {
+            farhelm_helm::run_embedded(args, None, None, ready_tx, shutdown_rx)
+        });
+        let ready: farhelm_helm::EmbeddedReady = ready
+            .recv_timeout(STEP)
+            .expect("the embedded helm became ready");
+        let listing = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let reply = reqwest::Client::new()
+                    .get(format!("http://{}/api/hosts", ready.addr))
+                    .bearer_auth(&ready.native_device_secret)
+                    .timeout(STEP)
+                    .send()
+                    .await
+                    .unwrap();
+                assert!(reply.status().is_success(), "{}", reply.status());
+                reply.json::<serde_json::Value>().await.unwrap()
+            });
+        let _ = shutdown.send(());
+        helm.join()
+            .expect("the helm thread did not panic")
+            .expect("the helm shut down cleanly");
+        let hosts = listing["hosts"].as_array().cloned().unwrap_or_default();
+        let remotes: Vec<_> = hosts
+            .iter()
+            .filter(|host| host["kind"] == "ssh")
+            .map(|host| {
+                (
+                    host["destination"].as_str().unwrap_or_default(),
+                    host["remote_state_dir"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            remotes,
+            [
+                ("build-box.invalid", "/run/r0"),
+                ("gpu-1.invalid", "/run/r1")
+            ],
+            "{hosts:#?}"
+        );
+        assert!(
+            hosts.iter().any(|host| host["kind"] == "local"),
+            "{hosts:#?}"
+        );
+    }
 
     /// An X11-only Linux session must get a clear refusal rather than an app that starts its helm and supervisor behind
     /// a window that never shows. Specified: on Linux, without a non-empty `WAYLAND_DISPLAY` the launch refuses with a

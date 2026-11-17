@@ -1,8 +1,9 @@
-"""The parts of gui-agent.py that decide what a run may touch: its paths, the app's environment, the seeding requests
-and the processes `stop` signals; the waits scenes rely on (a seeded fleet's statuses, `terminal-text --wait`); and how
-a request to the app's helm reads its reply.
+"""The parts of gui-agent.py that decide what a run may touch: its paths, the app's environment, a staged run's private
+HOME and PATH and its remote supervisors, the seeding requests and the processes `stop` signals; the waits scenes rely
+on (a seeded fleet's statuses, `terminal-text --wait`); and how a request to the app's helm reads its reply.
 
-These start no compositor and build nothing; the process tests start only `sleep` and Python children of their own. The
+These start no compositor and build nothing; the process tests start only `sleep`, Python children of their own and, for
+a staged run's sessions, the machine's own login bash with a stand-in for the fake agent. The
 end-to-end run is the check that the pieces work together (docs/gui-agent.md); these pin the rules that keep a run from
 reaching outside its own directory: a socket path that cannot fit, a display or bus inherited from the caller's desktop,
 a state directory that defaults to a real installation's, or a recorded pid that now names someone else's process.
@@ -14,6 +15,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -247,6 +249,393 @@ class EnvironmentTest(unittest.TestCase):
         for bad in ("900", "900x", "x700", "0x700", "-1x700", "900X700", "wide"):
             with self.assertRaises(gui_agent.UsageError, msg=bad):
                 gui_agent.parse_size(bad)
+
+
+# A stand-in for the fake agent (`farhelm-fixtures`) that prints the arguments it was run with, so a test can tell which
+# program a session's `claude` reached and what it was given.
+FIXTURES_STANDIN = '#!/bin/sh\necho "fixture: $*"\n'
+
+# A stand-in for a vendor's real CLI, on the caller's PATH and in the caller's own login profile, which a staged session
+# must never reach.
+REAL_AGENT = '#!/bin/sh\necho "REAL AGENT REACHED"\n'
+
+# A shell line printing where each harness's program resolves, one per line, in STAGED_AGENTS order.
+RESOLVE_ALL = " ".join(f"command -v {name};" for name in gui_agent.STAGED_AGENTS)
+
+
+def launch_programs(source: str) -> list[str]:
+    """The program names `fn program` in crates/farhelm-helm/src/launches.rs (`source`) maps the launch harnesses to,
+    read from its same-line `LaunchHarness::X => "name"` arms. Fails when the function has an arm written any other way
+    (a constant, a call, a value on the next line), so such an entry fails the wrapper test instead of being skipped."""
+    body = source[source.index("fn program(harness: LaunchHarness)"):]
+    body = body[: body.index("\n}\n")]
+    programs = re.findall(r'LaunchHarness::\w+ => "([^"]+)"', body)
+    arms = body.count("=>")
+    if arms != len(programs):
+        raise AssertionError(f"{arms} arms but {len(programs)} same-line quoted names in `fn program`: {body}")
+    return programs
+
+
+def write_executable(path: pathlib.Path, text: str) -> pathlib.Path:
+    """Write an executable file and return its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(0o755)
+    return path
+
+
+class StagedRunTest(unittest.TestCase):
+    """A staged run launches its sessions by an agent harness's bare name (`claude`, `codex`, ...), so the only thing
+    between a staged session and the vendor's real agent (with the caller's real account) is how those names resolve.
+    These pin that every one resolves to the run's wrappers, which run the fake agent, whatever the caller's own PATH
+    and login profile say, and that no credential of the caller's reaches the run."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.dir)
+        # The caller's world, which a staged run must not reach: real agents on its PATH, a login profile that puts
+        # them first, and variables that point at the caller's configuration.
+        self.real_bin = self.dir / "caller" / "bin"
+        self.real_home = self.dir / "caller" / "home"
+        for name in gui_agent.STAGED_AGENTS:
+            write_executable(self.real_bin / name, REAL_AGENT)
+        self.real_home.mkdir(parents=True)
+        (self.real_home / ".bash_profile").write_text(f'export PATH={self.real_bin}:"$PATH"\n')
+        self.caller = {
+            "PATH": f"{self.real_bin}:/usr/bin:/bin",
+            "HOME": str(self.real_home),
+            "SHELL": "/bin/zsh",
+            "ZDOTDIR": str(self.real_home),
+            "BASH_ENV": str(self.real_home / ".bash_profile"),
+            "XDG_CONFIG_HOME": str(self.real_home / ".config"),
+            "CLAUDE_CONFIG_DIR": str(self.real_home / ".claude"),
+            "CODEX_HOME": str(self.real_home / ".codex"),
+            "ANTHROPIC_API_KEY": "sk-ant-caller",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-caller",
+            "OPENAI_API_KEY": "sk-caller",
+            "OPENROUTER_API_KEY": "or-caller",
+            "GITHUB_TOKEN": "gh-caller",
+            "AWS_PROFILE": "caller-bedrock",
+            "SSH_AUTH_SOCK": "/tmp/agent.sock",
+            "LANG": "C.UTF-8",
+        }
+        self.run_dir = self.dir / "run"
+        self.run_dir.mkdir()
+        self.fixtures = write_executable(self.dir / "target" / "debug" / "farhelm-fixtures", FIXTURES_STANDIN)
+        self.staging = gui_agent.prepare_staging(self.run_dir, str(self.fixtures))
+        record = {"staging": self.staging, "runtime": "/r/runtime", "display": "wayland-fh-x", "dbus": "unix:path=/b"}
+        self.env = gui_agent.run_env(self.run_dir, record, base=self.caller)
+        self.wrappers = {name: str(pathlib.Path(self.staging["bin"]) / name) for name in gui_agent.STAGED_AGENTS}
+
+    def login_shell(self, env: dict[str, str], script: str, cwd: pathlib.Path) -> str:
+        """Run `script` the way the supervisor starts a session: the environment's login shell, interactive and
+        login (`-l -i`), with the launch shim's change on top (the directory of the supervisor's `farhelm`, here the
+        build directory beside the fake agent, put first on PATH after the shell's startup). Returns its stdout."""
+        farhelm_dir = self.fixtures.parent
+        result = subprocess.run(
+            [env["SHELL"], "-l", "-i", "-c", f'PATH={farhelm_dir}:"$PATH"; {script}'],
+            env=env,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_a_staged_session_cannot_reach_a_real_agent(self):
+        """The safety proof. Specified: in the environment a staged run gives the app, its supervisor and every remote
+        supervisor, every harness's program (STAGED_AGENTS) resolves to the run's wrapper both through that PATH and
+        inside a session's login shell (the machine's real bash, reading the private HOME's profile after the system's),
+        even though the caller's PATH and its own login profile put real programs of those names first, and also when
+        the system's profile has put other directories first; and running any of them reaches the fake agent with every
+        argument, never the real program.
+
+        The premise is checked first: with the caller's environment the same login shell does reach the real programs,
+        so a staged run that leaked the caller's PATH or HOME would fail here."""
+        session = self.dir / "session"
+        session.mkdir()
+        caller = dict(self.caller, SHELL=gui_agent.STAGED_SHELL)
+        premise = self.login_shell(caller, RESOLVE_ALL, session).split()
+        self.assertEqual(premise, [str(self.real_bin / name) for name in gui_agent.STAGED_AGENTS], "premise")
+
+        for name, wrapper in self.wrappers.items():
+            self.assertEqual(shutil.which(name, path=self.env["PATH"]), wrapper)
+        resolved = self.login_shell(self.env, RESOLVE_ALL, session).split()
+        self.assertEqual(resolved, [self.wrappers[name] for name in gui_agent.STAGED_AGENTS])
+        # A system profile that rebuilds PATH with its own directories first (macOS's path_helper does) runs before the
+        # private one, which must put the wrappers back in front. Acted out here, since this machine's system profile
+        # may not do it: the real programs go first, then the private profile is read as a login shell reads it.
+        rebuilt = self.login_shell(
+            self.env, f'PATH={self.real_bin}:"$PATH"; . "$HOME/.bash_profile"; {RESOLVE_ALL}', session
+        ).split()
+        self.assertEqual(rebuilt, [self.wrappers[name] for name in gui_agent.STAGED_AGENTS])
+        for name in gui_agent.STAGED_AGENTS:
+            out = self.login_shell(self.env, f"{name} --dangerously-skip-permissions", session)
+            self.assertNotIn("REAL AGENT", out)
+            self.assertEqual(out.strip(), "fixture: fake-agent --script basic --dangerously-skip-permissions", name)
+
+    def test_a_session_with_a_staged_agent_script_runs_it(self):
+        """A scenario gives each staged session its own replay through a script in the session's working directory, so
+        sessions that are all launched as `claude` can show different transcripts. Specified: with STAGED_AGENT_SCRIPT
+        in the working directory, `claude` runs that script with every argument instead of the basic fake agent."""
+        session = self.dir / "replaying"
+        session.mkdir()
+        (session / gui_agent.STAGED_AGENT_SCRIPT).write_text('echo "staged: $*"\n')
+        out = self.login_shell(self.env, "claude --settings x", session)
+        self.assertEqual(out.strip(), "staged: --settings x")
+
+    def test_the_staged_environment_points_at_nothing_of_the_callers(self):
+        """Specified: HOME, PATH and SHELL are the run's (HOME and the wrappers inside the run directory, the wrappers
+        first on PATH, then only system directories); every variable that names the caller's configuration
+        (STAGED_DROPPED_ENV) and every credential or vendor variable (a vendor's prefix, or a name ending like a key or
+        a token) is gone; whatever else the caller set passes through, `SSH_AUTH_SOCK` included, since the helm's ssh
+        to a staged host may need the caller's agent; and the caller's own dictionary is left as it was."""
+        before = dict(self.caller)
+        env = gui_agent.staged_env(self.caller, self.staging)
+        self.assertEqual(self.caller, before)
+        self.assertEqual(env["HOME"], str(self.run_dir / "staging" / "home"))
+        self.assertEqual(env["PATH"], f"{self.run_dir / 'staging' / 'bin'}:{gui_agent.STAGED_SYSTEM_PATH}")
+        self.assertEqual(env["SHELL"], gui_agent.STAGED_SHELL)
+        dropped = (*gui_agent.STAGED_DROPPED_ENV, "CLAUDE_CONFIG_DIR", "CODEX_HOME", "ANTHROPIC_API_KEY",
+                   "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GITHUB_TOKEN", "AWS_PROFILE")
+        for name in dropped:
+            self.assertNotIn(name, env)
+            self.assertNotIn(name, self.env)
+        self.assertEqual(env["LANG"], "C.UTF-8")
+        self.assertEqual(env["SSH_AUTH_SOCK"], "/tmp/agent.sock")
+        self.assertNotIn(str(self.real_home), json.dumps(env))
+        self.assertNotIn(str(self.real_bin), json.dumps(env))
+        # The bridge's own command line and the app get it too, under the bridge's display and renderer variables.
+        self.assertEqual((self.env["HOME"], self.env["PATH"]), (env["HOME"], env["PATH"]))
+        self.assertEqual(self.env["WAYLAND_DISPLAY"], "wayland-fh-x")
+        # An unstaged run keeps the caller's own HOME and PATH, as before.
+        plain = gui_agent.run_env(self.run_dir, {}, base=self.caller)
+        self.assertEqual((plain["HOME"], plain["PATH"]), (self.caller["HOME"], self.caller["PATH"]))
+
+    def test_every_harness_the_app_launches_by_name_is_wrapped(self):
+        """A harness missing from STAGED_AGENTS would launch the vendor's real program in a staged run. Specified: the
+        names are exactly the programs the helm composes an agent launch with (`fn program` in
+        crates/farhelm-helm/src/launches.rs), read from that source, so a harness added there fails this until it is
+        added here; and each has its wrapper in the run's PATH directory. An arm the reader cannot take a name from
+        fails the read rather than being skipped, shown on a synthetic function with a constant arm."""
+        source = (pathlib.Path(__file__).resolve().parent.parent / "crates/farhelm-helm/src/launches.rs").read_text()
+        programs = launch_programs(source)
+        self.assertGreater(len(programs), 5, "premise: the match was found and read")
+        self.assertEqual(sorted(gui_agent.STAGED_AGENTS), sorted(programs))
+        for name in programs:
+            self.assertTrue(os.access(pathlib.Path(self.staging["bin"]) / name, os.X_OK), name)
+        synthetic = (
+            "fn program(harness: LaunchHarness) -> &'static str {\n    match harness {\n"
+            '        LaunchHarness::Codex => "codex",\n        LaunchHarness::Other => OTHER_PROGRAM,\n    }\n}\n'
+        )
+        with self.assertRaisesRegex(AssertionError, "2 arms but 1 same-line quoted names"):
+            launch_programs(synthetic)
+
+    def test_a_farhelm_directory_holding_an_agent_is_found(self):
+        """The launch shim puts the supervisor's own directory first on a session's PATH, ahead of the wrappers, so a
+        `claude` or `codex` there would be reached instead. Specified: `shadowing_agents` names each one present and
+        nothing else."""
+        build = self.dir / "build"
+        build.mkdir()
+        write_executable(build / "farhelm", "")
+        self.assertEqual(gui_agent.shadowing_agents(build), [])
+        write_executable(build / "codex", REAL_AGENT)
+        self.assertEqual(gui_agent.shadowing_agents(build), ["codex"])
+
+
+class RemoteHostsTest(unittest.TestCase):
+    """What a staged run's remote hosts are: this machine over ssh under distinct spellings, each served by a supervisor
+    the run started in its own directory."""
+
+    def test_remote_hosts_are_distinct_plain_destinations(self):
+        """The helm keys a host on its destination, so two equal spellings would be one host; a destination ssh would
+        read as an option, or an empty one, is a usage error before anything starts."""
+        self.assertEqual(gui_agent.parse_remote_hosts(["localhost", "me@localhost"]), ["localhost", "me@localhost"])
+        for bad in (["localhost", "localhost"], [""], ["-oProxyCommand=x"], ["local host"]):
+            with self.subTest(bad=bad), self.assertRaises(gui_agent.UsageError):
+                gui_agent.parse_remote_hosts(bad)
+
+    def test_a_staged_run_always_fakes_provisioning_also_after_a_relaunch(self):
+        """A staged remote host is this machine, so a real setup, Update or uninstall of it would act on the machine's
+        own Farhelm installation; the scripted backend is what stops that. Specified: a launch of a run whose record is
+        staged gets the scripted backend's directory under the variable the helm reads, also when nothing asked for
+        `--scripted-hosts`, both from `start`'s path (`launch_env_args`) and from `gui-lifecycle.py`'s relaunch, which
+        is driven here against a stand-in bridge until it hands over its launch arguments; an unstaged run's launch
+        gets none."""
+        run = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, run)
+        staged = {"binaries": {"farhelm": "/t/f", "desktop": "/t/d", "cli": "/t/c"}, "staging": {"home": "/h"}}
+        backend = f"{gui_agent.SCRIPTED_HOSTS_ENV}={gui_agent.scripted_hosts_dir(run)}"
+        self.assertIn(backend, gui_agent.launch_env_args(run, staged))
+        unstaged = {"binaries": staged["binaries"]}
+        self.assertFalse(any(arg.startswith(gui_agent.SCRIPTED_HOSTS_ENV) for arg in
+                             gui_agent.launch_env_args(run, unstaged)))
+
+        lifecycle_spec = importlib.util.spec_from_file_location(
+            "gui_lifecycle", pathlib.Path(__file__).with_name("gui-lifecycle.py")
+        )
+        lifecycle = importlib.util.module_from_spec(lifecycle_spec)
+        lifecycle_spec.loader.exec_module(lifecycle)
+        (run / "agent" / gui_agent.SESSION).mkdir(parents=True)
+        (run / "logs").mkdir()
+        (run / "run.json").write_text(json.dumps(staged))
+        launches = []
+
+        def stand_in_bridge(_run, _record, args, capture=False):
+            launches.append(args)
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="stand-in bridge")
+
+        lifecycle.RUN = run
+        lifecycle.gui_agent.cli = stand_in_bridge
+        lifecycle.gui_agent.app_identity = lambda _run: None
+        with self.assertRaisesRegex(AssertionError, "the relaunch failed"):
+            lifecycle.relaunch()
+        self.assertEqual(len(launches), 1, "premise: the relaunch reached the bridge once")
+        self.assertIn(backend, launches[0])
+
+    def test_each_ensured_host_is_dialed_at_the_runs_own_supervisor(self):
+        """A host registered without its paths would be dialed at the destination's default installation, which on
+        this machine is the maintainer's own. Specified: each destination, in order, names the run's `farhelm` and its
+        own `r<N>` state directory inside the run, both absolute, and the file reaches the app under the exact variable
+        its agent build reads."""
+        run = pathlib.Path("/tmp/run")
+        body = gui_agent.ensure_hosts_body(run, ["localhost", "me@localhost"], "/t/debug/farhelm")
+        self.assertEqual(
+            body,
+            {
+                "hosts": [
+                    {"ssh": "localhost", "remote_farhelm": "/t/debug/farhelm", "remote_state_dir": "/tmp/run/r0"},
+                    {"ssh": "me@localhost", "remote_farhelm": "/t/debug/farhelm", "remote_state_dir": "/tmp/run/r1"},
+                ]
+            },
+        )
+        args = gui_agent.app_env_args(run, {"farhelm": "/t/f"}, ensure_hosts=run / "ensure-hosts.json5")
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_ENSURE_HOSTS"], "/tmp/run/ensure-hosts.json5")
+        args = gui_agent.app_env_args(run, {"farhelm": "/t/f"})
+        self.assertNotIn("FARHELM_DESKTOP_AGENT_ENSURE_HOSTS", dict(arg.split("=", 1) for arg in args[1::2]))
+
+
+# A stand-in for the `farhelm` CLI, for the two commands a staged run's lifecycle runs: `supervisor run --state-dir DIR`
+# records the HOME, PATH and SHELL it was started with in DIR/env.json, binds DIR/supervisor.sock and then waits to be
+# stopped (STANDIN_MODE `no-socket` waits without binding, `exit` exits at once); `internal stop-terminal-hosts
+# --state-dir DIR` appends DIR to the file next to this script named `stopped-hosts` and succeeds.
+FARHELM_STANDIN = """\
+import json, os, pathlib, socket, sys, time
+args = sys.argv[1:]
+state = pathlib.Path(args[args.index("--state-dir") + 1])
+if args[:2] == ["internal", "stop-terminal-hosts"]:
+    with open(pathlib.Path(sys.argv[0]).parent / "stopped-hosts", "a") as log:
+        log.write(str(state) + "\\n")
+    sys.exit(0)
+mode = os.environ.get("STANDIN_MODE", "")
+if mode == "exit":
+    sys.exit(3)
+(state / "env.json").write_text(json.dumps({key: os.environ.get(key) for key in ("HOME", "PATH", "SHELL")}))
+if mode != "no-socket":
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(state / "supervisor.sock"))
+    listener.listen()
+time.sleep(120)
+"""
+
+
+class RemoteSupervisorTest(unittest.TestCase):
+    """A staged run's remote supervisors: started from the run's own directories with the staged environment, recorded
+    before anything waits on them, and stopped by `stop` with their terminal hosts, never by a pid alone."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.run_dir = self.dir / "run"
+        (self.run_dir / "logs").mkdir(parents=True)
+        self.farhelm = write_executable(self.dir / "bin" / "farhelm", f"#!{sys.executable}\n{FARHELM_STANDIN}")
+        self.staging = gui_agent.prepare_staging(self.run_dir, "/fx")
+        record = {"staging": self.staging, "runtime": "/r/runtime", "display": "wayland-fh-x", "dbus": "unix:path=/b"}
+        self.env = gui_agent.run_env(self.run_dir, record, base={"PATH": "/usr/bin:/bin"})
+        self.recorded: list[list[dict]] = []
+
+    def tearDown(self):
+        for remotes in self.recorded:
+            for remote in remotes:
+                if remote["start"] and gui_agent.running(remote["pid"], remote["start"]):
+                    kill_quietly(remote["pid"])
+        shutil.rmtree(self.dir)
+
+    def start(self, count: int, env: dict | None = None, socket_wait: float = 30) -> list[dict]:
+        """Start `count` remote supervisors from the stand-in, recording every record `on_started` hands over."""
+        destinations = ["localhost", "me@localhost", "127.0.0.1"][:count]
+        return gui_agent.start_remote_supervisors(
+            self.run_dir,
+            destinations,
+            str(self.farhelm),
+            env or self.env,
+            lambda remotes: self.recorded.append([dict(remote) for remote in remotes]),
+            socket_wait=socket_wait,
+        )
+
+    def test_supervisors_start_staged_in_the_run_and_stop_with_it(self):
+        """Specified: one supervisor per destination, in order, each serving its own `r<N>` directory inside the run
+        and started with the staged HOME, PATH and SHELL (so its sessions resolve `claude` to the wrappers); each is
+        recorded before `start` waits on any; and `stop` ends every one, then their terminal hosts (for a state
+        directory that has any), and reports success."""
+        remotes = self.start(2)
+        self.assertEqual([remote["state"] for remote in remotes],
+                         [str(self.run_dir / "r0"), str(self.run_dir / "r1")])
+        self.assertEqual(len(self.recorded[0]), 1, "the first supervisor is recorded before the second starts")
+        for remote in remotes:
+            self.assertTrue(gui_agent.running(remote["pid"], remote["start"]))
+            env = json.loads((pathlib.Path(remote["state"]) / "env.json").read_text())
+            self.assertEqual(env, {"HOME": self.staging["home"], "PATH": self.staging["path"],
+                                   "SHELL": gui_agent.STAGED_SHELL})
+        (self.run_dir / "r1" / "hosts").mkdir()
+        record = {"state": str(self.run_dir / "state"), "binaries": {"farhelm": str(self.farhelm)}, "remotes": remotes}
+        self.assertEqual(gui_agent.stop(self.run_dir, record), 0)
+        for remote in remotes:
+            self.assertFalse(gui_agent.running(remote["pid"], remote["start"]), remote)
+        self.assertEqual((self.dir / "bin" / "stopped-hosts").read_text().split(), [str(self.run_dir / "r1")])
+
+    def test_a_supervisor_that_never_binds_fails_start_and_is_left_for_stop(self):
+        """A supervisor that does not come up fails `start` naming its log, and is already in the record, so the
+        `stop` every failed start is followed by ends it rather than leaking it."""
+        with self.assertRaisesRegex(RuntimeError, "logs/r0.log"):
+            self.start(1, env=dict(self.env, STANDIN_MODE="no-socket"), socket_wait=1)
+        remote = self.recorded[-1][0]
+        self.assertTrue(gui_agent.running(remote["pid"], remote["start"]), "premise: it is still running")
+        record = {"state": str(self.run_dir / "state"), "binaries": {"farhelm": str(self.farhelm)},
+                  "remotes": self.recorded[-1]}
+        self.assertEqual(gui_agent.stop(self.run_dir, record), 0)
+        self.assertFalse(gui_agent.running(remote["pid"], remote["start"]))
+
+    def test_a_supervisor_that_exits_fails_start_at_once(self):
+        """A supervisor that exits (a bad state directory, say) fails `start` without waiting out the socket wait."""
+        began = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "exited before"):
+            self.start(1, env=dict(self.env, STANDIN_MODE="exit"), socket_wait=60)
+        self.assertLess(time.monotonic() - began, 30)
+
+    def test_a_recorded_supervisor_is_claimed_only_while_it_is_still_the_runs(self):
+        """`stop` signals a recorded remote supervisor only while its pid and start time match and its command line
+        names its state directory. Specified: a pid now held by a process without that directory, a start time that no
+        longer matches and a pid that is gone are all left alone."""
+        state = self.run_dir / "r0"
+        stranger = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", str(self.dir / "elsewhere")])
+        self.addCleanup(stranger.wait)
+        self.addCleanup(stranger.kill)
+        wait_for_exec(stranger.pid, str(self.dir / "elsewhere"))
+        start = gui_agent.proc_start(stranger.pid)
+        stranger_record = {"state": str(state), "pid": stranger.pid, "start": start}
+        self.assertIsNone(gui_agent.remote_supervisor_to_stop(stranger_record))
+        ours = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", str(state)])
+        self.addCleanup(ours.wait)
+        self.addCleanup(ours.kill)
+        wait_for_exec(ours.pid, str(state))
+        start = gui_agent.proc_start(ours.pid)
+        self.assertEqual(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": ours.pid, "start": start}),
+                         (ours.pid, start))
+        self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": ours.pid, "start": "x"}))
+        self.assertIsNone(gui_agent.remote_supervisor_to_stop({"state": str(state), "pid": 2**22 + 1, "start": "1"}))
 
 
 class SeedTest(unittest.TestCase):
