@@ -91,10 +91,9 @@
 //! measures it again.
 //!
 //! NOTE: Not ported from the old caret: `aria-haspopup`, which GPUI cannot report, and placing the menu at its caret's
-//! right edge (the layer manager places a popover below its anchor). The old condensed look also gave the text size
-//! buttons 2 pixels of padding (the `.btn` rule reached them), which this row does not draw yet: those buttons are the
-//! terminal area's (`terminal/text_size.rs`), which agreed on 2026-11-16 to give the group's drawing a `compact: bool`
-//! that the header will pass into the condensed look.
+//! right edge (the layer manager places a popover below its anchor). The text size group is the terminal area's
+//! (`terminal/text_size.rs`); the row tells it which look it is drawn in, and it is as tall as the lifecycle buttons in
+//! each (the maintainer's decision of 2026-11-16, where the old group was shorter).
 //!
 //! NOTE: The row's height is its minimum (30 pixels, or the title band's height), no longer the tallest thing in it:
 //! its content is laid out by [`fit`] inside a box that asks for no height of its own. Everything the row holds is
@@ -1045,8 +1044,8 @@ impl Drawn<'_> {
                 ACTIONS_GAP
             }))
             // The terminal area's text size group starts the right-hand group (SPEC.md's top row), for a session that
-            // has a terminal to size.
-            .children((!self.retired).then(|| crate::terminal::text_size::controls(cx)))
+            // has a terminal to size, drawn in the same look as the buttons so it stays exactly as tall as they are.
+            .children((!self.retired).then(|| crate::terminal::text_size::controls(condensed, cx)))
             .children(buttons)
             .into_any_element()
     }

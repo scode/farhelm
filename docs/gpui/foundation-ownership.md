@@ -215,6 +215,10 @@ a rail avatar opens its host's menu on a right press, leaving keyboard focus whe
 for every press but the primary one (sidebar-and-session-view); and `RadioGroup::fit_words`, which sizes the session
 list's status filter segments from their words beside the expanded rail (sidebar-and-session-view).
 
+`Button::compact_height`, a public metric rather than a builder, gives the outer height of a session header button in
+each look, so the terminal's text size group is drawn exactly as tall as the header's buttons (terminal; approved by the
+component layer's owner on 2026-11-16). The session header's tests check it against a drawn Stop button.
+
 The quick-launch sequence pill's bottom placement takes its bottom gap from area code: `SequencePill::at_bottom` takes
 the gap as an argument, the way the pill's other builder methods (`SequencePill::lowered`, `SequencePill::chip`) take
 their values (templates-and-quick-launch).
