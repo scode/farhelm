@@ -207,6 +207,41 @@ fn a_row_opens_its_template_pressed_with_focus_on_its_name(cx: &mut TestAppConte
     assert!(helm.commands().is_empty(), "nothing was sent");
 }
 
+/// The rest of the old "reselecting the current template preserves edits and renames": the row the editor holds stays a
+/// no-op for any field, not just the name, and still after a save, when the editor holds the saved template as its
+/// baseline; a reopen that reloaded the stored copy would silently drop the edit or the rename being typed. Specified:
+/// with `codex-deep`'s model edited, a click on its row asks nothing and keeps the edit; after that edit is saved, a
+/// new name typed in the name field survives another click on the row, which again asks nothing and sends nothing.
+#[gpui::test]
+fn reopening_the_open_row_keeps_any_edit_also_after_a_save(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    let luna = Some(Some("gpt-6-luna".to_owned()));
+    click(cx, "templates-suggestion-gpt-6-luna");
+    assert_eq!(draft(cx).fields.model, luna, "the premise: the model edit");
+    click(cx, "template-open-codex-deep");
+    assert!(!drawn(cx, "prompt-confirm"), "no leave question");
+    assert_eq!(draft(cx).fields.model, luna, "reopening kept the model");
+
+    click(cx, "templates-save");
+    let (id, saved) = one(&mut helm, Method::Put, "/api/templates/codex-deep");
+    let mut stored = templates();
+    stored[0].fields = serde_json::from_value(saved).expect("the fields decode");
+    push(&mut helm, &stored, Availability::Available, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    assert!(
+        !painted(cx).contains("Unsaved changes"),
+        "the premise: saved"
+    );
+    click(cx, "templates-name");
+    retype(cx, "codex-renamed");
+    click(cx, "template-open-codex-deep");
+    assert!(!drawn(cx, "prompt-confirm"), "no leave question");
+    assert_eq!(draft(cx).name, "codex-renamed", "reopening kept the rename");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+}
+
 /// "+ New template" opens an empty draft on the Agent switch (the old editor's new draft), headed "New template",
 /// with no row pressed and focus in its empty name field.
 #[gpui::test]
@@ -958,6 +993,65 @@ fn an_edit_while_saving_changes_nothing(cx: &mut TestAppContext) {
         "codex-deep-y",
         "the field takes edits again"
     );
+}
+
+/// The old "templates busy root stays keyboard-scrollable": the old editor disabled every control while a save was out,
+/// so the dialog itself had to become a stop that the keys scroll, or a keyboard user could not get back to the top of
+/// a tall editor. Here the controls stay focusable while busy (the deviation "While a save is in flight") and the
+/// dialog's body scrolls whatever focus moves to into view, which is how SPEC.md's "Every scrollable region ... can be
+/// reached and scrolled with the keyboard alone" holds for a region of controls; Home is not bound there (the deviation
+/// "Home and the page keys do not scroll the Templates editor"). Specified: in the shortest window, with `codex-deep`
+/// edited, reaching Save by Tab scrolls the name field out of the body, and Enter on it sends the save; Shift+Tab,
+/// walked back to the name field while the save is still out, scrolls the body until the whole field shows, and nothing
+/// more is sent.
+#[gpui::test]
+fn the_busy_editor_scrolls_back_to_its_name_by_keyboard(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-codex-deep", cx);
+    // Edited while the whole editor fits, since a click needs its target on screen.
+    click(cx, "templates-suggestion-gpt-6-luna");
+    assert!(
+        painted(cx).contains("Unsaved changes"),
+        "the premise: an edit to save"
+    );
+    // Then the shortest window SPEC.md allows, so that showing Save scrolls the editor's top well out of view.
+    let height = gpui::px(560.);
+    cx.simulate_resize(gpui::size(gpui::px(1600.), height));
+    settle(cx);
+    // Bounded walks: the editor has a few dozen stops at most, so each reaches its target or fails loudly.
+    for _ in 0..40 {
+        if test_support::focused_id(cx).as_deref() == Some("templates-save") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-save"),
+        "the premise: Tab reached Save"
+    );
+    keys(cx, "enter");
+    assert_eq!(helm.commands().len(), 1, "the premise: the save is out");
+    // Shown whole: inside the body and inside the window, whichever of the frame's two scrolling parts moved.
+    let name_shown = |cx: &mut VisualTestContext| {
+        let name = test_support::bounds(cx, "templates-name");
+        let body = test_support::bounds(cx, "templates-body");
+        let shown = name.top() >= body.top().max(gpui::px(0.))
+            && name.bottom() <= body.bottom().min(height);
+        (shown, format!("{name:?} in {body:?}"))
+    };
+    let (shown, at) = name_shown(cx);
+    assert!(!shown, "the premise: the name field is scrolled away: {at}");
+    for _ in 0..40 {
+        if name_focused(cx) {
+            break;
+        }
+        keys(cx, "shift-tab");
+    }
+    assert!(name_focused(cx), "Shift+Tab reached the name field");
+    let (shown, at) = name_shown(cx);
+    assert!(shown, "and it was scrolled into view: {at}");
+    assert!(helm.commands().is_empty(), "nothing more was sent");
 }
 
 // ---- More fields ----------------------------------------------------------------------------------------------------
