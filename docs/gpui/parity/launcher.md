@@ -434,7 +434,7 @@ whether Farhelm captures that agent's conversation, and so whether Restart can f
 
 ### `tests/nonblocking-launch.spec.ts`
 
-Tests: 15. Covers: a pending New keeps one immutable draft while sidebar, switcher and terminal work.
+Tests: 17. Covers: a pending New keeps one immutable draft while sidebar, switcher and terminal work.
 
 partly: `launcher::launch_tests::launching_sends_one_create_and_hides_the_launcher`,
 `launcher::launch_tests::a_launch_the_user_waited_for_opens_its_session`,
@@ -453,13 +453,38 @@ launch work); superseded: the retired variants of 237 and 1037, which revoked th
 operation store, not the view, settles a reply (SPEC_impl.md, "Work that finishes later: the operation stores";
 `operations_tests::work_started_from_a_view_settles_after_the_view_is_gone`), and 1782, since an automatic pick uses the
 preferences as the helm last pushed them, with no read to go stale (SPEC.md, "Terminal experience"); the quick-launch
-naming cases (567, 658) are the templates area's; not yet ported: the window staying usable while a create is out (59:
-typing in the open terminal, opening another session, Stop on another one), the keyboard staying in the session the user
-switched to (345, every action), a held YOLO refusal waiting behind the notice and its answer resending the same draft
-(454) and the session then opening (809's YOLO variant), a row menu opened during New staying open (901), Restart with's
-and Replace with's unknown outcome (1037), a locally refused Replace with keeping the source's earlier Stop report
-(1617), and Delete's successor staying selected through New's completion (1693)
+naming cases (567, 658) are the templates area's; not yet ported: Clone's and Replace with's half of 345 (the keyboard
+staying in the session switched to; New's is ported below, and the three share the submit and its completion)
 
+- 59 and 901, another session opening, its Stop going out beside the create, and a row menu opened meanwhile staying
+  open through the create's success: `launcher::pending_tests::the_window_keeps_working_while_a_create_is_out`.
+- 345, New's, and 59's typing half (the open session's terminal holding the keyboard while the create is out; what it
+  does with the keys is the terminal's):
+  `launcher::pending_tests::a_launchs_success_leaves_the_keyboard_in_the_session_switched_to`.
+- 454 and 809's YOLO variant, the question waiting behind the notice, its answer resending the same draft and
+  destination with consent although the user opened a session on another host meanwhile, and the session then opening:
+  `launcher::pending_tests::a_yolo_question_the_user_moved_on_from_waits_and_its_answer_resends_the_draft`.
+- 1037's unknown outcome, the host's timeout, for both modes, the row settled while the launcher is out of sight and the
+  launcher brought back from its notice:
+  `launcher::restart_with_tests::a_timed_out_restart_with_settles_its_row_before_the_launcher_returns` and
+  `launcher::replace_with_tests::a_timed_out_replace_with_settles_its_row_before_the_launcher_returns`.
+- 1617: `launcher::replace_with_tests::a_locally_refused_replace_with_keeps_the_sources_stop_report`.
+- 1693, reframed for the ordered channel, where a Delete sent while a create is out is answered after it (SPEC_impl.md,
+  "The UI channel"): the launch the user moved on from selects nothing, and the Delete's pick then follows the ordinary
+  rules, the most recently visited session still listed over the launch's newer one:
+  `launcher::pending_tests::a_delete_while_a_launch_is_out_picks_by_the_ordinary_rules`.
+- 237's Rename variant, "Rename during a pending launch preserves its refusal and draft", reframed: opening Rename is a
+  click, so the user has moved on, and a refusal the user moved on from waits behind its notice, which brings the
+  launcher back with its draft and refusal, in
+  `launcher::launch_tests::a_refusal_the_user_moved_on_from_waits_behind_a_notice` (moved on with a key press); not yet
+  ported: Rename's field keeping the keyboard as the refusal arrives.
+- 970, "New preserves Hosts and reports its success without retaining its launcher": Hosts still showing and the
+  "Started" report after a launch the user moved on from in
+  `session_pane::tests::a_first_launch_the_user_moved_on_from_selects_nothing`, the report in
+  `launcher::launch_tests::{a_launch_that_does_not_open_reports_started, a_slow_success_hands_the_pill_to_its_started_report}`,
+  and the next New starting fresh in
+  `launcher::pending_tests::a_launchs_success_leaves_the_keyboard_in_the_session_switched_to`; not yet ported: the
+  remembered selection staying the source's, and the report holding no button or link.
 - Line 1037's refusal outcome for Restart with:
   `launcher::restart_with_tests::restart_with_settles_as_plain_restart_does`.
 - Line 1436's pointer variant (a double click's second click is a repeat, not moving on):
