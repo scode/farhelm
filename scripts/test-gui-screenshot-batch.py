@@ -359,6 +359,17 @@ class Pictures(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_region_crop_preserves_the_selected_pixels_and_source(self) -> None:
+        """Docs shots crop to a checked pixel rectangle; keep exactly those pixels in row order and leave the full
+        capture unchanged so the retained run still explains what was cut."""
+        path, out = self.root / "full.png", self.root / "region.png"
+        pixels = bytes(range(80))
+        filtered_png(path, 5, 4, pixels)
+        before = path.read_bytes()
+        batch.crop_png(path, (1, 1, 4, 3), out)
+        self.assertEqual(batch.read_rgba(out), (3, 2, bytearray(pixels[24:36] + pixels[44:56])))
+        self.assertEqual(path.read_bytes(), before)
+
     def test_every_png_row_filter_reads_back_exactly(self) -> None:
         """The bridge's encoder picks a filter per row; a mistake in undoing any one of them would shift pixels without
         an error, so each of the five must give back the pixels that were written."""

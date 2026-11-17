@@ -71,7 +71,7 @@
 # URL, the source revision, the committer identity).
 #
 # NOTE: no reliance on `set -e` (inert under some harnesses); every step
-# carries its own guard. Linux only, like the capture: it uses bash 4 and, in
+# carries its own guard. The publisher is Linux only: it uses bash 4 and, in
 # the self-test, GNU date.
 
 # What is published and where. Constants on purpose; see the header.

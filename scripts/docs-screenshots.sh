@@ -2,12 +2,13 @@
 # Capture the docs website's screenshots (docs/docs-shots/SPEC.md).
 #
 # One command, so that "refresh the docs screenshots" is a thing an agent can
-# be told without it inventing a procedure. Builds whatever is missing, boots
-# the docs fleet through the dedicated Playwright config, runs every page's
-# shots (or one page's), and prints each PNG's path. The PNGs land in the
-# docs website's gitignored website/public/docs-shots-local/, where the local
-# preview shows them at once. It never publishes: look at every picture, then
-# run scripts/publish-docs-shots.sh.
+# be told without it inventing a procedure. Runs the GPUI test harness through
+# scripts/docs_shots.py for every page module (or one page), and prints each
+# PNG's path. Local only for now; the Mac path comes with the first published
+# page. On Linux every shot stops at the size check because it renders at
+# scale 1. The PNGs land in the docs website's gitignored
+# website/public/docs-shots-local/, where the local preview shows them at
+# once. It never publishes.
 #
 # Screenshots are published in bulk (docs/docs-shots/SPEC.md, "Regenerated in
 # bulk"). A complete run writes capture.json beside the shots, naming the main
@@ -15,36 +16,27 @@
 # records in the manifest, with a checksum of every PNG so a publish can tell
 # the shots are that run's. A one-page run (--only, for drafting) deletes it,
 # and so does a run that cannot vouch for showing main's UI: one whose app
-# code differs from that main commit, one that skipped the builds
-# (--no-build), or one whose builds go to a CARGO_TARGET_DIR other than the
-# checkout's own target/, which the stack never runs. Such a full run still
-# captures, for the preview, but exits 3 to say its shots cannot be
+# code differs from that main commit, or one that skipped the build
+# (--no-build). Such a full run still captures, for the preview, but exits 3
+# to say its shots cannot be
 # published; that is decided before the slow part, and said up front.
 #
 # Published release shots are frozen (docs/docs-shots/SPEC.md, "Release
-# shots are frozen"). A shot a release's screenshot list names
-# (website/src/release-notes/*.json) is, once the manifest says it is
-# published, never captured again by default, by a full run or by --only:
-# its test skips, the publish script carries the published image over, and
-# the release's notes keep showing the UI that release shipped. A release
-# shot not yet published is captured like any other. --recapture-release-shot
-# is for a deliberate correction: it takes the named published release shots
-# after all, and a complete run lists them under recaptured_release_shots in
-# capture.json, which is the only way a publish accepts a replacement.
+# shots are frozen"). Release-shot argument validation is retained, but no
+# page module captures release shots yet, so recapture is refused.
 #
-# Usage: scripts/docs-screenshots.sh [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
-#   --only PAGE  capture only that page's shots (e2e/docs-shots/PAGE.spec.ts)
-#   --no-build   skip the cargo and dx builds even if their outputs are missing (the
+# Usage: scripts/docs-screenshots.sh --local [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
+#   --local      capture on this machine through the GPUI test harness
+#   --only PAGE  capture only that page's shots (scripts/docs-shots/PAGE.py)
+#   --no-build   reuse the harness's existing binaries (the
 #                shots can then be previewed but not published)
 #   --recapture-release-shot NAME
 #                also capture the published release shot NAME
 #                (release-notes/v<X-Y-Z>-<what>) from the current UI, to correct it;
-#                repeatable, and refused for a name that is not a published release shot
+#                repeatable; currently refused because no page module captures one
 #
-# Prerequisites beyond the browser suite's own (rustup, dx, node, Playwright
-# with Chromium under e2e/): passwordless ssh to every destination the
-# scenario's remote hosts name, which the stack script checks before it boots
-# anything.
+# Prerequisites: the GPUI harness's build and runtime tools (docs/gui-agent.md).
+# The harness builds the agent app and stages its own fleet and private sshd.
 #
 # NOTE: no reliance on `set -e` (inert under some harnesses); every step
 # carries its own guard.
@@ -53,9 +45,11 @@ repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 output="$repo/website/public/docs-shots-local"
 only=""
 build=true
+local_mode=false
 recapture=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --local) local_mode=true ;;
     --only)
       shift
       test -n "${1:-}" || { echo "--only needs a page name" >&2; exit 2; }
@@ -77,21 +71,20 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-specs=()
+if [ "$local_mode" != true ]; then
+  echo "pass --local; the Mac path comes with the first published page" >&2
+  exit 2
+fi
+
 if [ -n "$only" ]; then
   case "$only" in
     *[!a-z0-9-]* | -*) echo "--only takes a page name in lowercase kebab case, got '$only'" >&2; exit 2 ;;
   esac
-  test -f "$repo/e2e/docs-shots/$only.spec.ts" || { echo "no shots for page '$only' (e2e/docs-shots/$only.spec.ts)" >&2; exit 2; }
-  specs=("docs-shots/$only.spec.ts")
 fi
 
 # A recapture must name a shot that is frozen now: a published release shot,
-# by the definition e2e/docs-shots/release-shots.ts and the publish script
-# share. Anything else is a typo or a misunderstanding (an unpublished
-# release shot is captured anyway), and is refused before the builds.
-# Release shots' tests all live in release-notes.spec.ts, so with --only no
-# other page can take one.
+# by the definition the publish script shares. Keep the validation before
+# refusing the unsupported capture, so a typo still explains what is wrong.
 if [ "${#recapture[@]}" -gt 0 ]; then
   if [ -n "$only" ] && [ "$only" != release-notes ]; then
     echo "--recapture-release-shot works only on a full run or with --only release-notes" >&2
@@ -111,6 +104,12 @@ for name in map(str, names):
             "(one that a website/src/release-notes/*.json lists and website/src/data/docs-shots.json holds)"
         )
 EOF
+  echo "no page module captures release shots yet" >&2
+  exit 2
+fi
+
+if [ -n "$only" ]; then
+  test -f "$repo/scripts/docs-shots/$only.py" || { echo "no shots for page '$only' (scripts/docs-shots/$only.py)" >&2; exit 2; }
 fi
 
 # Whether this full run can produce a publishable record, and if not, why.
@@ -120,8 +119,6 @@ unpublishable=""
 if [ -z "$only" ]; then
   if [ "$build" != true ]; then
     unpublishable="--no-build skips the builds, so nothing proves the binaries are this checkout's"
-  elif [ -n "${CARGO_TARGET_DIR:-}" ] && [ "$(cd "$CARGO_TARGET_DIR" 2>/dev/null && pwd -P)" != "$(cd "$repo" && pwd -P)/target" ]; then
-    unpublishable="CARGO_TARGET_DIR points outside this checkout, but the stack runs this checkout's target/"
   elif ! base=$(git -C "$repo" merge-base HEAD refs/remotes/origin/main 2>/dev/null); then
     unpublishable="cannot find this checkout's base on origin's main (a jj workspace without .git, or no origin/main)"
   elif ! git -C "$repo" diff --quiet "$base" -- crates/ Cargo.toml Cargo.lock; then
@@ -134,27 +131,10 @@ if [ -z "$only" ]; then
   fi
 fi
 
-if [ "$build" = true ]; then
-  # Both builds are incremental and cheap when nothing changed; running them
-  # unconditionally is what makes "at the current version" true rather than
-  # hopeful, since a stale binary or bundle would photograph the past.
-  (cd "$repo" && cargo build) || { echo "cargo build failed" >&2; exit 1; }
-  (cd "$repo/crates/farhelm-ui" && dx build --package farhelm-ui --platform web --release) || {
-    echo "dx build failed" >&2
-    exit 1
-  }
-fi
-test -x "$repo/target/debug/farhelm" || { echo "missing target/debug/farhelm" >&2; exit 1; }
-test -f "$repo/target/dx/farhelm-ui/release/web/public/index.html" || { echo "missing the dx web bundle" >&2; exit 1; }
-test -d "$repo/e2e/node_modules/@playwright" || {
-  echo "e2e/node_modules is missing — run 'cd e2e && npm ci && npx playwright install chromium' once" >&2
-  exit 1
-}
-
 record="$output/capture.json"
 rm -f "$record" || exit 1
 
-# Clear the shots this run replaces, so a shot whose test was deleted or
+# Clear the shots this run replaces, so a shot whose declaration was deleted or
 # renamed does not linger and get published. A one-page run clears only that
 # page's shots. Only the PNG files go, never the directories: the docs preview
 # (Astro's dev server) serves this directory from its public folder, and once
@@ -167,13 +147,13 @@ else
 fi
 mkdir -p "$output" || exit 1
 
-# The recapture list reaches the Playwright child on its command line only
-# (RECAPTURE_RELEASE_SHOTS_ENV in e2e/docs-shots/paths.ts), comma separated,
-# which is safe because shot names are lowercase kebab case.
-recapture_list=$(IFS=,; printf '%s' "${recapture[*]}")
-(cd "$repo/e2e" && FARHELM_DOCS_SHOTS_OUTPUT="$output" FARHELM_DOCS_RECAPTURE_RELEASE_SHOTS="$recapture_list" \
-  npx playwright test -c docs-shots.config.ts --reporter=line "${specs[@]}") || {
-  echo "the capture did not complete; see e2e/test-results for the trace" >&2
+# The harness owns the build directory, fleet and capture checks; pages share
+# one app run at the scenario's viewport.
+engine=(python3 -B "$repo/scripts/docs_shots.py" --out "$output")
+[ -z "$only" ] || engine+=(--only "$only")
+[ "$build" = true ] || engine+=(--no-build)
+"${engine[@]}" || {
+  echo "the capture did not complete; see the run directory printed above" >&2
   exit 1
 }
 if [ -n "$only" ]; then
@@ -192,7 +172,7 @@ printf '%s\n' "$found"
 
 # The record a publish needs, for a complete run that can vouch for showing
 # main's UI at $base (see above). It lists every PNG with its checksum, so a
-# shot overwritten afterwards (a stray single-spec Playwright run, an edit)
+# shot overwritten afterwards (a stray single-page run, an edit)
 # no longer matches and the publish refuses the mix. It also lists the
 # published release shots this run recaptured on purpose, each of which must
 # be among its PNGs: the publish refuses any other published release shot

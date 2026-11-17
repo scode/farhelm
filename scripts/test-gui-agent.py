@@ -1722,9 +1722,9 @@ class CaptureTest(unittest.TestCase):
 
         return bridge, asked
 
-    def capture_with(self, bridge) -> tuple[pathlib.Path, pathlib.Path]:
+    def capture_with(self, bridge, *options: str) -> tuple[pathlib.Path, pathlib.Path]:
         """Run `capture` on a hero scenario run in this test's directory against `bridge`, as on a Mac (no frame to
-        crop); returns the run directory and the output path."""
+        crop); returns the run directory and the output path. Flags share the same fixture as the default path."""
         run = self.dir / "run"
         run.mkdir()
         record = {"scenario": {"file": str(HERO)}, "binaries": {"farhelm": "/build/target/debug/farhelm"}}
@@ -1733,7 +1733,7 @@ class CaptureTest(unittest.TestCase):
         import io
 
         with contextlib.redirect_stdout(io.StringIO()):
-            gui_agent.capture(run, record, [str(output)], platform="darwin", bridge_cli=bridge)
+            gui_agent.capture(run, record, [str(output), *options], platform="darwin", bridge_cli=bridge)
         return run, output
 
     def test_capture_settles_parks_checks_and_writes_only_a_right_sized_picture(self):
@@ -1777,10 +1777,49 @@ class CaptureTest(unittest.TestCase):
         self.assertNotIn("screenshot", [args[0] for args in asked])
         self.assertFalse((self.dir / "out").exists())
 
+    def test_keep_focus_skips_terminal_input_and_readiness_wait(self):
+        """A launcher shot must keep its field focused even while the terminal probe stays null. Specified: no click
+        and no transcript poll, but both pointer parks, idle waits and leak probes still surround a successful shot."""
+        bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0})
+        run = self.dir / "run"
+        run.mkdir()
+        output = self.dir / "dialog.png"
+        record = {"scenario": {"file": str(HERO)}, "binaries": {"farhelm": "/build/target/debug/farhelm"}}
+        self.assertEqual(gui_agent.capture(run, record, [str(output), "--keep-focus"], platform="darwin",
+                                          bridge_cli=bridge), 0)
+        self.assertFalse(any(args[0] == "click" for args in asked))
+        # Only the two leak checks may read the terminal; a readiness poll would add reads and time out on null.
+        self.assertEqual(asked.count(["get", "probe", "terminal_text"]), 2)
+        self.assertEqual(asked.count(["hover", "id:brand"]), 2)
+        self.assertEqual(asked.count(["wait", "--idle", "--timeout", str(gui_agent.IDLE_MILLISECONDS)]), 2)
+        self.assertEqual(output.read_bytes(), (run / gui_agent.CAPTURE_FILE).read_bytes())
+
     def test_capture_refuses_a_run_without_a_scenario(self):
         """Only a scenario says what the picture's size and open session are."""
         with self.assertRaisesRegex(gui_agent.UsageError, "start this run with --scenario"):
             gui_agent.capture(self.dir, {}, [str(self.dir / "x.png")])
+
+    def test_explicit_park_hovers_the_named_target_without_searching(self):
+        """A modal shot knows its safe title even when automatic parking finds no spot. Both parking passes must
+        hover that id directly, retain their idle waits and never search; a refused hover must name the target."""
+        bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0})
+        original = gui_agent.park_targets
+        gui_agent.park_targets = lambda *_: self.fail("explicit parking must not search")
+        self.addCleanup(setattr, gui_agent, "park_targets", original)
+        run, _ = self.capture_with(bridge, "--keep-focus", "--park", "id:title")
+        self.assertEqual([args for args in asked if args[0] == "hover"], [["hover", "id:title"]] * 2)
+        self.assertFalse(any(args[0] == "snapshot" for args in asked))
+        self.assertEqual(asked.count(["wait", "--idle", "--timeout", str(gui_agent.IDLE_MILLISECONDS)]), 2)
+        shutil.rmtree(run)
+
+        def refused(run, record, args, capture=False):
+            """Exercise a covered explicit spot without falling back to automatic discovery."""
+            if args[0] == "hover":
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="covered")
+            return bridge(run, record, args, capture=capture)
+
+        with self.assertRaisesRegex(RuntimeError, "hover id:title.*covered"):
+            self.capture_with(refused, "--keep-focus", "--park", "id:title")
 
 
 class ProcessIdentityTest(unittest.TestCase):
