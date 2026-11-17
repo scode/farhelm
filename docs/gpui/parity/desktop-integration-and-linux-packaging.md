@@ -8,7 +8,7 @@ sections: Desktop window chrome, Installation and updates, Desktop Quit, Status.
 
 Tests: 6. Covers: the macOS inset belongs to the merged top row and leaves details compact.
 
-replaced: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`,
+partly: `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs`,
 `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`,
 `desktop::tests::the_window_options_give_the_band_the_title_bar_only_on_macos` and, run on the test Mac,
 `desktop::tests::mac::the_real_rows_drag_from_their_background_and_leave_their_controls_and_text_alone`,
@@ -17,13 +17,21 @@ replaced: `desktop::tests::presses_on_empty_band_background_drag_and_controls_an
 `desktop::tests::mac::with_no_session_open_a_band_strip_covers_the_panes_top` and
 `desktop::tests::mac::in_a_narrow_window_the_app_bar_runs_above_both_panes`; the web-shell case is superseded (there is
 no web shell), and "text stays selectable" is superseded by labels no longer being selectable (decided by the maintainer
-on 2026-11-13); and the real-window check on the test Mac passed (2026-11-14: dragging the wordmark or the session top
-row's empty background moves the window, a drag that starts on the version text does not, a double-click on the band
-zooms and a second one restores; not covered: a Force Touch trackpad, a second display). The `app-title-band` scene,
-captured by the screenshot batch on the test Mac (2026-11-14, light, narrow), matches the reference
-`macos-window-chrome`: the inset kept clear for the traffic lights, the wordmark and version, and the 48 px top row
-across both panes; the batch captures the app's own drawing, so the lights themselves show only in a screen capture of
-the real window
+on 2026-11-13; see Deviations); and the real-window check on the test Mac passed (2026-11-14: dragging the wordmark or
+the session top row's empty background moves the window, a drag that starts on the version text does not, a double-click
+on the band zooms and a second one restores; not covered: a Force Touch trackpad, a second display). The
+`app-title-band` scene, captured by the screenshot batch on the test Mac (2026-11-14, light, narrow), matches the
+reference `macos-window-chrome`: the inset kept clear for the traffic lights, the wordmark and version, and the 48 px
+top row across both panes; the batch captures the app's own drawing, so the lights themselves show only in a screen
+capture of the real window. Not yet ported: a press over a stale session's inert tab, and presses on and beside a real
+tab in the session top row (the same gap as `click-detail.test.js`'s inert-descendant case). Both dated checks predate
+the terminal tab strip and the text-size stepper that the session top row gained on 2026-11-15, so neither pressed a
+tab, the stepper or the strip's empty part, and the `mac` tests' run on the test Mac is not dated here; the real-rows
+test presses the middle of the row's tab slot and expects a drag, a press that could land on a tab once tabs fill the
+slot
+
+- `desktop::tests::mac::the_connection_screens_strip_keeps_the_lights_clear_and_drags`: while the window is not
+  connected, a 48-point band strip runs across its top and a press on it drags.
 
 ### `tests/update-readout-css.spec.ts`
 
@@ -35,7 +43,12 @@ replaced: `update_readout::view::tests::hover_and_keyboard_focus_brighten_the_ve
 `the_spinner_runs_only_while_something_spins_and_stands_still_under_reduced_motion`, and the goldens of every state,
 light and dark (`version-readout-check`, `version-readout-progress`, `version-readout-outcomes`,
 `version-readout-update-ready`, `version-readout-menu`, `version-readout-tooltip`). The hover transitions are not ported
-(see Deviations)
+(see Deviations). Per their scene titles in `docs/gpui/screenshot-scenes.json`, `-check` shows the check button at rest,
+lit as under the pointer, with a reinstall warning, that warning lit, and with keyboard focus; `-progress` a check and
+an install, alone and beside the update toggle; `-outcomes` Up to date, Check failed, Check failed beside the toggle,
+and the failure button focused; `-update-ready` the update toggle plain, with a withdrawal warning, and focused; `-menu`
+the update menu open; `-tooltip` the wider paragraph help for a reinstall readout. The goldens are Linux only: no Mac
+golden shows the readout in the band
 
 ## The old native app's own tests
 
@@ -57,8 +70,9 @@ local supervisor keeps running after
 
 Tests: 10. Covers: the saved frame's format and restore rules, and following the live window.
 
-replaced: the format and restore tests moved unchanged with their code (`window_state::tests`, in
-`crates/farhelm-desktop`), the following is
+replaced: nine of the ten format and restore tests moved unchanged with their code (`window_state::tests`, in
+`crates/farhelm-desktop`); the tenth, `maximized_transitions_preserve_last_normal_bounds`, was removed with the unused
+helper it tested (2026-11-14), and its case is the bullet below; the following is
 `window_state::tests::reports_only_make_the_frame_pending_and_a_flush_writes_the_last_one` and the other `FrameKeeper`
 tests beside it, `desktop::tests::the_hosts_placement_is_where_the_window_opens`,
 `desktop::tests::following_the_window_reports_its_frame_at_once_and_on_every_change` and
@@ -70,6 +84,9 @@ saved, a frame off every display falls back; not covered: a second Mac display, 
 back after a relaunch, written between launches since the bridge cannot resize a window on headless Mutter; and a window
 maximized by the title bar's Maximize saved maximized with its ordinary frame kept, reopened maximized, and once quit
 again still saved maximized with that frame)
+
+- `window_state::tests::maximize_keeps_the_ordinary_frame_and_fullscreen_is_not_saved`: the removed test's case, the
+  ordinary frame kept while maximized, now as a `FrameKeeper` test.
 
 ### `crates/farhelm-ui/src/window_chrome.rs` (`press_decision_covers_buttons_reports_and_fullscreen`, `click_report_header_parsing_rejects_non_reports`)
 
@@ -85,11 +102,12 @@ Tests: 20. Covers: which presses inside a drag surface count as empty background
 partly: the classification and pairing cases by
 `desktop::tests::presses_on_empty_band_background_drag_and_controls_and_text_keep_theirs` and
 `desktop::tests::a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background`; the endpoint, header and
-synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" waits for the terminal
-area's tabs (no inert band control exists yet); a positioned popover over the band is covered by the layer manager's
-occluding popovers, which a press never passes through; "a press inside a surface but outside its box" is GPUI's hit
-testing, which hands a row only presses inside it; "a replaced or disconnected spacer" is covered by pairing presses by
-row, not by element
+synchronous-POST cases are superseded (no JavaScript bridge); "a press over an inert descendant" (the old case pressed a
+stale session's inert tab) has no test yet: the terminal tabs are now in the session top row and go inert with the
+terminal under a stale session's card, but no test presses a live tab, an inert one or the strip's empty part; a
+positioned popover over the band is covered by the layer manager's occluding popovers, which a press never passes
+through; "a press inside a surface but outside its box" is GPUI's hit testing, which hands a row only presses inside it;
+"a replaced or disconnected spacer" is covered by pairing presses by row, not by element
 
 ### The old native smoke test's legs
 
@@ -112,10 +130,19 @@ replaced: `scripts/gui-lifecycle.py` step 02
 Tests: 1. Covers: the embedded helm comes up and the local host connects; no browser UI at `/`, no `/api/auth/token`,
 the web view authenticates, no stored credential or device row.
 
-partly: the boot and connection by `scripts/gui-lifecycle.py` step 01 (the window draws the listing it read over its UI
-channel, the helm lists its local host as connected, and the app's own supervisor is recorded and running); the web
+replaced: the boot and connection by `scripts/gui-lifecycle.py` step 01 (the window draws the listing it read over its
+UI channel, the helm lists its local host as connected, and the app's own supervisor is recorded and running); the web
 view's authentication is superseded (the window reaches the helm in process with an in-memory credential); the 404s for
-`/` and `/api/auth/token` and the absence of stored credentials and device rows are not yet ported
+`/` and `POST /api/auth/token` are the first bullet below; the check for no stored credential or device row is
+superseded, since the helm keeps credentials only in memory and writes none to `helm.db`. That rests on the design (the
+helm's `auth` module has no store), not on a test: no test asserts that minting writes no row, and the other two bullets
+test only its consequences
+
+- `router_boundary_tests::the_helm_serves_no_page_and_no_sign_in` (in `farhelm-helm`): `/` and `POST /api/auth/token`
+  answer 404.
+- `auth::tests::credentials_are_scoped_to_the_minting_process`: a credential another helm process minted is refused.
+- `auth::tests::a_device_row_left_by_an_older_helm_does_not_authenticate`: a `device_sessions` row an older helm stored
+  authenticates nothing.
 
 #### "a second desktop launch refuses the owned state directory"
 
@@ -125,6 +152,9 @@ superseded: on Linux a second launch now brings the open app forward (settled by
 2026-11-13), `scripts/gui-lifecycle.py` step 05 and
 `second_launch::tests::a_second_launch_hands_over_only_to_a_live_app_and_carries_its_token`; the refusal stays for a
 launch that cannot reach the open app, `the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder`
+
+- `desktop::tests::each_second_launch_activates_the_main_window_with_its_token`: the open app raises its main window
+  once per second launch, with that launch's activation token.
 
 #### "a second launch with another program refuses without stopping the open app's supervisor"
 
@@ -157,8 +187,14 @@ dropped: the GPUI app loads no web assets; its fonts and icons are compiled in a
 Tests: 1. Covers: two sessions created through the helm's API, each with a live agent terminal running in a terminal
 host, set up for the restart leg.
 
-partly: `scripts/gui-lifecycle.py` seeds one session through the helm's API (`gui-agent.py start --sessions 1`) for
-steps 07 and 08; that a created session's agent runs in a terminal host is the e2e `host_creates::` selection
+replaced: `scripts/gui-lifecycle.py` seeds one session through the helm's API (`gui-agent.py start --sessions 1`) for
+steps 07 and 08, which is all the restart legs need; that a created session's agent runs in a terminal host is the
+bullet below. The second session let the old relaunch show that the window reopened on the remembered session rather
+than the newest, which is the sidebar area's to port
+
+- `host_creates::a_create_starts_its_agent_in_a_terminal_host` (the e2e suite,
+  `crates/farhelm/tests/e2e/host_creates.rs`): a created session's row is a terminal-host row naming the host's socket,
+  and the session lists as live.
 
 #### "waiting for the window and nudging it to render"
 
@@ -172,19 +208,22 @@ window's size and waits for drawn text
 Tests: 1. Covers: after SIGKILL the supervisor survives and the relaunch reuses it, mints a new credential and refuses
 the old one, and keeps the sessions (their terminals alive) and the helm's preferences.
 
-partly: `scripts/gui-lifecycle.py` step 08 (SIGKILL, the same supervisor running and reused, the seeded session listed
+replaced: `scripts/gui-lifecycle.py` step 08 (SIGKILL, the same supervisor running and reused, the seeded session listed
 again as running, waiting or idle) and step 07 (the same after a quit, and a new credential with the old one refused
-with 401); that the kept session's terminal still takes input after the relaunch is not yet ported (the lifecycle check
-reads the helm's listing, not the terminal); the remembered selection and sort are the helm's preferences, which the
-sidebar area restores; the web view's re-authentication and attachment trace are superseded
+with 401). The old leg's live terminal was a terminal host still listening on its socket, not typed input; a session
+whose terminal was lost lists as interrupted, which the steps' live-state check refuses. The remembered selection and
+sort are the helm's preferences, which the sidebar area restores, and this entry does not claim them; the web view's
+re-authentication and attachment trace are superseded
 
 #### "rotating the token: the internal desktop credential carries on"
 
 Tests: 1. Covers: rotating the helm token neither revokes the app's credential nor re-authenticates the web view or
 closes its terminal socket.
 
-partly superseded: the web view's re-authentication and socket are gone; that a rotation leaves the window's in-memory
-credential working is not yet ported
+superseded: the web view's re-authentication and socket are gone, and so are the `farhelm helm token rotate` command and
+the durable token it rotated (removed with the browser interface; see `releasing/changelog.d/gpui-desktop.md`), so no
+rotation can happen; the window's credential is minted per launch and kept in memory, and a relaunch's new credential,
+with the old one refused, is `scripts/gui-lifecycle.py` step 07
 
 #### the eval-bridge watchdog stays silent
 
@@ -245,7 +284,14 @@ supervisor is reused); the leg's teardown of a planted terminal host was harness
 Tests: 4. Covers: a fresh and a stored launch in dark and light GTK themes paint the web view in the matching palette.
 
 superseded: it drove the web view's `matchMedia` from GTK themes; the GPUI app's light and dark palettes are its
-goldens, light and dark (`scripts/check-gui-goldens.py`)
+goldens, light and dark, which run only under `scripts/check-gui-goldens.py`. The remaining case, a launch in the
+system's palette that a stored choice overrides, is the Settings area's tests below
+
+- `settings::tests::the_stored_appearance_paints_the_window_from_the_first_snapshot_on`: the window starts in the
+  system's palette and the stored choice applies from the first snapshot on.
+- `settings::tests::system_follows_the_operating_system_and_an_explicit_choice_does_not`: System follows the operating
+  system, and a stored Light or Dark wins over it.
+- `settings::tests::an_unset_or_unknown_appearance_reads_as_system`: no stored choice reads as System.
 
 #### the missing-initialize leg (`DESKTOP_SMOKE_APPEARANCE=no-initialize`)
 
@@ -270,8 +316,9 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   disabled over a terminal, where the old app's did nothing useful either. With neither focused, all six are disabled.
   In the old app the menu's Paste reached the terminal, but its Select All most likely did not (the old terminal
   selected everything only from its Cmd+A key handler), and whether its Copy did without a right-click first is
-  uncertain. Tested by the menu description test (which also pins the chords the three items show to the terminal's key
-  rows), the enabled-state test,
+  uncertain. Tested by the menu description test (`desktop::tests::the_mac_menu_is_the_old_apps_with_no_close_window`),
+  which also pins the chords the three items show to the terminal's key rows, the enabled-state test
+  (`desktop::tests::the_menus_commands_are_handled_app_wide_and_the_edit_items_by_a_focused_field`),
   `components::tests::text_input::the_edit_menus_copy_paste_and_select_all_act_on_every_kind_of_field` and
   `terminal::attached::tests::the_edit_menus_copy_paste_and_select_all_reach_a_focused_terminal`. Pending on the test
   Mac: the three items over a real terminal, and that Cmd+C on a focused button falls through to the disabled Copy
@@ -296,7 +343,12 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   the installed release bundle starts one is `updater::tests::the_updater_runs_only_for_the_installed_release_bundle`.
   The entry points other areas call are `desktop::updates::runs`, `check_now`, `automatic_updates` and
   `set_automatic_updates`.
-
+- **The Mac app comes forward when it starts.** As soon as its main window opens, the app asks macOS to make it the
+  active app, however it was started; macOS does that by itself only for an app Launch Services opens, so a build run
+  from a terminal otherwise opened behind the app in front. The old app asked too, once its window was visible, with no
+  test. Tested by `desktop::tests::the_mac_brings_the_main_window_forward_at_startup`, which sees only the window's
+  half: the request to macOS does nothing on GPUI's test platform, and was checked on a test Mac (started from a shell
+  with Finder in front, the app was frontmost). On Linux the compositor decides.
 - **The Linux window's own title bar** (new: the old app's Linux build was never released). Under a compositor that
   draws no window decorations (GNOME's Mutter) the main window and the notices window draw a 34 px bar with the title
   and Minimize, Maximize or Restore, and Close; a drag on its background moves the window and a double-click maximizes
@@ -304,11 +356,13 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   compositor draws its own title bar (KDE) the window draws none. The minimum size grows by GPUI Kit's frame and the bar
   so the app's content keeps 720 by 560. Tested by `desktop::linux_title_bar::tests` (when it shows, the minimum and
   opening allowances, the named buttons, their commands, the background's drag and zoom and focus) and the screenshot
-  batch's crop test; driven through the bridge on headless Mutter (the bar inside Kit's frame, its buttons, Maximize and
-  its relabelling to Restore, Close ending the app; Close and Maximize also in `scripts/gui-lifecycle.py` steps 06 and
-  10); the `linux-title-bar` golden shows it ordinary and maximized. Pending: a drag, a double-click zoom and Minimize
-  on a real GNOME session (headless Mutter has no pointer drag and no visible minimize), and the KDE check (KWin's own
-  bar, no drawn bar, no Kit margin, the 722x596 minimum, drag, resize and close), which cannot run here.
+  batch's crop test (`scripts/test-gui-screenshot-batch.py`,
+  `test_the_linux_windows_own_title_bar_is_cropped_with_the_frame`); driven through the bridge on headless Mutter (the
+  bar inside Kit's frame, its buttons, Maximize and its relabelling to Restore, Close ending the app; Close and Maximize
+  also in `scripts/gui-lifecycle.py` steps 06 and 10); the `linux-title-bar` golden shows it ordinary and maximized.
+  Pending: a drag, a double-click zoom and Minimize on a real GNOME session (headless Mutter has no pointer drag and no
+  visible minimize), and the KDE check (KWin's own bar, no drawn bar, no Kit margin, the 722x596 minimum, drag, resize
+  and close), which cannot run here.
 - **The Linux app refuses an X11-only session** (new: the old app's Linux build was never released). Without a Wayland
   display the app prints `farhelm-desktop: the desktop app needs a Wayland session ...` and exits 1 before starting
   anything, rather than starting its helm and supervisor behind a window that never shows. A second launch from such a
@@ -355,6 +409,10 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   would otherwise have no title bar at all and could not be moved with the pointer (settled by the migration's
   coordinator on 2026-11-13). The bar is inert while a dialog is open, as the macOS band is, and under KDE the minimum
   is 722 by 596, since it is set before the compositor says whether it draws the bar.
+- **Text in the title band is not selectable.** In the old app a double-click on the band's text (the version, say)
+  selected a word of it; GPUI's labels are not selectable, and the maintainer decided on 2026-11-13 that, apart from the
+  terminal and text fields, text is copyable only through the copy buttons and copy menu items the old app had, so no
+  text in the band can be selected or copied.
 - **No debug Help menu.** The old app's debug builds had a Help menu with the web view's developer tools and Float on
   Top; both went with the web view.
 - **The version readout's hover is the wider paragraph help.** The old app showed it in the short tooltip, 280 px wide
