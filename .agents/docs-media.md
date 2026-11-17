@@ -75,10 +75,12 @@ is published yet. Run `scripts/docs-screenshots.sh --mac <destination>` for a ca
 SSH transport, preflight and Mac-wide lock. On Linux each shot is expected to stop at the size check since headless
 Mutter renders at scale 1.
 
-> NOTE: The docs scenario's 1600x1000-point window needs a larger Mac display than the README hero's. On the test Mac
-> (2026-11-17) the app fitted it to 1600x972 points, so both Launch templates shots stopped at the size check and no
-> picture came back. When that happens, say so, and do not work around it with window resizing, rescaling or a GPUI
-> patch.
+> NOTE: The docs scenario's 1600x1000-point window needs more of the Mac's screen than the README hero's. On the test
+> Mac it fits only with the Dock set to hide itself (`docs/gui-agent.md`, "On a Mac"). When the window does not fit, say
+> so, and do not work around it with window resizing, rescaling or a GPUI patch. No Mac docs capture has completed yet:
+> on 2026-11-17, with the window fitting, two runs returned the Launch templates page's full shots and then failed its
+> later steps, once on a click into the launcher's search box that focused no field and once on a search box not found
+> on screen. Until that is fixed, expect a Mac docs capture to stop there.
 
 The command keeps its bulk capture record and local preview output, and `--only <page>` remains for drafting. Publishing
 belongs to a docs refresh. Published release material stays frozen, and no page module captures release shots yet. The
