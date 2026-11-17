@@ -795,10 +795,11 @@ Lint exceptions: none.
 
 ### Notices bell
 
-Extension points: reported, the whole file: owned by the other-dialogs area, which built it. Another area uses one of
-its items: the session list draws each row's bell (`bell`, sidebar-and-session-view). The table holds only whole paths,
-so the row covers the bell's list too and the owner's own changes to it are reported; the review gate passes those that
-leave the shared item alone. Another area's change follows the pattern already there, and the review gate judges it.
+Extension points: reported, the whole file: owned by the other-dialogs area, which built it. Another area uses two of
+its items: the session list draws each row's bell (`bell`) and caps its row menu's height as the notices panels' is
+capped (`window_cap`), both sidebar-and-session-view. The table holds only whole paths, so the row covers the bell's
+list too and the owner's own changes to it are reported; the review gate passes those that leave the shared items alone.
+Another area's change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -997,11 +998,11 @@ the Linux window's own title bar, drawn by the main view (`bar`, `follow_decorat
 owners build on: `content_area` is the part of the window that holds the app's content, inside GPUI Kit's frame and
 below the bar, and the layer manager keeps its dialogs, popovers and tooltips inside it (with `bar_height` for the
 dialog veil's padding), the notices panels (other-dialogs' notices bell list and rail notices panel, through
-`notices_bell::list_panel`) cap their height by it, the component layer's dialog frame caps its size against it,
-settings-and-hosts' host progress card caps its height against it, and sidebar-and-session-view's sidebar keeps the main
-pane's floor against its width. A change to what `content_area` covers moves every one of those, so it is a
-foundation-change request, not a pattern change. Another area's change follows the pattern already there, and the review
-gate judges it.
+`notices_bell::list_panel`) cap their height by it, sidebar-and-session-view's session row menu caps its height by it
+(through `notices_bell::window_cap`), the component layer's dialog frame caps its size against it, settings-and-hosts'
+host progress card caps its height against it, and sidebar-and-session-view's sidebar keeps the main pane's floor
+against its width. A change to what `content_area` covers moves every one of those, so it is a foundation-change
+request, not a pattern change. Another area's change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
