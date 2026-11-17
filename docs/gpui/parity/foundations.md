@@ -81,6 +81,12 @@ replaced: screenshot goldens `buttons--{light,dark}`
   [Sidebar and session view](sidebar-and-session-view.md), "Deviations from the old app": touch screens get no
   always-shown button, since GPUI reports no coarse pointer to ask about
 
+Not yet ported: of the second case, the real launcher footer's tiers, Launch primary while it can launch and Reset
+choices neutral (the launcher area's). Nothing pins them: the `dialog-launcher-frame` golden builds its own buttons, so
+it pins how the tiers look rather than that the launcher picks them, and the `app-launcher-scrolled-end` app scene is a
+side-by-side capture that nothing compares. The port is adding no new committed goldens, so the case waits for a test
+that reads the drawn tiers or a later golden of the real launcher.
+
 ### `tests/chrome.spec.ts`
 
 Tests: 3. Covers: the three-level surface ladder renders distinct, correctly grouped levels.
@@ -124,13 +130,13 @@ partly
 - crates/gui/farhelm-gui/src/trash/dialog/tests.rs `a_known_archive_time_alone_is_drawn_in_the_monospace_face` (the
   second case, archive metadata keeps labels in the interface face and only known timestamps in the monospace face: the
   Trash dialog's "Archived" before a time in the monospace face, and "Archive time unknown" in the interface face)
+- crates/gui/farhelm-gui/src/launcher/view_tests.rs
+  `the_launchers_paths_and_command_are_monospace_beside_words_in_the_interface_face` (the first case, in the launcher:
+  the Folder and Agent command fields in the monospace face, the search field in the interface face, and the search's
+  "Use this path" and "Browse this path" rows, words in the interface face and paths in the monospace face)
 
 Not yet ported:
 
-- of the first case, the launcher's search field in the interface face, its Folder and Agent command fields in the
-  monospace face, and its search's "Use this path" and "Browse this path" rows, words in the interface face and paths in
-  the monospace face; belongs to the launcher ([Launcher](launcher.md)), in
-  crates/gui/farhelm-gui/src/launcher/view_tests.rs
 - of the first case, the version readout in the monospace face; belongs to desktop integration
   ([Desktop integration and Linux packaging](desktop-integration-and-linux-packaging.md)), in
   crates/gui/farhelm-gui/src/update_readout/view/tests.rs
