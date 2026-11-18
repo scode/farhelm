@@ -94,7 +94,6 @@ use changed::Changed;
 mod browse;
 mod changed;
 mod checkout;
-pub(crate) use checkout::destination_choice;
 #[cfg(test)]
 pub(super) use checkout::repository_choices as repository_choices_for_tests;
 mod choices;
@@ -113,7 +112,6 @@ mod host_picker;
 mod latest;
 mod model_field;
 mod placement;
-pub(crate) use placement::{PlacementEdit, PlacementMode, build_placement_rows};
 mod recents;
 mod sandbox_question;
 mod save;

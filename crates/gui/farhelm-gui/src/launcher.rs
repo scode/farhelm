@@ -20,8 +20,10 @@
 //!   reasons, a new sandbox's checked against the Tensorlake account the launcher reads as it opens.
 //! - [`search`]: the composer search's rules (what a query means, the rows it offers, the row preselected, what an
 //!   empty result says), with no view.
-//! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits, the Runs on switch
-//!   and a new environment's Recipe and Container host among them (`view::placement`).
+//! - `destination_rows`: the controls shared with the template editor: Runs on with a new environment's Recipe and
+//!   Container host, and the Folder or Managed checkout choice.
+//! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits; its Podman check
+//!   requests, account read and build notes for a new environment are in `view::placement`.
 //! - `words`: the launcher's own words for agent choices (its chip order, docs link and agent notes); the permission
 //!   and effort names other surfaces show too are `crate::permission::words`.
 //!
@@ -42,6 +44,7 @@
 //!   deals with the reply; a launch started without showing the launcher goes through the same check, body and reply
 //!   handling.
 
+pub(crate) mod destination_rows;
 pub mod draft;
 pub mod entry;
 pub mod launch;

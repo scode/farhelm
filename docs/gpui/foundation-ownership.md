@@ -101,6 +101,7 @@ table conflicted across all of it.
 | Updater window side             | `crates/gui/farhelm-gui/src/desktop/updates.rs`                                                                                                                                                                                                                                                        | [reported](#updater-window-side)         | none                                  |
 | Launcher entry                  | `crates/gui/farhelm-gui/src/launcher/entry.rs`                                                                                                                                                                                                                                                         | [reported](#launcher-entry)              | none                                  |
 | Launcher view                   | `crates/gui/farhelm-gui/src/launcher/view.rs`                                                                                                                                                                                                                                                          | [reported](#launcher-view)               | none                                  |
+| Destination rows                | `crates/gui/farhelm-gui/src/launcher/destination_rows.rs`                                                                                                                                                                                                                                              | [reported](#destination-rows)            | none                                  |
 | Launch draft                    | `crates/gui/farhelm-gui/src/launcher/draft.rs`                                                                                                                                                                                                                                                         | [reported](#launch-draft)                | none                                  |
 | Launch models                   | `crates/gui/farhelm-gui/src/launcher/model.rs`                                                                                                                                                                                                                                                         | [reported](#launch-models)               | none                                  |
 | Session replace                 | `crates/gui/farhelm-gui/src/session_list/replace.rs`                                                                                                                                                                                                                                                   | [reported](#session-replace)             | none                                  |
@@ -710,6 +711,16 @@ already there, and the review gate judges it.
 
 Lint exceptions: none.
 
+### Destination rows
+
+Extension points: reported, the whole file: owned by the launcher area, which built it, and shared with
+templates-and-quick-launch, whose template editor draws the same Runs on, Recipe and Container host rows in authoring
+mode (`build_placement_rows`, `PlacementMode`, `PlacementEdit`) and the same Folder or Managed checkout choice
+(`destination_choice`); quick launch draws none of them. Another area's change follows the pattern already there, and
+the review gate judges it.
+
+Lint exceptions: none.
+
 ### Launch draft
 
 Extension points: reported, the whole file: owned by the launcher area, which built it, and shared with
@@ -1217,6 +1228,7 @@ without a conflict marker.
 | Updater window side    | `crates/gui/farhelm-gui/src/desktop/updates.rs`                  | `reported`    |
 | Launcher entry         | `crates/gui/farhelm-gui/src/launcher/entry.rs`                   | `reported`    |
 | Launcher view          | `crates/gui/farhelm-gui/src/launcher/view.rs`                    | `reported`    |
+| Destination rows       | `crates/gui/farhelm-gui/src/launcher/destination_rows.rs`        | `reported`    |
 | Launch draft           | `crates/gui/farhelm-gui/src/launcher/draft.rs`                   | `reported`    |
 | Launch models          | `crates/gui/farhelm-gui/src/launcher/model.rs`                   | `reported`    |
 | Session replace        | `crates/gui/farhelm-gui/src/session_list/replace.rs`             | `reported`    |
