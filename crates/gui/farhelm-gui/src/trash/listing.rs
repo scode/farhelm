@@ -77,6 +77,10 @@ pub(crate) struct HostTrash {
     pub serial: u64,
     /// The next recheck of a host that reported active removal; dropping it cancels it.
     pub recheck: Option<ticker::Deadline>,
+    /// Whether the last read was answered from a staged run's pins file rather than the host (agent builds only;
+    /// `crate::agent_startup`, "Staged host values"). A host becomes staged when the harness gives it its alias, which
+    /// can be after the window first read it, so a change either way reads it again.
+    pub staged: bool,
 }
 
 /// A cleanup outcome the dialog keeps showing for a host until something settles it: a refusal the host gave for one

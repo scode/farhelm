@@ -269,8 +269,29 @@ back from the app's start, so they read older by however long staging took. The 
 helm sorts the list by its real statuses and work starts, running and waiting sessions first, and the pins change no
 order. Sessions are matched by their current title, so a renamed session shows its real scratch folder, a machine path,
 and a Clone, which keeps its source's title, shows the pinned values too. The pinned folder is also where New session
-(from the open session), Clone and Replace with start, a folder that does not exist on this machine. The summary card's
-start time stays real, so it reads later than the pinned last activity.
+(from the open session), Clone and Replace with start. That folder, and every other `~` folder the scenario names
+(sessions, `launch_history`, `folders`, templates' folder destinations), is created inside the run's private HOME before
+any supervisor starts (`create_scenario_dirs`), so the launcher's folder check, which each staged supervisor answers
+against that HOME, finds it and shows no warning. The summary card's start time stays real, so it reads later than the
+pinned last activity.
+
+Staged host values: the same file carries one block per scenario host,
+`{"alias", "launches", "folders", "trash", "files"}`, from the scenario's `launch_history`, `folders`, `checkout_trash`
+and `terminal_files` (`session_pins_body` documents the exact shape, and `plan_scenario` checks the fields first: wire
+names for the launch choices, an absolute trash root, known hosts). An agent build finds each host by the alias `start`
+gave it and, for that host, replaces the launch history's launches and folders as the launcher reads them, answers the
+Trash button's listing without reading the host and refuses every trash delete before sending it, and answers a
+terminal's file checks itself (Ready with the staged full path and size for a listed path, Not found for any other, a
+click downloading nothing). Every scenario host gets a block, an empty one when the scenario stages nothing for it, so a
+staged session's scratch folder never shows in the launcher. The values hold for the whole run: the trash shows its
+count in every shot. Ages count back from the same anchor as the session ages.
+
+A printed path is a run of terminal cells, not an element `hover` can aim at, so an agent build with a pins file handles
+`action farhelm_agent::HoverStagedTerminalFile`: it gives the first staged path a terminal shows (focused terminals
+first, paths in the file's order) the hover a pointer resting on its middle would, and the terminal then shows its file
+display. The hover lasts until the terminal sees the pointer again, by a move over its grid or the pointer leaving it,
+so dispatch it with the pointer already outside the terminal and capture with `--keep-focus`: neither park lands on the
+terminal, which reacts to hover. Wait for `id:terminal-file-disclosure` before capturing.
 
 The window starts at the viewport's size as the app's own drawing: on Linux `start` asks for a window larger by the
 frame and title bar the screenshot batch crops off (1322x876 for the hero's 1280x800), unless `--window-size` says

@@ -27,9 +27,32 @@ agents replaying invented transcripts. Statuses are the supervisor's real readin
 directories on the staged sessions so the run's private paths do not enter the picture. `gui-agent.py start --scenario`
 owns that staging and its private sshd; nothing uses a live installation.
 
+Three more things a page needs cannot be answered honestly by a staged host, so the app substitutes the scenario's
+values for them, through the same agent-build seam (the maintainer's decision of 2026-11-18; the "Staged host values"
+section of `crates/gui/farhelm-gui/src/agent_startup.rs` has the details). The launch history comes from
+`launch_history` and `folders`: the helm records every staged session's launch in its scratch directory, a machine path
+the capture refuses, and a fresh run has no history worth showing. The launcher's grouping, ranking, filters and catalog
+checks then run on it as on a real one. The checkout trash comes from `checkout_trash`: the run has no managed
+checkouts, and real ones would list folders under the run. The app never reads a staged host's trash, and refuses every
+delete from it before anything is sent. Since the app reads the pins file at startup, the trash is staged for the whole
+run, so the Trash button shows its count in every shot. A terminal's file check comes from `terminal_files`: the helm
+would look the path up in the session's scratch directory. A staged host is never asked; a path the scenario does not
+list reads as Not found, and a click on a staged file downloads nothing. A printed path is terminal cells rather than an
+element, so the bridge cannot hover it; the agent-build action `farhelm_agent::HoverStagedTerminalFile` gives the first
+staged path a terminal shows the hover a resting pointer would, until the pointer next moves over or out of the
+terminal. Hosts are matched by alias, and every scenario host gets its values, an empty list included, so nothing real
+shows through.
+
+Staging also creates every `~` folder the scenario names inside the run's private home, which every staged supervisor,
+local and remote, expands `~` against. The launcher's folder check therefore finds them for real and shows no "does not
+exist" warning.
+
 The docs engine also stores the scenario's launch templates through the helm's real `PUT /api/templates/<name>` API. A
-template's host key becomes that host's install identity from `GET /api/hosts`. No shot saves or deletes a template.
-Other scenario declarations for pages not yet ported are not staged by this engine.
+template's host key becomes that host's install identity from `GET /api/hosts`. No shot saves or deletes a template. For
+the scenario's invented `add_host` destination, the engine scripts the run's fake hosts (`docs/gui-agent.md`, "Scripted
+hosts") to check it as a reachable machine with nothing set up and the scenario's home, so the Add host dialog shows the
+helm's real setup plan for it; no shot confirms that setup. The remote hosts' destinations are invented host names that
+the run's private ssh configuration sends to its own sshd, so host settings and details show them as they are.
 
 Before each shot the engine presses Escape until no layer remains, giving up after six presses, and hides the Hosts
 panel, which is not a layer. The page's steps then reach the state to photograph; a shot whose steps start, replace or

@@ -153,6 +153,29 @@ class Bridge:
     def __init__(self, gui, run: Path, record: dict, plan: dict | None = None):
         self.gui, self.run, self.record, self.plan = gui, run, record, plan
         self._host_ids: dict | None = None
+        self._tree: dict | None = None
+
+    def forget_tree(self):
+        """Drop the cached element tree; the engine calls this once a shot's state is reached and again per shot."""
+        self._tree = None
+
+    def box(self, target: str) -> dict:
+        """The on-screen box of `target`, in the decorated window's logical coordinates, for crops and annotations.
+
+        The bridge's `get box` resolves an id through its snapshot, where a plain container (a launcher form row, a
+        section) has no entry of its own, so it answers with the box of the container's first text instead. The raw
+        element tree has every element with an id, so an id held by exactly one element there gives its whole visible
+        box; anything else (no such element, several, an empty box) falls back to `get box`.
+        """
+        target = self.resolve(target)
+        if target.startswith("id:"):
+            if self._tree is None:
+                self._tree = json.loads(self._call("tree"))
+            name = target[3:]
+            nodes = [node for node in self._tree.get("nodes", []) if node.get("id") == name]
+            if len(nodes) == 1 and nodes[0]["visible"]["w"] > 0 and nodes[0]["visible"]["h"] > 0:
+                return dict(nodes[0]["visible"])
+        return json.loads(self._call("get", "box", target, "--json"))
 
     def session_key(self, title: str) -> str:
         """The helm's key of the staged session the scenario titles `title`, as `start --scenario` recorded it."""
@@ -195,6 +218,12 @@ class Bridge:
         """Rest the pointer on the named element, for a shot of what hovering shows; pair it with the shot's `park` on
         the same target, since the capture moves the pointer to its park spot before the picture."""
         self._call("hover", self.resolve(target))
+
+    def action(self, name: str, data: dict | None = None):
+        """Dispatch the app action `name` (with `data` as its JSON arguments), for a state no click reaches, such as an
+        agent build's `farhelm_agent::HoverStagedTerminalFile` (docs/docs-shots/SPEC.md, "What is real and what is
+        not")."""
+        self._call("action", name, *([] if data is None else [json.dumps(data)]))
 
     def scroll_into_view(self, target: str):
         """Scroll the named element's scrollable ancestors until it is on screen, for a control below a long dialog's
@@ -298,7 +327,7 @@ def annotate(bridge, batch, shot: Shot, full: Path, window: dict, frame: int, ti
     origin = (frame, frame + title_bar)
     targets = {}
     for annotation in shot.annotations:
-        box = json.loads(bridge._call("get", "box", bridge.resolve(annotation.target), "--json"))
+        box = bridge.box(annotation.target)
         targets[annotation.target] = callouts.Rect(box["x"] - origin[0], box["y"] - origin[1], box["w"], box["h"])
     view_w = window["width"] - 2 * frame
     view_h = window["height"] - 2 * frame - title_bar
@@ -343,8 +372,8 @@ def capture_pages(gui, batch, run: Path, pages, out: Path, *, frame: int = 0, ti
                     args += ["--park", bridge.resolve(shot.park)]
                 if gui.capture(run, record, args):
                     raise RuntimeError("capture failed")
-                boxes = [json.loads(bridge._call("get", "box", bridge.resolve(region), "--json"))
-                         for region in shot.regions]
+                bridge.forget_tree()
+                boxes = [bridge.box(region) for region in shot.regions]
                 window = json.loads(bridge._call("windows", "--json"))[0]
                 boxes += annotate(bridge, batch, shot, full, window, frame, title_bar)
                 if guard and session_ids(gui, run) != before:

@@ -30,6 +30,9 @@
 //!   host's history only, so an environment's home never becomes a host's folder. A failed read offers none of them.
 //!   The old launcher also re-read it on every activity-feed notice, which the desktop app has not (the same deviation
 //!   as above).
+//! - **A staged run's hosts** (agent builds with a pins file only): the answer's launches and folders are replaced by
+//!   the scenario's as it arrives, before anything here reads it ([`crate::agent_startup::staged_launch_history`]), so
+//!   every view of the history, the folder default included, sees only the staged one.
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
@@ -116,6 +119,13 @@ impl Launcher {
                     }
                     match answer {
                         Ok(reply) => {
+                            // A staged run's host shows the scenario's history in place of its real one, whose
+                            // folders are the run's scratch directories (`agent_startup`, "Staged host values").
+                            let reply = crate::agent_startup::staged_launch_history(
+                                reply,
+                                launcher.chosen_host(cx),
+                                cx,
+                            );
                             launcher.observe_checkout_config_revision(
                                 reply.checkout_config_revision,
                                 cx,

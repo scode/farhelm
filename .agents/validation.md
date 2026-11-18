@@ -657,10 +657,10 @@ systemd or SSH substrate ran.
   app's state files, the window frame's format and restore arithmetic, the embedded helm's arguments carrying a staged
   run's ensure-hosts file (its hosts listed, at made-up `.invalid` destinations it never reaches), bundle resolution,
   the updater against injected dependencies (no network or real bundle), the update readout's wording, and that the
-  ordinary build's binary holds no reader of an agent build's pinned session values. Excluded from the workspace nextest
-  run above, so this is the only development run of these tests. On Linux it needs the packages the clippy entry above
-  names, and no others. The release gate runs this selection on both of its test legs: on x86_64 Linux after the
-  workspace run, and on macOS together with the GUI crates
+  ordinary build's binary holds no reader of an agent build's staged session and host values and no name of its staged
+  file hover action. Excluded from the workspace nextest run above, so this is the only development run of these tests.
+  On Linux it needs the packages the clippy entry above names, and no others. The release gate runs this selection on
+  both of its test legs: on x86_64 Linux after the workspace run, and on macOS together with the GUI crates
   (`-p farhelm-desktop -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping`), each with a doctest run beside
   it.
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` — proves every ban in
@@ -746,7 +746,8 @@ systemd or SSH substrate ran.
   and their exact units, against stand-in `podman` and `systemctl`), the payload directory's checks (absolute, and an
   existing directory), the seeding requests (a `--fleet` kind's replay shape, its transcript fitting a narrow terminal,
   and only the waiting kind declaring an agent type; the `spawner` kind's spawn script by its bare name, and the local
-  host's YOLO setting it turns on), a `--scenario` run (the scenario's checks and refusals, its pins file, the create
+  host's YOLO setting it turns on), a `--scenario` run (the scenario's checks and refusals, its pins file with each
+  host's staged history, folders, trash and file checks, the `~` directories it creates in the staged home, the create
   requests and replay scripts it makes, and against a stand-in helm the open session created first and the status and
   shield checks), a scenario `capture` (the transcript's readiness line, the pointer parked only clear of hover and
   tooltip reactions, the leak check refusing machine paths anywhere and the account's ssh spelling and the hostname only

@@ -472,6 +472,73 @@ fn an_answer_from_a_hosts_old_connection_is_dropped(cx: &mut TestAppContext) {
     );
 }
 
+/// Why this matters: a staged run's trash (`agent_startup`, "Staged host values") lists checkouts that exist on no
+/// host, for the docs screenshots, so the staged host must never be asked, neither for its listing nor to delete an
+/// entry, while every other host is read as before. The harness gives the hosts their aliases only once the window is
+/// up, after its first reads (the first docs capture showed the real, empty trash this way). Specified, with
+/// `build-box` staged by its alias: before it carries that alias both hosts are read; once a push gives it the alias,
+/// with no trash epoch moved, it is not read again but shows the staged listing at once, counted with the local
+/// host's; an entry's Delete on it sends nothing and leaves a refusal beside that entry, naming the staging.
+#[gpui::test]
+fn a_staged_hosts_trash_is_never_read_and_never_deleted_from(cx: &mut TestAppContext) {
+    let pins = r#"{"sessions": [], "hosts": [{"alias": "build-box", "launches": [], "folders": [], "files": [],
+        "trash": [{"repository": "acme/api", "checkout": "api-1", "root": "/home/dev/work", "age": 86400,
+                   "bytes": 187000000}]}]}"#;
+    let staged = crate::agent_startup::StagedValues::parse(pins, 1_800_000_000).unwrap();
+    cx.update(|cx| cx.set_global(staged));
+    let mut unnamed = remote();
+    unnamed.alias = None;
+    let (mut helm, button, cx) = open_button(cx, vec![hosts(&[local(), unnamed])]);
+    let first = take(&mut helm);
+    assert_eq!(
+        reads(&first).iter().map(|read| read.1).collect::<Vec<_>>(),
+        [1, 2],
+        "the premise: before its alias the host is an ordinary one"
+    );
+    answer(
+        &mut helm,
+        &first,
+        |_| (200, listing(&[checkout("a", Some(1))], false)),
+        |_| (500, Value::Null),
+    );
+    test_support::settle(cx);
+    push_hosts(&mut helm, &[local(), remote()]);
+    test_support::settle(cx);
+    assert!(take(&mut helm).is_empty(), "the staged host is not read");
+    let shown = snapshot(&button, cx);
+    assert_eq!(shown.count(), (2, false), "both hosts' entries count");
+    let staged_host = shown.hosts.iter().find(|host| host.id == 2).unwrap();
+    let entries = &staged_host.listed().expect("listed").checkouts;
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry.path.as_str()))
+            .collect::<Vec<_>>(),
+        [("staged-0", "/home/dev/work/.farhelm-trash/api-1")]
+    );
+
+    cx.update(|_, cx| button.update(cx, |button, cx| button.delete(2, "staged-0", cx)));
+    test_support::settle(cx);
+    assert!(take(&mut helm).is_empty(), "the delete was never sent");
+    let notices = snapshot(&button, cx)
+        .hosts
+        .into_iter()
+        .find(|host| host.id == 2)
+        .unwrap()
+        .notices;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].ids, ["staged-0"]);
+    assert!(
+        !notices[0].unconfirmed,
+        "a refusal, not an unconfirmed reply"
+    );
+    assert!(
+        notices[0].message.raw().contains("staged"),
+        "{:?}",
+        notices[0].message
+    );
+}
+
 // ---- The can -------------------------------------------------------------------------------------------------------
 
 /// Why this matters: the can is how the user sees, without opening anything, whether archived checkouts take space on

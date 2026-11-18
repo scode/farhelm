@@ -21,6 +21,9 @@
 //!   layer manager to say what covers a popover, as it does for web links.
 //! - A printed path shows the pointing hand only once its check succeeded; a program's hyperlink shows it at once
 //!   (SPEC.md: "OSC hyperlinks may show a pointer earlier").
+//! - A staged run's host (agent builds with a pins file only) is never asked: the check is answered at once from the
+//!   pins file ([`crate::agent_startup::staged_file_stat`]), and a click on such an answer saves nothing, since the
+//!   file it names exists on no host.
 //!
 //! The terminal's owner ([`super::attached`]) draws the display through the same non-focusing popover and anchor as a
 //! web link's destination display, so it opens by the pointer, closes on a press, comes back after it and is judged
@@ -106,6 +109,9 @@ struct Hover {
     /// Where the display was last drawn, which a click checks it against; the owner's for the display it opened.
     drawn: Drawn,
     check: Check,
+    /// Whether `check` came from a staged run's pins file rather than the host (agent builds only): the file it names
+    /// exists on no host, so a click on it downloads nothing.
+    staged: bool,
     /// The stat in flight. Dropping it, with the hover, abandons the request.
     _stat: Option<Task<()>>,
 }
@@ -157,8 +163,13 @@ impl FileLinks {
             hover.platform = platform;
             return;
         }
-        let (check, stat) = match &self.transfers {
-            Some(transfers) => {
+        // A staged run's host is never asked: its answer comes from the pins file (`agent_startup`, "Staged host
+        // values"), at once, as if the host had answered.
+        let staged = crate::agent_startup::staged_file_stat(&self.session, &path, cx);
+        let was_staged = staged.is_some();
+        let (check, stat) = match (&self.transfers, staged) {
+            (_, Some(stat)) => (Check::Answered(stat), None),
+            (Some(transfers), None) => {
                 let stat = transfers.stat(&self.session, &path);
                 let task = cx.spawn(async move |files, cx| {
                     let answer = stat.await;
@@ -166,7 +177,7 @@ impl FileLinks {
                 });
                 (Check::Checking, Some(task))
             }
-            None => (
+            (None, None) => (
                 Check::Failed(failure(&TransferError::NotSent(NO_HELM_CLIENT.into()))),
                 None,
             ),
@@ -177,6 +188,7 @@ impl FileLinks {
             platform,
             drawn,
             check,
+            staged: was_staged,
             _stat: stat,
         });
         cx.notify();
@@ -247,6 +259,7 @@ impl FileLinks {
         }
         if admitted {
             if let Some(hover) = &self.hover
+                && !hover.staged
                 && let Check::Answered(stat) = &hover.check
             {
                 let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
@@ -548,6 +561,7 @@ pub(crate) fn golden_displays(window: &Window, cx: &App) -> AnyElement {
             platform: Platform::Mac,
             drawn: Drawn::default(),
             check,
+            staged: false,
             _stat: None,
         })
         .collect();

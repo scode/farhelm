@@ -1048,8 +1048,11 @@ impl Launcher {
             self.checkout.setup = Some((field, saved));
         }
         let (field, _) = self.checkout.setup.as_ref()?;
+        // The same name as an id and as a debug selector, as `row` does: the in-process tests find the field by the
+        // selector, and the test-automation bridge, which cannot see selectors, by the id.
         Some(
             div()
+                .id("launcher-checkout-setup")
                 .debug_selector(|| "launcher-checkout-setup".into())
                 .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .child(field.clone())
