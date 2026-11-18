@@ -509,6 +509,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
+  launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
+  0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least
+  once after having typed in it, and then hitting cmd-p
+
 - **Retire the 0.37.0 old-terminal release announcement.** The in-app announcement `0.37.0-old-terminal-support`
   ("Restart old terminals before support ends") tells users to restart sessions in old tmux terminals "or a future
   release will forcibly terminate them". Since tmux-end-old-terminals (#3358 to #3370) that has happened, so the
