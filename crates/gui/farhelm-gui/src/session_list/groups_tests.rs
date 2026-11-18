@@ -10,8 +10,64 @@ use gpui::TestAppContext;
 use serde_json::json;
 
 use super::menu_tests::{drawn, label_of, snapshot};
+use super::row_tests::node;
 use super::tests::{Fixture, open_main, row_order, session};
 use crate::test_support::{self, frame};
+
+/// Group layout shifts the status control in both densities without narrowing the row's open control. Each drawn
+/// member carries its guide and the loose row after the group has none.
+#[gpui::test]
+fn members_keep_their_indent_when_the_list_goes_compact(cx: &mut TestAppContext) {
+    let state = grouped_snapshot(
+        &[
+            session("global").pinned(1),
+            session("pin").pinned(2).grouped(10),
+            session("member").grouped(10),
+            session("loose"),
+        ],
+        vec![group(10, "Project", 2, false)],
+    );
+    let (_fake, cx) = open_main(cx, state);
+    let check = |cx: &mut gpui::VisualTestContext| {
+        let nodes = frame(cx);
+        assert_eq!(row_order(&nodes), ["global", "pin", "member", "loose"]);
+        let bounds = |id: &str| node(&nodes, id).expect(id).bounds;
+        let row = bounds("session-row-loose");
+        let dot = bounds("session-seen-loose");
+        for (item, button, status, guide) in [
+            (
+                "session-item-pin",
+                "session-row-pin",
+                "session-seen-pin",
+                "session-group-guide-pin",
+            ),
+            (
+                "session-item-member",
+                "session-row-member",
+                "session-seen-member",
+                "session-group-guide-member",
+            ),
+        ] {
+            let member = bounds(button);
+            assert_eq!(member.left(), row.left());
+            assert_eq!(member.right(), row.right());
+            assert_eq!(bounds(status).left() - dot.left(), gpui::px(16.));
+            let guide = test_support::bounds(cx, guide);
+            assert_eq!(guide.left() - member.left(), gpui::px(20.));
+            assert_eq!(guide.top(), member.top());
+            assert_eq!(guide.bottom(), bounds(item).bottom());
+        }
+        assert!(cx.debug_bounds("session-group-guide-loose").is_none());
+        row.size.height
+    };
+    let height = check(cx);
+    test_support::click(cx, "session-order");
+    test_support::click(cx, super::order::COMPACT_ID);
+    assert!(
+        check(cx) < height,
+        "Compact removed the loose row's second line"
+    );
+}
 
 /// A named group as stored by the helm. A filtered fixture can name a
 /// member total larger than the number of rows it sends.

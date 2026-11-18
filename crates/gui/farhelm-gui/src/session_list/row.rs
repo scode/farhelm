@@ -258,7 +258,8 @@ impl Inks {
 /// row's summary card ([`SummaryCard::of`]), its open control's hover help. `focus` is the row's own focus handle,
 /// which the list owns and registers with its list state: the row's item tracks it so it contains whichever of the
 /// row's controls holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is
-/// over it, for the menu button's reveal. `marked` draws the marked look (see the module docs). `on_open` runs when the
+/// over it, for the menu button's reveal. `marked` draws the marked look (see the module docs). `grouped` follows the
+/// displayed band, including while the hovered list holds a moved member in its former slot. `on_open` runs when the
 /// user activates the row, with the gesture the click's modifiers ask for; the keyboard's Enter and Space carry none,
 /// so they always open.
 #[allow(
@@ -270,6 +271,7 @@ pub(crate) fn row(
     collections: &Collections,
     selected: bool,
     marked: bool,
+    grouped: bool,
     steps: Steps,
     menu: AnyElement,
     bell: Option<AnyElement>,
@@ -445,8 +447,14 @@ pub(crate) fn row(
             place,
         ));
 
+    let indent = if grouped {
+        super::groups::MEMBER_INDENT
+    } else {
+        px(0.)
+    };
     let mut control = ListRow::new(id.clone(), label, help, Role::Button)
         .selected(selected)
+        .content_indent(indent)
         .line(identity);
     if !compact && (ended.is_some() || cause.is_some() || suspended || deleting.is_some()) {
         // The being-deleted phase takes the cause's place, as the Suspended badge does.
@@ -504,20 +512,37 @@ pub(crate) fn row(
                 .child(div().flex_1().min_w_0().child(control))
                 .child(menu),
         )
-        .children(replace::progress_line(
-            session.key,
-            row,
-            steps.spinner,
-            selected,
-            cx,
-        ))
-        .children(outcome::row_line(session.key, selected, cx))
-        .children(replace_yolo::row_question(session.key, cx))
+        .children(
+            replace::progress_line(session.key, row, steps.spinner, selected, cx)
+                .map(|line| inset_inline(line, indent)),
+        )
+        .children(
+            outcome::row_line(session.key, selected, cx).map(|line| inset_inline(line, indent)),
+        )
+        .children(
+            replace_yolo::row_question(session.key, cx)
+                .map(|question| inset_inline(question, indent)),
+        )
+        .children(grouped.then(|| {
+            // The row's bottom border is outside the absolute positioning area. Carry the guide through that pixel.
+            super::groups::member_guide(palette)
+                .bottom(-px(1.))
+                .debug_selector(|| format!("session-group-guide-{}", session.key))
+        }))
         .children(drag.recorder)
         .children(drag.grip)
         .children(drag.drop_line)
         .children(marked.then(|| marker(session.key, selected, palette)))
         .into_any_element()
+}
+
+/// Inline notices and questions keep their own padding but begin past the same group guide as the open control.
+fn inset_inline(content: impl IntoElement, indent: gpui::Pixels) -> AnyElement {
+    if indent == px(0.) {
+        content.into_any_element()
+    } else {
+        div().pl(indent).child(content).into_any_element()
+    }
 }
 
 /// The row's title as the first line draws it, taking the width the line leaves and truncated at its end, in the

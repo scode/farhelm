@@ -11,8 +11,8 @@ use farhelm_proto::session_requests::{
 use farhelm_proto::ui_channel::{Collection, SessionGroup, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
-    IntoElement, ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Transformation, WeakEntity, Window, div, px, radians, svg,
+    IntoElement, ParentElement as _, Pixels, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Transformation, WeakEntity, Window, div, px, radians, svg,
 };
 use serde_json::json;
 
@@ -27,6 +27,20 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::theme::{self, metrics};
+
+/// The content steps in under the group header. The grip, selection fill and marked stripe use the original row edge.
+pub(super) const MEMBER_INDENT: Pixels = px(16.);
+
+/// Put the guide beside the leading edge of the header's caret, clear of the member's indented status slot.
+pub(super) fn member_guide(palette: &theme::Palette) -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left(px(20.))
+        .w(px(1.))
+        .bg(theme::color(palette.border_nested))
+}
 
 /// The group header key is outside the session reference namespace. Menu
 /// anchors, virtualized focus and drag handles can all use the same key.
@@ -558,6 +572,8 @@ pub(super) struct Frame<'a> {
     pub(super) keys: Vec<String>,
     pub(super) rows: Vec<Listed<'a>>,
     pub(super) headers: HashMap<String, Header>,
+    /// Displayed membership can lag a helm update while the list holds its order.
+    pub(super) member_groups: HashMap<String, i64>,
     pub(super) separators: HashMap<String, pins::Separator>,
     pub(super) moves: HashMap<String, pins::Neighbors>,
     pub(super) drag: Vec<pin_drag::Band>,
@@ -578,6 +594,7 @@ impl<'a> Frame<'a> {
             keys: Vec::new(),
             rows: Vec::new(),
             headers: HashMap::new(),
+            member_groups: HashMap::new(),
             separators: HashMap::new(),
             moves: HashMap::new(),
             drag: Vec::new(),
@@ -677,10 +694,14 @@ impl<'a> Frame<'a> {
         self.keys.extend(rows.iter().map(|row| row.key.to_owned()));
         let (separator, area) = match band {
             Band::GlobalPins => (pins::Separator::GlobalPins, SessionGroupTarget::Ungrouped),
-            Band::Group(id) => (
-                pins::Separator::GroupPins(id),
-                SessionGroupTarget::Group(id),
-            ),
+            Band::Group(id) => {
+                self.member_groups
+                    .extend(rows.iter().map(|row| (row.key.to_owned(), id)));
+                (
+                    pins::Separator::GroupPins(id),
+                    SessionGroupTarget::Group(id),
+                )
+            }
             Band::Tail => return,
         };
         if let Some(row) = pins::separator_after(rows, follows, |row| row.row.pinned) {
