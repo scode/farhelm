@@ -559,6 +559,8 @@ fn permission(chips: &Chips, palette: &Palette) -> AnyElement {
 /// is the shared keyboard-scrollable one ([`ScrollBox`]), a tab stop named for its label as the old labelled box was, so
 /// the whole text is reachable without a pointer. Commands, resume commands and wrapper words are in the monospace face
 /// (the old `pre`); a prompt keeps the interface face (`.approval-card-prompt`), being prose.
+/// Carriage returns stay visible even before a newline. Bash treats a backslash followed by CRLF differently from a
+/// backslash followed by LF, so dropping the carriage return can make a separate command look like a continuation.
 fn long_text(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElement {
     let Fact::Box(_, text) = fact else {
         return div().into_any_element();
@@ -566,9 +568,8 @@ fn long_text(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyEl
     let label = fact.label();
     // Each line its own host-text element, so a line break the agent wrote stays a line break and every character on
     // the line is escaped as host text anywhere is.
-    let lines = text.raw().replace("\r\n", "\n");
     let lines = div().flex().flex_col().children(
-        lines
+        text.raw()
             .split('\n')
             .map(|line| host_text::element(&HostText::from_host(line)).min_h(BOX_LINE)),
     );

@@ -15,7 +15,9 @@ use std::rc::Rc;
 use farhelm_proto::approvals::{
     ApprovalAction, ApprovalAnswer, ApprovalSession, LaunchVerb, PendingApproval,
 };
-use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch, SessionRef};
+use farhelm_proto::{
+    CommandLaunch, LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch, SessionRef,
+};
 use gpui::{
     DriverNode, DriverText, IntoElement as _, Modifiers, Role, TestAppContext, VisualTestContext,
     px,
@@ -257,6 +259,39 @@ fn the_card_paints_its_badge_heading_count_from_line_facts_and_answers(cx: &mut 
             "Always allow from build",
             "Deny"
         ]
+    );
+}
+
+/// The command box paints the carriage return after a backslash and starts a new line at the LF. Hiding the CR would
+/// make Bash source with a separate command look like a line continuation to the person answering the card.
+#[gpui::test]
+fn the_command_box_shows_a_carriage_return_before_a_newline(cx: &mut TestAppContext) {
+    let mut approval = launch("build");
+    let ApprovalAction::Launch { launch, .. } = &mut approval.action else {
+        panic!("expected a launch approval");
+    };
+    let command = CommandLaunch {
+        command: "echo A \\\r\necho B".to_owned(),
+        yolo: true,
+        agent: None,
+        resume: None,
+    };
+    assert!(
+        command.validate().is_ok(),
+        "premise: the helm admits the command"
+    );
+    *launch = SessionLaunch::Command(command);
+    let drawn = Rc::new(RefCell::new(Drawn {
+        approval,
+        width: 660.,
+        busy: false,
+        refusal: None,
+        pressed: Rc::default(),
+    }));
+    let cx = open(cx, drawn);
+    assert_eq!(
+        painted(&frame(cx), "approval-req-1-box-0"),
+        [r"echo A \<U+000D>", "echo B"]
     );
 }
 
