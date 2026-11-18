@@ -69,6 +69,63 @@ fn members_keep_their_indent_when_the_list_goes_compact(cx: &mut TestAppContext)
     );
 }
 
+/// The marker carries selection while the chosen member is hidden. Choosing it must leave shared collapse alone,
+/// and opening the group moves selection back to the member row.
+#[gpui::test]
+fn a_collapsed_group_marks_its_open_member_without_expanding(cx: &mut TestAppContext) {
+    let state = grouped_snapshot(
+        &[
+            session("loose"),
+            session("hidden").title("Review \u{202e} notes").grouped(10),
+            session("other").grouped(20),
+        ],
+        vec![group(10, "Review", 1, true), group(20, "Tools", 1, true)],
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    let _ = group_commands(&mut fake);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["loose"],
+        "both groups start collapsed"
+    );
+    assert!(cx.debug_bounds("session-group-10-open").is_none());
+    cx.update(|_, cx| super::selection::choose("hidden", cx));
+    test_support::settle(cx);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["loose"],
+        "the open member is still hidden"
+    );
+    assert!(
+        group_commands(&mut fake).is_empty(),
+        "opening sends no collapse write"
+    );
+    let marker = test_support::bounds(cx, "session-group-10-open");
+    assert_eq!(marker.size.width, gpui::px(3.));
+    assert!(cx.debug_bounds("session-group-20-open").is_none());
+
+    let toggle = test_support::center(cx, "session-group-10-toggle");
+    cx.simulate_mouse_move(toggle, None, gpui::Modifiers::none());
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    let help = cx
+        .update(|window, cx| crate::layers::shown_tooltip(window, cx))
+        .expect("group toggle help");
+    assert!(
+        help.text
+            .contains("Holds the open session: Review <U+202E> notes")
+    );
+
+    test_support::click(cx, "session-group-10-toggle");
+    let nodes = frame(cx);
+    assert_eq!(
+        node(&nodes, "session-item-hidden")
+            .expect("expanded member")
+            .selected,
+        Some(true)
+    );
+    assert!(cx.debug_bounds("session-group-10-open").is_none());
+}
+
 /// A named group as stored by the helm. A filtered fixture can name a
 /// member total larger than the number of rows it sends.
 pub(super) fn group(id: i64, name: &str, members: u64, collapsed: bool) -> SessionGroup {

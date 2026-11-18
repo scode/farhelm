@@ -109,6 +109,8 @@ pub(super) struct Header {
     live: bool,
     pub(super) count: Option<String>,
     pub(super) attention: Option<Attention>,
+    /// The title that otherwise has no selected row while this group is folded.
+    open_member: Option<HostText>,
 }
 
 /// The same queue used by the sidebar preferences, with an entity owned
@@ -222,6 +224,17 @@ pub(super) fn draw_header(
         "Collapse group"
     };
     let name_label = format!("{words} {}", farhelm_proto::text::escaped(name.raw()));
+    let toggle_help = header.open_member.as_ref().map_or_else(
+        || HoverHelp::tooltip(words),
+        |title| {
+            HoverHelp::sentence(
+                HostSentence::new(format!("session-group-{id}-open-help"))
+                    .text(words)
+                    .text(". Holds the open session: ")
+                    .host(title),
+            )
+        },
+    );
     let caret = svg()
         .path(Icon::ChevronDown.path())
         .size(px(12.))
@@ -232,7 +245,7 @@ pub(super) fn draw_header(
         } else {
             0.
         })));
-    let toggle = Button::new(label, name_label, HoverHelp::tooltip(words), Role::Button)
+    let toggle = Button::new(label, name_label, toggle_help, Role::Button)
         .tier(Tier::Ghost)
         .compact()
         .discloses(!header.collapsed)
@@ -301,6 +314,10 @@ pub(super) fn draw_header(
         .children(group_menu)
         .children(drag.recorder)
         .children(drag.grip)
+        .children(header.open_member.as_ref().map(|_| {
+            super::row::leading_marker(palette.accent_fill)
+                .debug_selector(|| format!("session-group-{id}-open"))
+        }))
         .children(drag.drop_line);
     if drag.lifted {
         head = head
@@ -588,8 +605,22 @@ impl<'a> Frame<'a> {
         original_pins: Option<&std::collections::HashSet<String>>,
         collapse: &CollapseWrites,
         counts: Option<farhelm_proto::ui_channel::ListCounts>,
+        open: Option<Listed<'a>>,
         cx: &App,
     ) -> Self {
+        // While a hold keeps a displayed member in its former band, follow that band. A filtered-out open row still
+        // comes through the channel outside the order and can mark its group when other members match the filters.
+        let open_group = open.and_then(|open| {
+            let band = layout
+                .members()
+                .find(|(_, member)| member.key == open.key)
+                .map(|(band, _)| band)
+                .unwrap_or_else(|| Band::served(&open));
+            match band {
+                Band::Group(id) => Some((id, open.row.info.title.as_str())),
+                Band::GlobalPins | Band::Tail => None,
+            }
+        });
         let mut frame = Self {
             keys: Vec::new(),
             rows: Vec::new(),
@@ -619,6 +650,9 @@ impl<'a> Frame<'a> {
                 super::complete_count(matching, denominator)
             });
             let attention = collapsed.then(|| Attention::highest(&rows)).flatten();
+            let open_member = open_group
+                .filter(|(id, _)| collapsed && *id == group.id)
+                .map(|(_, title)| HostText::from_host(title));
             let live = roster.iter().any(|live| live.id == group.id);
             frame.headers.insert(
                 key.clone(),
@@ -629,6 +663,7 @@ impl<'a> Frame<'a> {
                     live,
                     count,
                     attention,
+                    open_member,
                 },
             );
             if live {

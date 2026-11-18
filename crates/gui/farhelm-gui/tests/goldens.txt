@@ -154,8 +154,8 @@ linux/session-list-deleting--dark.png 9ba5d5e996d6e62b3f73402e5fa6b06193fec674
 linux/session-list-deleting--light.png 816e11c7671ca7e6eca4d2f159b4e9f0b18e5434
 linux/session-list-empty--dark.png 8b720a3b0820ceb817736f36658024f56297b8ad
 linux/session-list-empty--light.png 49921a5aef76b37af5b17600469acc51ab926d5c
-linux/session-list-groups--dark.png 111a77ea7ba66b8e6794d8e02ef0d9d77a028b6a
-linux/session-list-groups--light.png 93e6d7c89c2774f554c9ec51e8b75903a35756eb
+linux/session-list-groups--dark.png ba6b06070f987df1053191fa03eadf790f5c851c
+linux/session-list-groups--light.png b6a4bff83eddef2d0ba15e3679bc1b1b57549f5b
 linux/session-list-marked--dark.png 5d0f0ef8188b56abab080a7740ff0f48dd5ab456
 linux/session-list-marked--light.png 8da1490afaf3d528258ee50744f6ce18412c46f9
 linux/session-list-pinned--dark.png 5dd8a6e5fe03d36f0868c9a5d0471c5a5b7b3056
