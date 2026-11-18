@@ -32,22 +32,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   be refused from an empty launcher, because the agent was inferred from the suggestion list. The plan was told to keep
   inferring Codex or OpenCode for those four IDs in that case only, keeping the saved ID as a custom model, and to
   record this in SPEC.md as a narrow exception to templates applying exactly like hand edits. The alternative was making
-  affected users add an agent type to such templates themselves.
-- **Revisit raising sandbox-suspend-overlap's size gate to about 1,000 lines.** Decided on the maintainer's behalf on
-  2026-11-12 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
-  changed lines against a gate of about 400 for the whole plan, because the estimate was low rather than the scope
-  growing. The plan was told to build the second PR (a launch's wake waiting out a "host is busy" refusal and failing at
-  once when its host is suspended again) as planned, with the gate raised to about 1,000 lines for both, roughly 900
-  expected. The alternatives were landing #3339 alone and dropping that hardening, or landing it alone and planning the
-  hardening separately; both leave a same-host launch racing a Suspend or Resume able to fail needlessly or time out
-  misleadingly.
-
-- **Revisit accepting sandbox-suspend-overlap at about 1,215 lines.** Decided on the maintainer's behalf on 2026-11-12
-  when that plan blocked a second time, finished, over the raised limit of about 1,000: #3339 is about 600 changed lines
-  and the wake hardening (#3341) about 615 against an estimate of 300, mostly the wake logic's comments and unit tests
-  and three browser tests. Both PRs were accepted as they are. The alternative was trimming comments and folding unit
-  tests first, which would save perhaps 100 to 150 lines, still be over 1,000, and likely shorten the explanation of why
-  a stale suspended state right after a Resume is not a new suspension.
+  affected users add an agent type to such templates themselves. Plan: `plans/queue/model-families.md`.
 
 ## Near term
 
@@ -99,7 +84,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Revisit the 500-session cap per host.** A host with more than 500 sessions cuts its list, and the helm never sees
   the cut sessions. Work out exactly what the limit is and the full set of implications when it is hit. One known one:
-  if the open session is among the cut ones, the app cannot tell that it was deleted.
+  if the open session is among the cut ones, the app cannot tell that it was deleted. Plan:
+  `plans/queue/session-limit-notice.md`.
 
 - **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
   about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
@@ -122,14 +108,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   working directories under the private staged run. The switcher queries its own session list, which the harness's
   display-path substitution for the main session list does not cover. Investigate how to give those rows safe display
   paths while keeping their real fixture working directories and the pre-crop privacy check. The image was dropped from
-  the release notes. Focused capture evidence: recorder run `0f04c908-2a73-40e0-a5bc-1044b0ffdec8`.
+  the release notes. Focused capture evidence: recorder run `0f04c908-2a73-40e0-a5bc-1044b0ffdec8`. Plan:
+  `plans/queue/quick-switcher-shot-paths.md`.
 
 - **Test that the template editor ignores New sandbox or New container with nothing left to place it on.** The launcher
   and the template editor share one placement picker (#4068). The editor ignores a press on the already chosen New
   sandbox or New container segment once nothing is left to place it on (the last container host removed while the editor
   was open, say), where passing the press on would move the template to Existing host; the launcher ignores the same
   press on its own. `docs/gpui/parity/templates-and-quick-launch.md` states the behavior, but no test covers it, so a
-  later change to the shared picker could break it unnoticed.
+  later change to the shared picker could break it unnoticed. Plan: `plans/queue/shared-placement-picker.md`.
 
 - **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
   the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
@@ -357,7 +344,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Drag sessions into groups.** Drag and drop any session, pinned or not, into a session group, out of one, or between
   groups in the session list. The session groups plan adds groups with a row-menu "Move to group" action and lets only
   pinned sessions cross between pin areas by dragging; this extends dragging to every row. Recorded by the maintainer on
-  2026-11-17 while planning session groups.
+  2026-11-17 while planning session groups. Plan: `plans/queue/session-group-follow-ups.md`.
 
 - **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
   preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
@@ -409,15 +396,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   flat while a slow viewer stalls and two file-upload tests beside a busy or deleted session; port those with this.
   Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-- **Stop warning at every Mac supervisor start about an old tmux socket.** The startup step from tmux-end-old-terminals
-  turns off the private tmux server an older release left running. On macOS a socket nothing listens on refuses
-  connections exactly as a wedged server does, so the step cannot tell a dead old server from a wedged one: it leaves
-  `tmux.sock` and its config in place and logs a warning at every supervisor start. That is every Mac rebooted since its
-  old server last ran, the common case. Sessions are still converted; it is log noise. Find a way to tell the two apart
-  on macOS (or remove a socket whose owning process is gone), so the files are cleaned up and the warning stops, without
-  ever signalling a process other than the old server. Otherwise this lasts until "phase 3" (Mid term) removes the step.
-  Recorded by the maintainer on 2026-11-18 from the plan's review.
-
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
   installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0
@@ -452,7 +430,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   expanded; the header's status dot shows only the most urgent member. Make the selection visible on the collapsed group
   (details to be decided; marking the header that holds the open session is one option). Separately, group members are
   not indented, so in a long group only the header and the heavier separator after the last group mark where it ends;
-  indent members under their header. Recorded by the maintainer on 2026-11-18 from the plan's review.
+  indent members under their header. Recorded by the maintainer on 2026-11-18 from the plan's review. Plan:
+  `plans/queue/session-group-follow-ups.md`.
 
 - **Clone: keep invisible characters when a copied folder or name is edited.** Since gpui-last-mile-fixes (#4059), Clone
   shows invisible characters in the copied folder and session name spelled out (`<U+200B>`), using the rule the command
@@ -468,7 +447,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `a_row_names_a_custom_model_escaped`, `local_home_moves_to_the_local_host`, and
   `a_suspend_in_flight_leaves_new_available`, which drives the whole launcher UI to build a draft a helper already
   builds), and copy-pasted neighbours in `launch_tests.rs` and `environment_recents_tests.rs`. Found by a skeptical
-  re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18.
+  re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18. Plan:
+  `plans/queue/clone-keeps-invisible-characters.md`.
 
 - **Shared placement picker: drop a no-op event and give it a shared home.** Since gpui-shared-placement (#4068), the
   launcher and the template editor share one placement picker (`crates/gui/farhelm-gui/src/launcher/view/placement.rs`).
@@ -478,7 +458,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   lines less, and the guard and its comment go). Separately, the shared picker lives in a launcher-private file that the
   GUI ownership table (`docs/gpui/foundation-ownership.md`) does not cover, so a change there alters the template editor
   without the ownership check reporting it: move the shared items to a sibling module and add an ownership row. Found by
-  a skeptical re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18.
+  a skeptical re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18. Plan:
+  `plans/queue/shared-placement-picker.md`.
+
+- **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
+  field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete
+  to a model at all. Asked for by the maintainer on 2026-11-18 while planning `model-families`, which records the latest
+  model of each family that this needs.
 
 ### Tensorlake
 
@@ -512,14 +498,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
   launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
   0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least
-  once after having typed in it, and then hitting cmd-p
+  once after having typed in it, and then hitting cmd-p. Findings, 2026-11-18: code reading (no change to the path since
+  0.40.0) found no ordinary cause. The maintainer did not recall a "Started" pill, which the designed "moved on" path
+  shows. One rare helm-side corner case matches every symptom: the helm's best-effort cache write of a newly created
+  session (`record_session`, called from `accept_created_session`) can fail when the host reconnected during the create,
+  so the list pushed with the reply is complete but lacks the new session; the desktop app opens it, sees it proven gone
+  (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
+  the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
+  keep watching for it.
 
 - **Retire the 0.37.0 old-terminal release announcement.** The in-app announcement `0.37.0-old-terminal-support`
   ("Restart old terminals before support ends") tells users to restart sessions in old tmux terminals "or a future
   release will forcibly terminate them". Since tmux-end-old-terminals (#3358 to #3370) that has happened, so the
   announcement promises something already done. Remove it from the helm's release announcement table
   (`crates/farhelm-helm/src/release_announcements.json`, where it is the only entry). Recorded by the maintainer on
-  2026-11-18 from the plan's review.
+  2026-11-18 from the plan's review. Plan: `plans/queue/retire-old-terminal-announcement.md`.
 
 - **Remove the leftover `.ci-tmux/` entry.** Until tmux-drop-from-tooling (#3377 to #3379), the test tooling built its
   own pinned tmux into a `.ci-tmux/` directory in each checkout. That build is gone, but the plan kept `.ci-tmux/` in
@@ -534,7 +527,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and Move to group) opens a submenu only on click, Enter or Right; while it is open its parent item loses its
   highlight. Make submenus open on hover, as most desktop submenus do, keep the parent highlighted while its submenu is
   open, and state hover-to-open as the general UI rule for submenus in SPEC.md, implemented once in the shared component
-  so every submenu follows it. Recorded by the maintainer on 2026-11-18 from the mute-sessions review.
+  so every submenu follows it. Recorded by the maintainer on 2026-11-18 from the mute-sessions review. Plan:
+  `plans/queue/submenus-open-on-hover.md`.
 
 ## Mid term
 
@@ -1078,5 +1072,10 @@ are not.
   sessions and can span repositories, owning things that belong to the work rather than to any one session or checkout:
   its own identity, context, skills, a favicon, memory, and similar. Whether Farhelm has such a concept, what it owns,
   and how it is created and selected are all TBD.
+
+- **Make the session list scale past its 500-session ceiling.** Each host lists at most 500 sessions and the helm's list
+  across hosts at most 500, by design (SPEC.md, "The list is served and rendered WHOLE"), and the `session-limit-notice`
+  plan only tells the user through the rail bell when a ceiling is hit. If people do run that many sessions, make the
+  list scale instead. Recorded by the maintainer on 2026-11-18 while planning that notice.
 
 ## Unbucketized
