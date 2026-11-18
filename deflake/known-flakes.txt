@@ -11,3 +11,4 @@
 
 nextest farhelm::e2e create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session  # crash-retry-delete-user-manager-silent
 nextest farhelm-supervisor service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts  # failed-create-replay-timeout
+nextest farhelm::e2e containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use  # retired-session-delete-user-manager-timeout

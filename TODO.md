@@ -569,6 +569,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rerun. The 2026-09-30 FLAKES.md entry fixed the same exposure in another test by giving it a disabled scope manager;
   this test likely needs the same, or a scope manager that answers quickly. See FLAKES.md, 2026-11-09.
 
+- **Retired session deletion depends on the systemd user manager.**
+  `containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use` in
+  `crates/farhelm/tests/e2e/containerized_sessions.rs` passed in RC.6 and failed in the v0.40.0 release gate (recorder
+  `8346914f`) after the reopened supervisor's systemd probe timed out. The test checks retired-session refusal and
+  deletion, so give it a scope manager whose responses do not depend on the runner. See FLAKES.md, 2026-11-17.
+
 ### Difficult deflake
 
 ## Broken tests
