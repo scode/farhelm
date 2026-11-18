@@ -14,12 +14,14 @@ changing the version in that file; the runner image's default stable does not se
 config (or `.github/dist-build-setup.yml`) and run `dist init --yes && dprint fmt` to regenerate. It runs on tag pushes
 only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release path is validated when a tag is cut, by
 the gate `.github/dist-build-setup.yml` puts at the top of every build job — the tag-shape assertion, the changelog
-format and announcement checks, then the retained Rust targets, the desktop app's tests, the OMP reporter's JS scenarios
-and CentOS provisioning on the x86_64 Linux one; standalone uninstall validation and the desktop app's and GPUI crates'
-tests on macOS. The Linux workspace selection includes the full farhelm integration suite, with rootless Podman and its
-offline Ubuntu image prepared before execution. That gate lives inside the build jobs rather than in a `plan-jobs`
-workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a failure
-inside a build job is the only kind it refuses.
+format and announcement checks, then the retained Rust targets, the desktop app's tests, the GPUI end-to-end smoke, the
+OMP reporter's JS scenarios and CentOS provisioning on x86_64 Linux. The macOS job runs standalone uninstall validation
+and the desktop app's and GPUI crates' tests. The Linux workspace selection includes the full farhelm integration suite,
+with rootless Podman and its offline Ubuntu image prepared before execution. The GPUI smoke runs the debug app through
+its automation bridge on a private headless Mutter display with Mesa's software renderer. Its recorder output goes to
+the same failure evidence collection as the other release tests. The gate lives inside the build jobs rather than in a
+`plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a
+failure inside a build job is the only kind it refuses.
 
 What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what
 you expect), `dist generate --check` (the generated workflow is current), the release scripts' own `--self-test` modes

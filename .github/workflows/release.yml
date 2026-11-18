@@ -248,6 +248,17 @@ jobs:
             --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
             --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc -p farhelm-desktop -- --show-output --test-threads=4
+      - name: "Install the GPUI smoke's runtime packages"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: "sudo apt-get install -y mutter dbus-daemon mesa-vulkan-drivers libegl-mesa0 libxcb1-dev libxkbcommon-x11-dev"
+      - name: "Run the GPUI app end-to-end smoke"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          python3 scripts/record-test-run.py \
+            --kind release --selection 'GPUI app end-to-end smoke' \
+            --concurrency 'one app run, steps in order; one step starts and stops a second run' \
+            --termination-grace 30 --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- python3 -B scripts/gui-e2e-smoke.py
       - name: "Run the OMP reporter asset scenarios"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
