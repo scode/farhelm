@@ -49,17 +49,18 @@ alongside the tag build. Wait for the announcement answer before step 1, and car
 changelog PR. Stable re-cuts carry over the settled list without asking again.
 
 1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Review every required commit since the last
-   stable release. Read the commit and PR when a fragment is `MISSING`. Draft entries for changes that meet the criteria
-   in `releasing/EDITORIAL_GUIDANCE.md`. `kind: none` fragments are left out of the draft and `STALE` ones are not used
-   (see `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
+   stable release. Read the commit and PR when a fragment is `MISSING`. Draft a full-list entry for every user-facing
+   change, and pick the ones to propose as highlights (`releasing/.agents/changelog.md`, "Highlights and the full list",
+   and "What gets an entry"). `kind: none` fragments are left out of the draft and `STALE` ones are not used (see
+   `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
    exclusions (the fragment author's judgment is not the user's decision), in the message that hands over the review
    page in step 2. Their answers arrive with the wording review and change the draft like any other edit; nothing in
    this step waits for them. This is the sweep the fragment rule exists to make cheap.
 
    Then run `python3 releasing/check-changelog.py plans`, which lists the plans landed since the last stable release
-   with the release note each one settled at planning time. Those notes are the default entries for their plans' work,
-   and their opt-outs decide what is left out or asked for, as `releasing/.agents/changelog.md`, "Plans' release notes",
-   describes.
+   with the release note each one settled at planning time. Their entries are the release's highlights, and their
+   opt-outs decide which plans get no highlight or are asked about, as `releasing/.agents/changelog.md`, "Plans' release
+   notes", describes.
 
    In the same step, ALWAYS check whether the helm–supervisor protocol version changed since the last stable release,
    and tell the user the answer either way. Compare `PROTOCOL_VERSION` in `crates/farhelm-proto/src/lib.rs` at the merge
@@ -72,26 +73,32 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
 
    (`vPREV` is the last stable tag.) Neither the sweep nor the fragments can be trusted to surface this: a bump often
    rides in a `refactor`, which needs no fragment, or inside a feature whose fragment is about something else. A
-   protocol change informs release testing. Updating remote hosts is part of an ordinary upgrade.
+   protocol change informs release testing. Updating remote hosts is part of an ordinary upgrade, so the change gets no
+   entry, Breaking or otherwise, in the notes (`releasing/.agents/changelog.md`, "Format").
 
    Start the risk report (`releasing/.agents/risk-report.md`, "The release risk report") now too. It must reach the
    maintainer before the tag is pushed in step 7, but the tag does not wait for a reply to it.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments, the plans' release notes, and
-   whatever the user and the agent agree on in conversation, following that guidance. A plan's entry goes in word for
-   word, and its possible inaccuracies are called out on the review page and in the handover message rather than fixed,
-   per `releasing/.agents/changelog.md`, "Plans' release notes". Choose which fixes warrant coverage by the same
-   criteria. The maintainer reviews that selection with the wording. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD`
-   section in a Markdown file in your scratch directory, written exactly as it will go into `CHANGELOG.md`, and show it
-   using the `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or
-   anywhere else unless the maintainer asks.
+   whatever the user and the agent agree on in conversation, following that guidance and
+   `releasing/.agents/changelog.md`, "Highlights and the full list": the plans' entries and the maintainer's own as the
+   highlights, and everything else in the full list, proposed highlights included until the maintainer promotes them. A
+   plan's entry goes in word for word, and its possible inaccuracies are called out on the review page and in the
+   handover message rather than fixed, per `releasing/.agents/changelog.md`, "Plans' release notes". Keep the whole
+   proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch directory, written exactly as it will go
+   into `CHANGELOG.md`, the full list's `<details>` frame included, and show it using the `interactive-artifact` skill.
+   Load and follow that skill by name. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
 
    Write a body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent
-   scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Do not use
-   the legacy notes-review page generator: it emits a full document with its own scripts, which the skill does not
-   accept. The Markdown scratch file stays authoritative; page markup is only its presentation. Follow the skill for
-   styling, serving, sharing the URL and any tunnel instructions, waiting for submissions, status, replies and shutdown.
-   Use its chosen port and tokenized URL. If the skill is unavailable or its server fails, stop and report why. Give the
-   maintainer the URL as soon as the page is served.
+   scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Show the
+   full list as its own part of the page below the highlights, open, so the maintainer can comment on it without
+   unfolding anything. Mark every proposed highlight with the reason for proposing it and a picker to promote it, and
+   every deferred plan's draft (which sits in the full list until the maintainer answers) with a picker to approve it as
+   a highlight and a field for their own text. Do not use the legacy notes-review page generator: it emits a full
+   document with its own scripts, which the skill does not accept. The Markdown scratch file stays authoritative; page
+   markup is only its presentation. Follow the skill for styling, serving, sharing the URL and any tunnel instructions,
+   waiting for submissions, status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is
+   unavailable or its server fails, stop and report why. Give the maintainer the URL as soon as the page is served, and
+   list the proposed highlights in that message.
 
    The maintainer comments on entries, suggests replacements, or submits general notes through the skill. Match feedback
    to the quoted text and section, rather than positional entry ids that shift between rounds. Apply the feedback to the
@@ -147,8 +154,9 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
      what dist wrote. Run it again when in doubt; once finalized, it reports so and changes nothing. A GitHub release
      that is deleted and recreated (the recovery procedure in `dist-workspace.toml`) comes back with the tag's draft, so
      run it again after that.
-   - If the approval changed which entries exist or which PRs they cite, bring the screenshot work from step 4 up to
-     date the way `releasing/.agents/stable.md`, "Re-cutting a stable release", describes.
+   - If the approval changed which entries exist, which PRs they cite, or which entries are highlights (a promotion or a
+     move to the full list), bring the screenshot work from step 4 up to date the way `releasing/.agents/stable.md`,
+     "Re-cutting a stable release", describes.
 
    If the maintainer approves before the changelog PR in step 4 merges, that PR carries the approved section without the
    notice instead, and there is nothing to finalize.
@@ -172,8 +180,9 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
      `jjstack init` there; a linked workspace whose Git directory differs from jj's store fails its colocation guard. Do
      not run `cargo clean` or touch tags, the release branch, or anything on get.farhelm.io.
    - Read the approved scratch section supplied by the release agent, or the `## vX.Y.Z` section of `CHANGELOG.md` once
-     it has landed, and decide which entries change something a reader would see: a new dialog or control, or a
-     redesign. Most entries do not, and a release with none gets no PR; say so and stop.
+     it has landed, and decide which of its highlights (the entries above the folded "All other changes" list, which
+     gets no screenshots) change something a reader would see: a new dialog or control, or a redesign. Most entries do
+     not, and a release with none gets no PR; say so and stop.
    - For each that does, add a shot to `scripts/docs-shots/release-notes.py` and an item to
      `website/src/release-notes/vX.Y.Z.json`. Run the full capture on Linux (`scripts/docs-screenshots.sh --local`, no
      `--only`), look at every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm
@@ -270,22 +279,27 @@ and protocol check against the new base, then make another changelog PR as in st
 table over without asking again, retaining each entry's version and id even when the re-cut gets a new patch version; do
 not copy an earlier announcement into a new entry. The PR renames the `## vX.Y.Z` section when the version changed (a
 stable `announce` fails unless the newest section names the tag exactly), considers the fix and all required commits
-that landed since, and deletes the fragments. Entries the maintainer already approved stay word for word. Draft new
-entries from the fragments (or, for a `MISSING` commit, from the commit and its PR) following
-`releasing/EDITORIAL_GUIDANCE.md`, with a newly landed plan's release note used and checked as step 2 does, and sort
-them into categories as step 2 does. Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask about
-them. Re-run the `plans` mode too, and reconcile what it lists with the carried-over section by PR number: a plan whose
-PRs the section already cites keeps its entry as it stands, and only a plan with PRs the section does not cite yet gets
-a new entry. When the failed attempt pushed its tag, the mode's range starts at that attempt's changelog commit, so
-"merged before this range" there means the failed attempt covered it, not that it shipped. The maintainer chose this on
-2026-10-11, over stopping for wording review and over cutting from the old base with only the fix cherry-picked.
+that landed since, and deletes the fragments. Entries the maintainer already approved stay word for word, in the tier
+they were approved in. Draft new full-list entries from the fragments (or, for a `MISSING` commit, from the commit and
+its PR) following `releasing/EDITORIAL_GUIDANCE.md`, marking any proposed highlights, with a newly landed plan's release
+note used as a highlight and checked as step 2 does, and sort them into categories as step 2 does. Leave out
+`kind: none` fragments and `STALE` ones rather than stopping to ask about them. Re-run the `plans` mode too, and
+reconcile what it lists with the carried-over section by PR number: a plan whose PRs the section already cites in the
+highlights keeps its entry as it stands, and only a plan with PRs the section does not cite yet gets a new entry. A plan
+whose PRs the section cites only in the full list (its PRs merged before its landing was recorded, so the earlier
+attempt curated them from their fragments) now has its note: its entry becomes the highlight and replaces those
+full-list entries for the same work, unless the maintainer approved them as they stand, in which case keep them and put
+the plan's entry on the page with a callout. When the failed attempt pushed its tag, the mode's range starts at that
+attempt's changelog commit, so "merged before this range" there means the failed attempt covered it, not that it
+shipped. The maintainer chose this on 2026-10-11, over stopping for wording review and over cutting from the old base
+with only the fix cherry-picked.
 
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
 with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
 review page still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
 starting new ones (serve the page again as step 2 does if its server was stopped), and in the message that hands the
-maintainer the updated page, list every entry added without their review, every fragment left out, and every callout on
-a plan's entry.
+maintainer the updated page, list every entry added without their review, every proposed highlight, every fragment left
+out, and every callout on a plan's entry.
 
 Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
 pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from

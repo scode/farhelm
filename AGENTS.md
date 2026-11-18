@@ -151,10 +151,10 @@ A PR whose title type is `feat`, `fix`, `perf`, `style`, or `revert`, or whose t
 fragment under `releasing/changelog.d/` in the same commit as the change, without asking; the agent writes it. The file
 name is a free mnemonic (`cursor-launch.md`), nothing parses it, and `README.md` there is not a fragment. The content is
 a leading `---` front matter block holding a `kind:` line (`breaking`, `added`, `changed`, `fixed`, `removed`, or `none`
-for a change with nothing user-facing, with the reason as its body), then a draft entry written for someone running
-Farhelm: what changed for them, with caveats, and without internal mechanics, following the maintainer's wording rules
-in `releasing/EDITORIAL_GUIDANCE.md`; its first paragraph is the entry candidate, and further paragraphs supply context
-for curation. It is not reviewed at PR time; the release-time curation rewrites it.
+for a change with nothing user-facing, with the reason as its body; a protocol bump alone is `none`), then a draft entry
+written for someone running Farhelm: what changed for them, with caveats, and without internal mechanics, following the
+maintainer's wording rules in `releasing/EDITORIAL_GUIDANCE.md`; its first paragraph is the entry candidate, and further
+paragraphs supply context for curation. It is not reviewed at PR time; the release-time curation rewrites it.
 `python3 releasing/check-changelog.py format` validates it. Other types add one only when the change has a user-facing
 effect.
 
