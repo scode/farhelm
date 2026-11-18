@@ -388,10 +388,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Session groups.** Let users group related sessions in the session list and collapse each group. Keep sessions
-  together as activity changes and show when a collapsed group contains a session that needs attention. Plan:
-  `plans/queue/session-groups.md`.
-
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks

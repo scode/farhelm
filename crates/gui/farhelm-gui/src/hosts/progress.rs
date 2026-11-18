@@ -372,6 +372,7 @@ pub(crate) fn status(
         | Work::Pin
         | Work::Mute
         | Work::MovePin
+        | Work::SessionGroup
         | Work::StopAndSuspend
         | Work::EnvironmentDelete => None,
         // A host's Suspend and Resume run on its key (`super::lifecycle`), and start no run.

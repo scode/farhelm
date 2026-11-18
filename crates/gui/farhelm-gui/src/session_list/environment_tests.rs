@@ -335,8 +335,8 @@ fn a_suspended_row_has_its_badge_and_a_stopped_container_never_does(cx: &mut Tes
 
 /// The old menu put the environment's commands at the head of the Clone group, offered Stop and suspend only while the
 /// environment runs, and withheld the supervisor's lifecycle verbs while it was frozen. Specified: a connected sandbox
-/// session's menu reads Rename, Mark unread, Pin to top, Mute, Suspend, Stop and suspend, Clone, Replace with…, Replace,
-/// Stop, Delete; once suspended it reads the same with Resume in Suspend's place and no Stop and suspend, and Replace
+/// session's menu includes the ordinary viewer actions before Suspend and Stop and suspend. Once suspended it reads
+/// the same with Resume in Suspend's place and no Stop and suspend, and Replace
 /// with…, Replace and Stop ignore a click (the menu stays open), while Stop's description says the sandbox keeps
 /// billing.
 #[gpui::test]
@@ -351,6 +351,7 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-group",
             "session-menu-mute",
             "session-menu-suspend",
             "session-menu-stop-and-suspend",
@@ -375,6 +376,7 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-group",
             "session-menu-mute",
             "session-menu-resume",
             "session-menu-clone",
@@ -946,6 +948,7 @@ fn every_menu_command_is_refused_while_the_environment_is_being_deleted(cx: &mut
         "session-menu-rename",
         "session-menu-seen",
         "session-menu-pin",
+        "session-menu-group",
         "session-menu-mute",
         "session-menu-suspend",
         "session-menu-stop-and-suspend",

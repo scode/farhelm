@@ -81,6 +81,20 @@ pub(crate) enum Ended {
 }
 
 impl Live {
+    /// A collapsed group uses only the attention colors. A stale mark is
+    /// historical, and a mute suppresses everything except a live wait.
+    pub(super) fn group_rank(self, row: &SessionRow) -> Option<u8> {
+        if row.stale || super::retired::is(row) || (muted(row) && self != Self::Waiting) {
+            return None;
+        }
+        match self {
+            Self::Waiting => Some(3),
+            Self::IdleUnseen => Some(2),
+            Self::Running => Some(1),
+            Self::Idle => None,
+        }
+    }
+
     /// The status word, which assistive technology reads instead of the mark.
     pub(crate) fn word(self) -> &'static str {
         match self {

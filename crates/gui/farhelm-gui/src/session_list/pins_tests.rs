@@ -63,7 +63,7 @@ fn move_put(key: &str, neighbor: &str, placement: &str) -> (Method, String, Valu
     (
         Method::Put,
         format!("/api/sessions/{key}/pin-order"),
-        json!({ "neighbor": neighbor, "placement": placement }),
+        json!({ "neighbor": neighbor, "placement": placement, "areas": { "source": "ungrouped", "destination": "ungrouped" } }),
     )
 }
 

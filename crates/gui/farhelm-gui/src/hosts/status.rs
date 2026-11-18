@@ -193,6 +193,7 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::Pin
         | Work::Mute
         | Work::MovePin
+        | Work::SessionGroup
         | Work::Suspend
         | Work::Resume
         | Work::StopAndSuspend

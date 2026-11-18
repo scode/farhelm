@@ -41,6 +41,7 @@ use std::collections::{HashMap, HashSet};
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::SessionRef;
+use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupTarget};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     App, InteractiveElement, IntoElement, ParentElement, Role, SharedString,
@@ -48,12 +49,12 @@ use gpui::{
 };
 use serde_json::json;
 
-use super::SessionList;
 use super::row_marks::HelpPlace;
 use super::selection::Listed;
+use super::{SessionList, groups};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, MenuItem, StatusMark};
-use crate::operations::{Command, Work};
+use crate::operations::{Command, OpKey, Work};
 use crate::theme::{self, Palette, Token};
 
 // ---- The display order -----------------------------------------------------------------------------------------------
@@ -117,6 +118,7 @@ pub(super) struct Neighbors {
 pub(super) fn neighbors(
     shown: &[Listed],
     original: Option<&HashSet<String>>,
+    band: groups::Band,
 ) -> HashMap<String, Neighbors> {
     if !manual_order(shown) {
         return HashMap::new();
@@ -124,7 +126,9 @@ pub(super) fn neighbors(
     let movable: Vec<&str> = shown
         .iter()
         .take_while(|session| {
-            session.row.pinned && original.is_none_or(|original| original.contains(session.key))
+            session.row.pinned
+                && groups::Band::served(session) == band
+                && original.is_none_or(|original| original.contains(session.key))
         })
         .map(|session| session.key)
         .collect();
@@ -133,7 +137,7 @@ pub(super) fn neighbors(
 
 /// Neighbors of every item in one displayed manual order. The edges have
 /// only one direction, and a lone item still has an entry for its grip.
-fn ordered_neighbors(movable: &[&str]) -> HashMap<String, Neighbors> {
+pub(super) fn ordered_neighbors(movable: &[&str]) -> HashMap<String, Neighbors> {
     movable
         .iter()
         .enumerate()
@@ -145,16 +149,15 @@ fn ordered_neighbors(movable: &[&str]) -> HashMap<String, Neighbors> {
         .collect()
 }
 
-/// The key of the row the separator follows: the last of the displayed leading run of pinned rows, only when an
-/// unpinned row follows it. Judged on the displayed order, so a pin the hold keeps lower down does not move it, and
-/// unpinning a row inside the run shortens the run at once.
-pub(super) fn separator_after<'a>(shown: &[Listed<'a>]) -> Option<&'a str> {
-    let leading = shown
-        .iter()
-        .take_while(|session| session.row.pinned)
-        .count();
-    (leading > 0 && shown[leading..].iter().any(|session| !session.row.pinned))
-        .then(|| shown[leading - 1].key)
+/// Draw after the displayed leading run, only when another item follows.
+/// A header can follow a pin run and a session can follow the groups.
+pub(super) fn separator_after<T>(
+    shown: &[T],
+    another_band: bool,
+    in_run: impl Fn(&T) -> bool,
+) -> Option<&T> {
+    let leading = shown.iter().take_while(|item| in_run(item)).count();
+    (leading > 0 && (another_band || leading < shown.len())).then(|| &shown[leading - 1])
 }
 
 // ---- The menu items --------------------------------------------------------------------------------------------------
@@ -233,18 +236,22 @@ impl Direction {
     }
 
     /// The line the item shows under its label (the old item's description).
-    fn description(self) -> &'static str {
-        match self {
-            Direction::Up => "Place before the pinned session above",
-            Direction::Down => "Place after the pinned session below",
+    fn description(self, group: bool) -> &'static str {
+        match (self, group) {
+            (Direction::Up, false) => "Place before the pinned session above",
+            (Direction::Down, false) => "Place after the pinned session below",
+            (Direction::Up, true) => "Place before the group above",
+            (Direction::Down, true) => "Place after the group below",
         }
     }
 
     /// The item's hover help.
-    fn help(self) -> &'static str {
-        match self {
-            Direction::Up => "Move up: place before the pinned session above",
-            Direction::Down => "Move down: place after the pinned session below",
+    fn help(self, group: bool) -> &'static str {
+        match (self, group) {
+            (Direction::Up, false) => "Move up: place before the pinned session above",
+            (Direction::Down, false) => "Move down: place after the pinned session below",
+            (Direction::Up, true) => "Move the group up",
+            (Direction::Down, true) => "Move the group down",
         }
     }
 
@@ -307,9 +314,27 @@ pub(super) fn menu_items(
             });
         })
     };
+    let area = row
+        .group
+        .map_or(SessionGroupTarget::Ungrouped, SessionGroupTarget::Group);
     std::iter::once(pin)
-        .chain(move_items(list, key, &neighbors, busy))
+        .chain(move_items(list, key, &neighbors, busy, Some(area)))
         .collect()
+}
+
+/// Group menus have no Pin item. Their Move actions use the same neighbors
+/// and send the same relative placement as a pinned row.
+pub(super) fn group_move_items(
+    list: &WeakEntity<SessionList>,
+    key: &str,
+    busy: bool,
+    cx: &App,
+) -> Vec<MenuItem> {
+    let neighbors = list
+        .upgrade()
+        .and_then(|list| list.read(cx).moves.get(key).cloned())
+        .unwrap_or_default();
+    move_items(list, key, &neighbors, busy, None).collect()
 }
 
 /// Build the Move actions from the neighbors drawn on screen. Both
@@ -319,6 +344,7 @@ fn move_items<'a>(
     key: &'a str,
     neighbors: &'a Neighbors,
     busy: bool,
+    area: Option<SessionGroupTarget>,
 ) -> impl Iterator<Item = MenuItem> + 'a {
     [Direction::Up, Direction::Down]
         .into_iter()
@@ -330,17 +356,21 @@ fn move_items<'a>(
                     direction.item_id(),
                     direction.icon(),
                     direction.label(),
-                    HoverHelp::tooltip(direction.help()),
+                    HoverHelp::tooltip(direction.help(area.is_none())),
                     Role::MenuItem,
                 )
-                .description(direction.description())
+                .description(direction.description(area.is_none()))
                 .disabled(busy)
                 .on_click(move |_, window, cx| {
                     let _ = list.update(cx, |list, cx| {
                         // Closing returns focus to this row's menu button, where SPEC.md keeps it after a Move,
                         // before the request goes out; the reply's new order moves the row and the focus with it.
                         list.close_menu(&key, window, cx);
-                        send_move(&key, &neighbor, direction.placement(), cx);
+                        let areas = area.map(|area| PinMoveAreas {
+                            source: area,
+                            destination: area,
+                        });
+                        send_move(&key, &neighbor, direction.placement(), areas, cx);
                     });
                 }),
             )
@@ -370,19 +400,71 @@ fn pin_command(session: &str, pinned: bool) -> Result<Command, PathError> {
 /// Send `key`'s move to `placement` of `neighbor`, a displayed movable pin, through the operation store, as the menu's
 /// Move up and Move down and a drop of the row's grip do: one request, under the session's key, with nothing drawn in
 /// advance (the helm pushes the new order before it replies, and the order hold lets it through at once).
-pub(super) fn send_move(key: &str, neighbor: &str, placement: Placement, cx: &mut gpui::App) {
-    super::menu::send(key, move_command(key, neighbor, placement), cx);
+pub(super) fn send_move(
+    key: &str,
+    neighbor: &str,
+    placement: Placement,
+    areas: Option<PinMoveAreas>,
+    cx: &mut gpui::App,
+) {
+    if let Some(group) = groups::header_id(key) {
+        let Some(neighbor) = groups::header_id(neighbor) else {
+            return;
+        };
+        super::menu::send_for(
+            &OpKey::session_group(group),
+            relative_command(
+                Work::SessionGroup,
+                &["session-groups", &group.to_string(), "order"],
+                json!(neighbor),
+                placement,
+                None,
+                "PUT /api/session-groups/[group]/order",
+            ),
+            cx,
+        );
+    } else {
+        super::menu::send(key, move_command(key, neighbor, placement, areas), cx);
+    }
 }
 
 /// The session's move: `PUT /api/sessions/{id}/pin-order` naming the displayed `neighbor` by its full key and the
 /// placement relative to it. The helm refuses it when either is no longer pinned.
-fn move_command(session: &str, neighbor: &str, placement: Placement) -> Result<Command, PathError> {
-    Ok(Command::new(
+pub(super) fn move_command(
+    session: &str,
+    neighbor: &str,
+    placement: Placement,
+    areas: Option<PinMoveAreas>,
+) -> Result<Command, PathError> {
+    relative_command(
         Work::MovePin,
-        Method::Put,
-        ApiPath::api(&["sessions", session, "pin-order"])?,
-        Some(json!({ "neighbor": neighbor, "placement": placement.word() })),
+        &["sessions", session, "pin-order"],
+        json!(neighbor),
+        placement,
+        areas,
         "PUT /api/sessions/[session]/pin-order",
+    )
+}
+
+/// Only the resource and neighbor key differ between the two order routes.
+fn relative_command(
+    work: Work,
+    path: &[&str],
+    neighbor: serde_json::Value,
+    placement: Placement,
+    areas: Option<PinMoveAreas>,
+    label: &'static str,
+) -> Result<Command, PathError> {
+    let mut body = json!({ "neighbor": neighbor, "placement": placement.word() });
+    if let Some(areas) = areas {
+        body["areas"] = json!(areas);
+    }
+    Ok(Command::new(
+        work,
+        Method::Put,
+        ApiPath::api(path)?,
+        Some(body),
+        label,
     ))
 }
 
@@ -439,17 +521,37 @@ const SEPARATOR_ID: &str = "session-pin-separator";
 /// The heavier separator under the leading pinned run (`.session-pin-separator`): two pixels of `--border-row` under
 /// the last pinned row's own one-pixel border, then a 6-pixel gap before the first unpinned row, named "Pinned
 /// sessions" as the old `role="separator"` was. There is no "Pinned" heading.
-pub(super) fn separator(palette: &Palette) -> impl IntoElement {
+#[derive(Clone, Copy)]
+pub(super) enum Separator {
+    GlobalPins,
+    GroupPins(i64),
+    Groups,
+}
+
+pub(super) fn separator(kind: Separator, palette: &Palette) -> impl IntoElement {
+    let (id, label) = match kind {
+        Separator::GlobalPins => (SEPARATOR_ID.to_owned(), "Pinned sessions"),
+        Separator::GroupPins(id) => (
+            format!("session-group-{id}-pin-separator"),
+            "Pinned group members",
+        ),
+        Separator::Groups => ("session-groups-separator".to_owned(), "Session groups"),
+    };
+    let (weight, gap) = if matches!(kind, Separator::GroupPins(_)) {
+        (1., 3.)
+    } else {
+        (2., 6.)
+    };
     div()
-        .id(SEPARATOR_ID)
+        .id(SharedString::from(id.clone()))
         // Tests find it by this; it records nothing outside test builds.
-        .debug_selector(|| SEPARATOR_ID.into())
+        .debug_selector(move || id.clone())
         .role(Role::Splitter)
-        .aria_label("Pinned sessions")
+        .aria_label(label)
         .w_full()
-        .border_t_2()
+        .border_t(px(weight))
         .border_color(theme::color(palette.border_row))
-        .mb(px(6.))
+        .mb(px(gap))
 }
 
 #[cfg(test)]
@@ -517,7 +619,7 @@ mod tests {
         rows[1].1.pin_position = None;
         let shown = pinned_first(listed(&rows));
         assert_eq!(keys(&shown), ["b", "a", "u"]);
-        assert!(neighbors(&shown, None).is_empty());
+        assert!(neighbors(&shown, None, groups::Band::GlobalPins).is_empty());
     }
 
     /// The items' words are the old menu's, and each request is its own kind of work on its own route, so a refusal
@@ -545,8 +647,8 @@ mod tests {
         assert_eq!(
             (
                 Direction::Up.label(),
-                Direction::Up.description(),
-                Direction::Up.help()
+                Direction::Up.description(false),
+                Direction::Up.help(false)
             ),
             (
                 "Move up",
@@ -557,8 +659,8 @@ mod tests {
         assert_eq!(
             (
                 Direction::Down.label(),
-                Direction::Down.description(),
-                Direction::Down.help()
+                Direction::Down.description(false),
+                Direction::Down.help(false)
             ),
             (
                 "Move down",
@@ -571,7 +673,7 @@ mod tests {
             (pin.work(), pin.path().as_str()),
             (Work::Pin, "/api/sessions/a/pin")
         );
-        let moved = move_command("a", "b", Direction::Up.placement()).unwrap();
+        let moved = move_command("a", "b", Direction::Up.placement(), None).unwrap();
         assert_eq!(
             (moved.work(), moved.path().as_str()),
             (Work::MovePin, "/api/sessions/a/pin-order")
@@ -601,16 +703,20 @@ mod tests {
         let rows = rows(&fixtures);
         let shown = listed(&rows);
         assert_eq!(
-            separator_after(&shown),
+            separator_after(&shown, false, |row| row.row.pinned).map(|row| row.key),
             Some("q"),
             "a pin held below moves nothing"
         );
         assert_eq!(
-            separator_after(&shown[..2]),
+            separator_after(&shown[..2], false, |row| row.row.pinned).map(|row| row.key),
             None,
             "nothing unpinned follows"
         );
-        assert_eq!(separator_after(&shown[2..3]), None, "nothing is pinned");
+        assert_eq!(
+            separator_after(&shown[2..3], false, |row| row.row.pinned).map(|row| row.key),
+            None,
+            "nothing is pinned"
+        );
     }
 
     /// The operation store's two classifications decide whether a launch and a host registry change refuse each other

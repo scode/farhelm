@@ -290,6 +290,7 @@ fn a_frame_counts_and_offers_only_the_marks_it_shows() {
         [
             (MetadataAction::Pin, vec!["a"]),
             (MetadataAction::Unpin, vec!["b"]),
+            (MetadataAction::MoveGroup, vec!["a", "b"]),
             (MetadataAction::Mute, vec!["a", "b"]),
             (MetadataAction::Read, vec!["b"]),
             (MetadataAction::Unread, vec!["a"]),
@@ -312,6 +313,7 @@ fn a_frame_counts_and_offers_only_the_marks_it_shows() {
         offered(&one),
         [
             (MetadataAction::Pin, vec!["a"]),
+            (MetadataAction::MoveGroup, vec!["a"]),
             (MetadataAction::Mute, vec!["a"]),
             (MetadataAction::Unread, vec!["a"]),
         ]
@@ -812,6 +814,7 @@ fn metadata_writes_go_once_per_eligible_row_and_clear_the_marks(cx: &mut TestApp
     let items = [
         "session-marked-menu-pin",
         "session-marked-menu-unpin",
+        "session-marked-menu-group",
         "session-marked-menu-mute",
         "session-marked-menu-read",
         "session-marked-menu-unread",

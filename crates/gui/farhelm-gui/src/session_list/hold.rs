@@ -1,5 +1,5 @@
-//! The order hold: while the pointer is over the list's rows, the rows keep the order they had on screen, so a row does
-//! not move out from under the pointer on its way to a click.
+//! The order hold keeps a session or group from moving under the pointer
+//! while the user reaches for it.
 //!
 //! SPEC.md, "Session list". Ported from the old app's `rows.rs` (`HeldOrder`, `held_display_order`,
 //! `hold_should_release`) and `list/view.rs` (`order_hold`, `note_list_pointer`, `leave_list`,
@@ -23,10 +23,10 @@
 //!   served order stay authoritative. While held, rows keep updating in place (they draw from the store); a session
 //!   that disappears goes at once, since a deleted session must not stay clickable; a new session joins at the bottom,
 //!   below every held row, until the hold ends ([`display`]).
-//! - **A manual move takes effect at once.** The pins that were pinned when the hold began and still are follow the
-//!   shared manual order within the slots those pins already hold, so a Move made in this window (or anywhere) shows
-//!   without waiting. Any other pin change stays in place until the hold ends, and a pin made during the hold is never
-//!   admitted as an original one, however many replies come, so it offers no Move items until then ([`super::pins`]).
+//! - **A manual move takes effect at once.** Original groups and pins still eligible in their bands use the shared
+//!   manual order within the slots they already hold. An accepted cross-area drop moves a held slot in the window
+//!   that sent it. Other membership and pin changes keep their slots. A pin made during the hold offers Move after
+//!   the hold ends ([`super::pins`]). Collapse is applied after reconciliation.
 //! - **A pin drag is activity.** While a pinned row is dragged by its grip, every move the drag captures counts as
 //!   the pointer moving over the rows, wherever it is, as the old list kept hearing the moves its grip captured; the
 //!   drop is a manual move like any other ([`super::pin_drag`]).
@@ -40,11 +40,11 @@
 //! cancels it, so the one left is always 5 seconds from the last activity, with no clock read here.
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use farhelm_helm_client::Collections;
-use farhelm_proto::ui_channel::{Availability, Collection, SessionRow};
+use farhelm_proto::ui_channel::SessionGroup;
 use gpui::{
     App, Context, Div, HoverListenerMode, InteractiveElement as _, Stateful,
     StatefulInteractiveElement as _, WeakEntity, Window,
@@ -52,10 +52,11 @@ use gpui::{
 
 use super::SessionList;
 use super::filters::Query;
+use super::groups::{Band, Layout};
 use super::order::Order;
 use super::pins;
 use super::selection::Listed;
-use crate::{session, ticker};
+use crate::ticker;
 
 /// How long the pointer must be completely still over the rows before the hold lets go (SPEC.md's 5 seconds).
 pub(super) const STILLNESS: Duration = Duration::from_secs(5);
@@ -77,6 +78,12 @@ pub(super) struct Held {
     /// The keys among `ids` that were pinned when the hold began and are still shown: the original pins, the only ones
     /// that follow the manual order during the hold and offer Move items.
     original_pins: HashSet<String>,
+    /// Last displayed band of each held row, even if the row's membership
+    /// changes while its menu or the pointer keeps the hold in place.
+    bands: HashMap<String, Band>,
+    /// Preserve the header while held rows still describe a group the helm
+    /// just removed. Live attributes take precedence whenever it exists.
+    groups: Vec<SessionGroup>,
     /// The list the snapshot was taken of.
     list: ListId,
 }
@@ -84,13 +91,25 @@ pub(super) struct Held {
 impl Held {
     /// A snapshot of `shown`, the rows as displayed, for the list `list`. Even an empty one is a hold: rows that arrive
     /// later are new to it.
-    pub(super) fn capture(shown: &[Listed], list: ListId) -> Held {
+    pub(super) fn capture(shown: &Layout<'_>, list: ListId) -> Held {
         Held {
-            ids: shown.iter().map(|session| session.key.to_owned()).collect(),
+            ids: shown
+                .members()
+                .map(|(_, session)| session.key.to_owned())
+                .collect(),
             original_pins: shown
+                .members()
+                .filter(|(band, session)| *band != Band::Tail && session.row.pinned)
+                .map(|(_, session)| session.key.to_owned())
+                .collect(),
+            bands: shown
+                .members()
+                .map(|(band, session)| (session.key.to_owned(), band))
+                .collect(),
+            groups: shown
+                .groups
                 .iter()
-                .filter(|session| session.row.pinned)
-                .map(|session| session.key.to_owned())
+                .map(|block| block.group.clone())
                 .collect(),
             list,
         }
@@ -168,10 +187,53 @@ impl Hold {
         self.held.as_ref().map(|held| &held.original_pins)
     }
 
-    /// The rows to draw for `served`, the rows in the order the list would draw them unheld ([`pins::pinned_first`]
-    /// of the helm's order), answering the list `list`: as the hold keeps them ([`display`]), and the snapshot brought
-    /// up to date with what is drawn, or `served` itself with no hold. A hold taken for another list ends here.
-    pub(super) fn apply<'a>(&mut self, served: Vec<Listed<'a>>, list: ListId) -> Vec<Listed<'a>> {
+    /// Refresh the last frame's snapshot only while there is no hold. The
+    /// next pointer activity takes it before any new server order can draw.
+    pub(super) fn snapshot(&self, layout: &Layout<'_>, list: ListId) -> Option<Held> {
+        self.held.is_none().then(|| Held::capture(layout, list))
+    }
+
+    /// Move the held slot only after this window's cross-area drop was
+    /// accepted. Membership pushes alone cannot move it during a hold.
+    pub(super) fn crossed(
+        &mut self,
+        key: &str,
+        band: Band,
+        neighbor: Option<(&str, pins::Placement)>,
+    ) {
+        let Some(held) = &mut self.held else { return };
+        if !held.original_pins.contains(key) {
+            return;
+        }
+        let Some(old) = held.ids.iter().position(|id| id == key) else {
+            return;
+        };
+        let moved = held.ids.remove(old);
+        let insert = neighbor
+            .and_then(|(key, placement)| {
+                held.ids
+                    .iter()
+                    .position(|id| id == key)
+                    .map(|index| index + usize::from(placement == pins::Placement::After))
+            })
+            .or_else(|| {
+                held.ids
+                    .iter()
+                    .position(|id| held.bands.get(id) == Some(&band))
+            })
+            .unwrap_or(held.ids.len());
+        held.bands.insert(moved.clone(), band);
+        held.ids.insert(insert, moved);
+    }
+
+    /// Reconcile the uncollapsed layout against its held bands and slots.
+    /// A hold taken for another list ends here.
+    pub(super) fn apply<'a>(
+        &mut self,
+        served: Layout<'a>,
+        roster: &[SessionGroup],
+        list: ListId,
+    ) -> Layout<'a> {
         let Some(held) = &mut self.held else {
             return served;
         };
@@ -179,10 +241,12 @@ impl Hold {
             self.held = None;
             return served;
         }
-        let shown = display(held, &served);
-        held.ids = shown.iter().map(|session| session.key.to_owned()).collect();
-        let ids: HashSet<&str> = held.ids.iter().map(String::as_str).collect();
-        held.original_pins.retain(|key| ids.contains(key.as_str()));
+        let shown = display(held, served, roster);
+        let mut next = Held::capture(&shown, list);
+        next.original_pins = std::mem::take(&mut held.original_pins);
+        next.original_pins
+            .retain(|key| next.bands.contains_key(key));
+        *held = next;
         shown
     }
 }
@@ -242,29 +306,9 @@ impl SessionList {
                 cx.notify();
             });
         });
-        let Some(store) = session::current_store(cx) else {
-            return;
-        };
-        let collections = store.read(cx).collections();
-        let available = collections
-            .meta(Collection::Sessions)
-            .is_some_and(|meta| meta.availability == Availability::Available);
-        let list = self.list_id(collections, cx);
-        let entries = &self.entries;
-        self.current.current(cx).hold.activity(deadline, || {
-            // The rows as drawn: `entries` is the order the last frame drew.
-            available.then(|| {
-                let shown: Vec<Listed> = entries
-                    .iter()
-                    .filter_map(|(key, _)| {
-                        collections
-                            .get::<SessionRow>(key)
-                            .map(|row| Listed { key, row })
-                    })
-                    .collect();
-                Held::capture(&shown, list)
-            })
-        });
+        let current = self.current.current(cx);
+        let snapshot = &mut current.last_uncollapsed;
+        current.hold.activity(deadline, || snapshot.take());
     }
 
     /// The pointer left the rows: redraw, so the frame's release check ([`Hold::release_if_due`]) ends the hold unless
@@ -306,29 +350,51 @@ impl SessionList {
     }
 }
 
-/// The rows `held` shows of `served`: every held row still served, in its held slot and with its current data; then
-/// the rows new to the hold, in served order; and, when `served` carries the manual pin order, the original pins that
-/// are still pinned sorted into the slots those pins occupy, so a move among them shows at once. Any other pin change
-/// stays where it is.
-pub(super) fn display<'a>(held: &Held, served: &[Listed<'a>]) -> Vec<Listed<'a>> {
-    let held_ids: HashSet<&str> = held.ids.iter().map(String::as_str).collect();
-    let mut shown: Vec<Listed<'a>> = held
+/// Reconcile the held slots with current row data and group attributes.
+/// The layout keeps vanished headers only while their held members remain.
+/// Arrivals join the tail so a group assignment cannot move other rows.
+fn display<'a>(held: &Held, served: Layout<'a>, roster: &[SessionGroup]) -> Layout<'a> {
+    let served_rows: HashMap<_, _> = served.members().map(|(_, row)| (row.key, row)).collect();
+    let rows = held
         .ids
         .iter()
-        .filter_map(|key| served.iter().find(|session| session.key == key).copied())
+        .filter_map(|key| served_rows.get(key.as_str()).copied())
         .chain(
             served
-                .iter()
-                .filter(|session| !held_ids.contains(session.key))
-                .copied(),
-        )
-        .collect();
-    if pins::manual_order(served) {
-        reorder_slots(
-            &mut shown,
-            |session| session.row.pinned && held.original_pins.contains(session.key),
-            pins::by_position,
+                .members()
+                .map(|(_, row)| row)
+                .filter(|row| !held.bands.contains_key(row.key)),
         );
+    let live_groups: HashMap<_, _> = roster.iter().map(|group| (group.id, group)).collect();
+    let mut groups: Vec<_> = held
+        .groups
+        .iter()
+        .map(|group| live_groups.get(&group.id).copied().unwrap_or(group))
+        .collect();
+    reorder_slots(
+        &mut groups,
+        |group| live_groups.contains_key(&group.id),
+        |a, b| (a.position, a.id).cmp(&(b.position, b.id)),
+    );
+    let mut shown = Layout::partition(rows, groups, |row| {
+        held.bands.get(row.key).copied().unwrap_or(Band::Tail)
+    });
+    let reorder_pins = |rows: &mut [Listed<'a>], band| {
+        if pins::manual_order(rows) {
+            reorder_slots(
+                rows,
+                |row| {
+                    row.row.pinned
+                        && held.original_pins.contains(row.key)
+                        && Band::served(row) == band
+                },
+                pins::by_position,
+            );
+        }
+    };
+    reorder_pins(&mut shown.global, Band::GlobalPins);
+    for block in &mut shown.groups {
+        reorder_pins(&mut block.rows, Band::Group(block.group.id));
     }
     shown
 }
@@ -364,19 +430,20 @@ mod tests {
             .into_iter()
             .map(|key| (key, session(key).row()))
             .collect();
-        let shown = |order: [usize; 2]| -> Vec<Listed> {
-            order
+        let shown = |order: [usize; 2]| -> Layout<'_> {
+            let rows = order
                 .iter()
                 .map(|ix| Listed {
                     key: rows[*ix].0,
                     row: &rows[*ix].1,
                 })
-                .collect()
+                .collect();
+            Layout::served(rows, &[])
         };
-        let keys = |shown: Vec<Listed>| {
+        let keys = |shown: Layout<'_>| {
             shown
-                .iter()
-                .map(|session| session.key.to_owned())
+                .members()
+                .map(|(_, session)| session.key.to_owned())
                 .collect::<Vec<String>>()
         };
         let list = ListId {
@@ -401,8 +468,8 @@ mod tests {
                 held: Some(Held::capture(&shown([0, 1]), list)),
                 ..Hold::default()
             };
-            assert_eq!(keys(hold.apply(shown([1, 0]), list)), ["a", "b"]);
-            assert_eq!(keys(hold.apply(shown([1, 0]), other)), ["b", "a"]);
+            assert_eq!(keys(hold.apply(shown([1, 0]), &[], list)), ["a", "b"]);
+            assert_eq!(keys(hold.apply(shown([1, 0]), &[], other)), ["b", "a"]);
             assert!(hold.held.is_none(), "{other:?}");
         }
     }

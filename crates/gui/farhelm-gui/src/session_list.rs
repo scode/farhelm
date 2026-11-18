@@ -1,11 +1,9 @@
-//! The session list: every session the helm lists, pinned ones first, then in the helm's order, with the open one
-//! selected.
+//! The session list draws the helm's sessions as global pins, named groups and an ungrouped tail. The open session
+//! stays selected even when its group is collapsed.
 //!
-//! SPEC.md, "Session list". The list is drawn from the store while it draws and keeps nothing the helm pushed: its rows
-//! are the sessions collection in the order the collection's metadata gives (the helm sorts; the channel starts in the
-//! user's stored order), with the pinned sessions moved ahead in their shared manual order ([`pins`]), so a pushed
-//! change or a reset redraws it with nothing to go stale. While the pointer is over the rows, the order hold keeps them
-//! in the order they had on screen ([`hold`]), a display-only snapshot that the frame applies on top. Above the rows, a
+//! SPEC.md, "Session list". The store supplies the ordered sessions and the group roster. The sidebar partitions them
+//! before applying the pointer's order hold ([`groups`], [`pins`], [`hold`]). Collapse comes after the hold, so an
+//! expand reveals the same held slots. Above the rows, a
 //! heading band carries the order's title, which opens the menu that changes the order ([`order`]), the count
 //! ("Sessions: N" to assistive technology and on hover, as the old count said) and, at its right, the Trash button (a
 //! view of the trash's own, [`crate::trash`]), the Templates button and New; a listing the helm's cap cut says so in an
@@ -159,6 +157,7 @@ pub(crate) mod delete_notice;
 pub(crate) mod environment;
 pub(crate) mod environment_delete;
 pub(crate) mod filters;
+mod groups;
 pub(crate) mod hold;
 pub(crate) mod host_rail;
 pub(crate) mod marking;
@@ -195,6 +194,9 @@ mod compact_tests;
 
 #[cfg(test)]
 mod delete_notice_tests;
+
+#[cfg(test)]
+mod groups_tests;
 
 #[cfg(test)]
 mod environment_delete_tests;
@@ -315,7 +317,7 @@ pub struct SessionList {
     /// The virtualized rows' state: their count, measured heights, scroll position and focus handles. Kept in step
     /// with the store by [`SessionList::sync_rows`] at the top of every frame; it holds no session data of its own.
     rows: ListState,
-    /// The listed sessions' keys in the order the list state was last rebuilt to, each with its row's focus handle:
+    /// The displayed session and group keys, each with its item's focus handle:
     /// how a frame tells whether the rows or their order changed, and what the item callback draws by index. That is
     /// the displayed order (pins first, as the order hold keeps it), which is also what the hold snapshots when the
     /// pointer takes it, not the helm's.
@@ -374,9 +376,8 @@ pub struct SessionList {
     /// panel's Details choice survives closing and reopening it (SPEC.md: opening or closing Hosts keeps "the current
     /// ... details choice").
     hosts_panel: Entity<HostsPanel>,
-    /// Each movable pin's Move neighbors in the order last drawn ([`pins::neighbors`]), which an open row menu reads
-    /// to draw its Move up and Move down. Worked out with `entries` at the top of every frame, so the menu, drawn after
-    /// the list in the same frame, names the neighbors the user sees.
+    /// The move neighbors in each displayed pin band and among group headers. Menus read these from the same frame
+    /// that draws the list so Move up and Move down name the neighbors the user sees.
     moves: HashMap<String, pins::Neighbors>,
     /// The marked bar's focus handles and anchor, and what the last frame projected of the marks ([`marking::Kept`]):
     /// kept here for the window's life, since the bar is rebuilt on every draw and its menu names its toggle.
@@ -415,9 +416,15 @@ struct Current {
     /// The order hold ([`hold`]): the order on screen while the pointer is over the rows. Per UI session, so a reset
     /// drops it with the listing it held.
     hold: hold::Hold,
+    /// The frame's complete layout before collapse, for a hold taken by
+    /// the pointer before the next frame.
+    last_uncollapsed: Option<hold::Held>,
     /// A pinned row's drag by its grip and the movable rows the last frame drew ([`pin_drag`]). Per UI session, so a
     /// reset forgets a drag with the listing it was over.
     pin_drag: pin_drag::Shared,
+    /// Collapse saves are independent for each group and retire with this
+    /// UI session's operation store.
+    group_collapse: groups::CollapseWrites,
     /// The marked sessions ([`marking`]), shown or hidden. Per UI session, so a reset forgets them, as the old app's
     /// reload did.
     marks: marking::Marks,
@@ -799,59 +806,94 @@ impl Render for SessionList {
             return body_row.child(list);
         };
         // Whether a row's menu or its question is open, which keeps the order hold on whatever the pointer did.
-        let menu_open = self
-            .current
-            .current(cx)
-            .rows
-            .borrow_mut()
-            .any_open(window, cx);
+        let menu_open = {
+            let current = self.current.current(cx);
+            current.rows.borrow_mut().any_open(window, cx)
+                || current
+                    .marked_menu
+                    .is_some_and(|layer| crate::layers::is_open(layer, window, cx))
+        };
         self.after_menus(menu_open, window, cx);
         // One pass over the listing for what the frame needs from all of it: the keys in the order drawn (pins first,
         // then as the order hold keeps them), the pins' Move neighbors and the separator, the marks shown and the
         // marked menu's offers, whether any row pulses or shows a spinner (a pending Delete or Stop, or a Replace that
         // has waited long enough to say so), and whether any has an activity stamp to show an age for. Everything else
         // is read row by row, for the rows drawn.
-        let (keys, separator, projection, any_pulse, any_spinner, any_stamp, movable) = {
+        let (
+            keys,
+            headers,
+            separators,
+            projection,
+            any_pulse,
+            any_spinner,
+            any_stamp,
+            drag_bands,
+            served_count,
+        ) = {
             let collections = store.read(cx).collections();
             let list_id = self.list_id(collections, cx);
             let current = self.current.current(cx);
             current.hold.release_if_due(menu_open);
-            let listed = current
-                .hold
-                .apply(pins::pinned_first(selection::listed(collections)), list_id);
+            let roster = groups::roster(collections);
+            let served = selection::listed(collections);
+            let served_count = served.len();
+            let layout =
+                current
+                    .hold
+                    .apply(groups::Layout::served(served, roster), roster, list_id);
             // Marks count only while the rows are shown and the helm could read the listing (`marking`'s "Stored and
             // effective marks"); otherwise the frame projects nothing and keeps the stored marks.
+            let meta = collections.meta(Collection::Sessions);
             let exposed = !current.hosts_shown
-                && collections
-                    .meta(Collection::Sessions)
-                    .is_some_and(|meta| meta.availability == Availability::Available);
+                && meta.is_some_and(|meta| meta.availability == Availability::Available);
+            current.last_uncollapsed = if exposed {
+                current.hold.snapshot(&layout, list_id)
+            } else {
+                None
+            };
+            if meta.is_some_and(|meta| meta.availability == Availability::Available) {
+                current
+                    .group_collapse
+                    .retain(|id, _| roster.iter().any(|group| group.id == *id));
+            }
+            let groups::Frame {
+                keys,
+                headers,
+                separators,
+                moves,
+                rows: listed,
+                drag,
+            } = groups::Frame::new(
+                layout,
+                roster,
+                current.hold.original_pins(),
+                &current.group_collapse,
+                meta.and_then(|meta| meta.counts),
+                cx,
+            );
             let projection = exposed.then(|| marking::project(&listed, &current.marks));
-            self.moves = pins::neighbors(&listed, current.hold.original_pins());
+            self.moves = if exposed { moves } else { HashMap::new() };
             // The rows a drag may land beside, and whose grips may drag them: the movable pins, in the order drawn, and
             // none while the rows are not shown or the listing is unavailable (`pin_drag`'s "The list cancels too"). A
             // retired session's pin is one of them as a target; `pin_drag` refuses only its own drag.
-            let movable: Vec<String> = listed
-                .iter()
-                .filter(|session| exposed && self.moves.contains_key(session.key))
-                .map(|session| session.key.to_owned())
-                .collect();
-            let separator = pins::separator_after(&listed).map(str::to_owned);
-            let unchanged = listed.len() == self.entries.len()
-                && listed
+            let drag_bands = if exposed { drag } else { Vec::new() };
+            let unchanged = keys.len() == self.entries.len()
+                && keys
                     .iter()
                     .zip(self.entries.iter())
-                    .all(|(session, (key, _))| session.key == key);
-            let keys = (!unchanged).then(|| {
-                listed
-                    .iter()
-                    .map(|session| session.key.to_owned())
-                    .collect::<Vec<String>>()
-            });
+                    .all(|(next, (key, _))| next == key);
+            let keys = (!unchanged).then_some(keys);
             // The sidebar bell takes the place of the running dot, so a
             // muted row alone needs no tick for the running animation.
             let any_pulse = listed
                 .iter()
-                .any(|session| !status::muted(session.row) && status::pulses(session.row));
+                .any(|session| !status::muted(session.row) && status::pulses(session.row))
+                || headers.values().any(|header| {
+                    header
+                        .attention
+                        .as_ref()
+                        .is_some_and(groups::Attention::pulses)
+                });
             let any_spinner = listed.iter().any(|session| {
                 delete::in_flight(session.key, cx).is_some()
                     || stop::in_flight(session.key, cx)
@@ -863,15 +905,17 @@ impl Render for SessionList {
                 .any(|session| session.row.info.effective_activity() > 0);
             (
                 keys,
-                separator,
+                headers,
+                separators,
                 projection,
                 any_pulse,
                 any_spinner,
                 any_stamp,
-                movable,
+                drag_bands,
+                served_count,
             )
         };
-        let pin_drag = self.pin_drag_frame(movable, window.is_window_active(), cx);
+        let pin_drag = self.pin_drag_frame(drag_bands, window.is_window_active(), cx);
         self.marks_projected(projection, window, cx);
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
@@ -983,7 +1027,7 @@ impl Render for SessionList {
         };
         let selected = local_state::selected(cx);
 
-        let count = count_line(meta, self.entries.len());
+        let count = count_line(meta, served_count);
         let heading = heading(
             bar,
             title,
@@ -1011,7 +1055,7 @@ impl Render for SessionList {
             )),
         };
 
-        let empty = filters::empty(meta, self.entries.len(), choice.answered());
+        let empty = filters::empty(meta, served_count, choice.answered());
         let body: AnyElement = if let Some(empty) = empty {
             filters::empty_state(collections, empty, &weak, palette).into_any_element()
         } else if empty_fleet(collections) {
@@ -1036,17 +1080,30 @@ impl Render for SessionList {
                         let Some((key, focus)) = entries.get(ix) else {
                             return div().into_any_element();
                         };
-                        let selected = selected.as_deref() == Some(key.as_str());
-                        let marked = marked.iter().any(|shown| shown == key);
-                        let row = draw_row(
-                            &shared, &pin_drag, &weak, key, focus, selected, marked, steps, window,
-                            cx,
-                        );
-                        if separator.as_deref() == Some(key.as_str()) {
+                        let row = if let Some(header) = headers.get(key) {
+                            groups::draw_header(
+                                header,
+                                focus,
+                                &shared,
+                                &pin_drag,
+                                &weak,
+                                steps.pulse,
+                                window,
+                                cx,
+                            )
+                        } else {
+                            let selected = selected.as_deref() == Some(key.as_str());
+                            let marked = marked.iter().any(|shown| shown == key);
+                            draw_row(
+                                &shared, &pin_drag, &weak, key, focus, selected, marked, steps,
+                                window, cx,
+                            )
+                        };
+                        if let Some(separator) = separators.get(key) {
                             // After the row's item, so the item's own border stays its bottom edge.
                             div()
                                 .child(row)
-                                .child(pins::separator(theme::palette(cx)))
+                                .child(pins::separator(*separator, theme::palette(cx)))
                                 .into_any_element()
                         } else {
                             row
@@ -1315,8 +1372,8 @@ pub(crate) fn count_line(meta: &CollectionMeta, shown: usize) -> CountLine {
         return CountLine::Count(shown.to_string());
     };
     match (counts.truncated, counts.matching) {
-        (false, None) => CountLine::Count(counts.total.to_string()),
-        (false, Some(matching)) => CountLine::Count(format!("{matching} of {}", counts.total)),
+        (false, None) => CountLine::Count(complete_count(counts.total, None)),
+        (false, Some(matching)) => CountLine::Count(complete_count(matching, Some(counts.total))),
         (true, None) => CountLine::Cut(format!(
             "Showing {shown} of {} sessions — could not read the list to the end",
             counts.total
@@ -1326,6 +1383,11 @@ pub(crate) fn count_line(meta: &CollectionMeta, shown: usize) -> CountLine {
             counts.total
         )),
     }
+}
+
+/// Both group and list counts name a denominator when a filter is active.
+fn complete_count(shown: u64, total: Option<u64>) -> String {
+    total.map_or_else(|| shown.to_string(), |total| format!("{shown} of {total}"))
 }
 
 /// Whether the helm has shown that there are no sessions at all: an available, complete, unfiltered listing with no

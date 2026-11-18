@@ -161,7 +161,10 @@ fn the_shortcut_opens_rename_for_the_open_session_and_escape_returns_to_its_term
     keys(cx, RENAME);
     assert!(any_open(cx), "the shortcut opened the editor");
     let opened = editor(cx);
-    let key = cx.update(|_, cx| opened.read(cx).key.clone());
+    let key = cx.update(|_, cx| match &opened.read(cx).subject {
+        super::Subject::Session { key, .. } => key.clone(),
+        _ => panic!("expected the session editor"),
+    });
     assert_eq!(key, "a");
     assert_eq!(field(cx), "fix\u{200B}build", "the raw title, unescaped");
     assert!(field_focused(cx), "focus starts in the title field");

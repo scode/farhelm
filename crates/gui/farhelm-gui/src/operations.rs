@@ -186,6 +186,9 @@ pub enum Work {
     /// the session's own key. Apart from [`Work::Pin`] because the old app named the two refusals differently ("Pin:"
     /// and "Move pin:"). Not supersedable: each press names the neighbor it was drawn with.
     MovePin,
+    /// Write membership or a group's attributes and order. Membership uses
+    /// the session key. A header write uses its own group key.
+    SessionGroup,
     /// The Suspend of an environment session's host (`POST /api/hosts/{id}/suspend`). A session's Suspend, from its
     /// row menu or header, runs on the session's own key, so its other lifecycle actions wait for it as the old app's
     /// session claim made them wait (`session_list::environment`); the Hosts panel's Suspend runs on the host's key
@@ -261,6 +264,7 @@ impl Work {
             Work::Pin => false,
             Work::Mute => false,
             Work::MovePin => false,
+            Work::SessionGroup => false,
             Work::Suspend => false,
             Work::Resume => false,
             Work::StopAndSuspend => false,
@@ -301,6 +305,7 @@ impl Work {
             Work::Pin => false,
             Work::Mute => false,
             Work::MovePin => false,
+            Work::SessionGroup => false,
             Work::Suspend => false,
             Work::Resume => false,
             Work::StopAndSuspend => false,
@@ -319,6 +324,8 @@ pub struct OpKey(Key);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Key {
     Session(String),
+    SessionGroup(i64),
+    NewSessionGroup,
     Host(String),
     Template(String),
     Preferences,
@@ -349,6 +356,16 @@ impl OpKey {
     /// A session, by the id the helm serves it under.
     pub fn session(id: &str) -> OpKey {
         OpKey(Key::Session(id.to_owned()))
+    }
+
+    /// Serialize writes to one shared group without blocking another group.
+    pub(crate) fn session_group(id: i64) -> OpKey {
+        OpKey(Key::SessionGroup(id))
+    }
+
+    /// The New group dialog shares one key because only one can be open.
+    pub(crate) fn new_session_group() -> OpKey {
+        OpKey(Key::NewSessionGroup)
     }
 
     /// A host, by its registry id.

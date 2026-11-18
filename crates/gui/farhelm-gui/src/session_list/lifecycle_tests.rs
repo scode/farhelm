@@ -504,6 +504,7 @@ fn a_busy_menu_walks_its_unavailable_commands_without_filling_or_running_them(
     for next in [
         "session-menu-seen",
         "session-menu-pin",
+        "session-menu-group",
         "session-menu-mute",
         "session-menu-clone",
         "session-menu-replace-with",
