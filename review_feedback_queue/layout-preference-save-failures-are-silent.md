@@ -26,3 +26,12 @@ connection is a separate question.
 
 Report the refusal in the affected surface while restoring the previous preference. Cover each of the three controls
 with a fake rejected write.
+
+### Haiku follow-up
+
+Reviewed at `c9575db61abb31bebe43da0f11a76712e18725c1` in the Haiku pass, checked by gpt-6.2-sol. Source confirmed at
+`crates/gui/farhelm-gui/src/session_list/host_rail/expansion.rs:115–135`,
+`crates/gui/farhelm-gui/src/session_list/queued_preference.rs:143–150`, `crates/gui/farhelm-gui/src/sidebar.rs:274–291`,
+and `crates/gui/farhelm-gui/src/terminal/text_size.rs:154–174`. SPEC.md:4354–4369 names list order, last selection,
+compact layout and feedback contact in this preference exception. Rail expansion, sidebar width and terminal text size
+are absent. Restore the saved choice and show the latest refusal near the affected control. Suggested bucket **other**.

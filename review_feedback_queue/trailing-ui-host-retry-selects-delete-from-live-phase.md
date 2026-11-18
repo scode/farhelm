@@ -99,3 +99,12 @@ verdict.
 
 Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
 [g031 record](records/review-through-00de0b6c/groups/g031.json). Record ID: `f2`.
+
+### GPUI follow-up
+
+Haiku pass H-P4-1, checked by gpt-6.2-sol at `c9575db61abb31bebe43da0f11a76712e18725c1`. The GPUI Hosts menu now
+describes Retry as “Finish the deletion” when its rendered host has failed deletion
+(`crates/gui/farhelm-gui/src/hosts/menu.rs:306–336`). The operation still comes from the current phase on delivery
+(`crates/gui/farhelm-gui/src/hosts/remedies.rs:91–97,135–150`). The separate GPUI route of a button drawn for reconnect
+and pressed after the phase changes remains a possible cover for the live-retarget concern. The helm requires failed
+sealed deletion (`crates/farhelm-helm/src/sessions/sandbox.rs:354–383`). See SPEC.md:1540–1544,4858–4860.

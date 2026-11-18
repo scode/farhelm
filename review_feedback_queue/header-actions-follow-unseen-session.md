@@ -29,3 +29,27 @@ Capture the drawn key in each header control, as the row menu already does. Refu
 changes. Exercise input dispatched to A's frame after B mounts. SPEC.md's “One GUI at a time” accepts some actions
 delivered before redraw, and keeps explicit destructive guards in force (lines 5135–5138). The skipped confirmation rule
 at lines 2063–2065 binds the action to what was rendered.
+
+### Interrupted-session card Replace
+
+Also reviewed at `c9575db61abb31bebe43da0f11a76712e18725c1` in the Haiku pass (H-P7-2), checked by gpt-6.2-sol. The
+interrupted-session card has its own Replace button. The listener resolves the session pane's newly mounted key when the
+click arrives. With confirmation skipping enabled, it can dispatch Replace directly for that different session.
+
+- Verdict: ALREADY QUEUED: header-actions-follow-unseen-session.md
+- Route checked: `session_pane/header.rs:734–793,819–832`; `session_pane.rs:392–415,510–515`;
+  `SPEC.md:2063–2065,5135–5138`.
+- Reason: The native listener keeps its action and gets the target from the newly mounted pane before redraw. The queued
+  highest bucket exceeds this charter's bar: the verified route is bounded by one redraw and no widening was shown. The
+  target binding still conflicts with the render-based skip rule.
+
+- Verdict: NOT CRITICAL
+- Route checked: `session_pane/card.rs:457–480,558–578`; `session_list/replace.rs:225–252`;
+  `SPEC.md:2063–2065,5135–5138`.
+- Reason: The separate card button also reads the mounted key on delivery, so skipped Replace can send for the newly
+  selected session. The header queue item covers the same design error only in header controls. The card route is still
+  limited to the old listener's redraw window.
+
+The verifier assessed the header route as below the review's immediate-fix threshold because it fits within a single
+redraw. The queue's `highest` bucket still applies to the established wrong-session process-loss route. Capture the
+card's drawn key too and exercise a stale card click after the pane switches sessions.
