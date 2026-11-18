@@ -3214,6 +3214,12 @@ pub(crate) async fn get_session(
         .into_iter()
         .find(|row| row.id == host)
         .and_then(|row| row.host_identity);
+    // Read mute before seen, as in the list. If an unmute commits between
+    // these reads, a row that was already unmuted cannot carry the old stamp.
+    let mute = match state.store.session_mutes(std::slice::from_ref(&key)).await {
+        Ok(mutes) => mutes.get(&key).copied().and_then(store::MuteEntry::active),
+        Err(e) => return http_error(e),
+    };
     // One-id seen-state read, same table and same reason as the listing's
     // own join (`aggregate::session_list_staged`): this route answers with
     // exactly the shape a listing row has, so it must carry the same field.
@@ -3259,6 +3265,8 @@ pub(crate) async fn get_session(
                     seen_activity_at,
                     pinned: pin_position.is_some(),
                     pin_position,
+                    mute,
+                    activity_order_hold: None,
                     notifications_read_through,
                     stale: true,
                 })
@@ -3294,6 +3302,8 @@ pub(crate) async fn get_session(
                         seen_activity_at,
                         pinned: pin_position.is_some(),
                         pin_position,
+                        mute,
+                        activity_order_hold: None,
                         notifications_read_through,
                         stale: false,
                     })
@@ -4087,6 +4097,12 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's pin; a stray row may remain");
     }
+    // Remove the mute before clearing the stamp. A timed unmute in flight
+    // then either commits first or finds no mute to mark seen.
+    if let Err(error) = state.store.forget_muted_session(&key).await {
+        warn!(session_id = manager::peer_text(id).as_str(), error = %error,
+            "could not clear the deleted session's mute; a stray row may remain");
+    }
     if let Err(error) = state.store.clear_seen(&key).await {
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's seen state; a stray row may remain");
@@ -4181,16 +4197,9 @@ pub(crate) async fn set_pin(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<SetPinReq>,
 ) -> impl IntoResponse {
-    let key = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
+    let (key, _) = match viewer_session(&state, &id).await {
+        Ok(session) => session,
         Err(error) => return http_error(error),
-    };
-    if let Err(error) = refuse_cached_retired(&state, &key).await {
-        return http_error(error);
-    }
-    match resolve_owner(&state, &key).await {
-        Ok(owner) => owner,
-        Err(e) => return http_error(e),
     };
     match state.store.set_pinned(&key, req.pinned).await {
         Ok(changed) => {
@@ -4200,6 +4209,60 @@ pub(crate) async fn set_pin(
             axum::Json(serde_json::json!({})).into_response()
         }
         Err(e) => http_error(e),
+    }
+}
+
+/// Resolve the session for a helm-owned viewer write. A stale listing can
+/// still carry a valid session, so this checks membership and the retired
+/// session refusal without requiring a connected supervisor.
+async fn viewer_session(
+    state: &AppState,
+    id: &str,
+) -> anyhow::Result<(store::SessionKey, manager::HostStatus)> {
+    let key = resolve_session_ref(state, id).await?;
+    refuse_cached_retired(state, &key).await?;
+    let (_, status) = resolve_owner(state, &key).await?;
+    Ok((key, status))
+}
+
+/// Freeze the last observed work-start key for a mute. Unmute uses the
+/// same store transaction as timer expiry so the seen stamp is published
+/// with the change to mute state.
+pub(crate) async fn set_mute(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<farhelm_proto::SessionMuteRequest>,
+) -> impl IntoResponse {
+    use farhelm_proto::SessionMuteRequest;
+
+    // Delete uses the same local gate while clearing viewer state and
+    // removing membership. A late Mute cannot recreate a row after cleanup.
+    let _session_mutation = state.tunnels.mutation.lock().await;
+    let (key, status) = match viewer_session(&state, &id).await {
+        Ok(session) => session,
+        Err(error) => return http_error(error),
+    };
+    let live = crate::session_mute::live_observation(&key, Some(&status));
+    let changed = match req {
+        SessionMuteRequest::Mute { until } => {
+            if until.is_some_and(|until| until <= crate::session_mute::now_ms()) {
+                return http_error(invalid_request(
+                    "the mute deadline has already passed".into(),
+                ));
+            }
+            state.store.mute_session(&key, until, live).await
+        }
+        SessionMuteRequest::Unmute => state.store.unmute_session(&key, None, live).await.map(Some),
+    };
+    match changed {
+        Ok(Some(changed)) => {
+            if changed {
+                state.manager.events().bump();
+            }
+            axum::Json(serde_json::json!({})).into_response()
+        }
+        Ok(None) => http_error(no_such_session()),
+        Err(error) => http_error(error),
     }
 }
 
@@ -4868,13 +4931,13 @@ async fn finish_replacement(
     let _deleting = state
         .approvals
         .deny_session(&store::SessionKey::new(claim.host, id));
-    // Preserve the user's pin before the destructive half of Replace. A
-    // storage failure must not delete the only session that still has it.
-    if state.store.inherit_pin(
+    // Preserve the user's pin and mute before the destructive half of Replace.
+    // A storage failure must not delete the only session that still has them.
+    if state.store.inherit_viewer_state(
         &store::SessionKey::new(claim.host, id),
         &store::SessionKey::new(claim.host, &created.id),
     ).await.with_context(|| {
-        format!("created replacement session {} but could not copy the original's pin; the original {id} was not removed", created.id)
+        format!("created replacement session {} but could not copy the original's pin or mute; the original {id} was not removed", created.id)
     })? {
         state.manager.events().bump();
     }

@@ -2869,6 +2869,24 @@ where
     Option::<i64>::deserialize(deserializer)
 }
 
+/// A session's active mute as stored by the helm. The client that mutes it
+/// computes the absolute deadline once, so clients in different time zones
+/// still agree on when the mute ends.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionMute {
+    /// Unix milliseconds, or `None` for a mute that ends only by user action.
+    pub until: Option<i64>,
+}
+
+/// The body of `PUT /api/sessions/{id}/mute`. An explicit action distinguishes
+/// an indefinite mute from clearing a mute and marking the session seen.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SessionMuteRequest {
+    Mute { until: Option<i64> },
+    Unmute,
+}
+
 /// The success body of `POST /api/sessions/{id}/replace`: the replacement's own session, plus the notice the source's
 /// Delete carried, only when it carried one, so a reader of the body as a bare session still works.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 85;
+pub(crate) const SCHEMA_VERSION: i64 = 86;
 
 mod environment_history;
 mod podman;
@@ -578,6 +578,10 @@ const SESSION_PINS_ORDERED_SCHEMA: &str = "CREATE TABLE session_pins (
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;";
 
+mod session_mutes;
+use session_mutes::SESSION_MUTES_SCHEMA;
+pub(crate) use session_mutes::{MuteEntry, MuteObservation};
+
 /// Monotone notification sequence marks share the same entry boundary as
 /// seen state. Sequence numbers are supervisor-local, so the host is part of
 /// their meaning even when another host reports the same bare session ID.
@@ -666,6 +670,71 @@ pub type HostId = i64;
 pub struct SessionKey {
     pub host: HostId,
     pub session_id: String,
+}
+
+/// The monotone seen write shared by Mark read and the transaction that
+/// ends a mute. A later stamp already recorded by another window wins.
+fn write_seen_stamp(conn: &Connection, key: &SessionKey, activity_at: i64) -> anyhow::Result<bool> {
+    let changed = conn
+        .execute(
+            "INSERT INTO session_seen (host_id, session_id, seen_activity_at) \
+             VALUES (?1, ?2, ?3) ON CONFLICT (host_id, session_id) DO UPDATE \
+             SET seen_activity_at = excluded.seen_activity_at \
+             WHERE session_seen.seen_activity_at < excluded.seen_activity_at",
+            rusqlite::params![key.host, key.session_id, activity_at],
+        )
+        .context("writing the seen stamp")?;
+    Ok(changed > 0)
+}
+
+/// Decode the cache row only if its payload still belongs to the recorded
+/// session. Mute transitions call this with the same connection as the write
+/// so an intervening host refresh cannot make the captured activity stale.
+fn cached_session_on_connection(
+    conn: &Connection,
+    host: HostId,
+    session_id: &str,
+) -> anyhow::Result<Option<SessionInfo>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT info_json FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+            rusqlite::params![host, session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("reading one cached session")?;
+    Ok(json.and_then(|json| match serde_json::from_str::<SessionInfo>(&json) {
+        // The payload must AGREE with the id it was filed under. Serving a row whose own id says something else
+        // would show the caller one session's metadata under another's name — the same column/payload
+        // contradiction the page scan treats as poison, and the same answer: nothing is shown, and it is said out
+        // loud.
+        Ok(info) if info.id != session_id => {
+            tracing::warn!(
+                host,
+                session_id,
+                payload_id = info.id.as_str(),
+                "a cached session's payload names a different session; it cannot be shown"
+            );
+            None
+        }
+        Ok(info) => {
+            if let Err(error) = crate::session_cache::ensure_recordable_session(&info) {
+                tracing::warn!(host, session_id, %error, "skipping an unaddressable cached session");
+                None
+            } else {
+                Some(info)
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                host,
+                session_id,
+                error = %error,
+                "a cached session's info_json no longer decodes; it cannot be shown"
+            );
+            None
+        }
+    }))
 }
 
 impl SessionKey {
@@ -3001,6 +3070,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
              ) STRICT;
               {SESSION_SEEN_PAIRED_SCHEMA}
               {SESSION_PINS_ORDERED_SCHEMA}
+              {SESSION_MUTES_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA}
@@ -3014,7 +3084,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 85;",
+              PRAGMA user_version = 86;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4841,6 +4911,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 85")?;
         version = 85;
     }
+    if version == 85 {
+        tx.execute_batch(SESSION_MUTES_SCHEMA)
+            .context("adding session mute state")?;
+        tx.execute_batch("PRAGMA user_version = 86;")
+            .context("migrating helm.db to schema version 86")?;
+        version = 86;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -6027,16 +6104,7 @@ impl HelmStore {
             .call(
                 "seen-stamp write task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    let changed = conn
-                        .execute(
-                            "INSERT INTO session_seen (host_id, session_id, seen_activity_at) \
-                     VALUES (?1, ?2, ?3) ON CONFLICT (host_id, session_id) DO UPDATE \
-                     SET seen_activity_at = excluded.seen_activity_at \
-                     WHERE session_seen.seen_activity_at < excluded.seen_activity_at",
-                            rusqlite::params![key.host, key.session_id, activity_at],
-                        )
-                        .context("writing the seen stamp")?;
-                    Ok(changed > 0)
+                    write_seen_stamp(conn, &key, activity_at)
                 },
             )
             .await
@@ -6090,12 +6158,32 @@ impl HelmStore {
         &self,
         ids: &[SessionKey],
     ) -> anyhow::Result<std::collections::HashMap<SessionKey, i64>> {
+        self.read_keyed_viewer_state(
+            ids,
+            "pin read task panicked",
+            "SELECT host_id, session_id, position FROM session_pins",
+            |row| row.get(2),
+        )
+        .await
+    }
+
+    /// Read viewer state in batches below SQLite's parameter limit. Every
+    /// query starts with the full entry/session pair, so two hosts' equal
+    /// bare IDs can never share a row. `select` is a static projection ending
+    /// at FROM, with any extra columns interpreted by the caller's decoder.
+    async fn read_keyed_viewer_state<T: Send + 'static>(
+        &self,
+        ids: &[SessionKey],
+        panic_context: &'static str,
+        select: &'static str,
+        decode: impl Fn(&rusqlite::Row<'_>) -> rusqlite::Result<T> + Send + 'static,
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, T>> {
         if ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
         let ids = ids.to_vec();
         self.conn
-            .call("pin read task panicked", move |conn: &mut Connection| {
+            .call(panic_context, move |conn: &mut Connection| {
                 let mut result = std::collections::HashMap::new();
                 for batch in ids.chunks(SESSION_KEY_BATCH) {
                     let placeholders = (0..batch.len())
@@ -6103,8 +6191,7 @@ impl HelmStore {
                         .collect::<Vec<_>>()
                         .join(",");
                     let mut stmt = conn.prepare(&format!(
-                        "SELECT host_id, session_id, position FROM session_pins \
-                     WHERE (host_id, session_id) IN (VALUES {placeholders})"
+                        "{select} WHERE (host_id, session_id) IN (VALUES {placeholders})"
                     ))?;
                     let values = batch.iter().flat_map(|key| {
                         [
@@ -6116,7 +6203,7 @@ impl HelmStore {
                         .query_map(rusqlite::params_from_iter(values), |row| {
                             Ok((
                                 SessionKey::new(row.get(0)?, row.get::<_, String>(1)?),
-                                row.get(2)?,
+                                decode(row)?,
                             ))
                         })?
                         .collect::<Result<Vec<_>, _>>()?;
@@ -6175,12 +6262,11 @@ impl HelmStore {
             .await
     }
 
-    /// Give a replacement its source's pin before destroying the source.
-    /// A failed delete can leave both sessions, so this copies membership
-    /// and position; ties are legal until the source is confirmed deleted.
-    /// An already-pinned replacement keeps its own position. Returns whether
-    /// the replacement gained a pin, for event publication.
-    pub async fn inherit_pin(
+    /// Give a replacement the source's pin and active mute before destroying
+    /// the source. Either both copies commit or neither does. When the source
+    /// remains after a failed delete, both sessions can hold the same pin
+    /// position and deadline. A replacement's own choices take precedence.
+    pub async fn inherit_viewer_state(
         &self,
         source: &SessionKey,
         replacement: &SessionKey,
@@ -6189,9 +6275,10 @@ impl HelmStore {
         let replacement = replacement.clone();
         self.conn
             .call(
-                "replacement pin task panicked",
+                "replacement viewer state task panicked",
                 move |conn: &mut Connection| {
-                    let changed = conn
+                    let tx = conn.transaction()?;
+                    let copied_pin = tx
                         .execute(
                             "INSERT OR IGNORE INTO session_pins (host_id, session_id, position) \
                  SELECT ?3, ?4, position FROM session_pins WHERE host_id = ?1 AND session_id = ?2",
@@ -6202,8 +6289,12 @@ impl HelmStore {
                                 replacement.session_id
                             ],
                         )
-                        .context("copying replacement pin")?;
-                    Ok(changed > 0)
+                        .context("copying replacement pin")?
+                        != 0;
+                    let copied_mute = session_mutes::inherit_mute(&tx, &source, &replacement)
+                        .context("copying replacement mute")?;
+                    tx.commit()?;
+                    Ok(copied_pin || copied_mute)
                 },
             )
             .await
@@ -9543,50 +9634,7 @@ impl HelmStore {
         self.conn
             .call(
                 "cached session task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Option<SessionInfo>> {
-                    let json: Option<String> = conn
-                .query_row(
-                    "SELECT info_json FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
-                    rusqlite::params![host, session_id],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading one cached session")?;
-                    Ok(json.and_then(|json| match serde_json::from_str::<SessionInfo>(&json) {
-                // The payload must AGREE with the id it was filed under.
-                // Serving a row whose own id says something else would show
-                // the caller one session's metadata under another's name —
-                // the same column/payload contradiction the page scan
-                // treats as poison, and the same answer: nothing is shown,
-                // and it is said out loud.
-                Ok(info) if info.id != session_id => {
-                    tracing::warn!(
-                        host,
-                        session_id = session_id.as_str(),
-                        payload_id = info.id.as_str(),
-                        "a cached session's payload names a different session; it cannot be shown"
-                    );
-                    None
-                }
-                Ok(info) => {
-                    if let Err(error) = crate::session_cache::ensure_recordable_session(&info) {
-                        tracing::warn!(host, session_id, %error, "skipping an unaddressable cached session");
-                        None
-                    } else {
-                        Some(info)
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        host,
-                        session_id = session_id.as_str(),
-                        error = %error,
-                        "a cached session's info_json no longer decodes; it cannot be shown"
-                    );
-                    None
-                }
-            }))
-                },
+                move |conn: &mut Connection| cached_session_on_connection(conn, host, &session_id),
             )
             .await
     }
@@ -10342,7 +10390,7 @@ mod tests {
 
         let migrated = HelmStore::open(&path).await.unwrap();
         assert_eq!(migrated.schema_version, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 85);
+        assert_eq!(SCHEMA_VERSION, 86);
         assert_eq!(
             migrated.preferences().await.unwrap(),
             before,
@@ -13683,6 +13731,112 @@ mod tests {
         SessionKey::new(host, id)
     }
 
+    /// A real schema-85 database has no mute table. Upgrading must preserve
+    /// the user's other viewer choices, and a stored mute must survive
+    /// reopening through the migrated schema.
+    #[farhelm_testtrace::test]
+    async fn schema_86_adds_durable_session_mutes() {
+        let (dir, store) = fresh_store().await;
+        let key = viewer_key(&store, "quiet");
+        let keys = std::slice::from_ref(&key);
+        store.set_pinned(&key, true).await.unwrap();
+        store.mark_seen(&key, 123).await.unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("DROP TABLE session_mutes; PRAGMA user_version = 85;")
+                .unwrap();
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'session_mutes')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "schema 85 has no session_mutes table");
+        }
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(store.schema_version, SCHEMA_VERSION);
+        assert_eq!(store.seen_activity(keys).await.unwrap()[&key], 123);
+        assert!(store.pinned_sessions(keys).await.unwrap().contains(&key));
+        assert!(store.session_mutes(keys).await.unwrap().is_empty());
+        let info = crate::rest_harness::session("quiet", 1_700_000_000);
+        assert_eq!(
+            store
+                .mute_session(&key, None, Some((&info).into()))
+                .await
+                .unwrap(),
+            Some(true)
+        );
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            store.session_mutes(keys).await.unwrap()[&key].active(),
+            Some(farhelm_proto::SessionMute { until: None })
+        );
+    }
+
+    /// The expiry write cannot act on a mute that replaced its observation.
+    /// Work during a mute is marked seen and held in the old position until
+    /// the next burst. The replacement inherits only active mute state.
+    #[farhelm_testtrace::test]
+    async fn mute_deadlines_hold_order_and_copy_with_pins() {
+        let (_dir, store) = fresh_store().await;
+        let key = viewer_key(&store, "quiet");
+        let replacement = viewer_key(&store, "replacement");
+        let keys = [key.clone(), replacement.clone()];
+        let mut info = crate::rest_harness::session("quiet", 100);
+        info.last_work_started_at = 150_000;
+        assert_eq!(
+            store
+                .mute_session(&key, Some(200_000), Some((&info).into()))
+                .await
+                .unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            store
+                .mute_session(&key, None, Some((&info).into()))
+                .await
+                .unwrap(),
+            Some(false)
+        );
+        assert_eq!(store.next_mute_deadline().await.unwrap(), Some(200_000));
+        assert!(store.set_pinned(&key, true).await.unwrap());
+        assert!(
+            store
+                .inherit_viewer_state(&key, &replacement)
+                .await
+                .unwrap()
+        );
+        let mutes = store.session_mutes(&keys).await.unwrap();
+        assert_eq!(mutes[&replacement], mutes[&key]);
+        let pins = store.pin_positions(&keys).await.unwrap();
+        assert_eq!(pins[&replacement], pins[&key]);
+
+        info.last_work_started_at = 170_000;
+        info.last_activity_at = 180;
+        assert!(
+            !store
+                .unmute_session(&key, Some(150_000), Some((&info).into()))
+                .await
+                .unwrap()
+        );
+        assert!(store.seen_activity(&keys).await.unwrap().is_empty());
+        assert!(
+            store
+                .unmute_session(&key, Some(200_000), Some((&info).into()))
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.seen_activity(&keys).await.unwrap()[&key], 180);
+        let ended = store.session_mutes(&keys).await.unwrap()[&key];
+        assert!(ended.active().is_none());
+        assert_eq!(ended.order_hold(170_000), Some(150_000));
+        assert_eq!(ended.order_hold(170_001), None);
+    }
+
     /// The whole read/write/clear cycle behind the idle-dot's blue/grey
     /// split (SPEC.md, Status): marking sets the stamp,
     /// re-marking a DIFFERENT stamp replaces it, and clearing removes it
@@ -13961,7 +14115,7 @@ mod tests {
         // Replace notifies the window only when this reports a copy.
         assert!(
             store
-                .inherit_pin(&viewer_key(&store, "source"), &viewer_key(&store, "new"))
+                .inherit_viewer_state(&viewer_key(&store, "source"), &viewer_key(&store, "new"))
                 .await
                 .unwrap()
         );
@@ -13973,7 +14127,7 @@ mod tests {
         );
         assert!(
             !store
-                .inherit_pin(&viewer_key(&store, "tail"), &ids[1])
+                .inherit_viewer_state(&viewer_key(&store, "tail"), &ids[1])
                 .await
                 .unwrap()
         );
@@ -13996,7 +14150,7 @@ mod tests {
         );
         assert!(
             !store
-                .inherit_pin(
+                .inherit_viewer_state(
                     &viewer_key(&store, "absent"),
                     &viewer_key(&store, "not-pinned")
                 )
@@ -14982,8 +15136,8 @@ mod tests {
             .await
             .unwrap();
         let replacement = SessionKey::new(first, "replacement");
-        assert!(store.inherit_pin(&a, &replacement).await.unwrap());
-        assert!(!store.inherit_pin(&a, &replacement).await.unwrap());
+        assert!(store.inherit_viewer_state(&a, &replacement).await.unwrap());
+        assert!(!store.inherit_viewer_state(&a, &replacement).await.unwrap());
         assert!(
             !store
                 .pinned_sessions(&[SessionKey::new(second, "replacement")])

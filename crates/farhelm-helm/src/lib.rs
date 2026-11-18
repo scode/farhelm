@@ -224,6 +224,7 @@ mod release_announcements;
 /// The rules both session caches share: the reply merge, creation order,
 /// cap eviction, and the session id bound.
 pub mod session_cache;
+mod session_mute;
 
 /// Acting agent requests waiting for the user's approval (see the module's
 /// own docs).
@@ -566,6 +567,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/pin",
             axum::routing::put(sessions::set_pin),
+        )
+        .route(
+            "/api/sessions/{id}/mute",
+            axum::routing::put(sessions::set_mute),
         )
         .route(
             "/api/sessions/{id}/pin-order",
@@ -1418,6 +1423,7 @@ async fn serve_with_ready(
     // Started here for the same reason: it needs the state the manager is a
     // field of. A seal noted before this point is kept and acted on at once.
     let _seal_finisher = sessions::spawn_seal_finisher(Arc::clone(&state));
+    let mute_expiry = session_mute::ExpiryTask::start(&state);
     let app = build_router(Arc::clone(&state), addr.port());
 
     // Establish the configuration baseline before announcing readiness or
@@ -1442,6 +1448,7 @@ async fn serve_with_ready(
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
         () = requested_shutdown => Ok(())
     };
+    drop(mute_expiry);
     state._automatic_updates.stop();
     state.tunnels.shutdown().await;
     state.manager.shutdown_and_wait().await;

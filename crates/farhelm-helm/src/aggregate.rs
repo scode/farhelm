@@ -185,6 +185,17 @@ pub(crate) fn apply_notification_marks(info: &mut SessionInfo, marks: Notificati
 
 pub(crate) use farhelm_proto::ui_channel::SessionList as SessionListBody;
 
+/// Helm-owned choices joined to a row by its registry entry and session ID.
+/// Keep them together so a row builder cannot pair the observations from one
+/// session with another session's viewer state.
+#[derive(Clone, Copy, Default)]
+struct ViewerState {
+    seen_activity_at: Option<i64>,
+    pin_position: Option<i64>,
+    marks: NotificationMarks,
+    mute: Option<store::MuteEntry>,
+}
+
 /// Tag one host's session with that host, for the merged list.
 ///
 /// `identity` is the registry's recorded install identity for the host —
@@ -197,11 +208,12 @@ fn row_of(
     host: &HostSnapshot,
     identity: Option<&str>,
     mut info: SessionInfo,
-    seen_activity_at: Option<i64>,
-    pin_position: Option<i64>,
-    marks: NotificationMarks,
+    viewer: ViewerState,
 ) -> SessionRow {
-    let notifications_read_through = apply_notification_marks(&mut info, marks);
+    let notifications_read_through = apply_notification_marks(&mut info, viewer.marks);
+    let activity_order_hold = viewer
+        .mute
+        .and_then(|mute| mute.order_hold(info.effective_work_started_at()));
     SessionRow {
         info,
         notifications_read_through,
@@ -213,9 +225,11 @@ fn row_of(
             host.destination.as_deref(),
             host.alias.as_deref(),
         ),
-        seen_activity_at,
-        pinned: pin_position.is_some(),
-        pin_position,
+        seen_activity_at: viewer.seen_activity_at,
+        pinned: viewer.pin_position.is_some(),
+        pin_position: viewer.pin_position,
+        mute: viewer.mute.and_then(store::MuteEntry::active),
+        activity_order_hold,
         stale: !host.state.is_connected(),
     }
 }
@@ -234,7 +248,7 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
 }
 
 /// Whether a row belongs to the Activity order's first group: a connected
-/// host's report that the session is Running or Waiting.
+/// Waiting report or a connected Running report whose order is free to move.
 ///
 /// "Connected" is the whole of the freshness claim — `stale` is set from
 /// `HostState::is_connected` alone, so a connected host's old cached Running
@@ -244,10 +258,19 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
 /// however new their work-start key is.
 fn is_active(row: &SessionRow) -> bool {
     !row.stale
-        && matches!(
-            row.info.status,
-            SessionStatus::Running | SessionStatus::Waiting
-        )
+        && (row.info.status == SessionStatus::Waiting
+            || (row.info.status == SessionStatus::Running && row.activity_order_hold.is_none()))
+}
+
+/// While a mute holds the order, use the previous burst's key. A connected
+/// Waiting report breaks through in both group and key until the wait clears.
+fn activity_order_key(row: &SessionRow) -> i64 {
+    let live_key = row.info.effective_work_started_at();
+    if !row.stale && row.info.status == SessionStatus::Waiting {
+        live_key
+    } else {
+        row.activity_order_hold.unwrap_or(live_key)
+    }
 }
 
 /// Sort `rows` into `sort`'s order, in place.
@@ -269,14 +292,11 @@ pub(crate) fn sort_rows(rows: &mut [SessionRow], sort: store::ListSort) {
         store::ListSort::Created => rows.sort_by(|a, b| creation_tail(a).cmp(&creation_tail(b))),
         store::ListSort::Activity => rows.sort_by(|a, b| {
             // `false < true`, so the grouping comparison is reversed to put
-            // the active rows first. Everything after it is the order the
-            // Activity sort has always used, unchanged inside both groups.
+            // the active rows first. Inside each group the held or live
+            // work-start key comes before the stable creation-order tail.
             is_active(b)
                 .cmp(&is_active(a))
-                .then_with(|| {
-                    std::cmp::Reverse(a.info.effective_work_started_at())
-                        .cmp(&std::cmp::Reverse(b.info.effective_work_started_at()))
-                })
+                .then_with(|| activity_order_key(b).cmp(&activity_order_key(a)))
                 .then_with(|| creation_tail(a).cmp(&creation_tail(b)))
         }),
         store::ListSort::Title => rows.sort_by_cached_key(|row| {
@@ -462,10 +482,19 @@ async fn session_list_staged(
             );
         }
     }
+    // Unmuting and marking seen commit together. Read the mute first so a
+    // just-unmuted row cannot pick up a stale pre-unmute seen stamp.
+    let mutes = store.session_mutes(&seen_ids).await?;
     let seen_activity = store.seen_activity(&seen_ids).await?;
     let pins = store.pin_positions(&seen_ids).await?;
     // The notification marks, joined the same way and for the same reason.
     let notification_marks = store.notification_marks(&seen_ids).await?;
+    let viewer_state = |key: &store::SessionKey| ViewerState {
+        seen_activity_at: seen_activity.get(key).copied(),
+        pin_position: pins.get(key).copied(),
+        marks: notification_marks.get(key).copied().unwrap_or_default(),
+        mute: mutes.get(key).copied(),
+    };
     for cached in slice.rows {
         let Some(host) = by_id.get(&cached.host) else {
             // A host the registry knows but the manager has no actor for
@@ -473,16 +502,11 @@ async fn session_list_staged(
             continue;
         };
         let key = store::SessionKey::new(cached.host, &cached.info().id);
-        let seen = seen_activity.get(&key).copied();
-        let pin_position = pins.get(&key).copied();
-        let marks = notification_marks.get(&key).copied().unwrap_or_default();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
             cached.into_info(),
-            seen,
-            pin_position,
-            marks,
+            viewer_state(&key),
         ));
     }
     // A cache-serving host's cap flag comes from the CACHE (the same
@@ -519,16 +543,7 @@ async fn session_list_staged(
         // IDs within this entry were already refused by the shared drain.
         for info in live.iter() {
             let key = store::SessionKey::new(snapshot.id, &info.id);
-            let seen = seen_activity.get(&key).copied();
-            let marks = notification_marks.get(&key).copied().unwrap_or_default();
-            view.push(row_of(
-                snapshot,
-                identity,
-                info.clone(),
-                seen,
-                pins.get(&key).copied(),
-                marks,
-            ));
+            view.push(row_of(snapshot, identity, info.clone(), viewer_state(&key)));
         }
     }
     Ok(assemble(view, filter, sort, hosts_truncated))
@@ -574,6 +589,8 @@ mod tests {
             seen_activity_at: None,
             pinned: false,
             pin_position: None,
+            mute: None,
+            activity_order_hold: None,
             notifications_read_through: 0,
             stale: false,
         }
@@ -651,6 +668,37 @@ mod tests {
             "the title order is case-insensitive (Apple precedes banana, İ folds), and titles \
              that differ only by case tie and break by creation time"
         );
+    }
+
+    /// The held key and the inactive group are independent parts of the
+    /// order. A connected wait breaks through both, while a stale wait or
+    /// running row uses both the old key and the inactive group.
+    #[farhelm_testtrace::test]
+    fn mute_order_is_held_except_while_connected_and_waiting() {
+        let mut muted = row("muted", 100, 1);
+        muted.info.status = SessionStatus::Running;
+        muted.info.last_work_started_at = 700_000;
+        muted.activity_order_hold = Some(200_000);
+        let mut idle = row("idle", 400, 1);
+        idle.info.status = SessionStatus::Idle;
+        let mut running = row("running", 600, 1);
+        running.info.status = SessionStatus::Running;
+
+        let order = |mut rows: [SessionRow; 3]| {
+            sort_rows(&mut rows, store::ListSort::Activity);
+            rows.map(|row| row.info.id)
+        };
+        assert_eq!(
+            order([muted.clone(), idle.clone(), running.clone()]),
+            ["running", "idle", "muted"]
+        );
+        muted.info.status = SessionStatus::Waiting;
+        assert_eq!(
+            order([muted.clone(), idle.clone(), running.clone()]),
+            ["muted", "running", "idle"]
+        );
+        muted.stale = true;
+        assert_eq!(order([muted, idle, running]), ["running", "idle", "muted"]);
     }
 
     /// The activity order moves for two reasons only: a later burst key, or a
