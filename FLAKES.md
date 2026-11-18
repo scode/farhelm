@@ -5001,3 +5001,26 @@ gui-lifecycle: FAILED: premise: after the kill, the socket file is not there ref
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-17 — retired session deletion refused when the user manager stopped answering (crates/farhelm/tests/e2e/containerized_sessions.rs)
+
+`containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use` was the sole failed test in the first
+v0.40.0 x86_64 release workspace run, recorder `8346914f-7b4d-4f82-9c7d-ed2c4b007feb` at clean `addf7bcac`. It ran on
+hosted Ubuntu 24.04 (Linux 6.14.0-1017-azure, eight CPUs, load unavailable) with nextest 0.9.148,
+`cargo nextest run --workspace --exclude farhelm-desktop`, four slots, zero retries, and locale `C.UTF-8`. The only
+`FARHELM_*` input was the recorder-owned trace directory. The supervisor first recorded a scoped launch, then the
+reopened supervisor's user-manager probe timed out at 15 seconds. Delete kept the row because it could not confirm the
+scope was empty. The test took 15.340 s, compared with 0.397 s on the same product source in RC.6's hosted workspace
+run. The reason the user manager stopped responding is unknown. The test last changed in #3330. The release job's
+failure artifact retains the report and traces until hosted retention expires. A focused local run on the clean stable
+tag passed in 2.000 s with a working systemd user manager, recorder `3dbb1a5f-8029-4422-9f75-75de2c26a523`,
+`cargo nextest run -p farhelm --test e2e -E 'test(=containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use)'`,
+four available slots, one selected test, zero retries. Disposition: open and excluded from Deflake sweeps.
+
+```
+called `Result::unwrap()` on an `Err` value: killing process tree: the process-tree sweep confirmed nothing is running, but the named cgroup scope(s) could not be torn down (scope farhelm-<session>-0.scope could not be checked because this host's systemd user manager is not usable now, so its cgroup may still hold processes); the session is kept so the operation can be retried
+```
+
+Class: substrate
+
+Cause: established
