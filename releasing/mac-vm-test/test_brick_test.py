@@ -766,13 +766,15 @@ image evidence so cleanup cannot silently skip its new obligation.
                 self.run.select_update(pass_id, 'v0.24.0')
             entry = self.run.selected(pass_id)
             for check in entry['required']:
+                if check not in self.run.executable_checks(entry)['required']:
+                    continue
                 if entry['required'][check].get('priority') == 'P1' and self.run.data['scope'] == 'p0-only':
                     continue
                 refs = [receipt] if check == 'artifact-verification' else [image, command]
                 self.run.record(pass_id, check, 'pass', refs, 'Synthetic evidence contract, not a product observation.')
                 if check == through:
                     return children
-            self.assertEqual(self.run.verdict(priority_entry(entry, 'P0')), 'pass')
+            self.assertEqual(self.run.verdict(self.run.executable_checks(priority_entry(entry, 'P0'))), 'pass')
             self.run.cleanup(pass_id)
         self.assertTrue(all(child.poll() == 0 for child in children))
         self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
@@ -826,6 +828,69 @@ image evidence so cleanup cannot silently skip its new obligation.
             self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
             self.assertEqual(report['verdict'], 'could not run')
         self.prepare('fresh')
+
+    def test_manual_discovery_gap_allows_remaining_checks_feedback_cleanup_and_bonus(self):
+        """Unsupported discovery must not strand useful release coverage or fake a P0 pass.
+
+RC and dev candidates use manual installation. Every other checkpoint, including seeded-session
+survival and remote removal, must still pass before feedback or bonus work and
+before the report can say all runnable P0 checks passed.
+"""
+        cases = (
+            ('v0.25.0-rc.1', True, 'v0.25.0-rc.1 is a release candidate. '
+             'The in-app updater only discovers stable releases.'),
+            ('v0.25.0-dev.1', True, 'v0.25.0-dev.1 is a development prerelease. '
+             'The in-app updater only discovers stable releases.'),
+        )
+        for candidate, supported, reason in cases:
+            with self.subTest(candidate=candidate):
+                self.enable_p0(candidate=candidate, supported=supported)
+                for pass_id in self.run.data['plan']['p0_sequence']:
+                    self.complete_p0(pass_id)
+                with self.run.locked():
+                    report = self.run.report()
+                    self.assertTrue(self.run.p0_executable_complete())
+                    self.assertEqual(report['p0']['verdict'], 'could not run')
+                    self.assertEqual(report['p0']['checks']['click-to-upgrade'], 'could not run')
+                    discovery = report['p0']['unavailable_checks']['update-discovery']
+                    self.assertIn(reason, discovery)
+                    self.assertIn('public update channel pointed to v0.24.0', discovery)
+                    self.assertEqual(report['p0']['summary'], 'All runnable P0 checks passed. ' + discovery)
+                    self.assertEqual(set(value for key, value in report['p0']['checks'].items()
+                                         if key != 'click-to-upgrade'), {'pass'})
+                    self.assertEqual(report['p1']['verdict'], 'pass')
+                    self.assertNotIn('update-discovery', self.run.selected('p0-updater-upgrade')['results'])
+                    self.assertEqual(report['passes']['p0-updater-upgrade']['phase'], 'deleted')
+                self.prepare('fresh')
+                with self.run.locked():
+                    self.run.cleanup('fresh', discard_failed=True)
+
+    def test_manual_gap_does_not_waive_missing_checks_failed_discovery_or_selection_evidence(self):
+        """Report a skip only with valid selection evidence, and summarize only completed coverage."""
+        self.enable_p0(candidate='v0.25.0-rc.1')
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        self.complete_p0('p0-updater-upgrade', through='update-relaunch')
+        with self.run.locked():
+            self.assertFalse(self.run.p0_executable_complete())
+            self.assertIn('update-discovery', self.run.report()['p0']['unavailable_checks'])
+            self.assertNotIn('summary', self.run.report()['p0'])
+            with self.assertRaisesRegex(Refused, 'all P0'):
+                self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [], 'Premature feedback.')
+            entry = self.run.selected('p0-updater-upgrade')
+            selection = self.run.directory / 'p0-updater-upgrade/latest-at-selection.json'
+            original = selection.read_bytes()
+            selection.write_text('{}')
+            self.assertIn('update-discovery', self.run.executable_checks(entry)['required'])
+            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
+            selection.write_bytes(original)
+            self.assertNotIn('update-discovery', self.run.executable_checks(entry)['required'])
+            self.run.record('p0-updater-upgrade', 'update-discovery', 'fail', [], 'Observed product failure.')
+            self.assertIn('update-discovery', self.run.executable_checks(entry)['required'])
+            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
+            self.assertEqual(self.run.report()['p0']['verdict'], 'fail')
+            with self.assertRaisesRegex(Refused, 'stop after the first'):
+                self.run.require_priority('fresh')
 
     def test_p0_only_scope_and_changed_evidence_fence_bonus_cloning(self):
         """A requested P0 stop stays effective, and stale successful evidence never authorizes more work."""

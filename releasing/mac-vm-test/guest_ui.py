@@ -42,6 +42,9 @@ Then use the documented app method name and a positional args array, e.g.
 {"target":"farhelm","method":"click","args":[8]} or getAXState with
 [{"disableDiffing":true}]. Each request performs one call; read fresh state after
 input. No JavaScript or arbitrary app names. Use paste for exact text entry;
+AX can list controls outside a scrollable dialog's viewport. Before clicking
+an element, inspect a fresh native screenshot and scroll it visibly into view;
+an AX index alone does not establish that a control is onscreen.
 typeText is not exposed because partial text delivery was observed. Verify the
 reactive field value before submitting. For the actual Restart to update
 button first capture its visible menu, then use method restart with its center

@@ -18,17 +18,17 @@ successful agent, then remote supervisor upgrade with one successful agent; on e
 the previous stable must also survive the upgrade in its terminal host, then restart onto a new terminal host and resume
 its conversation. Finally, Remove/re-add the remote host with its sessions preserved, then Uninstall after ending all
 its sessions. Preserve failed attempts and repair safe harness or setup problems under "Repair and continue"; keep
-working toward the requested brick-test coverage instead of ending the task at the first obstacle. After P0 passes, P1
-sends one live feedback submission from the candidate on P0's last Mac guest, before that fixture is exported and
-cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate verdict and
-does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends after recording
-P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts. **Stop after P1
-checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?** from the
-separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its own
-verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the maintainer's
-call for that release. Resolve missing prerequisites from evidence and existing authorization; ask only when a needed
-binding, permission or consequential decision cannot be established. A test request does not authorize publication or
-release promotion.
+working toward the requested brick-test coverage instead of ending the task at the first obstacle. After the runnable P0
+checks pass, P1 sends one live feedback submission from the candidate on P0's last Mac guest, before that fixture is
+exported and cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate
+verdict and does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends
+after recording P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts.
+**Stop after P1 checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?**
+from the separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its
+own verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the
+maintainer's call for that release. Resolve missing prerequisites from evidence and existing authorization; ask only
+when a needed binding, permission or consequential decision cannot be established. A test request does not authorize
+publication or release promotion.
 
 Use the guest-native executor of `releasing/mac-vm-test/BRICK-TEST.md` for actual tests: an independent Codex process
 inside the Mac guest drives native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned
@@ -99,19 +99,25 @@ never prerequisites inserted between these seven checks. After the supervisor ch
 Remove/re-add with both sessions preserved, then Uninstall after ending all remote sessions, retaining their data. These
 are the sixth and seventh named P0 results.
 
-**P1** sends one real feedback submission through the candidate app after P0 passes, on the Mac guest of
-`p0-updater-upgrade`, before the final export and cleanup of that pair. Its first line is `[brick-test] vX.Y.Z`, naming
-the candidate, so the private inbox issue is titled `Feedback: [brick-test] vX.Y.Z`. Report `p1.verdict` and its
+**P1** sends one real feedback submission through the candidate app after all runnable P0 checks pass, on the Mac guest
+of `p0-updater-upgrade`, before the final export and cleanup of that pair. Its first line is `[brick-test] vX.Y.Z`,
+naming the candidate, so the private inbox issue is titled `Feedback: [brick-test] vX.Y.Z`. Report `p1.verdict` and its
 `p1-feedback-send` result separately from P0. A P1 failure or unavailable check is reported promptly and does not stop
-bonus coverage; P0's verdict remains independent. The full `verdict` includes P1. If P0 fails or cannot run, do not
-attempt P1.
+bonus coverage; P0's verdict remains independent. The full `verdict` includes P1. If a runnable P0 check fails or cannot
+run, do not attempt P1.
+
+For an RC or dev build on the verified manual path, skip discovery, install while the old app and seeded sessions run,
+and use Restart to update. Run the rest of P0, then any authorized P1, normal cleanup and bonus coverage. The formal P0
+verdict still requires all seven results. A stable release requires discovery. If the old app cannot discover the stable
+candidate, record a failed discovery requirement and stop the dependent checks. An observed updater failure or missing
+evidence stops dependent work for every release kind.
 
 The coordinator reports `p0.verdict` and the seven named `p0.checks` separately from the full `verdict`. **Did P0 checks
-succeed?** means all seven ran and passed with retained evidence. For an RC on the manual path, say upfront that in-app
-update discovery was skipped as expected because the updater only discovers stable releases. Use the explanation in
-`p0.unavailable_checks` and include the installer upgrade and Restart to update outcome. When `p0.summary` says all
-runnable checks passed, lead with that. Otherwise name any checks that stopped and why. Give P1 and bonus blockers their
-own plain-language causes.
+succeed?** means all seven ran and passed with retained evidence. For an RC or dev build on the manual path, say upfront
+that in-app update discovery was skipped as expected because the updater only discovers stable releases. Use the
+explanation in `p0.unavailable_checks` and include the installer upgrade and Restart to update outcome. When
+`p0.summary` says all runnable checks passed, lead with that. Otherwise name any checks that stopped and why. Give P1
+and bonus blockers their own plain-language causes.
 
 **Stop after P0 checks** means record that scope with `init vX.Y.Z --stop-after-p0`, complete P0, export its evidence,
 clean up its successful fixtures, and end the session before P1 or bonus work; no feedback is sent. If requested during
@@ -134,11 +140,28 @@ succeed?** is answered from `p1.verdict` and the named check, never inferred fro
 Widening a run whose final pair was already cleaned cannot execute P1 on that discarded fixture. Start a new
 appropriately authorized run rather than restoring a deleted pair or inventing its feedback observation.
 
+When the maintainer resumes full coverage after a temporary scope stop, use `brick_test.py continue-full "$test_run"`.
+Resolve live-feedback authorization first. This rechecks setup consent without clearing observations or retrying sends;
+it cannot recover feedback on a pair already deleted.
+
 Read [RECIPE.md](RECIPE.md) for the product checks and [OPERATIONS.md](OPERATIONS.md) for guest commands, GUI mechanics
 and evidence collection. [BRING-UP.md](BRING-UP.md) covers preparing another machine. A previously successful run proves
 that run's versions and paths; a new candidate needs its own checks against its actual artifacts.
 
 ## Repair and continue
+
+### Requests to change the process
+
+An explicit request to change how brick testing works in general includes implementing and validating the change and
+opening a draft PR. Merge it when the maintainer asks. Use the repository's PR workflow and carry only the intended
+changes into the PR.
+
+If a request to unblock or redirect a run would change the process and could mean either a permanent change or a one-off
+exception, ask the maintainer which they intend before changing the process. Follow the repository's unattended rules
+when nobody is watching. A clearly scoped one-off needs no clarification. Keep any temporary code or instruction edits
+in an isolated checkout or otherwise track them separately from existing edits. After the run or attempt ends, remove
+those temporary edits and verify that the working copy has no changes from the exception. Retain the run's evidence and
+record the exception in its private log.
 
 The goal is to complete the requested brick test. A recoverable harness problem is work to diagnose and fix, not the
 default endpoint of the task. Inspect its actual error, retained events, current guest state and journal; make a narrow
@@ -545,12 +568,12 @@ The tester selects the branch automatically immediately before the first upgrade
 `python3 -B releasing/mac-vm-test/brick_test.py select-update "$test_run" <upgrade-pass>` reobserves `/latest` and saves
 `latest-at-selection.json`. Follow the reported `ordinary`, `override` or `manual` branch in RECIPE. Override support
 comes from that actual **old** tag's source. `p0-installer-upgrade` always selects the manual installer branch;
-`p0-updater-upgrade` must use ordinary or override discovery. An unsupported old updater or prerelease that cannot be
-discovered before promotion makes P0 could not run; do not replace that check with another manual installation. Native
-forwarding, its startup announcement and removal after relaunch still need actual evidence. Manual installation skips
-the old updater's probe and trust checks; separate minisign verification does not erase that coverage gap. If promotion
-happened meanwhile, report after-publication coverage. If `/latest` advanced beyond the candidate, stop and replan with
-the maintainer.
+`p0-updater-upgrade` uses ordinary or override discovery when supported. An RC or dev build on the manual path leaves
+discovery and strict P0 incomplete and continues through manual installation and native relaunch. A stable candidate on
+that path fails required discovery and stops dependent work. Native forwarding, its startup announcement and removal
+after relaunch still need actual evidence. Manual installation skips the old updater's probe and trust checks; separate
+minisign verification does not erase that coverage gap. If promotion happened meanwhile, report after-publication
+coverage. If `/latest` advanced beyond the candidate, stop and replan with the maintainer.
 
 Save an actual native tool-returned PNG or JPEG for every GUI checkpoint. Retain command/service/version/identity
 evidence as well for combined GUI and command checks. Bind native computer use to the guest app directly. Capture actual

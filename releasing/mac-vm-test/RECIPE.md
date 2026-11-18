@@ -103,9 +103,12 @@ not successful agent execution.
    counter command is needed. Reobserve `/latest`, select the ordinary or stable-override path below, and explicitly
    click **Check for updates** in the old app. Require it to discover and install the candidate (`update-discovery`),
    then use the actual **Restart to update** action and require the candidate app to return, with the same supervisor
-   handover as step 2 (`update-relaunch`). Verify override forwarding and removal when applicable. An RC/dev candidate
-   or old app without override support may lack a genuine pre-promotion discovery path; report that step and P0 as could
-   not run and stop. A manual installer cannot satisfy step 3.
+   handover as step 2 (`update-relaunch`). Verify override forwarding and removal when applicable. For an RC or dev
+   candidate on the verified manual path, report discovery as an expected skip and P0 as could not run. Install manually
+   while the old app and both seeded sessions run, use Restart to update, then perform steps 4–7. That exception permits
+   authorized P1, bonus coverage and normal cleanup after every runnable P0 check passes. For a stable candidate whose
+   old app cannot discover it, fail the required discovery check and stop. Any observed failure, other unavailable check
+   or damaged evidence still blocks dependent work.
 4. **Local supervisor upgrade, one successful agent and the old session.** On the step 3 fixture, require the local
    supervisor to connect at the candidate version. The Mac app normally upgrades its managed local supervisor when it
    relaunches; observe that transition rather than requiring an extra Update click. If the product offers a local Update
@@ -160,10 +163,11 @@ as historical coverage rather than rewriting them.
 
 ## P1 check: send feedback from the candidate
 
-Run only after all seven P0 checks passed with valid retained evidence. Use the Mac guest of `p0-updater-upgrade`, on
-the candidate app those steps left running; do not create a new clone or install another app. Permission preflight must
-already cover the live send to `farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This
-check does not run in stop-after-P0 scope.
+Run only after every runnable P0 check passed with valid retained evidence (step 3's RC and dev discovery exception does
+not waive any other prerequisite). Use the Mac guest of `p0-updater-upgrade`, on the candidate app those steps left
+running; do not create a new clone or install another app. Permission preflight must already cover the live send to
+`farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This check does not run in
+stop-after-P0 scope.
 
 1. Through computer use bound to this exact guest, open **?** and choose **send feedback**. Enter this exact message,
    replacing only `vX.Y.Z` with the candidate's full tag:
@@ -379,8 +383,8 @@ Coverage gaps: unrun checks, manual-verification omissions, untested version pai
 Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
-“P0 pass” requires all seven P0 checks to run and pass. “P1 pass” requires the feedback send after valid P0. “Full pass”
-additionally requires P1 and every planned bonus check to run and pass. A product failure makes the relevant verdict
-fail; a missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped
-check or a clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero
-risk for every supported installation.
+“P0 pass” requires all seven P0 checks to run and pass. “P1 pass” requires the feedback send after every runnable P0
+check passes. Discovery on the RC or dev manual path stays unavailable. “Full pass” additionally requires P1 and every
+planned bonus check to run and pass. A product failure makes the relevant verdict fail; a missing test environment with
+no demonstrated product failure makes it could not run. Never treat a skipped check or a clean process exit as a pass.
+This result covers the actual versions, artifacts and paths exercised, not zero risk for every supported installation.

@@ -218,7 +218,8 @@ could-not-run boundary are too specific to leave to that mapping.
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
         return remote_host_instructions(check_id)
     contracts = {
-        'p1-feedback-send': '''This is the separately authorized P1 check after all P0 checks passed.
+        'p1-feedback-send': '''This is the separately authorized P1 check after all runnable P0 checks passed.
+Expected RC or dev updater discovery skips do not block this check.
 Require context feedback_authorized true before opening Send; otherwise report
 could-not-run without sending. Read RECIPE.md's P1 contract. Through native CUA
 send its exact two-paragraph brick-test message with this candidate tag to the
@@ -456,6 +457,9 @@ a failure. Do not change confirmation preferences or repeat a completed update
 to obtain a dialog.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session with the configured model at low effort, YOLO and per-run trust where offered.
+Leave the launcher's optional Initial prompt blank. Launch first, then enter the
+prompt in the visible agent terminal; the initial-prompt field can be offscreen
+even when present in AX. Scroll other launcher controls into view before clicking.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
 answer 42, explanation, responsive terminal and completion. Leave the old
 remote session from old-fixture untouched. Leave this new session running: the
@@ -513,7 +517,8 @@ continuity_remote_after. Both must establish the original process survived.''',
 then call launch. Require usable candidate, both connected hosts, retained
 sessions and responsiveness. Call versions, remote_version, inspect_state and
 continuity_reopen_after. Capture final native image.''',
-        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all declared P0 checks passed.
+        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all runnable P0 checks passed.
+Expected RC or dev updater discovery skips do not block this check.
 Require context.feedback_authorized true. Open the normal ? > send feedback
 dialog. Use native paste for exactly this message, replacing vX.Y.Z only with
 context.candidate:

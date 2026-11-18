@@ -260,10 +260,13 @@ class NativeCoordinatorTests(unittest.TestCase):
     def test_p1_provider_failure_never_schedules_an_automatic_send_retry(self):
         """The live feedback boundary stays conservative even if a provider refusal looks pre-action."""
         self.finish_preceding_pairs()
+        with self.run.locked():
+            with self.assertRaisesRegex(Refused, 'feedback'):
+                self.run.continue_full()
+            self.assertEqual(self.run.data['scope'], 'p0-only')
         self.approve_feedback()
         with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
+            self.run.continue_full()
         self.fixture.prepare('p0-updater-upgrade')
         delays = []
         self.run.pause = delays.append
@@ -542,6 +545,60 @@ The refusal names its cause and comes before credentials or any guest turn.
             self.assertEqual(report['p1']['verdict'], 'pass')
             self.assertEqual(report['requested_verdict'], 'pass')
             self.run.cleanup('p0-updater-upgrade')
+
+    def test_rc_native_dispatch_skips_only_discovery_and_runs_feedback(self):
+        """Exercise the real serial dispatcher on a manual RC, not just record-shaped fixtures.
+
+Discovery gets no guest turn or passing receipt. The same pair still runs the
+manual relaunch, both old-session checks, remote menu checks and approved P1.
+Its retained captures permit normal cleanup while P0 stays incomplete.
+"""
+        self.fixture.enable_p0(candidate='v0.25.0-rc.1', p0_only=True)
+        self.run = self.fixture.run
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        with self.run.locked():
+            self.run.continue_full()
+        self.seen.clear()
+        self.drive_pair('p0-updater-upgrade')
+        dispatched = [value['check_id'] for value in self.seen]
+        self.assertNotIn('update-discovery', dispatched)
+        self.assertIn('local-old-session', dispatched)
+        self.assertIn('remote-old-session', dispatched)
+        self.assertIn('remote-host-uninstall', dispatched)
+        self.assertEqual(dispatched[-1], 'p1-feedback-send')
+        relaunch = next(value for value in self.seen if value['check_id'] == 'update-relaunch')
+        self.assertEqual(relaunch['context']['update_path'], 'manual')
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+            self.run.cleanup('p0-updater-upgrade')
+
+    def test_stable_manual_path_fails_required_discovery(self):
+        """A stable release requires discovery even when its old app lacks the override."""
+        self.fixture.enable_p0(candidate='v0.25.0', supported=False, p0_only=True)
+        self.run = self.fixture.run
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        with self.run.locked():
+            self.run.continue_full()
+        self.seen.clear()
+        with self.assertRaisesRegex(Refused, 'discovery is required for stable release v0.25.0'):
+            self.drive_pair('p0-updater-upgrade')
+        self.assertEqual([value['check_id'] for value in self.seen],
+                         ['native-preflight', 'artifact-verification', 'old-fixture'])
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'fail')
+            self.assertEqual(report['p0']['checks']['click-to-upgrade'], 'fail')
+            self.assertEqual(report['verdict'], 'fail')
+            self.assertNotIn('unavailable_checks', report['p0'])
+            self.assertNotIn('summary', report['p0'])
+            result = self.run.selected('p0-updater-upgrade')['results']['update-discovery']
+            self.assertEqual(result['evidence'], ['p0-updater-upgrade/latest-at-selection.json'])
+            self.assertTrue(self.run.result_evidence_retained(result))
+            with self.assertRaises(Refused):
+                self.run.cleanup('p0-updater-upgrade')
 
     def test_in_flight_p1_outcome_survives_late_scope_narrowing(self):
         """A scope request cannot recall a dispatched send or erase its actual retained result."""

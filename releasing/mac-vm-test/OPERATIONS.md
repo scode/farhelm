@@ -111,6 +111,12 @@ proof that the provisioned service failed.
 
 ## Guest commands and app launch
 
+On an RC or dev build's verified manual path, discovery stays unavailable. The coordinator continues native relaunch,
+agent execution, old-session survival, remote menu checks and approved feedback on the same pair. Every runnable P0
+check must pass before feedback or bonus work, and cleanup rechecks that evidence; only the unsupported, unattempted
+discovery is excluded from scheduling. P0's reported verdict remains incomplete. An observed failure, missing
+prerequisite or damaged receipt still stops dependent checks. A stable release requires discovery.
+
 Actual release checks use `brick_test.py test`, which stages an independent guest executor and checkpoint envelope
 through this journaled channel. Signature verification, fixture cleanliness and fresh installation use fixed
 command-only children, retaining operation receipts and explicit fixed-execution events without model or native-provider
@@ -214,6 +220,12 @@ Exact text uses the native provider's `paste`, which restores the guest clipboar
 characters in the P1 message during validation, so the structured tool does not offer it. Verify the complete reactive
 field value before submitting; successful input delivery is not inferred from the tool's exit. Host clipboard sharing
 stays disabled.
+
+The GPUI launcher's AX tree can include Initial prompt while that field is below its visible viewport. One RC test
+clicked that AX index and the provider refused with `cannotClickOffscreenElement`, ending the attempt after the remote
+supervisor had already upgraded. Inspect a native screenshot and scroll controls into view before clicking. For the
+remote-agent check, leave Initial prompt blank, launch the agent, then type its test prompt in the visible terminal.
+Retain the failed attempt and use a new run; never replay its completed remote update to recover the failed click.
 
 P0 native readiness uses a normal Finder file window and its Search field. Inspect AX first, create a file window when
 only Desktop exists, and dismiss any menu with its actual Cancel secondary action before requesting images. Escape alone
