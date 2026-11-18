@@ -21,45 +21,9 @@ consequences.
   — Blanket update-survival assurance includes the update that ends old terminals (proposed drop). Abbreviated
   collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md`](trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md)
-  — Proposed drop retained: cleanup may destroy only the initial launch's new resource. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md`](trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md)
   — Update-survival promise omits the explicitly accepted old-terminal migration. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md`](trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md)
-  — proposed drop: retirement permits residual agents beside later runs. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md`](trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md)
-  — supplied duplicate: interrupted Restart confirmation understates cleanup. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md`](trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md)
-  — Hidden old-tab and old-agent Deletes share the no-live authority gap. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md`](trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md)
-  — Proposed drop: ending old terminals is explicitly specified. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md`](trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md)
-  — An old page can turn a literal JSON paste into unbracketed terminal commands. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-startup-failure-versus-restart-reap.md`](trailing-old-terminal-startup-failure-versus-restart-reap.md)
-  — Unverified after investigation: accepted duplicate-agent risk lacks a complete ordinary Restart route. Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-page-raw-json-paste-grid-control.md`](trailing-old-page-raw-json-paste-grid-control.md) — The HTTP
-  defaults still reach an interactive old raw-paste surface after build skew. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-container-place-retarget-authority-is-unverified-after-investigation.md`](trailing-container-place-retarget-authority-is-unverified-after-investigation.md)
-  — Container-place retarget authority is unverified after investigation. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md`](trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md)
   — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
@@ -73,165 +37,25 @@ consequences.
   — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md`](trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md)
-  — Interrupted restart promises nothing remains before reaping surviving work. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md`](trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md)
-  — Old-page GUI interlocks do not block the supplied JSON paste reinterpretation. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md`](trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md)
-  — Cleanup-failure risk predates the removed GUI warning. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
-- [`trailing-warned-whole-environment-delete-includes-unmarked-peers.md`](trailing-warned-whole-environment-delete-includes-unmarked-peers.md)
-  — Whole-environment bulk Delete intentionally destroys unmarked peers. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md`](trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md)
-  — A fixed container-creation card can authorize execution and credentials on another machine. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-fresh-environment-launch-ambiguous-create-cleanup.md`](trailing-fresh-environment-launch-ambiguous-create-cleanup.md)
-  — Failed initial launch may destroy work started by a lost create reply (explicitly accepted). Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md`](trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md)
-  — Uninstall no longer ends an already-detached legacy tmux server. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-raster-default-native-opening-policy.md`](trailing-raster-default-native-opening-policy.md) — Raster
-  default and warning exemption are the dated product policy. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md`](trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md)
-  — Environment endpoint authority needs reconciliation with logical-entry consent. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md`](trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md)
-  — Old-page stream fallback can reinterpret a literal paste as grid input. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deliberate-old-tmux-terminal-retirement.md`](trailing-deliberate-old-tmux-terminal-retirement.md) — Old
-  terminal contents and running jobs are deliberately retired. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md`](trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md)
-  — Incoming input-reinterpretation lead is incorporated into c1. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-owned-image-rm-default-prunes-user-base.md`](trailing-podman-owned-image-rm-default-prunes-user-base.md)
-  — Owned-image cleanup can prune an untagged user-owned base. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-owned-image-removal-recursively-prunes-user-base.md`](trailing-podman-owned-image-removal-recursively-prunes-user-base.md)
-  — Provider image cleanup can recursively prune a user-owned base. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-old-terminal-migration-unconditional-session-survival-assurance.md`](trailing-old-terminal-migration-unconditional-session-survival-assurance.md)
   — Installer survival assurance can lead users to leave work in terminals this update ends. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md`](trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md)
-  — Old raw-byte pages can reinterpret a literal JSON paste as grid text input. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md`](trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md)
-  — Removed stream-kind negotiation matches protocol 77. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
-- [`trailing-fresh-environment-ambiguous-create-cleanup.md`](trailing-fresh-environment-ambiguous-create-cleanup.md) —
-  Ambiguous environment launches can duplicate resources or discard a started agent (specification acceptance proposed).
-  Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md`](trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md)
-  — Old-page caller guards permit the interactive unknown-kind mount in g196/l1. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md`](trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md)
-  — Migration can remove moved checkout work through an unprotected live spare claim. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-legacy-tmux-retirement-process-history-loss.md`](trailing-intentional-legacy-tmux-retirement-process-history-loss.md)
-  — Intentional legacy terminal retirement remains a specification-based drop proposal. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md`](trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md)
-  — Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check. Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-retirement-of-old-private-tmux-terminals.md`](trailing-intentional-retirement-of-old-private-tmux-terminals.md)
-  — old tmux terminal retirement loses retained history and ends programs, explicitly accepted. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-removed-lone-legacy-tab-lifecycle-oracles.md`](trailing-removed-lone-legacy-tab-lifecycle-oracles.md) —
   Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-snapshot-unvalidated-pane-owner.md`](trailing-old-terminal-snapshot-unvalidated-pane-owner.md)
-  — Snapshot-owner PID reuse can bypass host-tab exclusion. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-old-terminal-retirement-history-loss.md`](trailing-intentional-old-terminal-retirement-history-loss.md)
-  — Old tmux terminals lose restart history (specified behavior). Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md`](trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md)
-  — Migration can let spare cleanup follow moved directories into a retained checkout. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md`](trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md)
-  — Old-terminal fallback is explicitly accepted; a startup failure alone does not establish duplicate Restart.
-  Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-explicit-old-private-tmux-terminal-retirement.md`](trailing-explicit-old-private-tmux-terminal-retirement.md)
-  — Old tmux terminal access is deliberately removed on upgrade. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md`](trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md)
   — Host-backed fixture cleanup can SIGKILL a recycled, unrelated process group. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-old-tmux-terminal-retirement.md`](trailing-intentional-old-tmux-terminal-retirement.md) — Old
-  tmux terminals lose access and work under the explicit migration policy. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md`](trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md)
   — Natural detach can leave old viewer input live after replacement admission. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-specified-private-tmux-startup-retirement-loss.md`](trailing-specified-private-tmux-startup-retirement-loss.md)
-  — Legacy terminal removal can end running work; specification explicitly accepts it. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md`](trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md)
-  — A surviving old agent can be reaped by a guarded Delete after startup retirement fails. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-private-tmux-startup-retirement-process-history-loss.md`](trailing-old-private-tmux-startup-retirement-process-history-loss.md)
-  — Retired tmux status and tab discovery follows explicitly accepted process loss. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md`](trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md)
-  — Retiring old terminals ends their programs and loses their screens and history. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-legacy-tmux-retirement-work-history-loss.md`](trailing-intentional-legacy-tmux-retirement-work-history-loss.md)
-  — Retiring legacy tmux terminals destroys their retained output. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intentional-startup-retirement-of-private-tmux-work.md`](trailing-intentional-startup-retirement-of-private-tmux-work.md)
-  — upgrade intentionally ends work still in old tmux terminals. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md)
   — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-accepted-retirement-of-old-tmux-terminals.md`](trailing-accepted-retirement-of-old-tmux-terminals.md) —
-  Deleting tmux history capture tests adds no further history loss. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-removed-tmux-stale-target-fallback.md`](trailing-removed-tmux-stale-target-fallback.md) — Removing
   stale-window kill tests does not introduce sibling-target cleanup. Abbreviated collection; confidence, proposed
@@ -241,33 +65,9 @@ consequences.
   — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md`](trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md)
-  — Retiring tmux intentionally ends running legacy terminals. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md`](trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md)
-  — Old terminals and their running work end on upgrade (specification-accepted; proposed drop). Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-tmux-restart-does-not-migrate-scrollback.md`](trailing-retired-tmux-restart-does-not-migrate-scrollback.md)
-  — Retirement proposal retained; resized-seed excerpt counterexample verified. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-osc52-classifier-removal-clipboard-read-disclosure.md`](trailing-osc52-classifier-removal-clipboard-read-disclosure.md)
   — Removing the raw OSC 52 classifier does not expose clipboard reads. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md`](trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md)
-  — Old-page paste can reinterpret literal JSON as unbracketed terminal input. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-browser-grid-json-input-reinterpretation.md`](trailing-legacy-browser-grid-json-input-reinterpretation.md)
-  — Stale xterm pages can reinterpret literal JSON paste as unbracketed input. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md`](trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md)
-  — An old page can interpret pasted JSON as terminal commands. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
 
 - [`header-actions-follow-unseen-session.md`](header-actions-follow-unseen-session.md) — A Stop, Restart, Replace or
   Delete aimed at one session can act on a different session when the selection just changed. Replace on the
@@ -285,10 +85,6 @@ consequences.
 - [`wayland-enter-overtakes-pending-text-paste.md`](wayland-enter-overtakes-pending-text-paste.md) — On Wayland, Enter
   can run the command already on the line while Farhelm is still fetching pasted text meant to finish it. The paste can
   then arrive at the next prompt.
-
-- [`folder-create-approval-loses-target-identity.md`](folder-create-approval-loses-target-identity.md) — A launch
-  approval can still describe the old SSH destination after Farhelm has chosen its replacement. Allow can start the
-  agent and its wrapper on the replacement machine.
 
 - [`websocket-trace-logs-desktop-credential.md`](websocket-trace-logs-desktop-credential.md) — When WebSocket trace
   logging is enabled, Farhelm’s logs can contain a credential that grants access to the running app’s terminal, command,
