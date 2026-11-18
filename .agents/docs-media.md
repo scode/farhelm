@@ -29,21 +29,16 @@ it, never the SVGs by hand, and the outline step only reruns when the word or th
 
 ## README hero screenshot
 
-> NOTE: The capture needs a Mac display that fits the hero's window; when it does not, `scripts/readme-screenshot.sh`
-> stops at its size check with no picture. Then say so, and do not work around it with window resizing, rescaling or a
-> GPUI patch. `docs/gui-agent.md`, "On a Mac", has the test Mac's display.
-
 The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the GPUI desktop
-app against a staged fleet, taken on a Mac and governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot"
-means exactly: run `scripts/readme-screenshot.sh --mac <destination>` (its header lists the environment that names the
-Mac), look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the one-line URL change it
-leaves behind in README.md and in the landing page. Its preflight, shipment, build and window run under the Mac-wide
-lock, after a disk and memory check, and touches no Farhelm installation there; a failed run names its run directory on
-the Mac, kept for its logs; remove it once read. The design (`docs/readme-hero/scenario.json5` and the transcripts
-beside it) changes only when the maintainer asks for a different picture. The publish script is the only thing that
-pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main. Neither script is a
-gate: nothing in CI runs or checks the image. Changing the publish script means running its `--self-test`, which is its
-whole validation and needs no network.
+app against a staged fleet, taken on Linux at the scenario's scale of 2 and governed by `docs/readme-hero/SPEC.md`.
+"Refresh the README screenshot" means exactly: run `scripts/readme-screenshot.sh --local` on Linux, look at the PNG it
+prints, run `scripts/publish-readme-hero.sh` on it, and commit the one-line URL change it leaves behind in README.md and
+in the landing page. A failed run names its run directory, kept for its logs; remove it once read. The script's `--mac`
+route captures on a Mac instead and is not needed for a refresh. The design (`docs/readme-hero/scenario.json5` and the
+transcripts beside it) changes only when the maintainer asks for a different picture. The publish script is the only
+thing that pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main. Neither
+script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its `--self-test`,
+which is its whole validation and needs no network.
 
 ## README demo video
 
@@ -76,6 +71,6 @@ new release shots in `scripts/docs-shots/release-notes.py` and list them under t
 
 The command keeps its bulk capture record and local preview output. Use `--only <page>` for drafting. A full capture
 skips published release shots so the publisher can carry them over unchanged. Publishing belongs to a docs refresh or
-the release screenshot procedure. The docs shots have no Mac route; only the README hero is captured on a Mac.
-`scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it by hand or commit a
-screenshot on main. Changing that script means running its `--self-test`, which needs no network.
+the release screenshot procedure. The docs shots have no Mac route. `scripts/publish-docs-shots.sh` is the only thing
+that pushes `refs/docs-assets/keep`; never push it by hand or commit a screenshot on main. Changing that script means
+running its `--self-test`, which needs no network.

@@ -44,13 +44,13 @@ path is exactly the kind of machine detail the picture must not show. So each se
 the app shows the directory the scenario names.
 
 The browser capture did this by intercepting the helm's session replies on their way to the page. The desktop app has no
-such channel to intercept, since it talks to its embedded helm in memory, so the pinned values go through a debug-only
-seam in the app instead (the maintainer's decision of 2026-11-16). The capture writes each session's age and directory
-from the scenario into a file, an agent build of the app reads it at startup, and the app rewrites those two fields of
-the named sessions as it takes in what its helm pushes, so the list's rows and the open session's details bar both show
-them. The seam is compiled only into agent builds, which an optimized build refuses to compile, so no release build can
-carry it. Nothing else is altered, statuses included. The ages count from the app's start, so they read older by however
-long the capture took to stage the fleet (seconds, for this scenario).
+such channel to intercept, since it talks to the helm embedded in the same process, so the pinned values go through a
+debug-only seam in the app instead (the maintainer's decision of 2026-11-16). The capture writes each session's age and
+directory from the scenario into a file, an agent build of the app reads it at startup, and the app rewrites those two
+fields of the named sessions as it takes in what its helm pushes, so the list's rows and the open session's details bar
+both show them. The seam is compiled only into agent builds, which an optimized build refuses to compile, so no release
+build can carry it. Nothing else is altered, statuses included. The ages count from the app's start, so they read older
+by however long the capture took to stage the fleet (seconds, for this scenario).
 
 The pinned stamps do not reorder the list. The desktop app's "Recently active" order is the helm's own: it puts running
 and waiting sessions first and orders each group by when its sessions last started work, while the browser capture
@@ -79,21 +79,20 @@ name has left the procedure and should stop.
 
 ## Refreshing the image
 
-The hero refresh uses a Mac display at the scenario's scale of 2. `scripts/readme-screenshot.sh` ships the checkout's
-files to the Mac over ssh, builds the app's agent build there, stages the fleet, captures and fetches the PNG; its
-header lists what the Mac and the machine you run it from need, and the environment that names the Mac (the script names
-none). The Mac's display must fit the scenario's window, or the capture stops at its size check (`docs/gui-agent.md`,
-"On a Mac"). Neither machine needs passwordless ssh to itself.
+The hero refresh runs on Linux, like the docs screenshots (`docs/docs-shots/SPEC.md`): the run's private headless Mutter
+renders the scenario's viewport at its scale of 2. It needs what `docs/gui-agent.md` lists for a Linux run, and no
+passwordless ssh to the machine itself.
 
-- `scripts/readme-screenshot.sh --mac <destination>` prints the PNG's path (`target/readme-hero/readme-hero.png` unless
-  `--output` says otherwise). The capture refuses a picture that shows a machine path, the account's ssh spelling or the
-  hostname, or that is not the scenario's size; then there is no PNG, and the message names the Mac's run directory,
-  kept for its logs (remove it once read). Look at the picture.
+- `scripts/readme-screenshot.sh --local` prints the PNG's path (`target/readme-hero/readme-hero.png` unless `--output`
+  says otherwise). The capture refuses a picture that shows a machine path, the account's ssh spelling or the hostname,
+  or that is not the scenario's size; then there is no PNG, and the message names the run directory, kept for its logs
+  (remove it once read). Look at the picture.
 - `scripts/publish-readme-hero.sh <png>` pushes it and rewrites both pages' URL. `--dry-run` first if in doubt.
 - Commit the two-page change like any other change.
 
-`--local` runs the same capture on the machine you are on: on a Mac the picture itself, on Linux a development run on
-headless Mutter that runs every check and stops at the size check, since it renders at scale 1.
+`--mac <destination>` runs the same capture on a Mac over ssh, on its real screen, which must fit the scenario's window
+(`docs/gui-agent.md`, "On a Mac"); the script's header lists what the Mac needs and the environment that names it. It is
+not needed for a refresh.
 
 ## Changing the design
 
