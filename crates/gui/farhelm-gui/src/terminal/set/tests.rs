@@ -14,7 +14,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_proto::DetachCode;
-use farhelm_proto::grid::GridOutput;
+use farhelm_proto::grid::{GridInput, GridOutput};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
 use gpui::{Entity, TestAppContext, VisualTestContext};
 use serde_json::json;
@@ -1043,8 +1043,8 @@ fn skipping(tabs: &[&str]) -> Vec<CollectionState> {
 }
 
 /// SPEC.md, "Session view": the view "supports additional terminal tabs", and the old strip's New terminal opened one
-/// and showed it; the helm's reply and its push of the new tab list can come in either order, and the tab must be
-/// chosen either way, or a press would leave the user looking at the old terminal. Specified: New terminal sends one
+/// and showed it; the helm's reply and its push of the new tab list can come in either order, and when the user waits
+/// the tab must be chosen either way, or a press would leave the user looking at the old terminal. Specified: New terminal sends one
 /// `POST /api/sessions/a/tabs`; answered with tab t1 before the row lists it, nothing is chosen yet; once the push lists
 /// t1, t1 is chosen and a typed key reaches its stream. A second press, answered after the push of t2, chooses t2 at
 /// once.
@@ -1084,6 +1084,81 @@ fn new_terminal_opens_a_tab_and_shows_it(cx: &mut TestAppContext) {
         .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t2" } })));
     settle(window.cx);
     assert_eq!(window.chosen().as_deref(), Some("t2"));
+}
+
+/// SPEC.md, "Who may move focus": once the user has moved on, a result moves no focus. Here the reply comes before the
+/// row lists the new shell, and the user has clicked back into the agent and typed; when the row arrives the shell must
+/// not be chosen, because hiding the agent would send focus home to the shell, where Enter could run the rest of what
+/// the user was typing.
+#[gpui::test]
+fn new_terminal_reply_before_row_preserves_agent_input_after_moving_on(cx: &mut TestAppContext) {
+    new_terminal_preserves_agent_input_after_moving_on(cx, false);
+}
+
+/// SPEC.md, "Who may move focus", with the row listing the new shell before the reply arrives: once the user has moved
+/// on, the reply must leave the agent shown and typing routed to it. The immediate selection path can redirect input
+/// just as the deferred one can.
+#[gpui::test]
+fn new_terminal_row_before_reply_preserves_agent_input_after_moving_on(cx: &mut TestAppContext) {
+    new_terminal_preserves_agent_input_after_moving_on(cx, true);
+}
+
+/// Hold both helm messages until the user has resumed typing, then prove where the rest of the input lands with
+/// both streams live. An attaching shell would drop input and could conceal a redirect.
+fn new_terminal_preserves_agent_input_after_moving_on(cx: &mut TestAppContext, row_first: bool) {
+    let mut window = open(cx, snapshot(&[]));
+    let agent = window.stream_of(None);
+    window.go_live(agent, "agent");
+    tab_requests(&mut window.helm);
+
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "the open request is pending");
+    let agent_grid = test_support::frame(window.cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("terminal-grid"))
+        .expect("the agent terminal is drawn")
+        .bounds;
+    window
+        .cx
+        .simulate_click(agent_grid.center(), gpui::Modifiers::none());
+    assert!(test_support::terminal_focused(window.cx));
+    keys(window.cx, "x");
+    assert!(window.typed_into(agent), "typing resumed in the agent");
+
+    if row_first {
+        window.push_tabs(&["t1"]);
+    }
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t1" } })));
+    settle(window.cx);
+    if !row_first {
+        window.push_tabs(&["t1"]);
+    }
+    let shell = window.stream_of(Some("t1"));
+    window.go_live(shell, "shell");
+    assert_eq!(window.phase(shell), FakePhase::Attached);
+
+    keys(window.cx, "y enter");
+    let agent_input: Vec<_> = window
+        .received(agent)
+        .into_iter()
+        .filter(|request| matches!(request, FakeTerminalRequest::Input { .. }))
+        .collect();
+    let shell_input = window.typed_into(shell);
+    assert!(
+        matches!(agent_input.as_slice(), [
+            FakeTerminalRequest::Input { input: GridInput::Key { key: letter, .. }, delivered: true },
+            FakeTerminalRequest::Input { input: GridInput::Key { key: enter, .. }, delivered: true },
+        ] if letter == "y" && enter == "Enter"),
+        "the agent must receive the rest of the typing and Enter: {agent_input:?}; shell received input: {shell_input}"
+    );
+    assert!(!shell_input, "the shell received no input");
+    assert_eq!(window.chosen(), None, "the agent stays chosen");
+
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
 }
 
 /// SPEC.md, "Lifecycle operations": a pending request refuses "another lifecycle action, New terminal or Clone on that
