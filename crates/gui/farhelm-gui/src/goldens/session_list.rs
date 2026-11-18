@@ -440,6 +440,7 @@ fn listing_carrying_the_open_session(shown: &[&str], open: Option<String>) -> Co
             }),
             selected_outside_query: carried,
             selected_cut: false,
+            session_groups: Vec::new(),
         },
         upsert: Vec::new(),
         remove,

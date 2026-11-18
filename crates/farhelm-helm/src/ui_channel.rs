@@ -199,6 +199,7 @@ pub(crate) struct Projected {
     /// Entries in served order, with their keys.
     pub(crate) entries: Vec<(String, Value)>,
     pub(crate) counts: Option<ListCounts>,
+    pub(crate) session_groups: Vec<farhelm_proto::ui_channel::SessionGroup>,
     /// The key of the entry in `entries` that is there only because the
     /// session query selected it (always the last entry). The diff keeps it
     /// out of the order and names it in the metadata.
@@ -256,6 +257,7 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                 Ok(Projected {
                     entries: vec![(PREFERENCES_KEY.to_string(), body)],
                     counts: None,
+                    session_groups: Vec::new(),
                     selected_outside_query: None,
                     selected_cut: false,
                 })
@@ -287,6 +289,7 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                 Ok(Projected {
                     entries: vec![(ANNOUNCEMENTS_KEY.to_string(), body)],
                     counts: None,
+                    session_groups: Vec::new(),
                     selected_outside_query: None,
                     selected_cut: false,
                 })
@@ -339,6 +342,7 @@ fn split_recipe_places(body: Value) -> Result<Projected, String> {
     Ok(Projected {
         entries,
         counts: None,
+        session_groups: Vec::new(),
         selected_outside_query: None,
         selected_cut: false,
     })
@@ -400,8 +404,16 @@ fn split_sessions(body: Value) -> Result<Projected, String> {
             .as_bool()
             .ok_or("the session list has no `truncated`")?,
     };
+    let groups = body
+        .get("groups")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| format!("the session group roster does not decode: {error}"))?
+        .unwrap_or_default();
     let mut projected = split_keyed_array(body, "sessions", "id")?;
     projected.counts = Some(counts);
+    projected.session_groups = groups;
     Ok(projected)
 }
 
@@ -428,6 +440,7 @@ fn split_keyed_array(body: Value, field: &str, key: &str) -> Result<Projected, S
     Ok(Projected {
         entries,
         counts: None,
+        session_groups: Vec::new(),
         selected_outside_query: None,
         selected_cut: false,
     })
@@ -487,6 +500,7 @@ pub(crate) fn diff(
                 availability: Availability::Available,
                 order,
                 counts: projected.counts,
+                session_groups: projected.session_groups,
                 selected_outside_query: outside,
                 selected_cut: projected.selected_cut,
             };
@@ -748,6 +762,7 @@ impl Channel {
                     availability: Availability::Available,
                     order: Vec::new(),
                     counts: None,
+                    session_groups: Vec::new(),
                     selected_outside_query: None,
                     selected_cut: false,
                 },
@@ -787,6 +802,7 @@ impl Channel {
                     availability: Availability::Available,
                     order: Vec::new(),
                     counts: None,
+                    session_groups: Vec::new(),
                     selected_outside_query: None,
                     selected_cut: false,
                 },

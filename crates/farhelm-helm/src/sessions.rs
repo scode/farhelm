@@ -70,6 +70,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
 
+pub(crate) mod groups;
 mod sandbox;
 pub(crate) use sandbox::{EnvironmentUnasked, retry_environment_delete, spawn_seal_finisher};
 pub(crate) use sandbox::{create_environment_session, create_sandbox_session, stop_and_suspend};
@@ -3227,8 +3228,12 @@ pub(crate) async fn get_session(
         Ok(map) => map.get(&key).copied(),
         Err(e) => return http_error(e),
     };
-    let pin_position = match state.store.pin_positions(std::slice::from_ref(&key)).await {
-        Ok(pins) => pins.get(&key).copied(),
+    let placement = match state
+        .store
+        .session_placements(std::slice::from_ref(&key))
+        .await
+    {
+        Ok(placements) => placements.get(&key).copied().unwrap_or_default(),
         Err(e) => return http_error(e),
     };
     // And the notification marks, for the same reason.
@@ -3263,8 +3268,9 @@ pub(crate) async fn get_session(
                     host_identity,
                     host_name,
                     seen_activity_at,
-                    pinned: pin_position.is_some(),
-                    pin_position,
+                    pinned: placement.pin_position.is_some(),
+                    pin_position: placement.pin_position,
+                    group: placement.group,
                     mute,
                     activity_order_hold: None,
                     notifications_read_through,
@@ -3300,8 +3306,9 @@ pub(crate) async fn get_session(
                         host_identity,
                         host_name,
                         seen_activity_at,
-                        pinned: pin_position.is_some(),
-                        pin_position,
+                        pinned: placement.pin_position.is_some(),
+                        pin_position: placement.pin_position,
+                        group: placement.group,
                         mute,
                         activity_order_hold: None,
                         notifications_read_through,
@@ -4097,6 +4104,10 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's pin; a stray row may remain");
     }
+    if let Err(error) = state.store.forget_session_group(key.clone()).await {
+        warn!(session_id = manager::peer_text(id).as_str(), error = %error,
+            "could not clear the deleted session's group membership; a stray row may remain");
+    }
     // Remove the mute before clearing the stamp. A timed unmute in flight
     // then either commits first or finds no mute to mark seen.
     if let Err(error) = state.store.forget_muted_session(&key).await {
@@ -4197,6 +4208,7 @@ pub(crate) async fn set_pin(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<SetPinReq>,
 ) -> impl IntoResponse {
+    let _session_mutation = state.tunnels.mutation.lock().await;
     let (key, _) = match viewer_session(&state, &id).await {
         Ok(session) => session,
         Err(error) => return http_error(error),
@@ -4220,6 +4232,13 @@ async fn viewer_session(
     id: &str,
 ) -> anyhow::Result<(store::SessionKey, manager::HostStatus)> {
     let key = resolve_session_ref(state, id).await?;
+    if state.approvals.session_is_being_deleted(&key) {
+        return Err(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "this session is being removed".into(),
+        )
+        .into());
+    }
     refuse_cached_retired(state, &key).await?;
     let (_, status) = resolve_owner(state, &key).await?;
     Ok((key, status))
@@ -4275,12 +4294,14 @@ enum PinPlacement {
     After,
 }
 
-/// Both fields are required: a partial move must not silently choose an end
-/// or a direction. The neighbor is a full session reference like the path ID.
+/// Neighbor and side are required for both pin and group order. Pin drags
+/// also name the visible areas so a stale drop cannot switch groups by
+/// following a neighbor that moved elsewhere.
 #[derive(Deserialize)]
-pub(crate) struct MovePinReq {
-    neighbor: String,
+pub(crate) struct MovePinReq<Neighbor = String> {
+    neighbor: Neighbor,
     placement: PinPlacement,
+    areas: Option<farhelm_proto::session_requests::PinMoveAreas>,
 }
 
 /// Reorder helm-owned pins without contacting either session's supervisor.
@@ -4291,45 +4312,64 @@ pub(crate) async fn move_pin(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<MovePinReq>,
 ) -> impl IntoResponse {
-    let moved = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
+    let _session_mutation = state.tunnels.mutation.lock().await;
+    let moved = match viewer_session(&state, &id).await {
+        Ok((key, _)) => key,
         Err(error) => return http_error(error),
     };
-    if let Err(error) = refuse_cached_retired(&state, &moved).await {
-        return http_error(error);
-    }
     let neighbor = match resolve_session_ref(&state, &req.neighbor).await {
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
-    for key in [&moved, &neighbor] {
-        if let Err(error) = resolve_owner(&state, key).await {
-            return http_error(error);
-        }
+    if let Err(error) = resolve_owner(&state, &neighbor).await {
+        return http_error(error);
     }
-    match state
+    let result = state
         .store
-        .move_pin(
+        .move_pin_in_areas(
             &moved,
             &neighbor,
             matches!(req.placement, PinPlacement::Before),
+            req.areas,
         )
-        .await
-    {
+        .await;
+    order_move_reply(&state, result)
+}
+
+/// Pin and group ordering both publish a fleet change only after a real
+/// write. A missing item or changed area is a stale relative move.
+fn order_move_reply(state: &AppState, result: anyhow::Result<bool>) -> axum::response::Response {
+    match result {
         Ok(changed) => {
             if changed {
                 state.manager.events().bump();
             }
             axum::Json(serde_json::json!({})).into_response()
         }
-        Err(error) if error.downcast_ref::<store::PinMoveError>().is_some() => http_error(
-            SupervisorError::helm(
-                ErrorKind::Conflict,
-                "session or neighbor is no longer pinned".into(),
-            )
-            .into(),
-        ),
-        Err(error) => http_error(error),
+        Err(error) => {
+            let conflict = match error.downcast_ref::<store::PinMoveError>() {
+                Some(store::PinMoveError::NotPinned(_)) => {
+                    Some("session or neighbor is no longer pinned")
+                }
+                Some(store::PinMoveError::AreaChanged) => {
+                    Some("a pin has moved to a different area")
+                }
+                None if matches!(
+                    error.downcast_ref::<store::session_groups::GroupError>(),
+                    Some(store::session_groups::GroupError::Missing)
+                ) =>
+                {
+                    Some("group or neighbor no longer exists")
+                }
+                None => None,
+            };
+            if let Some(reason) = conflict {
+                return http_error(
+                    SupervisorError::helm(ErrorKind::Conflict, reason.into()).into(),
+                );
+            }
+            http_error(error)
+        }
     }
 }
 
@@ -4928,19 +4968,23 @@ async fn finish_replacement(
     // As for an ordinary delete: requests the source has waiting for the
     // user, or on their way to a card, would otherwise hold the delete behind
     // their request fence. Held until the delete answers.
-    let _deleting = state
-        .approvals
-        .deny_session(&store::SessionKey::new(claim.host, id));
-    // Preserve the user's pin and mute before the destructive half of Replace.
-    // A storage failure must not delete the only session that still has them.
-    if state.store.inherit_viewer_state(
-        &store::SessionKey::new(claim.host, id),
-        &store::SessionKey::new(claim.host, &created.id),
-    ).await.with_context(|| {
-        format!("created replacement session {} but could not copy the original's pin or mute; the original {id} was not removed", created.id)
-    })? {
-        state.manager.events().bump();
-    }
+    let _deleting = {
+        // Fence viewer writes before copying their state. The per-session
+        // deletion mark keeps the fence through the supervisor call without
+        // holding the shared mutation gate across that call.
+        let _session_mutation = state.tunnels.mutation.lock().await;
+        let source = store::SessionKey::new(claim.host, id);
+        let deleting = state.approvals.deny_session(&source);
+        if state.store.inherit_viewer_state(
+            &source,
+            &store::SessionKey::new(claim.host, &created.id),
+        ).await.with_context(|| {
+            format!("created replacement session {} but could not copy the original's group, pin or mute; the original {id} was not removed", created.id)
+        })? {
+            state.manager.events().bump();
+        }
+        deleting
+    };
     let delete_notice = match client.delete_session_with(id, guard).await {
         Ok(outcome) => {
             // As for Delete: an archived source checkout is new Trash content.

@@ -39,6 +39,7 @@ fn projected(entries: Vec<(String, Value)>) -> Projected {
     Projected {
         entries,
         counts: None,
+        session_groups: Vec::new(),
         selected_outside_query: None,
         selected_cut: false,
     }
@@ -50,6 +51,7 @@ fn empty_sent() -> Sent {
             availability: Availability::Available,
             order: Vec::new(),
             counts: None,
+            session_groups: Vec::new(),
             selected_outside_query: None,
             selected_cut: false,
         },
@@ -1933,6 +1935,57 @@ async fn the_session_query_filters_the_pushed_list_and_refusals_keep_the_old_one
         panic!("a refused query sends no changes");
     };
     assert_eq!((reply.id, reply.status), (2, 400));
+}
+
+/// Collapse can change the sidebar even when a client has no rows in the
+/// group. The roster must reach that client as a metadata-only push.
+#[farhelm_testtrace::test]
+async fn a_session_group_collapse_pushes_metadata_to_a_client_that_filtered_it_out() {
+    use farhelm_proto::session_requests::UpdateSessionGroup;
+
+    let mut harness = rest_harness::helm_listing(vec![
+        rest_harness::session("alpha", 100),
+        rest_harness::session("beta", 200),
+    ])
+    .await;
+    let host = rest_harness::local_id(&harness.store).await;
+    let group = harness
+        .store
+        .create_session_group(
+            "Beta".into(),
+            vec![crate::store::SessionKey::new(host, "beta")],
+        )
+        .await
+        .unwrap();
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    let changes = set_query(&mut ws, 1, serde_json::json!({ "title": "alpha" })).await;
+    assert_eq!(changes.meta.order, [harness.local_session_ref("alpha")]);
+    assert_eq!(changes.meta.session_groups.len(), 1);
+    assert_eq!(changes.meta.session_groups[0].id, group);
+    assert!(!changes.meta.session_groups[0].collapsed);
+
+    assert!(
+        harness
+            .store
+            .update_session_group(
+                group,
+                UpdateSessionGroup {
+                    collapsed: Some(true),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap()
+    );
+    harness.manager.events().bump();
+    let push = changes_of(&mut ws, Collection::Sessions).await;
+    assert!(push.upsert.is_empty());
+    assert!(push.remove.is_empty());
+    assert_eq!(push.meta.order, changes.meta.order);
+    assert_eq!(push.meta.session_groups[0].id, group);
+    assert!(push.meta.session_groups[0].collapsed);
 }
 
 /// The markers come off the real router's responses, middleware and all, not

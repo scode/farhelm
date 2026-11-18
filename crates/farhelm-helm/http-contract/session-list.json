@@ -88,8 +88,18 @@
           "owner": "octo"
         }
       },
+      "group": 3,
       "pinned": true,
       "pin_position": 7
+    }
+  ],
+  "groups": [
+    {
+      "id": 3,
+      "name": "Widgets",
+      "position": 0,
+      "collapsed": false,
+      "members": 2
     }
   ],
   "total": 5,

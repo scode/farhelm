@@ -191,7 +191,7 @@ pub(crate) use farhelm_proto::ui_channel::SessionList as SessionListBody;
 #[derive(Clone, Copy, Default)]
 struct ViewerState {
     seen_activity_at: Option<i64>,
-    pin_position: Option<i64>,
+    placement: store::SessionPlacement,
     marks: NotificationMarks,
     mute: Option<store::MuteEntry>,
 }
@@ -226,8 +226,9 @@ fn row_of(
             host.alias.as_deref(),
         ),
         seen_activity_at: viewer.seen_activity_at,
-        pinned: viewer.pin_position.is_some(),
-        pin_position: viewer.pin_position,
+        pinned: viewer.placement.pin_position.is_some(),
+        pin_position: viewer.placement.pin_position,
+        group: viewer.placement.group,
         mute: viewer.mute.and_then(store::MuteEntry::active),
         activity_order_hold,
         stale: !host.state.is_connected(),
@@ -345,6 +346,7 @@ fn assemble(
     sessions.truncate(LIST_SESSIONS_CAP);
     SessionListBody {
         sessions,
+        groups: Vec::new(),
         total,
         matching,
         truncated: hosts_truncated || capped,
@@ -486,12 +488,12 @@ async fn session_list_staged(
     // just-unmuted row cannot pick up a stale pre-unmute seen stamp.
     let mutes = store.session_mutes(&seen_ids).await?;
     let seen_activity = store.seen_activity(&seen_ids).await?;
-    let pins = store.pin_positions(&seen_ids).await?;
+    let groups = store.session_group_projection(&seen_ids).await?;
     // The notification marks, joined the same way and for the same reason.
     let notification_marks = store.notification_marks(&seen_ids).await?;
     let viewer_state = |key: &store::SessionKey| ViewerState {
         seen_activity_at: seen_activity.get(key).copied(),
-        pin_position: pins.get(key).copied(),
+        placement: groups.placements.get(key).copied().unwrap_or_default(),
         marks: notification_marks.get(key).copied().unwrap_or_default(),
         mute: mutes.get(key).copied(),
     };
@@ -546,7 +548,9 @@ async fn session_list_staged(
             view.push(row_of(snapshot, identity, info.clone(), viewer_state(&key)));
         }
     }
-    Ok(assemble(view, filter, sort, hosts_truncated))
+    let mut body = assemble(view, filter, sort, hosts_truncated);
+    body.groups = groups.roster;
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -589,6 +593,7 @@ mod tests {
             seen_activity_at: None,
             pinned: false,
             pin_position: None,
+            group: None,
             mute: None,
             activity_order_hold: None,
             notifications_read_through: 0,

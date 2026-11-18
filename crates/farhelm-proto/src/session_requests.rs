@@ -277,3 +277,62 @@ pub struct FolderHistoryEntry {
     pub created_at: i64,
     pub creation_seq: Option<u64>,
 }
+
+/// One explicit destination for a session move or a pin drop.
+/// The ungrouped area has its own wire value so an omitted destination
+/// cannot accidentally remove membership.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionGroupTarget {
+    Ungrouped,
+    Group(i64),
+}
+
+impl SessionGroupTarget {
+    /// Membership as stored on the session row. The global pins have no group.
+    pub fn group(self) -> Option<i64> {
+        match self {
+            Self::Ungrouped => None,
+            Self::Group(id) => Some(id),
+        }
+    }
+}
+
+impl From<Option<i64>> for SessionGroupTarget {
+    fn from(group: Option<i64>) -> Self {
+        group.map_or(Self::Ungrouped, Self::Group)
+    }
+}
+
+/// Before a neighbor move the helm checks both areas under the write lock.
+/// This distinguishes a deliberate cross-area drag from a stale menu move.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PinMoveAreas {
+    pub source: SessionGroupTarget,
+    pub destination: SessionGroupTarget,
+}
+
+/// A membership edit can also serve a pin drop that has no visible
+/// neighbor. Such a drop verifies the pin and its source before appending.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SessionGroupMembership {
+    pub target: SessionGroupTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_source: Option<SessionGroupTarget>,
+}
+
+/// Create one group for all named session references, including a marked set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewSessionGroup {
+    pub name: String,
+    pub sessions: Vec<String>,
+}
+
+/// Change either attribute of a group. An omitted value keeps its stored choice.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateSessionGroup {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
+}

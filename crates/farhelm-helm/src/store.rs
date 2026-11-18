@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 86;
+pub(crate) const SCHEMA_VERSION: i64 = 87;
 
 mod environment_history;
 mod podman;
@@ -579,7 +579,9 @@ const SESSION_PINS_ORDERED_SCHEMA: &str = "CREATE TABLE session_pins (
              ) STRICT;";
 
 mod manual_order;
+pub(crate) mod session_groups;
 mod session_mutes;
+use session_groups::SESSION_GROUPS_SCHEMA;
 use session_mutes::SESSION_MUTES_SCHEMA;
 pub(crate) use session_mutes::{MuteEntry, MuteObservation};
 
@@ -748,6 +750,35 @@ impl SessionKey {
     }
 }
 
+/// Membership and position must be observed together. Reading them on
+/// separate connections could apply a just-moved pin to the wrong group.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SessionPlacement {
+    pub(crate) pin_position: Option<i64>,
+    pub(crate) group: Option<i64>,
+}
+
+/// The list can narrow all visible rows of a group away, but the roster
+/// stays available as a move destination.
+pub(crate) struct GroupProjection {
+    pub(crate) placements: std::collections::HashMap<SessionKey, SessionPlacement>,
+    pub(crate) roster: Vec<farhelm_proto::ui_channel::SessionGroup>,
+}
+
+/// The paired lookup in both the list and detail projections.
+const SESSION_PLACEMENTS: &str = "
+    SELECT host_id, session_id, position, group_id FROM requested
+    LEFT JOIN session_pins USING (host_id, session_id)
+    LEFT JOIN session_group_members USING (host_id, session_id)";
+
+/// A missing pin or membership is normal for an ordinary ungrouped row.
+fn decode_session_placement(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionPlacement> {
+    Ok(SessionPlacement {
+        pin_position: row.get(2)?,
+        group: row.get(3)?,
+    })
+}
+
 /// A relative move cannot use a pin that disappeared after the client read
 /// its list. Callers can downcast this from `anyhow::Error` to refuse the
 /// stale request without reporting a storage failure. The moved key is
@@ -757,6 +788,9 @@ pub enum PinMoveError {
     /// The requested session or its neighbor no longer has a stored pin.
     #[error("session is no longer pinned")]
     NotPinned(SessionKey),
+    /// The current area no longer matches the caller's displayed order.
+    #[error("a pin has moved to a different area")]
+    AreaChanged,
 }
 
 /// The on-disk spelling of each [`HostKind`], the one place it is written:
@@ -3072,6 +3106,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {SESSION_SEEN_PAIRED_SCHEMA}
               {SESSION_PINS_ORDERED_SCHEMA}
               {SESSION_MUTES_SCHEMA}
+              {SESSION_GROUPS_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA}
@@ -3085,7 +3120,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 86;",
+              PRAGMA user_version = 87;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4919,6 +4954,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 86")?;
         version = 86;
     }
+    if version == 86 {
+        tx.execute_batch(SESSION_GROUPS_SCHEMA)
+            .context("adding session groups and membership")?;
+        tx.execute_batch("PRAGMA user_version = 87;")
+            .context("migrating helm.db to schema version 87")?;
+        version = 87;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4964,6 +5006,42 @@ fn renumber_pins(conn: &Connection, pins: &[(SessionKey, i64)]) -> anyhow::Resul
     manual_order::renumber(pins, |key, position| {
         statement.execute(rusqlite::params![key.host, key.session_id, position])
     })
+}
+
+/// All pin areas share one sequence. An append therefore follows every pin
+/// already in its target area, without a separate query or counter per group.
+fn next_pin_position(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<i64> {
+    let maximum = tx.query_row("SELECT MAX(position) FROM session_pins", [], |row| {
+        row.get(0)
+    })?;
+    manual_order::append_position(maximum, || {
+        let pins = ordered_pins(tx)?;
+        renumber_pins(tx, &pins)?;
+        Ok(pins.len())
+    })
+}
+
+/// Check the paired pin key, including when the host is disconnected.
+fn has_pin(conn: &Connection, key: &SessionKey) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_pins WHERE host_id = ?1 AND session_id = ?2)",
+        rusqlite::params![key.host, key.session_id],
+        |row| row.get(0),
+    )
+}
+
+/// Append a moved pin while leaving an unpinned member alone. Membership
+/// changes call this in the same transaction so its new area and position
+/// reach readers together.
+fn append_existing_pin(tx: &rusqlite::Transaction<'_>, key: &SessionKey) -> anyhow::Result<()> {
+    if has_pin(tx, key)? {
+        let position = next_pin_position(tx)?;
+        tx.execute(
+            "UPDATE session_pins SET position = ?3 WHERE host_id = ?1 AND session_id = ?2",
+            rusqlite::params![key.host, key.session_id, position],
+        )?;
+    }
+    Ok(())
 }
 
 /// Schema 37's rewrite of cached `SessionInfo` rows for launch kinds: each
@@ -6156,16 +6234,56 @@ impl HelmStore {
         self.read_keyed_viewer_state(
             ids,
             "pin read task panicked",
-            "SELECT host_id, session_id, position FROM session_pins",
+            "SELECT host_id, session_id, position FROM requested JOIN session_pins USING (host_id, session_id)",
             |row| row.get(2),
         )
         .await
     }
 
+    /// Read the same paired placement used by the list for a detail row.
+    pub(crate) async fn session_placements(
+        &self,
+        ids: &[SessionKey],
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, SessionPlacement>> {
+        self.read_keyed_viewer_state(
+            ids,
+            "placement read task panicked",
+            SESSION_PLACEMENTS,
+            decode_session_placement,
+        )
+        .await
+    }
+
+    /// Supply the full roster and each requested session's placement from
+    /// one database snapshot even when the reply only includes one host.
+    pub(crate) async fn session_group_projection(
+        &self,
+        ids: &[SessionKey],
+    ) -> anyhow::Result<GroupProjection> {
+        let ids = ids.to_vec();
+        self.conn
+            .call(
+                "group projection task panicked",
+                move |conn: &mut Connection| {
+                    let tx = conn.transaction()?;
+                    let placements = Self::query_keyed_viewer_state(
+                        &tx,
+                        &ids,
+                        SESSION_PLACEMENTS,
+                        &decode_session_placement,
+                    )?;
+                    let roster = session_groups::roster(&tx)?;
+                    tx.commit()?;
+                    Ok(GroupProjection { placements, roster })
+                },
+            )
+            .await
+    }
+
     /// Read viewer state in batches below SQLite's parameter limit. Every
     /// query starts with the full entry/session pair, so two hosts' equal
-    /// bare IDs can never share a row. `select` is a static projection ending
-    /// at FROM, with any extra columns interpreted by the caller's decoder.
+    /// bare IDs can never share a row. The query projects the pair and any
+    /// fields the caller needs from the tables it joins to `requested`.
     async fn read_keyed_viewer_state<T: Send + 'static>(
         &self,
         ids: &[SessionKey],
@@ -6179,34 +6297,46 @@ impl HelmStore {
         let ids = ids.to_vec();
         self.conn
             .call(panic_context, move |conn: &mut Connection| {
-                let mut result = std::collections::HashMap::new();
-                for batch in ids.chunks(SESSION_KEY_BATCH) {
-                    let placeholders = (0..batch.len())
-                        .map(|_| "(?, ?)")
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let mut stmt = conn.prepare(&format!(
-                        "{select} WHERE (host_id, session_id) IN (VALUES {placeholders})"
-                    ))?;
-                    let values = batch.iter().flat_map(|key| {
-                        [
-                            rusqlite::types::Value::Integer(key.host),
-                            rusqlite::types::Value::Text(key.session_id.clone()),
-                        ]
-                    });
-                    let rows = stmt
-                        .query_map(rusqlite::params_from_iter(values), |row| {
-                            Ok((
-                                SessionKey::new(row.get(0)?, row.get::<_, String>(1)?),
-                                decode(row)?,
-                            ))
-                        })?
-                        .collect::<Result<Vec<_>, _>>()?;
-                    result.extend(rows);
-                }
-                Ok(result)
+                Self::query_keyed_viewer_state(conn, &ids, select, &decode)
             })
             .await
+    }
+
+    /// Run the same batch read on an existing connection or transaction so
+    /// a projection can read its related roster before releasing the lock.
+    fn query_keyed_viewer_state<T>(
+        conn: &Connection,
+        ids: &[SessionKey],
+        select: &str,
+        decode: &impl Fn(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, T>> {
+        let mut result = std::collections::HashMap::new();
+        for batch in ids.chunks(SESSION_KEY_BATCH) {
+            let placeholders = (0..batch.len())
+                .map(|_| "(?, ?)")
+                .collect::<Vec<_>>()
+                .join(",");
+            let mut stmt = conn.prepare(&format!(
+                "WITH requested (host_id, session_id) AS (VALUES {placeholders}) {select}"
+            ))?;
+            let values = batch.iter().flat_map(|key| {
+                [
+                    rusqlite::types::Value::Integer(key.host),
+                    rusqlite::types::Value::Text(key.session_id.clone()),
+                ]
+            });
+            let rows = stmt.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok((
+                    SessionKey::new(row.get(0)?, row.get::<_, String>(1)?),
+                    decode(row)?,
+                ))
+            })?;
+            for row in rows {
+                let (key, value) = row?;
+                result.insert(key, value);
+            }
+        }
+        Ok(result)
     }
 
     /// Append a new pin after every stored pin, or remove its row on unpin.
@@ -6227,34 +6357,23 @@ impl HelmStore {
                         > 0);
                 }
                 let tx = conn.transaction().context("beginning pin append")?;
-                let present: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM session_pins WHERE host_id = ?1 AND session_id = ?2)",
-                    rusqlite::params![key.host, key.session_id],
-                    |row| row.get(0),
-                )?;
-                if present {
+                if has_pin(&tx, &key)? {
                     return Ok(false);
                 }
-                let maximum: Option<i64> = tx.query_row(
-                    "SELECT MAX(position) FROM session_pins", [], |row| row.get(0)
-                )?;
-                let position = manual_order::append_position(maximum, || {
-                    let pins = ordered_pins(&tx)?;
-                    renumber_pins(&tx, &pins)?;
-                    Ok(pins.len())
-                })?;
+                let position = next_pin_position(&tx)?;
                 tx.execute(
                     "INSERT INTO session_pins (host_id, session_id, position) VALUES (?1, ?2, ?3)",
                     rusqlite::params![key.host, key.session_id, position],
-                ).context("appending session pin")?;
+                )
+                .context("appending session pin")?;
                 tx.commit().context("committing pin append")?;
                 Ok(true)
             })
             .await
     }
 
-    /// Give a replacement the source's pin and active mute before destroying
-    /// the source. Either both copies commit or neither does. When the source
+    /// Give a replacement the source's membership, pin and active mute before
+    /// destroying the source. These choices commit together. When the source
     /// remains after a failed delete, both sessions can hold the same pin
     /// position and deadline. A replacement's own choices take precedence.
     pub async fn inherit_viewer_state(
@@ -6269,6 +6388,8 @@ impl HelmStore {
                 "replacement viewer state task panicked",
                 move |conn: &mut Connection| {
                     let tx = conn.transaction()?;
+                    let copied_group = session_groups::inherit(&tx, &source, &replacement)
+                        .context("copying replacement group")?;
                     let copied_pin = tx
                         .execute(
                             "INSERT OR IGNORE INTO session_pins (host_id, session_id, position) \
@@ -6282,10 +6403,21 @@ impl HelmStore {
                         )
                         .context("copying replacement pin")?
                         != 0;
+                    let pin_changed_areas = if copied_pin {
+                        session_groups::group_of(&tx, &source)?
+                            != session_groups::group_of(&tx, &replacement)?
+                    } else {
+                        copied_group
+                    };
+                    if pin_changed_areas {
+                        // A replay can find a replacement with its own group
+                        // or pin. A position from a different area appends.
+                        append_existing_pin(&tx, &replacement)?;
+                    }
                     let copied_mute = session_mutes::inherit_mute(&tx, &source, &replacement)
                         .context("copying replacement mute")?;
                     tx.commit()?;
-                    Ok(copied_pin || copied_mute)
+                    Ok(copied_group || copied_pin || copied_mute)
                 },
             )
             .await
@@ -6307,6 +6439,19 @@ impl HelmStore {
         neighbor: &SessionKey,
         before: bool,
     ) -> anyhow::Result<bool> {
+        self.move_pin_in_areas(moved, neighbor, before, None).await
+    }
+
+    /// Place pins within one area for requests from older clients. A
+    /// group-aware request can cross areas when both expected memberships
+    /// match inside the same transaction as placement.
+    pub(crate) async fn move_pin_in_areas(
+        &self,
+        moved: &SessionKey,
+        neighbor: &SessionKey,
+        before: bool,
+        areas: Option<farhelm_proto::session_requests::PinMoveAreas>,
+    ) -> anyhow::Result<bool> {
         let moved = moved.clone();
         let neighbor = neighbor.clone();
         self.conn
@@ -6318,7 +6463,20 @@ impl HelmStore {
                 {
                     return Ok(false);
                 }
-                let changed = renumber_pins(&tx, &pins)?;
+                let source = session_groups::group_of(&tx, &moved)?;
+                let destination = session_groups::group_of(&tx, &neighbor)?;
+                let expected = areas.map_or(source == destination, |areas| {
+                    source == areas.source.group() && destination == areas.destination.group()
+                });
+                if !expected {
+                    return Err(PinMoveError::AreaChanged.into());
+                }
+                let moved_group = source != destination;
+                if moved_group {
+                    session_groups::assign(&tx, &moved, destination)?;
+                    session_groups::prune_empty(&tx)?;
+                }
+                let changed = renumber_pins(&tx, &pins)? || moved_group;
                 tx.commit().context("committing pin move")?;
                 Ok(changed)
             })
@@ -7955,6 +8113,7 @@ impl HelmStore {
                         }
                         Some(HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman) => {
                             tx.execute("DELETE FROM hosts WHERE id = ?1", [host])?;
+                            session_groups::prune_empty(&tx)?;
                             tx.commit().context("committing host removal")?;
                             Ok(())
                         }
@@ -8380,6 +8539,19 @@ impl HelmStore {
             // hosts. Folded in before the commit so the generation below and
             // the reported answer are the same judgement.
             let changed = changed || !previous.is_empty();
+            if !truncated && !previous.is_empty() {
+                // A complete list from the same installation can prove a
+                // formerly cached member has gone, including after a lost
+                // Delete reply. An adoption emptied the old cache already.
+                let mut removed_group_member = false;
+                for departed in previous.into_keys() {
+                    removed_group_member |=
+                        session_groups::assign(&tx, &SessionKey::new(host, departed), None)?;
+                }
+                if removed_group_member {
+                    session_groups::prune_empty(&tx)?;
+                }
+            }
             // The cap flag is part of what this list IS, so a flip in it is
             // a change clients must re-read for: the notice it drives is on
             // screen. Compared against the stored value rather than written
@@ -10372,7 +10544,7 @@ mod tests {
 
         let migrated = HelmStore::open(&path).await.unwrap();
         assert_eq!(migrated.schema_version, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 86);
+        assert_eq!(SCHEMA_VERSION, 87);
         assert_eq!(
             migrated.preferences().await.unwrap(),
             before,
@@ -14066,6 +14238,211 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(marks(&store).await, None);
+    }
+
+    /// Schema 86 has viewer state but no groups. Starting with the same
+    /// group schema as a fresh helm must leave the old pin where it was.
+    #[farhelm_testtrace::test]
+    async fn schema_87_adds_session_groups_without_reordering_existing_pins() {
+        let (dir, store) = fresh_store().await;
+        let key = viewer_key(&store, "existing-pin");
+        store.set_pinned(&key, true).await.unwrap();
+        let expected_schema = schema_objects(&store.conn.lock());
+        let path = dir.path().join("helm.db");
+        drop(store);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "DROP TABLE session_group_members; DROP TABLE session_groups; PRAGMA user_version = 86;",
+            )
+            .unwrap();
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(migrated.schema_version, 87);
+        assert_eq!(schema_objects(&migrated.conn.lock()), expected_schema);
+        let view = migrated
+            .session_group_projection(std::slice::from_ref(&key))
+            .await
+            .unwrap();
+        assert!(view.roster.is_empty());
+        assert_eq!(view.placements[&key].pin_position, Some(0));
+        assert_eq!(view.placements[&key].group, None);
+    }
+
+    /// The roster keeps the full membership count under a partial read.
+    /// Replace carries membership and order before Delete cleans the old
+    /// key, so replacing a group's final session cannot remove the group.
+    #[farhelm_testtrace::test]
+    async fn session_groups_share_roster_and_inherit_pins() {
+        let (_dir, store) = fresh_store().await;
+        let a = viewer_key(&store, "a");
+        let b = viewer_key(&store, "b");
+        let replacement = viewer_key(&store, "replacement");
+        store.set_pinned(&a, true).await.unwrap();
+        let group = store
+            .create_session_group("  Projects  ".into(), vec![a.clone(), b.clone()])
+            .await
+            .unwrap();
+        let duplicate = store
+            .create_session_group("PROJECTS".into(), vec![replacement.clone()])
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            duplicate.downcast_ref::<session_groups::GroupError>(),
+            Some(session_groups::GroupError::DuplicateName)
+        ));
+        let view = store
+            .session_group_projection(std::slice::from_ref(&a))
+            .await
+            .unwrap();
+        assert_eq!(view.roster.len(), 1);
+        assert_eq!(
+            (view.roster[0].name.as_str(), view.roster[0].members),
+            ("Projects", 2)
+        );
+        let old_position = view.placements[&a]
+            .pin_position
+            .expect("grouping preserved the pin");
+        assert_eq!(view.placements[&a].group, Some(group));
+
+        assert!(store.inherit_viewer_state(&a, &replacement).await.unwrap());
+        assert!(!store.inherit_viewer_state(&a, &replacement).await.unwrap());
+        store.set_pinned(&a, false).await.unwrap();
+        store.forget_session_group(a).await.unwrap();
+        store.forget_session_group(b).await.unwrap();
+        let view = store
+            .session_group_projection(std::slice::from_ref(&replacement))
+            .await
+            .unwrap();
+        assert_eq!(view.roster[0].members, 1);
+        assert_eq!(view.placements[&replacement].group, Some(group));
+        assert_eq!(
+            view.placements[&replacement].pin_position,
+            Some(old_position)
+        );
+
+        store.forget_session_group(replacement).await.unwrap();
+        assert!(
+            store
+                .session_group_projection(&[])
+                .await
+                .unwrap()
+                .roster
+                .is_empty()
+        );
+    }
+
+    /// A disconnected or cut list can hide a group member. An uncut
+    /// refresh that removes a known row proves it departed from that host.
+    #[farhelm_testtrace::test]
+    async fn session_groups_forget_departed_members_only_on_a_complete_refresh() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "groups@host", "groups-identity").await;
+        let key = SessionKey::new(host, "grouped");
+        let seed = || admitted_rows(host, vec![session("grouped", 100)]);
+        store
+            .replace_host_sessions(host, "groups-identity", seed(), false)
+            .await
+            .unwrap();
+        let group = store
+            .create_session_group("Only member".into(), vec![key.clone()])
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .session_group_projection(std::slice::from_ref(&key))
+                .await
+                .unwrap()
+                .placements[&key]
+                .group,
+            Some(group)
+        );
+        store
+            .replace_host_sessions(host, "groups-identity", Vec::new(), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session_group_projection(&[]).await.unwrap().roster[0].id,
+            group
+        );
+        store
+            .replace_host_sessions(host, "groups-identity", seed(), false)
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(host, "groups-identity", Vec::new(), false)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .session_group_projection(&[])
+                .await
+                .unwrap()
+                .roster
+                .is_empty()
+        );
+    }
+
+    /// Pins dragged across areas use the same relative placement while the
+    /// store verifies both visible areas. A delayed keyboard move cannot
+    /// drag the row back after it changed group in another window.
+    #[farhelm_testtrace::test]
+    async fn session_groups_move_pins_between_areas_and_reject_stale_area() {
+        use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupTarget};
+        let (_dir, store) = fresh_store().await;
+        let a = viewer_key(&store, "a");
+        let b = viewer_key(&store, "b");
+        let c = viewer_key(&store, "c");
+        for key in [&a, &b, &c] {
+            store.set_pinned(key, true).await.unwrap();
+        }
+        let group = store
+            .create_session_group("B".into(), vec![b.clone(), c.clone()])
+            .await
+            .unwrap();
+        assert!(
+            store.move_pin(&a, &b, true).await.is_err(),
+            "legacy moves stay within one area"
+        );
+        let target = SessionGroupTarget::Group(group);
+        let request = PinMoveAreas {
+            source: SessionGroupTarget::Ungrouped,
+            destination: target,
+        };
+        assert!(
+            store
+                .move_pin_in_areas(&a, &b, false, Some(request))
+                .await
+                .unwrap()
+        );
+        let view = store
+            .session_group_projection(&[a.clone(), b.clone(), c.clone()])
+            .await
+            .unwrap();
+        assert_eq!(view.placements[&a].group, Some(group));
+        assert!(view.placements[&b].pin_position < view.placements[&a].pin_position);
+        assert!(view.placements[&a].pin_position < view.placements[&c].pin_position);
+        let stale = store
+            .move_pin_in_areas(&a, &b, true, Some(request))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            stale.downcast_ref::<PinMoveError>(),
+            Some(PinMoveError::AreaChanged)
+        ));
+        let tail = viewer_key(&store, "global-pin");
+        store.set_pinned(&tail, true).await.unwrap();
+        assert!(store.ungroup_sessions(group).await.unwrap());
+        let view = store
+            .session_group_projection(&[a.clone(), b.clone(), c.clone(), tail.clone()])
+            .await
+            .unwrap();
+        assert!(view.roster.is_empty());
+        let positions = [&tail, &b, &a, &c].map(|key| {
+            let placement = view.placements[key];
+            assert_eq!(placement.group, None);
+            placement.pin_position.expect("Ungroup keeps every pin")
+        });
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     /// Pins persist independently of refreshable session cache, copy to a

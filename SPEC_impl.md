@@ -5552,8 +5552,9 @@ installation it is on, so it follows an open session the sidebar's filter hides
   cannot advance activity between the observation and the write. If no observation remains, the timer ends the mute
   without advancing the seen stamp. The timed write matches the deadline it observed so a newer mute survives. Expiry
   checks also run when the helm starts. With a deadline armed, the timer checks wall time at least once a minute to
-  account for clock adjustments or suspend. Replace copies an active mute and its pin in one transaction before deleting
-  the original. Confirmed Delete clears the mute and any held key before clearing the seen stamp.
+  account for clock adjustments or suspend. Replace copies an active mute, its pin and group membership in one
+  transaction before deleting the original. Confirmed Delete clears the mute and any held key before clearing the seen
+  stamp.
 
 - Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
   `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
@@ -5594,9 +5595,30 @@ installation it is on, so it follows an open session the sidebar's filter hides
   hold hide or rearrange rows. One store call under the existing connection mutex reads the full stored set, including
   invisible pins, moves the requested pin beside its neighbor and renumbers the set from zero in a transaction. Ties and
   gaps normalize even when the requested adjacency already holds; a present self-move does nothing. Later concurrent
-  moves act on the earlier result, with no revision check or additional locking. The fleet revision advances only when
-  stored positions change. Router ownership keeps that event attached to the write after a client disconnects, and a
-  failed write rolls the transaction back.
+  moves act on the earlier result. Group-aware moves check the source and neighbor areas before changing either pin
+  order or group membership. A request from an older client stays within one area. The fleet revision advances when a
+  position or membership changes. Router ownership keeps that event attached to the write after a client disconnects,
+  and a failed write rolls the transaction back.
+
+- Helm schema 87 adds session groups, with a name, manual position and collapsed flag, and one membership per
+  `(host_id, session_id)`. The group ID is never reused because an open menu or queued collapse save can outlive its
+  group. Pin positions keep their single sequence across all areas. Group order and pin order use the same neighbor
+  placement, renumbering and overflow-safe append. Only their SQL keys and tie breaks differ. Cross-area drag uses the
+  same pin move transaction, and a drop without a visible neighbor uses the membership write with a source-area check.
+  Menu moves and Ungroup append existing pins in the same sequence. Delete clears membership in the existing
+  viewer-state cleanup, and a host removal cascades its memberships. Both remove empty groups without a sweeper. Replace
+  copies group membership with the pin and active mute before deleting the source. The replacement holds a per-session
+  deletion mark from the copy through cleanup so a concurrent viewer write cannot succeed on the source after the copy.
+  A complete refresh can also clear membership for a session that disappeared from the same host installation's cache,
+  including after a lost Delete reply. A cut list or an adoption does not prove that absence. Group-name uniqueness uses
+  Unicode case folding. The helm limits names to 256 bytes and budgets space for the roster within the session list
+  response.
+
+  The session placement read joins the pin and membership through the existing paired-key batch reader. The roster comes
+  from the same database snapshot. The session list keeps the full roster beside its rows when filtered, so a group
+  hidden by the filter still appears in Move to group. Each row carries its group ID. The UI channel pushes the roster
+  as session collection metadata, so a rename or collapse does not rewrite each member entry. These writes use the same
+  helm-local viewer preamble for session ownership and only publish after a committed change.
 
 ## Ntfy waiting alerts
 

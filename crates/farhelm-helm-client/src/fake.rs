@@ -280,6 +280,7 @@ mod tests {
                 counts: None,
                 selected_outside_query: None,
                 selected_cut: false,
+                session_groups: Vec::new(),
             },
             upsert: vec![],
             remove: vec![],

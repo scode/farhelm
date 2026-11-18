@@ -279,6 +279,12 @@ impl Approvals {
         }
     }
 
+    /// A marked source is being removed. A viewer write must not succeed
+    /// after Replace has carried the source's state to its replacement.
+    pub(crate) fn session_is_being_deleted(&self, key: &SessionKey) -> bool {
+        self.lock().deleting.contains_key(key)
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         // Nothing done while this lock is held can panic (map inserts,
         // removals and counter updates), so a poisoned lock cannot hide a
