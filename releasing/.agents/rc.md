@@ -7,6 +7,11 @@ with `dev` in place of `rc`, except for the announcement steps.
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+>
+> NOTE: When the release stops to wait on the maintainer at a point where this procedure already waits (a question it
+> says to ask, a line or task only they can do, an approval or verdict, a problem you cannot get past), send an urgent
+> notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That adds no stops: what runs without
+> asking also runs without a notification.
 
 An RC exists so the maintainer can `curl | sh` a candidate onto a real machine before the work being tried merges.
 Selected announcement text lands separately on main before the tag. The TAG, not any merge, is what triggers the release
@@ -50,8 +55,9 @@ never be reused.
 In that same request-settling reply, ask about in-app announcements per `releasing/AGENTS.md`, "In-app announcements".
 The first candidate asks which to include; later candidates show main's selected list for `X.Y.Z` and its prereleases
 and ask whether to add or change any. This question still needs an answer when the base and version are explicit,
-including "cut an rc with this stack". Do no other release work until it is answered. Fix-forward attempts carry over
-the settled list without asking again, and dev releases follow their exemption in `releasing/.agents/dev.md`.
+including "cut an rc with this stack". A request that already answers it ("no announcements") needs no further answer.
+Do no other release work until it is answered. Fix-forward attempts carry over the settled list without asking again,
+and dev releases follow their exemption in `releasing/.agents/dev.md`.
 
 With the base, version and announcements settled, the process is:
 

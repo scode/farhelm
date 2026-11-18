@@ -7,6 +7,11 @@ changelog curation reading lists include it. Step numbers in this file refer to 
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+>
+> NOTE: When the release stops to wait on the maintainer at a point where this procedure already waits (a question it
+> says to ask, a line or task only they can do, an approval or verdict, a problem you cannot get past), send an urgent
+> notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That adds no stops: what runs without
+> asking also runs without a notification.
 
 A stable release is cut from main. The changelog section and any selected announcement additions or changes land on main
 FIRST, in the changelog PR; the release branch is cut after it merges, so the bump commit keeps its three-file shape and
@@ -38,7 +43,8 @@ rc.3 had already settled.
 
 In that same request-settling reply, show main's selected announcements for `X.Y.Z` and its prereleases and ask whether
 to add or change any, per `releasing/AGENTS.md`, "In-app announcements". Ask even when the version is already settled,
-including when there was no earlier RC. "No" is enough. This is separate from the release-note wording review that runs
+including when there was no earlier RC. "No" is enough, and a request that already says so ("no announcements") has
+answered it: show the list as information and go on. This is separate from the release-note wording review that runs
 alongside the tag build. Wait for the announcement answer before step 1, and carry any additions or changes in step 4's
 changelog PR. Stable re-cuts carry over the settled list without asking again.
 

@@ -1128,6 +1128,10 @@ systemd or SSH substrate ran.
   node, it checks that the copied feedback block carries each note and a regenerated page drops notes typed on its
   previous revision. Without node it says `SKIPPED` for the page script part. Run it when that script changes; seconds,
   no network.
+- `bash -n releasing/notify.sh` and `shellcheck releasing/notify.sh` — the urgent notification a release sends whenever
+  it starts waiting on the maintainer (`releasing/AGENTS.md`, "Notifying the maintainer"). The send itself is not
+  exercised: it would reach the maintainer at the highest priority. Run them when the script changes; seconds, no
+  network.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, the desktop app's
 lints, the OMP reporter asset scenarios, the website build and its feedback endpoint tests, installer validation, the

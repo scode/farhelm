@@ -49,6 +49,9 @@ A re-cut follows the same rule. A change that needs earlier upgrade logic raises
 `releasing/mac-vm-test/brick_test.py`'s matching literal in its own PR and explains the raise in its PR and changelog
 fragment.
 
+Every time a release stops to wait on the maintainer where its procedure already waits, the agent sends an urgent
+notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That rule adds no stops.
+
 For a stable release, choosing an earlier base pauses the default main-based procedure before step 1. Settle a
 compatible release path with the maintainer before continuing; this decision does not authorize silently copying,
 cherry-picking or backporting source into the ordinary main-based release.
@@ -89,6 +92,78 @@ Before changing release plumbing (`.github/workflows/release.yml`, `dist-workspa
 config and regenerate. Changing the release workflow means updating the validation inventory in `.agents/validation.md`
 in the same change.
 
+## Notifying the maintainer
+
+A release must never sit still because the maintainer does not know it is waiting on them. They do not want to come back
+half an hour later and find that nothing happened because of a question (the maintainer asked for this on 2026-11-18).
+So from the moment a stable, RC or dev release is requested until its procedure is finished, fix-forward attempts and
+stable re-cuts included, every time the release stops and waits on the maintainer, the agent sends an ntfy notification
+at the highest priority, before anything else: before writing the question, before calling a harness question tool
+(which blocks until answered), before ending the turn.
+
+NOTE: This rule adds no stops. Whether the release stops is decided by the procedures exactly as before; this only makes
+sure a stop they already make is never silent. A request the procedures let run without asking also runs without a
+notification. "Cut a stable release, no announcements" from current main, where the version default applies and the
+upgrade floor is unchanged, neither stops nor notifies: the request answers the announcement question (see
+`releasing/AGENTS.md`, "In-app announcements"), and the agent states the version and that the floor is retained, and
+carries on. Never turn something the procedures settle by default or merely report into a question in order to notify
+about it.
+
+A stop is a point where the procedure has the agent wait for the maintainer before the release can go further. These are
+the kinds the procedures have, each only when its procedure actually makes it:
+
+- A question the procedure says to ask: the base or version when the request and the defaults do not settle them, the
+  in-app announcements when the request does not answer them, an upgrade-floor raise (an unchanged floor is reported,
+  not asked about), an earlier-base release path, a fix forward that is the maintainer's call, an inferred editorial
+  rule, a brick test that could not run.
+- A line or task only the maintainer can do, once the procedure waits on it: the RC or dev signing-and-install line, the
+  stable publish line, the brick test, the line that moves `/latest`.
+- An approval or verdict the procedure waits for: the notes approval once it is all that is left, the brick test
+  verdict, the confirmation that the release is good and going out. Handing over the release-note review page is not a
+  stop, because the procedure goes on without waiting for it.
+- A problem the agent cannot get past on its own: an expired login, a full disk, a refused permission, a tool or skill
+  that fails in a way the procedure says to stop and report.
+- Ending the turn for any other reason while the release is waiting on the maintainer. Ending the turn to wait for
+  something that finishes without the maintainer, such as a background build or test run, is not a stop. A wait that
+  only the maintainer's own input ends is one, even when a watcher wakes the agent on it, such as the release-note
+  review page's submission watcher once the notes approval is all that is left.
+
+Send one notification per stop, not one per turn: when the agent ends its turn again still waiting on the same thing, it
+does not notify again. Information that needs no answer, such as the risk report, the protocol-version check, a retained
+upgrade floor or the screenshot PR's link, sends nothing. Only the release agent notifies: a subagent (the risk-report
+researchers, the release screenshot subagent) reports to it, and it notifies if that report leaves the release waiting.
+
+In an unattended run, a question goes where `AGENTS.md`, "Unattended runs", sends it rather than to the maintainer, and
+that flow's own notification rules decide who notifies: a claim holder's block goes to the landing monitor, which
+notifies when it leaves the block for the maintainer (`plans/AGENTS.md`, "Notifications"); a delegate's question goes to
+its parent, which notifies if the release then waits on the maintainer. The agent that leaves the release waiting on the
+maintainer is the one that notifies.
+
+Send with this command, run from the checkout root, with the message as a single-quoted literal:
+
+```
+releasing/notify.sh 'v0.42.0-rc.1: which in-app announcements should this include?'
+```
+
+The working copy can lack the script: an RC or dev release cut from a stack that predates it. Then run main's copy,
+which needs no checkout of its own:
+
+```
+git show origin/main:releasing/notify.sh | bash -s -- 'v0.42.0-rc.1: ready to sign and install'
+```
+
+The message is one line in product terms: the release's version (or "release" when the version is not settled yet), then
+what it needs from the maintainer. Keep apostrophes out of it so the quoting holds. Never put paths, log excerpts,
+report text or the topic into it, because ntfy.sh is a third-party service. The script sends to the topic the plans flow
+uses, with the same rules for the topic file (`plans/AGENTS.md`, "Notifications"): never read, print, quote or log it.
+
+A failed send does not stop the release, and the question or handover goes out right after it either way; the script
+gives up within 20 seconds. Exit 1 is a send that failed: say so in the conversation and record it in the working log.
+Exit 3 means the topic file does not exist and exit 4 that it does not hold a valid topic: tell the maintainer once, in
+the same reply, that release notifications are off until the file is fixed, and record that in the working log so a
+resume does not repeat the warning. Keep sending at later stops anyway, without repeating the warning while it still
+fails the same way, so a fixed file takes effect at once.
+
 ## PR merges these procedures authorize
 
 These are the only merges a release request authorizes. Each is spelled out, with its conditions, in the file cited.
@@ -125,6 +200,11 @@ bodies, or say that the list is empty. Ask: "Do you want to add or change any in
 is enough." A stable request with no earlier RC asks the same question in its request-settling reply. This is the
 cycle's selected list, never a prediction of what a particular helm will show. Wait for the answer before starting the
 release work; the base, version and announcement questions belong together, not at separate later stops.
+
+A request that already gives the answer has settled the question, and nothing waits for it. "No announcements" in the
+request means no additions or changes: none at a first RC, and at a later RC or a stable release the cycle's entries
+already on main stay as they are. Show that list in the reply that announces the version, as information, say how the
+request was read, and carry on. Ask only when the request's wording about announcements is ambiguous.
 
 When offering to change an announcement, explain that an entry that already shipped keeps its id, and helms that already
 enqueued it keep the old text. Rewording is not a way to show an announcement a second time. Reproduce the maintainer's
