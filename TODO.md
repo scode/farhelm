@@ -359,6 +359,127 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pinned sessions cross between pin areas by dragging; this extends dragging to every row. Recorded by the maintainer on
   2026-11-17 while planning session groups.
 
+- **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
+  preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
+  job, while holding Farhelm's own exclusive cache lock (`clear_git_locks` in
+  `crates/farhelm-supervisor/src/repo_cache.rs`, called from `launch.rs`; SPEC_impl.md says cache Git processes "end
+  with their preparation job"). The landing review left three gaps, bundled here for one decision on which to fix:
+  - **A Git that outlives Farhelm can race a later launch.** Git's own lock file used to be the backstop: a Git process
+    still running after Farhelm's lock was released made the next fetch fail cleanly. Now Farhelm deletes that file. If
+    Farhelm's processes are killed by hand with SIGKILL during background cache cleanup, its `git` keeps running with
+    nothing to stop it, and a later launch can then race it on the cache's branch list. Nothing in Farhelm does this
+    itself. Recommended fix: on Linux, have the kernel end cache Git processes when their parent dies (a parent-death
+    signal on the spawned `git`), which also makes SPEC_impl.md's "end with their preparation job" true. Even an
+    ordinary termination signal lets Git run its own cleanup just after Farhelm's lock is released; the worst case found
+    is that launch's checkout failing once and a retry succeeding. Without the fix, soften that SPEC_impl.md wording.
+  - **Reftable storage and per-branch history logs are not covered.** The repair removes the lock files of Git's default
+    branch storage (`packed-refs.lock`, `HEAD.lock`, `config.lock`, `shallow.lock` and per-reference locks under
+    `refs/`). A cache using Git's newer reftable storage, or with per-branch history logs (`logs/`) turned on, can leave
+    locks it does not remove, and checkouts then fail as before the plan. Farhelm turns on neither, but cache Git runs
+    with the user's own Git settings, so a global `init.defaultRefFormat` or `core.logAllRefUpdates` setting can. Either
+    remove those locks too or run cache Git with the settings pinned.
+  - **A cache path that is a plain file gives a misleading error.** When the cache path is a file instead of a
+    directory, a checkout fails with "could not clear cache Git locks: Not a directory" rather than Git's own error. No
+    working cache is affected, but the message points at the lock repair, not the broken cache. The test that pins the
+    new message would change with it.
+
+  The plan's test covers one planted `packed-refs.lock` on a launch's checkout; the walk through `refs/`, the refusal to
+  follow a symlinked `refs/`, and the repair on the background cleanup path are untested and worth covering with
+  whichever fix lands. Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Keep a sealed environment's record across helm restarts.** Since environment-agent-operations (#3334 to #3364), the
+  last Delete in a sandbox or container makes the Farhelm inside seal itself, and the helm then destroys the
+  environment. The helm's record that an environment is sealed lives in memory only. If destroying it fails and the helm
+  then restarts, the helm forgets the seal until it connects to the environment again: until then Hosts shows an
+  ordinary sandbox or container with no sessions instead of "Deleting failed" with Retry. A running sandbox reconnects
+  and is destroyed then. But when the helm stays down for more than about half an hour, Tensorlake's 30-minute idle
+  timeout suspends the sandbox, Farhelm never resumes one on its own, and the sandbox sits in Hosts as an empty sandbox
+  billing for snapshot storage until the user notices and resumes or deletes it. The fix is to persist the helm's seal
+  record (environment and when the seal was seen) so a restarted helm keeps showing the failed deletion with Retry, and
+  can finish the destruction of a suspended sealed sandbox without waiting for a connection. This is helm-side state
+  about a session's end, which SPEC_impl.md forbids; the maintainer wants it anyway, so the change also writes that
+  exception into SPEC_impl.md. A process inside an environment writing the seal itself is not a trust boundary the
+  maintainer cares about (decided 2026-11-18). Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Make terminal hosts refuse an unusable folder or size clearly.** Known gaps in SPEC_impl.md since
+  tmux-end-old-terminals (#3358 to #3370): creating a session or opening a tab in a folder that cannot be entered fails
+  with an error that names `systemd-run` rather than the folder, and attaching at size 0x0 is mishandled. Terminal hosts
+  should refuse both up front with a clear message, the SPEC_impl.md known-gaps entries go, and the three tests that
+  were lost with tmux come back on terminal hosts. The same plan also lost, without porting, the check that memory stays
+  flat while a slow viewer stalls and two file-upload tests beside a busy or deleted session; port those with this.
+  Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Stop warning at every Mac supervisor start about an old tmux socket.** The startup step from tmux-end-old-terminals
+  turns off the private tmux server an older release left running. On macOS a socket nothing listens on refuses
+  connections exactly as a wedged server does, so the step cannot tell a dead old server from a wedged one: it leaves
+  `tmux.sock` and its config in place and logs a warning at every supervisor start. That is every Mac rebooted since its
+  old server last ran, the common case. Sessions are still converted; it is log noise. Find a way to tell the two apart
+  on macOS (or remove a socket whose owning process is gone), so the files are cleaned up and the warning stops, without
+  ever signalling a process other than the old server. Otherwise this lasts until "phase 3" (Mid term) removes the step.
+  Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
+  every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
+  installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0
+  (the current upgrade floor) up to the one before tmux was dropped may have installed it. Remove the step, its
+  explanation, docs and tests once the upgrade floor passes the release that dropped tmux, or together with "phase 3"
+  (Mid term), whichever comes first; a host updated after the step is gone keeps an unused copy, which is harmless.
+  Decide the timing when this is picked up. Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Finish the tmux cleanup: the known leftovers and one final sweep.** tmux-drop-from-docs (#3381 to #3385) audited
+  every remaining tmux and xterm.js mention and left these, each with the plan's recommendation:
+  - The 65-second "agent has not reported its identity" notice skips Enters inside a paste by scanning typed input for
+    xterm.js-style paste markers. The desktop app sends pastes as separate messages, so the scan probably never matches
+    now; confirm and remove it.
+  - Delete runs an extra scan of every process on the host for every session that was ever restarted, because an earlier
+    release's Restart could leave tmux tabs nothing lists; its cost was never measured. Goes with "phase 3".
+  - The per-session terminal-kind tracking and the paths that read it, test fixtures that still create old-kind rows by
+    default, and about 3,000 lines of test tooling for real tmux servers that now serves only the startup step's four
+    tests. Goes with "phase 3".
+  - Test-only: a half-second pause before an agent exits in the session lifecycle tests, and an extra error an
+    Attach-racing-Delete test still accepts; both existed for tmux, and nobody has checked whether terminal hosts need
+    them. Check and remove with "phase 3".
+  - Renames when the code is next touched: the "pane" vocabulary across the supervisor and tests,
+    `PRIVATE_TMUX_ENV_VARS` (now about the user's own tmux), and test names saying "new terminals" or "never in tmux".
+  - Left as they are by the plan: status detection's 16-screen read budget per round and the 10-second prompt delivery
+    timeout, both sized for tmux; revisit only if a better value appears.
+
+  Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
+  is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Show the open session in a collapsed group, and indent group members.** Since session-groups (#4110 to #4114), when
+  the open session belongs to a collapsed group, nothing in the sidebar shows which session is open until the group is
+  expanded; the header's status dot shows only the most urgent member. Make the selection visible on the collapsed group
+  (details to be decided; marking the header that holds the open session is one option). Separately, group members are
+  not indented, so in a long group only the header and the heavier separator after the last group mark where it ends;
+  indent members under their header. Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Clone: keep invisible characters when a copied folder or name is edited.** Since gpui-last-mile-fixes (#4059), Clone
+  shows invisible characters in the copied folder and session name spelled out (`<U+200B>`), using the rule the command
+  fields already had. The first keystroke in the field turns those spellings into literal text: type a letter and delete
+  it, and the field looks unchanged, but the launch uses a folder path containing the eight characters `<U+200B>`, or a
+  title containing `<U+202E>`. A wrong folder path is hard to spot. Turn spellings that are still in the edited text
+  back into the characters they stand for (about 10 to 15 lines in
+  `crates/gui/farhelm-gui/src/launcher/view/shown_text.rs`), for the folder and name and likely the command fields too;
+  the test `clone_shows_its_copied_folder_and_name_escaped_and_editable` pins today's behavior. In the same area: in
+  Restart with and Replace with, the suspended-host refusal (#4056) says "Resume it in Hosts, then launch" while the
+  button says Restart or Replace; word the ending per mode. Also from the same plan's re-review, test cleanup worth a
+  few dozen lines: cases added under old test names (`a_retired_container_setup_is_refused`,
+  `a_row_names_a_custom_model_escaped`, `local_home_moves_to_the_local_host`, and
+  `a_suspend_in_flight_leaves_new_available`, which drives the whole launcher UI to build a draft a helper already
+  builds), and copy-pasted neighbours in `launch_tests.rs` and `environment_recents_tests.rs`. Found by a skeptical
+  re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18.
+
+- **Shared placement picker: drop a no-op event and give it a shared home.** Since gpui-shared-placement (#4068), the
+  launcher and the template editor share one placement picker (`crates/gui/farhelm-gui/src/launcher/view/placement.rs`).
+  Pressing an already chosen "New" segment that has nowhere to go sends a "New, no target" change that the launcher
+  ignores and the template editor needs its own guard against (it would otherwise move the template to Existing host);
+  that guard is untested. Drop the press inside the shared picker and let the change carry only the target (about 10
+  lines less, and the guard and its comment go). Separately, the shared picker lives in a launcher-private file that the
+  GUI ownership table (`docs/gpui/foundation-ownership.md`) does not cover, so a change there alters the template editor
+  without the ownership check reporting it: move the shared items to a sibling module and add an ownership row. Found by
+  a skeptical re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
@@ -387,6 +508,28 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings or a periodic maintenance step as they grow.
 
 ### Trivial
+
+- **Retire the 0.37.0 old-terminal release announcement.** The in-app announcement `0.37.0-old-terminal-support`
+  ("Restart old terminals before support ends") tells users to restart sessions in old tmux terminals "or a future
+  release will forcibly terminate them". Since tmux-end-old-terminals (#3358 to #3370) that has happened, so the
+  announcement promises something already done. Remove it from the helm's release announcement table
+  (`crates/farhelm-helm/src/release_announcements.json`, where it is the only entry). Recorded by the maintainer on
+  2026-11-18 from the plan's review.
+
+- **Remove the leftover `.ci-tmux/` entry.** Until tmux-drop-from-tooling (#3377 to #3379), the test tooling built its
+  own pinned tmux into a `.ci-tmux/` directory in each checkout. That build is gone, but the plan kept `.ci-tmux/` in
+  `.gitignore` on purpose: existing checkouts still hold the old build there, and jj tracks new files on its own, so
+  without the entry a checkout's next snapshot could sweep a built tmux into a commit. `plans/.agents/close-reset.md`
+  also still lists `.ci-tmux/` among the build caches a reset keeps (that file changes only through a planning or
+  maintainer change). Delete the directory from the long-lived checkouts, then remove the `.gitignore` entry and the
+  close-reset mention. Recorded by the maintainer on 2026-11-18 from the plan's review.
+
+- **Open submenus on hover, as a general rule.** The shared submenu component
+  (`crates/gui/farhelm-gui/src/components/submenu.rs`, first used by mute-sessions and reused by session-groups for Mute
+  and Move to group) opens a submenu only on click, Enter or Right; while it is open its parent item loses its
+  highlight. Make submenus open on hover, as most desktop submenus do, keep the parent highlighted while its submenu is
+  open, and state hover-to-open as the general UI rule for submenus in SPEC.md, implemented once in the shared component
+  so every submenu follows it. Recorded by the maintainer on 2026-11-18 from the mute-sessions review.
 
 ## Mid term
 
