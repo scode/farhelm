@@ -270,8 +270,9 @@ consequences.
   and unresolved consequences are preserved in the entry.
 
 - [`header-actions-follow-unseen-session.md`](header-actions-follow-unseen-session.md) — A Stop, Restart, Replace or
-  Delete aimed at one session can act on a different session when the selection just changed. Skipping confirmations can
-  make the wrong action take effect immediately.
+  Delete aimed at one session can act on a different session when the selection just changed. Replace on the
+  interrupted-session card has the same problem. Skipping confirmations can make the wrong action take effect
+  immediately.
 
 - [`session-actions-use-unseen-liveness.md`](session-actions-use-unseen-liveness.md) — Deleting an ended session can
   kill an agent that restarted after the screen was drawn. Stop, Restart and Replace can also act on more running work
@@ -328,6 +329,10 @@ consequences.
 - [`podman-container-clone-inherits-leftover-ownership.md`](podman-container-clone-inherits-leftover-ownership.md) — A
   container you clone and use independently can show up in Settings as a Farhelm leftover. Deleting it from that list
   permanently removes the clone and its work.
+
+- [`template-number-key-save-overwrites-committed-binding.md`](template-number-key-save-overwrites-committed-binding.md)
+  — A number-key change in Templates can undo an agent's already saved binding on a different key if the helm is still
+  sending the window an older set of bindings.
 
 ## High priority: material UX degradation
 
@@ -581,6 +586,13 @@ consequences.
 - [`podman-place-probe-bypasses-host-identity-refusal.md`](podman-place-probe-bypasses-host-identity-refusal.md) —
   Farhelm can treat two SSH entries for the same machine and account as usable container places even while its ordinary
   host connection refuses the duplicate.
+
+- [`desktop-updater-waits-indefinitely-for-installer.md`](desktop-updater-waits-indefinitely-for-installer.md) — A
+  stalled installer can leave the desktop updater waiting indefinitely. Later checks cannot run, and a user-requested
+  check can stay on Installing.
+
+- [`macos-terminal-paste-blocks-gui-thread.md`](macos-terminal-paste-blocks-gui-thread.md) — When macOS stalls while
+  supplying clipboard contents, pasting into the terminal can freeze the whole Farhelm window.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -3668,3 +3680,163 @@ consequences.
 - [`linux-docs-capture-follow-ups.md`](linux-docs-capture-follow-ups.md) — The README hero still uses the Mac workflow
   by default. A small Templates button crop would fail the publisher’s size check if a page uses it, and the template
   search crop catches a warning below the search box.
+
+- [`desktop-updater-read-failure-enables-auto-install.md`](desktop-updater-read-failure-enables-auto-install.md) —
+  Farhelm can install an update in the background after you turned automatic updates off, if it later cannot read the
+  setting.
+
+- [`linux-sound-resolves-player-on-path.md`](linux-sound-resolves-player-on-path.md) — Farhelm plays notification sounds
+  with the first `pw-play` on its executable search path. A misconfigured path can select a different program.
+
+- [`tensorlake-add-host-caches-skip-confirmation.md`](tensorlake-add-host-caches-skip-confirmation.md) — If the
+  confirmation setting changes while Add Host stays open, the form can skip the question before starting a billed
+  Tensorlake sandbox.
+
+- [`environment-launch-opens-earliest-session.md`](environment-launch-opens-earliest-session.md) — If two sessions
+  appear in a new environment before launch finishes, Farhelm can open the other session when their creation times tie
+  or arrive out of order.
+
+- [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
+  enough to time out while the host is still working, Farhelm can remove the session without telling you where its
+  unarchived checkout was left.
+
+- [`stop-and-suspend-hides-timeout-reason.md`](stop-and-suspend-hides-timeout-reason.md) — When Stop and suspend exceeds
+  its reply deadline, Farhelm can leave you without the explanation that it is still working or that Stop already
+  failed.
+
+- [`credential-editor-retains-obsolete-secret-copies.md`](credential-editor-retains-obsolete-secret-copies.md) — The
+  credential editor can keep an extra copy of a rejected or superseded token or login file in app memory after you have
+  edited the draft.
+
+- [`template-collision-refusal-mixes-unisolated-name.md`](template-collision-refusal-mixes-unisolated-name.md) — When a
+  name is already taken, the refusal can display a right-to-left name differently from how Farhelm shows it elsewhere.
+
+- [`attachment-paste-keeps-directory-control-bytes.md`](attachment-paste-keeps-directory-control-bytes.md) — Uploading
+  from a session can paste control characters from the host's attachment directory into the same terminal along with the
+  path.
+
+- [`destructive-action-tests-omit-request-targets.md`](destructive-action-tests-omit-request-targets.md) — Several GUI
+  regressions would pass if Farhelm sent a destructive request for a different session, host, credential, or recipe. One
+  Tensorlake test does not check that its request clears the key.
+
+- [`secret-handling-tests-omit-output-assertions.md`](secret-handling-tests-omit-output-assertions.md) — Credential
+  tests can pass even if a token, login file, or device credential appears outside the intended entry field or request,
+  because they rarely look for the secret in the painted frame, refusal text, or logs.
+
+- [`desktop-startup-update-duplicates.md`](desktop-startup-update-duplicates.md) — Desktop startup and updates maintain
+  separate copies of the same checks, formatting, and reopen command construction.
+
+- [`terminal-grid-row-traversal-duplicated.md`](terminal-grid-row-traversal-duplicated.md) — Terminal word selection and
+  file-path recognition each interpret the same grid row separately, so their treatment of the same cells can drift.
+
+- [`gui-controls-repeat-shared-rendering.md`](gui-controls-repeat-shared-rendering.md) — Controls draw their own focus
+  rings and repeat small formatting rules that should stay consistent across forms.
+
+- [`gui-focus-checks-repeat-drawn-predicate.md`](gui-focus-checks-repeat-drawn-predicate.md) — Several focus paths
+  reimplement the check that a control is present in the frame.
+
+- [`approval-views-repeat-status-lookups.md`](approval-views-repeat-status-lookups.md) — Host-add and tunnel approval
+  views independently look up whether a request is waiting or being answered.
+
+- [`gui-command-paths-repeat-reply-classification.md`](gui-command-paths-repeat-reply-classification.md) — Two GUI
+  request paths repeat the classification of the same helm replies and refusal messages.
+
+- [`hosts-menu-and-settings-repeat-operation-logic.md`](hosts-menu-and-settings-repeat-operation-logic.md) — Hosts
+  repeats the code that closes menus, describes lifecycle operations, retains current progress, and saves permanent
+  answers.
+
+- [`launcher-repeats-choices-and-summary-formatting.md`](launcher-repeats-choices-and-summary-formatting.md) — Launcher
+  controls, search, and recent setups have separate implementations of labels and display rules that are supposed to
+  match.
+
+- [`gui-screenshot-scenes-repeat-fixture-wiring.md`](gui-screenshot-scenes-repeat-fixture-wiring.md) — Screenshot scenes
+  each build similar fake sessions and set up dialogs independently. One scene also recreates the update text it is
+  meant to show.
+
+- [`gui-migration-comments-need-current-contracts.md`](gui-migration-comments-need-current-contracts.md) — Comments
+  across the desktop and GUI still describe temporary assignments, milestones, and unfinished ports. Several now
+  contradict behavior already in the app.
+
+- [`desktop-reopen-masks-bundle-read-error.md`](desktop-reopen-masks-bundle-read-error.md) — Farhelm can say it was
+  uninstalled when it could not read its installation directory.
+
+- [`desktop-supervisor-ownership-save-is-silent.md`](desktop-supervisor-ownership-save-is-silent.md) — Farhelm can start
+  its supervisor and then silently fail to record it. Later launches can treat that supervisor as externally started.
+
+- [`open-source-notices-window-failure-is-silent.md`](open-source-notices-window-failure-is-silent.md) — Choosing
+  Open-source notices can do nothing when the notices window cannot open.
+
+- [`launcher-stale-search-selection-fails-silently.md`](launcher-stale-search-selection-fails-silently.md) — Choosing a
+  vanished host or stale recent setup can clear the search or do nothing without saying why.
+
+- [`desktop-startup-reopen-can-wait-on-reused-pid.md`](desktop-startup-reopen-can-wait-on-reused-pid.md) — If the old
+  Farhelm process number is reused during a handoff, the reopen helper can wait indefinitely and fail to open the
+  replacement window.
+
+- [`gui-labels-and-refusals-name-different-actions.md`](gui-labels-and-refusals-name-different-actions.md) — Several
+  dialogs, menus and accessible labels describe the same action differently. A few messages name the wrong operation or
+  cause.
+
+- [`session-list-actions-repeat-admission-and-progress.md`](session-list-actions-repeat-admission-and-progress.md) —
+  Session actions repeat their request setup, current-work lookup, and progress rendering. Compact and full rows also
+  repeat part of the status display.
+
+- [`session-pane-repeats-last-known-status.md`](session-pane-repeats-last-known-status.md) — The Details bar and the
+  unavailable-session view separately calculate the same last known status and activity age.
+
+- [`settings-repeat-preference-and-focus-wiring.md`](settings-repeat-preference-and-focus-wiring.md) — Several controls
+  build the same preference command, and two Settings editors independently restore focus to the control that opened
+  them.
+
+- [`templates-repeat-lookup-and-control-wiring.md`](templates-repeat-lookup-and-control-wiring.md) — Template screens
+  repeat lookups, refusal wording, control construction, and shortcut input mapping.
+
+- [`terminal-repeats-modifier-mapping.md`](terminal-repeats-modifier-mapping.md) — The terminal and its help keep
+  separate copies of platform modifier rules. The terminal also copies modifier conversion for mouse and keyboard input.
+
+- [`trash-repeats-animation-and-focus-wiring.md`](trash-repeats-animation-and-focus-wiring.md) — Trash repeats the
+  spinner's timer and independently looks up the same focus destination on confirmation and cancellation.
+
+- [`launcher-escalation-test-misses-banner-premise.md`](launcher-escalation-test-misses-banner-premise.md) — The test
+  intended to prove that switching agents clears an escalation warning can pass when the warning never appeared.
+
+- [`launcher-model-height-test-accepts-collapsed-list.md`](launcher-model-height-test-accepts-collapsed-list.md) — The
+  launcher model list's height test can pass if the list collapses to zero height.
+
+- [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
+  macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
+
+- [`delete-shortcut-test-misses-early-request.md`](delete-shortcut-test-misses-early-request.md) — The test can pass if
+  Delete sends a request before the user answers the question, even though Enter is supposed to authorize that request.
+
+- [`notice-docs-link-test-accepts-plain-text.md`](notice-docs-link-test-accepts-plain-text.md) — The test only checks
+  escaping after the notice recognizes a link, so it can pass if the address is displayed as plain text.
+
+- [`update-restart-failure-test-follows-status-id.md`](update-restart-failure-test-follows-status-id.md) — The updater
+  test can pass if a restart failure moves inline under a new element ID instead of staying in the hover help.
+
+- [`terminal-input-replays-accept-empty-fixtures.md`](terminal-input-replays-accept-empty-fixtures.md) — The terminal
+  key and mouse compatibility replays can pass without running their assertions when their fixture tables are empty.
+
+- [`wrapped-link-test-misses-second-open.md`](wrapped-link-test-misses-second-open.md) — The test checks that the second
+  click gives no refusal but never verifies that it opens the link.
+
+- [`control-tests-repeat-simulated-key-events.md`](control-tests-repeat-simulated-key-events.md) — Control and approval
+  tests each construct and deliver the same simulated key presses and releases.
+
+- [`session-list-tests-repeat-frame-and-request-helpers.md`](session-list-tests-repeat-frame-and-request-helpers.md) —
+  Session-list tests maintain separate copies of their frame queries, mouse gestures, and fake-helm acknowledgements.
+
+- [`connection-refusal-tests-release-port-too-early.md`](connection-refusal-tests-release-port-too-early.md) — Two tests
+  can reach a different process if it starts listening after the test gives up the port it reserved.
+
+- [`credential-chooser-test-assumes-missing-global-path.md`](credential-chooser-test-assumes-missing-global-path.md) —
+  The missing-file test depends on a machine-wide file path staying absent instead of controlling that premise in its
+  fixture.
+
+- [`open-types-acknowledgement-only-in-dialog.md`](open-types-acknowledgement-only-in-dialog.md) — Only the Settings
+  dialog asks for the acknowledgement SPEC requires before adding a file type that opens with a modifier-click; the helm
+  stores any parseable list.
+
+- [`staged-payloads-and-automatic-host-updates.md`](staged-payloads-and-automatic-host-updates.md) — Whether automatic
+  host updates can push an operator-staged, unverified payload directory without a per-host action has not been checked.
