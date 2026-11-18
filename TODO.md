@@ -472,13 +472,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
-- **Retire the 0.37.0 old-terminal release announcement.** The in-app announcement `0.37.0-old-terminal-support`
-  ("Restart old terminals before support ends") tells users to restart sessions in old tmux terminals "or a future
-  release will forcibly terminate them". Since tmux-end-old-terminals (#3358 to #3370) that has happened, so the
-  announcement promises something already done. Remove it from the helm's release announcement table
-  (`crates/farhelm-helm/src/release_announcements.json`, where it is the only entry). Recorded by the maintainer on
-  2026-11-18 from the plan's review. Plan: `plans/queue/retire-old-terminal-announcement.md`.
-
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
