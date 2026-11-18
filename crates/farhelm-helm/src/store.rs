@@ -578,6 +578,7 @@ const SESSION_PINS_ORDERED_SCHEMA: &str = "CREATE TABLE session_pins (
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;";
 
+mod manual_order;
 mod session_mutes;
 use session_mutes::SESSION_MUTES_SCHEMA;
 pub(crate) use session_mutes::{MuteEntry, MuteObservation};
@@ -4957,18 +4958,12 @@ fn ordered_pins(conn: &Connection) -> anyhow::Result<Vec<(SessionKey, i64)>> {
 /// Comparing positions avoids treating a retry of an already-normalized move
 /// as a change, while normalization of gaps or ties remains observable.
 fn renumber_pins(conn: &Connection, pins: &[(SessionKey, i64)]) -> anyhow::Result<bool> {
-    let mut changed = false;
     let mut statement = conn
         .prepare("UPDATE session_pins SET position = ?3 WHERE host_id = ?1 AND session_id = ?2")
         .context("preparing pin renumber")?;
-    for (index, (key, previous)) in pins.iter().enumerate() {
-        let position = i64::try_from(index).context("too many pins to renumber")?;
-        if position != *previous {
-            changed |=
-                statement.execute(rusqlite::params![key.host, key.session_id, position])? > 0;
-        }
-    }
-    Ok(changed)
+    manual_order::renumber(pins, |key, position| {
+        statement.execute(rusqlite::params![key.host, key.session_id, position])
+    })
 }
 
 /// Schema 37's rewrite of cached `SessionInfo` rows for launch kinds: each
@@ -6243,15 +6238,11 @@ impl HelmStore {
                 let maximum: Option<i64> = tx.query_row(
                     "SELECT MAX(position) FROM session_pins", [], |row| row.get(0)
                 )?;
-                let position = match maximum {
-                    None => 0,
-                    Some(i64::MAX) => {
-                        let pins = ordered_pins(&tx)?;
-                        renumber_pins(&tx, &pins)?;
-                        i64::try_from(pins.len()).context("too many pins to append")?
-                    }
-                    Some(maximum) => maximum + 1,
-                };
+                let position = manual_order::append_position(maximum, || {
+                    let pins = ordered_pins(&tx)?;
+                    renumber_pins(&tx, &pins)?;
+                    Ok(pins.len())
+                })?;
                 tx.execute(
                     "INSERT INTO session_pins (host_id, session_id, position) VALUES (?1, ?2, ?3)",
                     rusqlite::params![key.host, key.session_id, position],
@@ -6322,20 +6313,11 @@ impl HelmStore {
             .call("pin move task panicked", move |conn: &mut Connection| {
                 let tx = conn.transaction().context("beginning pin move")?;
                 let mut pins = ordered_pins(&tx)?;
-                let moved_index = pins
-                    .iter()
-                    .position(|(key, _)| key == &moved)
-                    .ok_or_else(|| anyhow::Error::new(PinMoveError::NotPinned(moved.clone())))?;
-                let neighbor_index = pins
-                    .iter()
-                    .position(|(key, _)| key == &neighbor)
-                    .ok_or_else(|| anyhow::Error::new(PinMoveError::NotPinned(neighbor)))?;
-                if moved_index == neighbor_index {
+                if !manual_order::place(&mut pins, &moved, &neighbor, before)
+                    .map_err(|missing| PinMoveError::NotPinned(missing.clone()))?
+                {
                     return Ok(false);
                 }
-                let pin = pins.remove(moved_index);
-                let neighbor_index = neighbor_index - usize::from(moved_index < neighbor_index);
-                pins.insert(neighbor_index + usize::from(!before), pin);
                 let changed = renumber_pins(&tx, &pins)?;
                 tx.commit().context("committing pin move")?;
                 Ok(changed)
