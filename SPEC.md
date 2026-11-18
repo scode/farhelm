@@ -2232,8 +2232,9 @@ non-authoritative reply does not establish disappearance.
 With any effective marks, **N marked**, **Stop**, **Delete**, a metadata menu and Clear replace the ordinary title,
 count and icon buttons; the filters and any truncation or unsupported-filter warning remain available. Stop and Delete
 apply to every marked row displayed at acceptance. **Pin** applies only to unpinned marked rows and **Unpin** only to
-pinned ones. **Mark read** and **Mark unread** apply only to marked rows whose own menus offer that action. Metadata
-choices reuse the ordinary writes and row-local errors, and clear marks once their eligible writes have been dispatched.
+pinned ones. **Mark read**, **Mark unread**, **Mute** and **Unmute** apply only to marked rows whose own menus offer
+that action. Metadata choices reuse the ordinary writes and row-local errors, and clear marks once their eligible writes
+have been dispatched.
 
 Each bulk Stop or Delete batch runs one request at a time on each host, with different hosts progressing independently;
 a second batch started while the first is still running has its own pace, so it can send to a host the first batch is
@@ -2482,6 +2483,13 @@ is the stable fallback where an older supervisor has no work-start observation. 
 and the seen/unseen comparison stay independent of the order: they describe when the agent was last working (see Status)
 and neither moves a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees
 without keeping a private rank.
+
+A muted session sorts with idle and ended sessions on the work-start key it had when muted. While it is waiting on a
+connected host, it joins the first group on its real work-start key so the question can promote it. When the wait ends,
+it returns to the frozen key. Ending the mute keeps the row in the second group on that key until the next observed work
+start, even if it is still running. A connected session waiting on the user still belongs in the first group. The
+sidebar's pinned rows keep their pin positions. The quick switcher uses the same recently active order, including mute's
+effect on it. Status filters use the real status.
 
 A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
 its way to a click. The hold is display-only and its snapshot is discarded when it ends: the shared pin order and chosen
@@ -2741,9 +2749,33 @@ client keeps its own copy, so a window shows the same colour after a restart or 
 UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all; otherwise it
 reads SEEN.
 
-Pins, seen stamps and notification read/cleared marks belong to the session on its particular host entry. They survive
-editing, retargeting or adopting that entry, but removing it and adding the host again starts those values fresh. On
-upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
+Pins, seen stamps, mutes and notification read/cleared marks belong to the session on its particular host entry. They
+survive editing, retargeting or adopting that entry, but removing it and adding the host again starts those values
+fresh. On upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
+
+The session row menu offers **Mute** beside the pin action on an eligible unmuted session. Retired containerized
+sessions still offer only Delete. The row menu and the marked-rows metadata menu use the same **Mute** submenu. **For 1
+hour** ends one hour after the click. **Until tomorrow morning** ends at the next 06:00 in the muting device's local
+time, including 06:00 the same day when the user mutes before then. **Until I unmute** has no deadline. The device
+computes a timed mute's deadline at the click and the helm ends it at that instant even with no client connected. The
+helm shares mutes and their changes with every client. Restart keeps a mute. Replace and Replace with carry it to the
+new session, deadline included. Delete removes it.
+
+Muted sessions read as seen on every surface. A muted session waiting on a connected host keeps its red waiting dot and
+shows a small bell after its title. Every other live muted row has a slashed bell in the status dot's slot, at its size,
+with no pulse. This includes unclassified sessions and last-known live statuses on unreachable hosts. An ended session
+keeps its usual wording or icon, with mute in the tooltip and accessible text. The bell follows the selected row's
+inverse rendering and is drawn only in the session list, including in compact mode. The open session's header and
+details bar show the seen state without a bell.
+
+The mark's tooltip and accessible text give the real status and say **Muted**, **Muted until 18:40**, or **Muted until
+tomorrow 06:00**, using the viewer's local time for a deadline. A muted row's menu offers **Unmute** in place of
+**Mute** and hides the **Mark read** and **Mark unread** actions. Clicking a mute bell also unmutes, and the bell's
+tooltip names that action. When a mute ends, including by expiry, the helm marks the session seen through its current
+activity. Only subsequent activity can make it unseen again.
+
+Mute suppresses the turn-finished sound. Waiting and approval sounds and waiting's ntfy alert follow their ordinary
+rules.
 
 The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
 session's activity advancing while it stays open re-records the new value — with whether the window has focus ignored: a
@@ -3353,6 +3385,10 @@ not move.
 
 A menu has one highlight. Whichever moved last, the pointer or the keys, sets it, and Enter acts on the highlighted
 item. Keys typed before a menu finishes appearing apply in order, as if typed slowly.
+
+A menu item with a submenu opens it beside the parent item. Right or Enter on the parent item opens the submenu and
+moves focus into it. Left or Escape closes the submenu and returns focus to that item. The one-highlight rule applies
+across the open menus. Closing the parent menu also closes its submenu.
 
 Confirmed 2026-10-17: when the user moves between controls (menu items, buttons, switches) by different means within
 tens of milliseconds of each other, such as an arrow key and a pointer or screen reader at nearly the same instant, a
