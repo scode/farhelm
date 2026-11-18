@@ -1,0 +1,14 @@
+{
+  "screenshots": [
+    {
+      "entry": 4114,
+      "name": "release-notes/v0-41-0-session-groups",
+      "alt": "New group dialog with Release preparation entered as the group name."
+    },
+    {
+      "entry": 4108,
+      "name": "release-notes/v0-41-0-session-mute",
+      "alt": "The session menu showing For 1 hour, Until tomorrow morning, and Until I unmute."
+    }
+  ]
+}
