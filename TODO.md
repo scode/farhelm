@@ -116,6 +116,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   press on its own. `docs/gpui/parity/templates-and-quick-launch.md` states the behavior, but no test covers it, so a
   later change to the shared picker could break it unnoticed.
 
+- **Run the GPUI screenshot goldens in the release process.** The goal is that a release runs
+  `scripts/check-gui-goldens.py`, the pixel comparison of every GUI component and dialog against its reference picture.
+  Today it runs only during development and landings, because its reference pictures live outside this repository, in
+  the private storage repository `scripts/gui-goldens.py` fetches from (moved there on 2026-11-16 to keep main's history
+  small), and the release runners cannot read it. Pick where the pictures should live so a release can reach them: a
+  token for the release runners to read the private store, making the store public, some other home, or back in the
+  repository. Then add the goldens to the release workflow next to the end-to-end GUI smoke.
+
 - **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
   repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
