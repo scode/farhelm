@@ -67,6 +67,12 @@ before testing. Treat fixtures and clones as private: never publish them or raw 
 licensing/concurrency constraints; the commonly cited limit of two running macOS guests must be checked for the actual
 setup. This recipe needs only one macOS guest at a time.
 
+Use a current official Codex CLI package that can serve the profile's `gpt-6.2-sol` model in both guests. Preserve the
+package layout and install the companion executables. A standalone `codex` binary can answer a model prompt but leave
+native tool discovery without `codex-code-mode-host`. Check the actual CLI path and version on both guests and run the
+guest-native screenshot, click and paste preflight with the same model before adopting refreshed bases. A newer host CLI
+or a successful `codex --version` does not establish any of these guest capabilities.
+
 ## Resolve the environment mechanics
 
 Use the verified mechanics in OPERATIONS.md, then resolve any differences on the current host in owned disposable VMs.
