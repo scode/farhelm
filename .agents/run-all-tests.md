@@ -175,9 +175,10 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   retained unavailable-fixture retries excluding product failures and feedback, structured native actions, restart
   handoff failures, durable update evidence, exact native update-channel readouts, normal Finder readiness, conditional
   product confirmations, remote menu Remove/re-add and Uninstall with independent effect receipts, old-session survival
-  and Restart onto a new terminal host, calibrated window-trace and bonus gesture-readiness gates, and expected RC
-  discovery skip reporting. The guest-only Swift helper separately needs SDK type-check and read-only runtime validation
-  in an owned disposable guest. None establishes live release product checks. Report platform skips.
+  and Restart onto a new terminal host, calibrated window-trace and bonus gesture-readiness gates, RC and dev discovery
+  skip continuation, stable discovery failure, consent-checked scope restoration, and remote launcher visibility. The
+  guest-only Swift helper separately needs SDK type-check and read-only runtime validation in an owned disposable guest.
+  None establishes live release product checks. Report platform skips.
 - Terminal host coverage and mutation testing from `.agents/validation.md`
   (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
   `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,

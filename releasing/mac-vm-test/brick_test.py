@@ -646,14 +646,14 @@ live send or erase its independently retained outcome.
                 # Manual observations must prove their ordering here. Native
                 # dispatch already established that premise before Send; later
                 # evidence loss changes P0's verdict, but cannot erase the send.
-                if not dispatched and any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass'
+                if not dispatched and any(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) != 'pass'
                                           for key in self.data['plan']['p0_sequence']):
                     raise Refused('complete all P0 checks with valid evidence before P1')
             elif entry.get('priority') == 'P0' and status == 'pass':
                 preceding = list(entry['required'])[:list(entry['required']).index(check_id)]
                 prefix = dict(entry, required={key: entry['required'][key] for key in preceding},
                               results={key: entry['results'][key] for key in preceding if key in entry['results']})
-                if self.verdict(prefix) != 'pass':
+                if self.verdict(self.executable_checks(prefix)) != 'pass':
                     raise Refused('complete preceding P0 checks with valid evidence first')
         native = {} if native is None else native
         if status == 'pass' and self.data.get('gui_backend') == 'guest-native' and set(native) != {'execution', 'events', 'task'}:
@@ -839,7 +839,7 @@ it never retries feedback, uncertain actions or failed cleanup.
                         # boundary; earlier credential consent cannot stand in.
                         require_setup(self.profile, feedback=True)
                         p0 = self.report()['p0']
-                        if p0['verdict'] != 'pass':
+                        if not self.p0_executable_complete():
                             raise Refused('complete all P0 checks with valid evidence before P1 dispatch')
                         context['feedback_authorized'] = True
                         print(json.dumps({'p0': p0}), flush=True)
@@ -847,8 +847,20 @@ it never retries feedback, uncertain actions or failed cleanup.
                         self.select_update(pass_id, download(ORIGIN + '/latest').decode().strip())
                     context['update_path'] = entry['update_path']
                     if check_id == 'update-discovery' and entry['update_path'] == 'manual':
-                        raise Unavailable(self.discovery_skip(entry)
-                                          or 'in-app update discovery unavailable on the selected manual path')
+                        discovery = self.discovery_skip(entry)
+                        if discovery:
+                            self.note('decision', discovery + ' Continue with the manual install and relaunch.')
+                            continue
+                        latest = self.manual_discovery_selection(entry)
+                        if latest is None:
+                            raise Refused('manual discovery path requires a valid update selection receipt')
+                        detail = (f'In-app update discovery is required for stable release {context["candidate"]}. '
+                                  f'The public update channel pointed to {latest}, and the {entry["previous"]} app '
+                                  'cannot select a stable release before it becomes the public default.')
+                        # This failure is established by the selection receipt before a guest turn starts.
+                        entry['tester'] = {'phase': 'running', 'check_id': check_id, 'termination_observed': True}
+                        self.record(pass_id, check_id, 'fail', [f'{pass_id}/latest-at-selection.json'], detail)
+                        raise CheckStopped(detail)
                     context['latest_at_selection'] = entry.get('latest_at_selection')
                     context['prior_results'] = entry['results']
                     task = task_for(self, pass_id, check_id, context, turn_timeout(check_id, pass_id, timeout))
@@ -1193,11 +1205,11 @@ the old app supports discovery. Its success cannot stand in for the updater.
         self.save()
         self.note('decision', f'Pass `{pass_id}` selected `{selected}` from observed public default `{latest}`.')
 
-    def discovery_skip(self, entry):
-        """Explain an expected discovery skip backed by the retained update selection.
+    def manual_discovery_selection(self, entry):
+        """Return the observed public default for a verified, unattempted manual discovery path.
 
 Planning alone is provisional because the public default can move. An actual
-discovery observation takes precedence over this explanation.
+discovery observation takes precedence over the selected path.
 """
         latest = entry.get('latest_at_selection')
         if (entry.get('id') != 'p0-updater-upgrade' or entry.get('update_path') != 'manual'
@@ -1212,14 +1224,18 @@ discovery observation takes precedence over this explanation.
                 return None
         except (OSError, ValueError, RuntimeError, tarfile.TarError):
             return None
-        channel = f'The public update channel pointed to {latest}.'
+        return latest
+
+    def discovery_skip(self, entry):
+        """Explain the one discovery skip that can let dependent checks proceed."""
+        candidate = self.data['plan']['candidate']
         kind = version(candidate)[4]
-        if kind:
-            label = {'rc': 'release candidate', 'dev': 'development prerelease'}[kind]
-            reason = f'{candidate} is a {label}. The in-app updater only discovers stable releases.'
-        else:
-            reason = f'The {entry["previous"]} app cannot select a stable release before it becomes the public default.'
-        return f'In-app update discovery was skipped as expected. {reason} {channel}'
+        latest = self.manual_discovery_selection(entry) if kind else None
+        if latest is None:
+            return None
+        label = {'rc': 'release candidate', 'dev': 'development prerelease'}[kind]
+        return (f'In-app update discovery was skipped as expected. {candidate} is a {label}. '
+                f'The in-app updater only discovers stable releases. The public update channel pointed to {latest}.')
 
     def add_check(self, pass_id, check_id, gui=False):
         """Keep release-specific obligations in bonus coverage without expanding P0."""
@@ -1274,6 +1290,42 @@ Ignoring P1 here never changes its separate or full-run verdict.
                     if entry['required'][key].get('priority', entry.get('priority')) != 'P1'):
                 raise Refused('stop after the first failed or unavailable check; preserve this run')
 
+    def continue_full(self):
+        """Restore requested full coverage after a temporary scope stop.
+
+The caller must have authorization to widen scope, including live feedback.
+Recheck setup consent and keep every observation and active-attempt fence;
+this transition neither retries a send nor recreates a cleaned fixture.
+"""
+        if not self.data['plan'].get('p0_sequence'):
+            raise Refused('this historical run has no explicit P0 plan')
+        if self.data.get('gui_backend') == 'guest-native':
+            require_setup(self.profile, feedback=True)
+        self.data['scope'] = 'full'
+        self.save()
+        self.note('decision', 'Full coverage requested again; retained observations and send boundaries unchanged.')
+
+    def executable_checks(self, entry):
+        """Exclude only unattempted discovery on the verified manual RC or dev path.
+
+Use this projection to schedule later checks. The formal P0 verdict uses the
+complete check set. An observed discovery result or missing selection evidence
+keeps discovery required for scheduling too.
+"""
+        if not self.discovery_skip(entry):
+            return entry
+        return dict(entry, required={key: spec for key, spec in entry['required'].items()
+                                     if key != 'update-discovery'})
+
+    def p0_executable_complete(self):
+        """Require every runnable P0 boundary before feedback or bonus coverage.
+
+An unsupported discovery path remains unavailable in the report. It does not
+prevent evidence-backed agent, session-survival, remote-menu or feedback tests.
+"""
+        return all(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) == 'pass'
+                   for key in self.data['plan']['p0_sequence'])
+
     def require_current_contract(self, pass_id):
         """Refuse to start or test an updater pair planned before P0 carried old sessions.
 
@@ -1303,7 +1355,7 @@ their observations are never retroactively relabeled as P0 coverage.
             if self.data.get('scope') in ('p0-only', 'p1-only'):
                 raise Refused('stop after P0 or P1 checks: bonus fixtures are outside this run scope')
             preceding = sequence
-        if any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass' for key in preceding):
+        if any(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) != 'pass' for key in preceding):
             raise Refused('complete P0 fixtures in order before later checks')
 
     def result_evidence_retained(self, result):
@@ -1425,13 +1477,7 @@ of its fixture's full verdict but excluded from P0's projections.
                 discovery = self.discovery_skip(updater)
                 if discovery:
                     output['p0']['unavailable_checks'] = {'update-discovery': discovery}
-                    # Retained runs can include later P0 coverage. Their
-                    # evidence must pass before the summary can say so.
-                    remaining = priority_entry(updater, 'P0')
-                    del remaining['required']['update-discovery']
-                    if (self.verdict(remaining) == 'pass'
-                            and all(verdict == 'pass' for key, verdict in zip(p0_ids, p0_verdicts)
-                                    if key != 'p0-updater-upgrade')):
+                    if self.p0_executable_complete():
                         output['p0']['summary'] = f'All runnable P0 checks passed. {discovery}'
             if self.data.get('gui_backend') == 'guest-native':
                 output['p0']['unverified_product_failures'] = [
@@ -1511,7 +1557,7 @@ discard approval as before; none of these paths delete retained evidence.
             raise Refused('cannot clean up while the independent guest tester is active')
         p1 = priority_entry(entry, 'P1')
         if p1['required']:
-            successful = self.verdict(priority_entry(entry, 'P0')) == 'pass'
+            successful = self.verdict(self.executable_checks(priority_entry(entry, 'P0'))) == 'pass'
             observed = set(p1['results']) == set(p1['required'])
             retained = self.verdict(p1) == 'pass' or all(
                 result['status'] != 'pass' and self.result_evidence_retained(result)
@@ -1609,10 +1655,10 @@ def main():
             scope.add_argument('--stop-after-p1', action='store_true',
                                help='complete P0 and the feedback P1 check, then stop')
     sub.add_parser('smoke')
-    for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
+    for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1', 'continue-full'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
-        if name not in ('status', 'stop-after-p0', 'stop-after-p1'):
+        if name not in ('status', 'stop-after-p0', 'stop-after-p1', 'continue-full'):
             child.add_argument('pass_id')
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
@@ -1705,6 +1751,8 @@ def main():
             run.limit_to_p0()
         elif args.action == 'stop-after-p1':
             run.limit_to_p1()
+        elif args.action == 'continue-full':
+            run.continue_full()
         report = run.report()
         if args.action == 'status':
             atomic_json(run.directory / 'report.json', report)

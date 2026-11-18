@@ -75,6 +75,13 @@ independent updater check. These assertions cover instructions, not live UI.
         self.assertLess(text.index('keep observing'), text.index('clicking the readout itself'))
         self.assertLess(text.index('Capture the visible menu'), text.index('brick_ui method restart'))
 
+    def test_remote_agent_prompt_is_entered_in_the_visible_terminal(self):
+        """Keep the tester away from the launcher field that may be offscreen after remote Update."""
+        text = self.envelope('p0-updater-upgrade', 'remote-supervisor-agent', 'manual', managed=True)['instructions']
+        self.assertIn("Leave the launcher's optional Initial prompt blank", text)
+        self.assertIn('prompt in the visible agent terminal', text)
+        self.assertLess(text.index('Launch first'), text.index('Send: What is 17 + 25?'))
+
 
 class OldSessionInstructionsTests(unittest.TestCase):
     """Pin what P0's old-session turns are told, in both the managed and the plain envelope.
