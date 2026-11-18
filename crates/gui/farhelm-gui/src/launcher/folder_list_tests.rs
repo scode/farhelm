@@ -269,6 +269,37 @@ fn enter_takes_a_highlighted_row_and_otherwise_launches(cx: &mut TestAppContext)
     assert!(!list_shown(cx), "and closes the list, refused or not");
 }
 
+/// Clone filters using the underlying folder after an edit. The visible spelling can also be a different path on disk.
+#[gpui::test]
+fn a_clone_folder_edit_filters_by_the_underlying_path(cx: &mut TestAppContext) {
+    let raw = "/src/work\u{200b}box";
+    let literal = "/src/work<U+200B>box";
+    let mut source = super::draft_tests::session(super::view_tests::codex(None, None, None));
+    source.cwd = raw.into();
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::clone_of(&source, Some(1)),
+        fixture_hosts(&[0]),
+    );
+    let reads = history_reads(&mut helm, cx);
+    let [(id, path)] = &reads[..] else {
+        panic!("one history read, not {reads:?}");
+    };
+    assert!(path.ends_with("launch-history?host=1"), "{path}");
+    helm.reply(*id, 200, Some(history(&[literal, raw])));
+    settle(cx);
+    focus_folder(cx);
+    assert_eq!(name_of(cx, "launcher-folder-0"), Some(tail_label(literal)));
+    assert_eq!(name_of(cx, "launcher-folder-1"), Some(tail_label(raw)));
+    keys(cx, "end x backspace");
+    assert!(draft(cx).folder.is_touched());
+    assert_eq!(name_of(cx, "launcher-folder-0"), Some(tail_label(raw)));
+    assert_eq!(
+        name_of(cx, "launcher-folder-1").as_deref(),
+        Some("Reset folder to home")
+    );
+}
+
 /// Typing filters the recents by what is typed (ignoring case), drops the highlight so Enter launches rather than
 /// taking a row, and reopens a list Escape closed; a click takes a row. Why: once the user types, the list is a search
 /// of their history (old `folder_suggestions`), and SPEC.md says "typing reopens it".

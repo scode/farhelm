@@ -578,7 +578,7 @@ pub(crate) struct Launcher {
     pub(super) flags: TextInputState,
     /// The model field's text: the chosen model while closed, what is typed while its list is open.
     pub(super) model_input: TextInputState,
-    /// The values whose spellings depend on what the launcher opened with (`shown_text`).
+    /// Restart with's stored command fields, used to keep their unsafe spellings read-only until Clear.
     opened: shown_text::Opened,
     /// The model field's list and what the user is doing in it.
     model_field: model_field::ModelField,
@@ -668,19 +668,6 @@ enum Input {
     Resume,
 }
 
-impl Input {
-    /// Whether the field shows its value through `shown_text`'s rules, which an edit can change.
-    fn shown_through_text_rules(self, draft: &LaunchDraft) -> bool {
-        match self {
-            Input::Wrapper | Input::Prompt | Input::Flags | Input::Command | Input::Resume => true,
-            Input::Folder | Input::Name => {
-                matches!(draft.mode, Mode::Clone) && draft.checkout.is_none()
-            }
-            Input::Conversation => false,
-        }
-    }
-}
-
 impl Launcher {
     fn new(
         draft: LaunchDraft,
@@ -694,8 +681,9 @@ impl Launcher {
             state
         };
         let opened = shown_text::Opened::of(&draft);
-        let folder = field(&shown_text::folder(&draft, &opened), window, cx);
-        let name = field(&shown_text::name(&draft, &opened), window, cx);
+        let present = |which: Input| which.present(&draft, &opened);
+        let folder = field(&present(Input::Folder).text, window, cx);
+        let name = field(&present(Input::Name).text, window, cx);
         let conversation = field(&draft.conversation, window, cx);
         // The mode never changes while the launcher is open, so neither does this placeholder.
         let required =
@@ -718,11 +706,11 @@ impl Launcher {
         let command = TextInputState::new(window, cx);
         let resume = TextInputState::new(window, cx);
         for (state, shown) in [
-            (&wrapper, shown_text::wrapper(&draft)),
-            (&prompt, shown_text::prompt(&draft)),
-            (&flags, shown_text::flags(&draft)),
-            (&command, shown_text::command(&draft, &opened)),
-            (&resume, shown_text::resume(&draft, &opened)),
+            (&wrapper, present(Input::Wrapper)),
+            (&prompt, present(Input::Prompt)),
+            (&flags, present(Input::Flags)),
+            (&command, present(Input::Command)),
+            (&resume, present(Input::Resume)),
         ] {
             state.set_text(shown.text, window, cx);
             state.set_read_only(shown.read_only, cx);
@@ -819,7 +807,7 @@ impl Launcher {
                         launcher.edited(which, input.text(cx).to_string(), cx);
                         // A typed or pasted invisible character can change how the field shows its value
                         // (`shown_text`), so it is put in step at once rather than at the next resync.
-                        if which.shown_through_text_rules(&launcher.draft) {
+                        if which.shown_through_text_rules(&launcher.draft, &launcher.opened) {
                             launcher.sync_fields(window, cx);
                         }
                     }
@@ -917,6 +905,7 @@ impl Launcher {
     /// The user changed field `which` to `text`: the draft's edit for it. Any edit takes the shown reason away until the
     /// next press, so the user is not told about a draft they already changed.
     fn edited(&mut self, which: Input, text: String, cx: &mut Context<Self>) {
+        let text = which.edited_text(text, &self.draft, &self.opened);
         match which {
             Input::Folder => self.draft.edit_folder(text),
             Input::Name => self.draft.edit_name(text),
@@ -1062,20 +1051,16 @@ impl Launcher {
 
     /// Put the text fields the draft can change on its own back in step with it (after Reset choices, or a template
     /// batch, which can set the name, the command and its resume command too). A field already showing the draft's
-    /// value is left alone, so its caret and selection stay where they were. The launch text fields show their values
-    /// through `shown_text`: spelled out while they hold an invisible character, read-only where the old field was. An
-    /// edit of one of them calls this too ([`Input::shown_through_text_rules`]), so text typed or pasted into a field
-    /// whose rule judges what it holds (the wrapper prefix, the prompt, Custom flags) is spelled out at once.
+    /// value is left alone, so its caret and selection stay where they were. Edits also resync fields whose spelling
+    /// can change, for example when a paste introduces an invisible character or completes its spelling.
     fn sync_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let present = |which: Input| which.present(&self.draft, &self.opened);
         for (state, shown) in [
-            (&self.wrapper, shown_text::wrapper(&self.draft)),
-            (&self.prompt, shown_text::prompt(&self.draft)),
-            (&self.flags, shown_text::flags(&self.draft)),
-            (
-                &self.command,
-                shown_text::command(&self.draft, &self.opened),
-            ),
-            (&self.resume, shown_text::resume(&self.draft, &self.opened)),
+            (&self.wrapper, present(Input::Wrapper)),
+            (&self.prompt, present(Input::Prompt)),
+            (&self.flags, present(Input::Flags)),
+            (&self.command, present(Input::Command)),
+            (&self.resume, present(Input::Resume)),
         ] {
             state.set_read_only(shown.read_only, cx);
             if state.text(cx).as_ref() != shown.text {
@@ -1084,10 +1069,10 @@ impl Launcher {
         }
         let pairs = [
             (&self.conversation, self.draft.conversation.clone()),
-            (&self.folder, shown_text::folder(&self.draft, &self.opened)),
+            (&self.folder, present(Input::Folder).text),
             // While a managed checkout is chosen the field shows the name the checkout gets, which ignores an untouched
             // copied title.
-            (&self.name, shown_text::name(&self.draft, &self.opened)),
+            (&self.name, present(Input::Name).text),
             (
                 &self.checkout.repository,
                 self.draft
@@ -1863,7 +1848,7 @@ impl Launcher {
                 .into_any_element(),
             );
             // The old line under a read-only prompt (`shown_text`), saying why it cannot be edited and what to do.
-            if shown_text::prompt(&self.draft).read_only {
+            if Input::Prompt.present(&self.draft, &self.opened).read_only {
                 fields.push(help_line(PROMPT_SPELLED_OUT, palette).into_any_element());
             }
             if !self.draft.prompt.is_empty() {
@@ -1905,7 +1890,7 @@ impl Launcher {
             )
             .into_any_element(),
         );
-        if shown_text::wrapper(&self.draft).read_only {
+        if Input::Wrapper.present(&self.draft, &self.opened).read_only {
             fields.push(shown_text::clear_button(
                 "launcher-clear-wrapper",
                 "Clear wrapper prefix",
@@ -2016,7 +2001,7 @@ impl Launcher {
             )
             .into_any_element(),
         ];
-        if shown_text::command(&self.draft, &self.opened).read_only {
+        if Input::Command.present(&self.draft, &self.opened).read_only {
             fields.push(shown_text::clear_button(
                 "launcher-clear-command",
                 "Clear agent command",
@@ -2176,7 +2161,7 @@ impl Launcher {
                     )
                     .into_any_element(),
                 );
-                if shown_text::resume(&self.draft, &self.opened).read_only {
+                if Input::Resume.present(&self.draft, &self.opened).read_only {
                     fields.push(shown_text::clear_button(
                         "launcher-clear-resume",
                         "Clear resume command",

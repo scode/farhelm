@@ -619,8 +619,8 @@ answer, SPEC_impl.md, "Questions: the prompt", pinned by
 
 Tests: 13. Covers: a structured GUI clone pre-fills without launching, then starts its ready successor.
 
-partly: a copied model, Custom flags and command text holding invisible characters spelled out, as the old prefill
-showed them, in
+partly: a copied model, Custom flags and command text holding invisible characters are spelled out. Edits to Custom
+flags or either command field preserve the invisible characters represented by their spellings, in
 `launcher::view_tests::{agent_launch_text_holding_invisible_characters_shows_escaped, copied_command_text_holding_invisible_characters_shows_escaped_and_editable}`
 (the first test's read-only prompt half is the old templates spec's "initial prompt launcher template stacking and save
 selection", in the templates area's file); the prefill, host fallback and its note, and refusals in
@@ -650,8 +650,8 @@ and `launcher::environment_tests::a_seeded_environment_has_the_segments_effects_
   supervisor's, in `crates/farhelm/tests/e2e/structured_launches.rs`.
 - "a failed catalog read shows a retry and leaves the clone launchable", its Retry:
   `launcher::view_tests::a_failed_catalog_read_says_so_and_retry_reads_it_again`.
-- Clone spells out invisible characters in the copied folder and session name. The unchanged fields send the raw bytes
-  from the source, and edits show what the user types:
+- Clone spells out invisible characters in the folder and session name, including its numbered checkout suggestion.
+  Editing beside a spelling preserves the underlying character in the launch request:
   `launcher::entry_tests::{clone_shows_its_copied_folder_and_name_escaped_and_editable, a_managed_clones_numbered_name_spells_out_its_source_title}`.
 
 ### `tests/destination-authority.spec.ts`
@@ -1441,11 +1441,7 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
   700-pixel narrow ones) or shorter than 560 (the alignment case's 1280 by 540). Only what such a leg checks at the
   minimum window and above is ported, as `other-dialogs.md` (Trash) and `templates-and-quick-launch.md` (Superseded)
   record for those dialogs' phone layouts.
-- In Restart with, a stored command line or resume command holding a hidden character is read-only and spelled out, with
-  its Clear, whenever the field holds the stored value, so typing it back exactly as stored makes it read-only again;
-  the old field stayed editable after its first edit (`list/create_form.rs` at `24bc0580`: `restart_command_readonly`
-  and `restart_resume_readonly` need no edit since opening, `!invocation_edited()` and `!command_resume_edited()`). The
-  GPUI rule compares the field with the value the launcher opened with, which in Restart with is the stored one
-  (`launcher/view/shown_text.rs`, `command` and `resume`).
-  `launcher::restart_with_tests::restart_with_shows_stored_command_values_escaped` checks that the spelling and the
-  Clear come back.
+- In Restart with, as in the old app, a stored command line or resume command holding a hidden character is read-only
+  and spelled out until Clear, and stays editable after it. Unlike the old field, which showed typed text raw, a hidden
+  character typed after Clear is spelled out, and a spelling typed by hand becomes that character. See
+  `launcher::restart_with_tests::restart_with_shows_stored_command_values_escaped`.

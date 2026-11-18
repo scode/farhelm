@@ -1625,8 +1625,8 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
 /// behind Clear initial prompt. Why: such text comes from a source session or a template, and shown raw it could hide
 /// or reverse what it says. Specified: a Codex draft with model `gpt<U+202E>x`, Custom flags `--a<U+200B>` and the
 /// prompt `do<U+202E>it` shows those spellings while the draft keeps the raw bytes; the flags field takes typing after
-/// the spelling, which the draft then holds as typed; the prompt says why it is read-only and refuses typing until
-/// Clear initial prompt empties it.
+/// the spelling, and the draft keeps the invisible character across that edit. The prompt says why it is read-only and
+/// refuses typing until Clear initial prompt empties it.
 #[gpui::test]
 fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestAppContext) {
     let mut start = LaunchDraft::new(Some(1), "~".into(), None);
@@ -1689,18 +1689,13 @@ fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestApp
     assert_eq!(flags(cx), "--a<U+200B>x", "the spelling is editable");
     assert_eq!(
         draft(cx).agent.permission_flags,
-        "--a<U+200B>x",
-        "and an edit takes the field as it reads"
+        "--a\u{200b}x",
+        "an edit keeps the original character in the draft"
     );
 }
 
-/// Outside Restart with's stored values, a command line and resume command holding invisible characters are shown in
-/// an editable escaped spelling, as the old launcher showed the ones Clone and Replace with copy, while an untouched
-/// value still holds its raw bytes; text the user types is shown as typed, since it reaches Bash as written and a
-/// spelling's `<` and `>` would be redirections there (SPEC.md, "Command launch"). Specified: a Command tab draft
-/// opening with command `run<U+200B> {farhelm_args}` and resume command `run<U+202E> {conversation}` shows both spelled
-/// out, with no Clear buttons; the draft keeps the raw text; typing at the command's end edits the spelling; a
-/// zero-width space typed after that is shown and kept as typed.
+/// Commands and resume commands use editable spellings. Keep the characters across edits because the spelling's
+/// angle brackets would otherwise reach Bash as redirection. A newly typed hidden character also appears spelled out.
 #[gpui::test]
 fn copied_command_text_holding_invisible_characters_shows_escaped_and_editable(
     cx: &mut TestAppContext,
@@ -1741,18 +1736,31 @@ fn copied_command_text_holding_invisible_characters_shows_escaped_and_editable(
         "the premise: the click focused the command field"
     );
     keys(cx, "end x");
-    assert_eq!(draft(cx).command.command, "run<U+200B> {farhelm_args}x");
+    assert_eq!(draft(cx).command.command, "run\u{200b} {farhelm_args}x");
+    keys(cx, "backspace");
+    assert_eq!(draft(cx).command.command, "run\u{200b} {farhelm_args}");
     cx.simulate_input("\u{200b}");
     settle(cx);
     assert_eq!(
         draft(cx).command.command,
-        "run<U+200B> {farhelm_args}x\u{200b}"
+        "run\u{200b} {farhelm_args}\u{200b}"
     );
     assert_eq!(
         text(cx).0,
-        "run<U+200B> {farhelm_args}x\u{200b}",
-        "typed text is shown as typed"
+        "run<U+200B> {farhelm_args}<U+200B>",
+        "a newly entered invisible character is spelled out too"
     );
+
+    test_support::click(cx, "launcher-resume-command-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .resume
+        .focus_handle(cx)
+        .is_focused(window)));
+    keys(cx, "end x");
+    assert_eq!(draft(cx).command.resume, "run\u{202e} {conversation}x");
+    keys(cx, "backspace");
+    assert_eq!(text(cx).1, "run<U+202E> {conversation}");
+    assert_eq!(draft(cx).command.resume, "run\u{202e} {conversation}");
 }
 
 /// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field only

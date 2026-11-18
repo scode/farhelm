@@ -463,9 +463,8 @@ fn e_stores_invisible_characters(helm: &mut FakeHelm, cx: &mut VisualTestContext
 
 /// Restart with shows a stored command line and resume command holding invisible characters escaped and read-only,
 /// each with its own Clear (the old launcher's Clear agent command and Clear resume command), so a stored command that
-/// came from elsewhere cannot hide what it runs. Specified: both fields show their `<U+…>` spellings and refuse typing
-/// until their Clear empties them; the stored command typed back in is the stored command again, so it is shown
-/// spelled out and read-only with its Clear (typed text is shown as typed until then, `view::shown_text`).
+/// came from elsewhere cannot hide what it runs. Both fields show their `<U+…>` spellings and refuse typing until Clear.
+/// Typing the same command after Clear keeps its spelling editable and preserves its original bytes on later edits.
 #[gpui::test]
 fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -486,7 +485,11 @@ fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
         |launcher| &launcher.resume,
     );
     test_support::click(cx, "launcher-command-row");
-    test_support::keys(cx, "backspace");
+    assert!(super::view_tests::read(cx, |launcher, window, cx| launcher
+        .command
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "end backspace");
     cx.simulate_input(RAW_COMMAND);
     settle(cx);
     assert_eq!(
@@ -498,10 +501,14 @@ fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
         "make<U+200B>  watch {farhelm_args}  ",
         "typed back in, the stored command is spelled out again"
     );
-    assert!(
-        cx.debug_bounds("launcher-clear-command").is_some(),
-        "with its Clear"
+    assert!(cx.debug_bounds("launcher-clear-command").is_none());
+    test_support::keys(cx, "end x");
+    assert_eq!(
+        super::view_tests::draft(cx).command.command,
+        format!("{RAW_COMMAND}x")
     );
+    test_support::keys(cx, "backspace");
+    assert_eq!(super::view_tests::draft(cx).command.command, RAW_COMMAND);
 }
 
 /// What is shown escaped is still sent as stored (restart-with.spec's "restart with preserves raw command bytes for a
