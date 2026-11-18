@@ -1785,7 +1785,7 @@ fn open_recording_terminal(
 
 /// Send an auto-repeat of `key`, held down since its last press: a key-down with `is_held` set, spelled as a press
 /// of the key is ([`keys`] adds the text a key types), and check.
-fn held(cx: &mut VisualTestContext, key: &'static str) {
+pub(crate) fn held(cx: &mut VisualTestContext, key: &'static str) {
     let keystroke = match Keystroke::parse(key) {
         Ok(keystroke) => keystroke.with_simulated_ime(),
         Err(error) => panic!("{key} is not a keystroke: {error}"),

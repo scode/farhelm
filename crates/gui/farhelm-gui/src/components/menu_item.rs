@@ -5,10 +5,12 @@
 //! stylesheet's `.session-row-menu-item`, `.menu-item`, `.menu-icon`, `.menu-copy`, `.menu-description` and
 //! `.menu-danger` rules at the reference commit. Here's the TLDR of how it behaves:
 //!
-//! - **One highlight, which is focus.** Inside a menu only focus paints the accent fill, and the pointer moves focus
-//!   onto the item it enters ([`focus::highlight`]), so the pointer and the arrow keys share one highlight (SPEC.md,
-//!   "Things changing underneath": "A menu has one highlight"). There is no separate hover fill: a resting pointer would
-//!   otherwise leave a second fill behind after an arrow-key move, which the old sheet suppressed for the same reason.
+//! - **The highlight tracks focus.** Inside a menu, focus paints the accent fill, and the pointer moves focus onto the
+//!   item it moves over ([`focus::highlight`]), so the pointer and the arrow keys share one highlight (SPEC.md,
+//!   "Things changing underneath": "A menu has one highlight"). There is no separate hover fill: a resting pointer
+//!   would otherwise leave a second fill behind after an arrow-key move, which the old sheet suppressed for the same
+//!   reason. The one exception is an expanded submenu trigger, which keeps the accent fill while its submenu is open
+//!   so the user sees which item the submenu belongs to. Only actual focus draws the keyboard ring or receives a key.
 //! - **A danger item stays a command.** Its label and icon rest in `--danger`, and once highlighted it takes the same
 //!   accent fill and inverse text as every other item: the wording, the icon and its group say it is destructive.
 //! - **Disabled is still focusable.** The old menus marked a busy item `aria-disabled` rather than disabling it,
@@ -49,6 +51,7 @@ use super::{Handler, HoverHelp};
 use crate::assets::Icon;
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
+use crate::layers;
 use crate::theme::{self, metrics};
 
 /// `.menu-item`'s padding, vertical then horizontal.
@@ -77,14 +80,21 @@ pub struct MenuItem {
     /// Whether this command is one of a set of choices in force ([`MenuItem::checked`]), and then whether it is the
     /// one in force.
     checked: Option<bool>,
-    /// A submenu trigger has the usual menu activation plus Right.
-    submenu_expanded: Option<bool>,
+    submenu: Option<SubmenuTrigger>,
     help: HoverHelp,
     role: Role,
     danger: bool,
     disabled: bool,
     focus: Option<FocusHandle>,
     on_click: Option<Handler>,
+}
+
+/// Pointer entry shows the child menu. Keyboard activation also enters it.
+#[derive(Clone)]
+struct SubmenuTrigger {
+    expanded: bool,
+    enter: Handler,
+    hover: Handler,
 }
 
 impl MenuItem {
@@ -107,7 +117,7 @@ impl MenuItem {
             suffix: None,
             chosen: None,
             checked: None,
-            submenu_expanded: None,
+            submenu: None,
             help,
             role,
             danger: false,
@@ -202,10 +212,18 @@ impl MenuItem {
         self
     }
 
-    /// Show the disclosure chevron and expose whether the child menu is open.
-    /// The same callback handles pointer and keyboard activation.
-    pub(super) fn submenu_trigger(mut self, expanded: bool) -> Self {
-        self.submenu_expanded = Some(expanded);
+    /// Use independent entry points for hover and keys. The click handler still follows the usual press rules.
+    pub(super) fn submenu_trigger(
+        mut self,
+        expanded: bool,
+        enter: Handler,
+        hover: Handler,
+    ) -> Self {
+        self.submenu = Some(SubmenuTrigger {
+            expanded,
+            enter,
+            hover,
+        });
         self
     }
 }
@@ -221,10 +239,10 @@ impl RenderOnce for MenuItem {
             )
         });
         let enabled = !self.disabled;
-        // `.menu-item:focus:not([aria-disabled="true"])`: the highlight. The keyboard ring goes on top of it only after
-        // keyboard input, as `:focus-visible` did.
-        let lit = enabled && focus.is_focused(window);
-        let ring = lit && focus::shows_ring(&focus, window, cx);
+        let expanded = self.submenu.as_ref().map(|trigger| trigger.expanded);
+        let focused = enabled && focus.is_focused(window);
+        let lit = focused || (enabled && expanded == Some(true));
+        let ring = focused && focus::shows_ring(&focus, window, cx);
         let (ink, icon_ink, description_ink) = if lit {
             (palette.on_fill, palette.on_fill, palette.on_accent_dim)
         } else if self.danger {
@@ -233,8 +251,24 @@ impl RenderOnce for MenuItem {
             (palette.fg_0, palette.fg_1, palette.fg_1)
         };
         let handler = self.on_click.clone().filter(|_| enabled);
-        let key_handler = handler.clone();
-        let submenu_handler = handler.clone().filter(|_| self.submenu_expanded.is_some());
+        let submenu = self.submenu.filter(|_| enabled);
+        let submenu_handler = submenu.as_ref().map(|trigger| trigger.enter.clone());
+        let hover_handler = submenu.map(|trigger| trigger.hover);
+        let key_handler = submenu_handler.clone().or_else(|| {
+            let command = handler.clone()?;
+            let activate: Handler = Rc::new(move |event, window, cx| {
+                if focus::menu_highlight_shown(window, cx) {
+                    command(event, window, cx);
+                }
+            });
+            Some(activate)
+        });
+        // The trigger moves focus on activation. A press on an open one must leave focus in the child.
+        let on_press = if enabled && expanded.is_some() {
+            focus::OnPress::KeepControl
+        } else {
+            focus::OnPress::Control
+        };
         let highlight = focus.clone();
 
         // A choice keeps its label (and any suffix) to one line, cut with an ellipsis: the list is as wide as its
@@ -305,7 +339,7 @@ impl RenderOnce for MenuItem {
                 )
             })
             .child(copy)
-            .when_some(self.submenu_expanded, |item, expanded| {
+            .when_some(expanded, |item, expanded| {
                 item.aria_expanded(expanded).child(div().flex_1()).child(
                     svg()
                         .path(Icon::ChevronDown.path())
@@ -352,15 +386,11 @@ impl RenderOnce for MenuItem {
         let item =
             super::with_hover_help(item, &self.id, &self.help, false, Some(&focus), window, cx);
         let item = super::activate_on_click(
-            super::activate_on_enter_or_space(
-                focus::track(item, &focus, focus::OnPress::Control),
-                key_handler,
-            ),
+            super::activate_on_enter_or_space(focus::track(item, &focus, on_press), key_handler),
             handler,
         );
-        // The pointer entering an item moves the menu's one highlight there; leaving it moves nothing, so the highlight
-        // stays where the pointer left it until the keys or the pointer move it on. On a wrapper, because GPUI takes
-        // one hover listener per element and the item's own is its tooltip's.
+        // Act on a pointer move. GPUI can also report hover on a redraw after a mouse-down switches input modality.
+        // That would reopen a submenu dismissed by Escape before the click meant to enter it reaches mouse-up.
         div()
             .id(ElementId::Name(format!("{}-highlight", self.id).into()))
             .on_key_down(move |event, window, cx| {
@@ -373,9 +403,15 @@ impl RenderOnce for MenuItem {
                     open(&ClickEvent::default(), window, cx);
                 }
             })
-            .on_hover(move |hovered, window, cx| {
-                if *hovered {
+            .on_mouse_move(move |event, window, cx| {
+                if event.pressed_button.is_none()
+                    && !cx.has_active_drag()
+                    && layers::prepare_menu_hover(&highlight, window, cx)
+                {
                     focus::highlight(&highlight, window, cx);
+                    if let Some(open) = &hover_handler {
+                        open(&ClickEvent::default(), window, cx);
+                    }
                 }
             })
             .child(item)

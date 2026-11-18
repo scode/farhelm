@@ -272,7 +272,7 @@ impl Closing {
 /// window is measured from the press, so an old press swallows only a key still held from it, which was meant for the
 /// layer that went. A press is recorded before anything acts on it ([`note_press`]), so a layer the key capture's
 /// handler closes, inside the interceptor, is taken as closed by it, not by the press before.
-fn note_closing(held_only: bool, window: &Window, cx: &mut App) {
+pub(crate) fn note_closing(held_only: bool, window: &Window, cx: &mut App) {
     let fresh_presses = !held_only && !layers::focus_layer_open(window, cx);
     if let Some(moved) = installed_mut::<MovedOn>(cx)
         && let Some((keystroke, at)) = moved.last_press.clone()
@@ -414,15 +414,21 @@ pub struct WindowFocus {
     /// Whether the user's latest press in this window was a key rather than a mouse button, which is what
     /// [`last_input_was_keyboard`] answers. Starts false, as GPUI's own flag does.
     keyboard: bool,
-    /// The menu item the pointer last moved focus onto ([`highlight`]), until any other move through [`apply`]: while
-    /// focus is still there, its landing was the pointer's ([`focus_came_by_keyboard`]).
-    pointer_landing: Option<WeakFocusHandle>,
+    /// The menu item the pointer last moved focus onto, until any other move through [`apply`].
+    pointer_landing: Option<PointerLanding>,
     /// The move [`focus_in_layer`] is waiting to make once a frame draws its target ([`Pending`]). One per window: a
     /// newer move replaces it, [`apply`] drops it with every focus move but recovery, and [`return_to`] when a layer
     /// that took focus closes and focus is returned. A dialog closed before its first frame (a reset before the next
     /// draw) returns no focus and keeps it, harmlessly: its target belonged to that dialog and is never drawn
     /// elsewhere, so a later judgement refuses it or it never fires.
     pending: Option<Pending>,
+}
+
+/// The pointer's focus move can reach GPUI's key dispatch before the drawn highlight reaches the window.
+#[derive(Clone)]
+struct PointerLanding {
+    control: WeakFocusHandle,
+    shown: Rc<Cell<bool>>,
 }
 
 /// A [`focus_in_layer`] move to a control not drawn yet, kept until the frame that draws it or until something drops
@@ -858,6 +864,9 @@ pub enum OnPress {
     /// only, a plain Tab skips it. A pop-up control (a select or combo box) must therefore not use this kind, or it
     /// drops out of Tab's order there.
     Control,
+    /// A button whose activation decides whether to move focus. Pressing an expanded submenu trigger keeps focus
+    /// wherever it was, including in the child. The trigger still follows the platform's button Tab order.
+    KeepControl,
     /// An element that takes focus whenever it is pressed, with any mouse button and on every platform: a terminal,
     /// which a click types into, a pop-up control, or a dialog whose empty space takes focus (the dialogs SPEC.md does
     /// not list as keeping it on the control in use). Any mouse button as the old terminal focused itself on every
@@ -907,7 +916,7 @@ pub fn track<E: InteractiveElement + ParentElement>(
             OnPress::Control if event.button == MouseButton::Left => {
                 pressed(&pressed_handle, window, cx)
             }
-            OnPress::Control | OnPress::Keep => {}
+            OnPress::Control | OnPress::KeepControl | OnPress::Keep => {}
             OnPress::Focus => {
                 let before = at_press.take();
                 if !press_was_taken(&pressed_handle, before.as_ref(), event, window, cx) {
@@ -917,7 +926,7 @@ pub fn track<E: InteractiveElement + ParentElement>(
         }
     });
     let kind = match on_press {
-        OnPress::Control => ControlKind::Button,
+        OnPress::Control | OnPress::KeepControl => ControlKind::Button,
         OnPress::Focus | OnPress::Keep => ControlKind::Field,
     };
     record_as(element, handle, kind)
@@ -1341,6 +1350,7 @@ fn apply(target: Move, window: &mut Window, cx: &mut App) {
 /// ([`reveal_focused`]). Moves made by a pointer press or by hover use [`apply`] alone.
 fn apply_and_reveal(target: Move, window: &mut Window, cx: &mut App) {
     apply(target, window, cx);
+    layers::close_unentered_submenu(window, cx);
     reveal_focused(window, cx);
 }
 
@@ -1356,7 +1366,18 @@ fn apply_and_reveal(target: Move, window: &mut Window, cx: &mut App) {
 ///
 /// Wherever focus ends up is then scrolled into view; the stops passed over on the way are not.
 fn step(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
+    let focus_state = state(window, cx);
+    let pointer_landing = focus_state
+        .as_ref()
+        .and_then(|state| state.read(cx).pointer_landing.clone());
     walk(forward, every, window, cx);
+    // The walk tries stops it may reject. A Tab that stays on the same item still needs its pointer highlight shown.
+    if let (Some(state), Some(landing)) = (focus_state, pointer_landing)
+        && landing.control.upgrade() == window.focused(cx)
+    {
+        state.update(cx, |state, _| state.pointer_landing = Some(landing));
+    }
+    layers::close_unentered_submenu(window, cx);
     reveal_focused(window, cx);
 }
 
@@ -1571,8 +1592,8 @@ fn press_was_taken(
 
 /// The pointer moved onto `item`, a control in a menu: it takes the menu's highlight, which is keyboard focus, so Up,
 /// Down and Enter go on from where the pointer is. SPEC.md: "A menu has one highlight. Whichever moved last, the
-/// pointer or the keys, sets it". A menu item calls this when the pointer enters it, on every platform (the click rule
-/// in [`track`] is about presses, not this).
+/// pointer or the keys, sets it". A menu item calls this when the pointer moves over it, on every platform (the click
+/// rule in [`track`] is about presses, not this).
 ///
 /// Only inside the topmost layer: a pointer crossing a menu that is covered, or the page behind an open menu, never
 /// takes focus out of the layer on top. Pointer movement is not a press, so it does not count as the user moving on,
@@ -1585,11 +1606,30 @@ pub fn highlight(item: &FocusHandle, window: &mut Window, cx: &mut App) {
     if top.contains(item, window) && !item.is_focused(window) {
         apply(Move::To(item), window, cx);
         if let Some(state) = state(window, cx) {
+            let shown = Rc::new(Cell::new(false));
             state.update(cx, |state, _| {
-                state.pointer_landing = Some(item.downgrade())
+                state.pointer_landing = Some(PointerLanding {
+                    control: item.downgrade(),
+                    shown: shown.clone(),
+                });
             });
+            crate::prompt::when_shown(window, move |_| shown.set(true));
         }
     }
+}
+
+/// A keyboard activation can use the pointer's latest menu highlight once a frame has shown it.
+/// Keyboard navigation clears that pointer landing and keeps its ordinary sequence of keys.
+pub(crate) fn menu_highlight_shown(window: &Window, cx: &App) -> bool {
+    state(window, cx).is_none_or(|state| {
+        state
+            .read(cx)
+            .pointer_landing
+            .as_ref()
+            .is_none_or(|landing| {
+                landing.shown.get() || landing.control.upgrade() != window.focused(cx)
+            })
+    })
 }
 
 /// Focus `handle` because a layer just opened and it is where that layer starts (the layer manager calls this).
@@ -1789,7 +1829,7 @@ pub fn focus_came_by_keyboard(window: &Window, cx: &App) -> bool {
     let by_pointer = state
         .pointer_landing
         .as_ref()
-        .and_then(WeakFocusHandle::upgrade);
+        .and_then(|landing| landing.control.upgrade());
     state.keyboard && by_pointer != window.focused(cx)
 }
 

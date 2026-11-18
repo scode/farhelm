@@ -9,6 +9,8 @@
 //! `session-menu-delete`, the Rename editor is `rename`, and the question's answers are `prompt-confirm` and
 //! `prompt-cancel`.
 
+use std::rc::Rc;
+
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
@@ -323,6 +325,83 @@ fn the_row_menu_mutes_and_the_bell_unmutes_its_session(cx: &mut TestAppContext) 
         sent(&mut fake),
         [("/api/sessions/b/mute".into(), json!({"action": "unmute"}))]
     );
+}
+
+/// Hovering previews Mute and Move to group without activating either. The paint is checked independently of focus
+/// because the expanded parent should keep its fill after the pointer or keyboard enters its child. An arrow key that
+/// moves off a previewed parent closes the submenu nobody entered.
+#[gpui::test]
+fn hovering_switches_submenus_and_preserves_the_expanded_parent_highlight(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    assert!(deletes(&mut fake).is_empty());
+    test_support::settle(cx);
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert!(!drawn(cx, "submenu"));
+    let hover = |cx: &mut VisualTestContext, id| {
+        let point = test_support::center(cx, id);
+        cx.simulate_mouse_move(point, None, Modifiers::none());
+        test_support::settle(cx);
+    };
+
+    hover(cx, "session-menu-mute");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute"));
+    assert_eq!(lit(cx, "session-menu"), ["session-menu-mute"]);
+    assert!(lit(cx, "submenu").is_empty());
+    assert!(drawn(cx, "session-menu-mute-hour"));
+    cx.update(|_, cx| {
+        crate::focus::follow_tab_reach(Rc::new(|| crate::focus::TabReach::TextFieldsAndPopups), cx);
+    });
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute"));
+    assert!(drawn(cx, "session-menu-mute-hour"));
+    test_support::keys(cx, "enter");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute-hour"));
+    assert_eq!(lit(cx, "session-menu"), ["session-menu-mute"]);
+    assert_eq!(lit(cx, "submenu"), ["session-menu-mute-hour"]);
+
+    test_support::keys(cx, "left");
+    hover(cx, "session-menu-mute");
+    hover(cx, "session-menu-mute-morning");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute-morning"));
+    assert_eq!(lit(cx, "submenu"), ["session-menu-mute-morning"]);
+    assert_eq!(lit(cx, "session-menu"), ["session-menu-mute"]);
+    // The test window has drawn the highlight but has not presented a frame. Enter during that gap
+    // must not send the command the pointer just moved onto.
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute-morning"));
+    test_support::keys(cx, "enter");
+    assert!(sent(&mut fake).is_empty());
+    assert!(drawn(cx, "session-menu-mute-morning"));
+
+    hover(cx, "session-menu-group");
+    assert!(!drawn(cx, "session-menu-mute-hour"));
+    assert!(drawn(cx, "session-menu-group-new"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-group"));
+    assert_eq!(lit(cx, "session-menu"), ["session-menu-group"]);
+    assert!(lit(cx, "submenu").is_empty());
+    hover(cx, "session-menu-group-new");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-group-new"));
+    assert_eq!(lit(cx, "submenu"), ["session-menu-group-new"]);
+    hover(cx, "session-menu-rename");
+    assert!(!drawn(cx, "submenu"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    assert_eq!(lit(cx, "session-menu"), ["session-menu-rename"]);
+
+    // An arrow key off a parent whose submenu hover opened, and nobody entered, closes that submenu: otherwise its
+    // choices would stay beside the next item, and Right there would open a second submenu.
+    hover(cx, "session-menu-mute");
+    assert!(
+        drawn(cx, "session-menu-mute-hour"),
+        "the premise: hover opened Mute's submenu"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute"));
+    test_support::keys(cx, "down");
+    assert!(!drawn(cx, "submenu"));
+    let next = focused_id(cx).expect("focus stays in the menu");
+    assert_ne!(next, "session-menu-mute");
+    assert_eq!(lit(cx, "session-menu"), [next.as_str()]);
+    assert!(sent(&mut fake).is_empty());
 }
 
 /// SPEC.md: a menu goes away "when the thing it is about is gone (a deleted session's open menu, say)", and focus
@@ -796,6 +875,7 @@ fn the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it(cx: &mut Test
     test_support::settle(cx);
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-clone"));
 
+    test_support::show_next_frame(cx);
     test_support::keys(cx, "enter");
     assert!(!drawn(cx, "session-menu"), "the menu closed");
     assert!(!drawn(cx, "rename"), "Rename did not run");

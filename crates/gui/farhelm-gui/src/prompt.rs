@@ -1137,15 +1137,12 @@ impl<T: Clone + 'static> Render for Prompt<T> {
 
 /// Run `shown` at the next frame GPUI shows: by then the frame drawn now is on screen, or, when it was drawn early to
 /// handle a key, it goes up right after the callback, with no input dispatched in between. A pending callback asks for
-/// that frame. The prompt's one use of
-/// a next-frame callback, for [`Prompt`]'s old-answer guard (its `render`): it asks for the next frame only while a
-/// reword's words have not been shown, once per frame that draws them, and never schedules anything over time.
+/// that frame. Used by the prompt's old-answer guard and by menu keyboard activation after pointer focus moves.
 #[allow(
     clippy::disallowed_methods,
-    reason = "one frame per reword, only to learn when its new words are shown; it schedules nothing over time, so \
-              the ticker's rule (SPEC_impl.md, \"Animation time: the ticker\") is not bypassed"
+    reason = "a one-shot visibility check for user input, with no redraws scheduled over time"
 )]
-fn when_shown(window: &Window, shown: impl FnOnce(&mut App) + 'static) {
+pub(crate) fn when_shown(window: &Window, shown: impl FnOnce(&mut App) + 'static) {
     window.on_next_frame(move |_, cx| shown(cx));
 }
 
