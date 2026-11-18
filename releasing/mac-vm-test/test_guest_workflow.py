@@ -24,14 +24,14 @@ discovery its own checkpoint, so duplicating that action can invalidate the
 independent updater check. These assertions cover instructions, not live UI.
 """
 
-    def envelope(self, pass_id, check_id, update_path):
+    def envelope(self, pass_id, check_id, update_path, managed=False):
         """Supply fictional run context to the production task builder without a VM."""
         run = types.SimpleNamespace(
             selected=lambda name: {'required': {check_id: {'gui': True}}},
             data={'run_id': 'fixture-run'},
             profile=types.SimpleNamespace(values={'guest_tester': {'settings': task()['settings']}}))
         return task_for(run, pass_id, check_id,
-                        {'pass_directory': '/fixture/pass', 'update_path': update_path})
+                        {'pass_directory': '/fixture/pass', 'update_path': update_path, 'managed_operations': managed})
 
     def test_bonus_discovery_precedes_restart_for_native_update_paths(self):
         """Disabled auto updates cannot create a Restart offer until the tester checks and installs."""
@@ -55,6 +55,18 @@ independent updater check. These assertions cover instructions, not live UI.
                 self.assertNotIn("Click the old app's actual Check for updates", text)
         discovery = self.envelope('p0-updater-upgrade', 'update-discovery', 'ordinary')['instructions']
         self.assertIn("Click the old app's actual Check for updates", discovery)
+
+    def test_session_launches_use_the_same_model_as_the_guest_tester(self):
+        """A model change must carry through the CLI envelope and both releases' native launch instructions."""
+        for check_id in ('old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent',
+                         'codex-conversation', 'seed-state'):
+            for managed in (False, True):
+                with self.subTest(check=check_id, managed=managed):
+                    envelope = self.envelope('p0-updater-upgrade', check_id, 'manual', managed=managed)
+                    model = envelope['settings']['model']
+                    self.assertIn('exact model ' + model, envelope['instructions'])
+                    self.assertIn('custom model ID', envelope['instructions'])
+                    self.assertNotIn('gpt-6.1-sol', envelope['instructions'])
 
 
 class OldSessionInstructionsTests(unittest.TestCase):
@@ -222,13 +234,18 @@ class SetupTests(unittest.TestCase):
             self.write('fixture.json', value)
             with self.subTest(capability=key), self.assertRaises(Refused):
                 require_setup(self.profile)
-        self.write('fixture.json', dict(self.receipt, settings=dict(self.config['settings'], model='other')))
+        self.write('fixture.json', dict(self.receipt, settings=dict(self.config['settings'], desktop_app='/Other.app')))
         with self.assertRaises(Refused):
             require_setup(self.profile)
         self.write('fixture.json', self.receipt)
         self.profile.values['mac_base'] = dict(self.profile.values['mac_base'], name='replacement')
         with self.assertRaises(Refused):
             require_setup(self.profile)
+
+    def test_configured_model_and_effort_can_change_without_replacing_the_native_receipt(self):
+        """Model changes get live preflight on the same attested native runtime."""
+        self.config['settings'] = dict(self.config['settings'], model='another-model', effort='medium')
+        self.assertEqual(require_setup(self.profile)['settings'], self.config['settings'])
 
     def test_feedback_consent_is_separate_from_credential_destinations(self):
         """Credential injection cannot authorize an external feedback issue.

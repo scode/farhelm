@@ -198,7 +198,7 @@ report should identify the unresolved prerequisite or risk and the repairs attem
       "codex": "/opt/homebrew/bin/codex",
       "python": "/opt/homebrew/bin/python3",
       "desktop_app": "/Applications/Codex.app",
-      "model": "gpt-6.1-sol",
+      "model": "gpt-6.2-sol",
       "effort": "high"
     },
     "auth_source": "~/.codex/auth.json",
@@ -212,6 +212,11 @@ Relative paths belong to the profile's directory, not the checkout. `~/` means t
 are unsupported. Read `operator_policy` and the journal before acting. They define local authorization, logging and
 failure retention. The profile holds bindings and references, never credential material. Its exact normalized bindings
 are copied into private run state; changing the profile cannot redirect an existing run's cleanup.
+
+Use `gpt-6.2-sol` as the Codex baseline. Check the installed private profile before starting a run and update an old
+model pin during setup. The same model drives the guest tester and the Codex sessions it launches through Farhelm. Older
+apps may need the launcher’s custom model field. The fixture receipt binds the prepared bases and local runtime paths.
+Each new run exercises its configured model and effort during native preflight.
 
 VM storage (`tart_home/vms`) and evidence must share a filesystem for the single-volume disk budget. The profile loader
 and the next-pair preparation both check that invariant, including mounted or symlinked storage. Budget observations

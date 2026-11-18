@@ -149,11 +149,12 @@ only RECIPE's fixed message through the disposable candidate app to `farhelm.io`
 contact. Obtain it during setup when that scope is wanted. P0-only validation needs no feedback approval and sends none.
 
 The fixture record uses `format: 1`, `bases` containing the exact `mac` and `linux` name/MAC bindings, and `settings`
-matching the profile's guest runtime/model configuration. Its `checks` object must attest all six obligations:
-`native-screenshot-click-type`, `native-after-reopen`, `clone-permission-carryover`, `auth-not-in-bases`,
-`farhelm-clean` and `linux-codex-ready`. Retain actual validation evidence privately and reference it in the record.
-These are operator attestations; never fill them from a successful install command alone. A new base identity or changed
-runtime requires new validation. Each actual test also probes its own clone before installing Farhelm.
+with the profile's Codex, Python and desktop-app paths. Each run exercises its configured model and effort in native
+preflight. The fixture record's `checks` object must attest all six obligations: `native-screenshot-click-type`,
+`native-after-reopen`, `clone-permission-carryover`, `auth-not-in-bases`, `farhelm-clean` and `linux-codex-ready`.
+Retain actual validation evidence privately and reference it in the record. These are operator attestations; never fill
+them from a successful install command alone. A new base identity or changed runtime requires new validation. Each
+actual test also probes its own clone before installing Farhelm.
 
 Save credential-free builders as new stopped bases, preserving old bases and the old profile for historical cleanup.
 Verify no Farhelm installation/state or Codex authentication remains. Update the conventional profile only after clean
