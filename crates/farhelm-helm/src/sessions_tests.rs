@@ -1947,7 +1947,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 /// REST reply carries no evidence either way (SPEC.md's "delete" leaves
 /// nothing behind to inspect through the API once the session is gone).
 #[farhelm_testtrace::test]
-async fn delete_session_drops_the_seen_and_notification_mark_rows() {
+async fn delete_session_drops_viewer_state() {
     use farhelm_proto::ControlMsg;
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use tower::ServiceExt;
@@ -1980,6 +1980,17 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
 
     let harness = rest_harness::spliced_helm(client_side).await;
     let viewer_host = rest_harness::local_id(&harness.store).await;
+    let key = store::SessionKey::new(viewer_host, "sess-1");
+    let info = rest_harness::session("sess-1", 1_700_000_000);
+    assert_eq!(
+        harness
+            .store
+            .mute_session(&key, None, Some((&info).into()))
+            .await
+            .unwrap(),
+        Some(true),
+        "fixture premise: source mute exists"
+    );
     harness
         .store
         .mark_seen(
@@ -2037,6 +2048,14 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     assert!(
         harness
             .store
+            .session_mutes(&[key])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        harness
+            .store
             .seen_activity(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
@@ -2063,6 +2082,48 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
         "deleted source pin must be cleared"
     );
     peer.await.unwrap();
+}
+
+/// Mute is helm-owned viewer state. The next listing and detail read
+/// expose an indefinite mute, and Unmute records the observed activity
+/// before either surface can show the session as eligible to become unseen.
+#[farhelm_testtrace::test]
+async fn mute_route_shares_state_and_unmute_marks_seen() {
+    let mut session = rest_harness::session("quiet", 1_700_000_000);
+    session.last_activity_at = 1_700_000_090;
+    let harness = rest_harness::helm_listing(vec![session]).await;
+    let detail_uri = harness.local_session_uri("/api/sessions/quiet");
+    let mute_uri = format!("{detail_uri}/mute");
+    let (_, before) = get_json(&harness, "/api/sessions").await;
+    assert!(before["sessions"][0]["mute"].is_null());
+    assert!(before["sessions"][0]["seen_activity_at"].is_null());
+
+    let (status, _) = put_json(
+        &harness,
+        &mute_uri,
+        serde_json::json!({ "action": "mute", "until": null }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, listing) = get_json(&harness, "/api/sessions?sort=activity").await;
+    let (status, detail) = get_json(&harness, &detail_uri).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        listing["sessions"][0]["mute"],
+        serde_json::json!({ "until": null })
+    );
+    assert_eq!(detail["mute"], listing["sessions"][0]["mute"]);
+
+    let (status, _) = put_json(
+        &harness,
+        &mute_uri,
+        serde_json::json!({ "action": "unmute" }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(listing["sessions"][0]["mute"], serde_json::Value::Null);
+    assert_eq!(listing["sessions"][0]["seen_activity_at"], 1_700_000_090);
 }
 
 /// `PUT /api/sessions/{id}/seen` end to end: a mark, a listing read, a

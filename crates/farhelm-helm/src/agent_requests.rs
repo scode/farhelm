@@ -4724,6 +4724,8 @@ fn agent_row_of_mutation(
         // Like seen state, pins are omitted by the agent-facing projection.
         pinned: false,
         pin_position: None,
+        mute: None,
+        activity_order_hold: None,
         // Likewise never read: notifications are a human-viewer surface.
         notifications_read_through: 0,
         stale,
@@ -5477,6 +5479,8 @@ mod tests {
             seen_activity_at: None,
             pinned: false,
             pin_position: None,
+            mute: None,
+            activity_order_hold: None,
             notifications_read_through: 0,
             stale: false,
         }

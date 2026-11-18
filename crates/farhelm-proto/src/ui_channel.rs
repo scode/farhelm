@@ -551,6 +551,13 @@ pub struct SessionRow {
     /// while Replace keeps both source and replacement; clients break ties
     /// by host number, then bare session ID. The served sort ignores it.
     pub pin_position: Option<i64>,
+    /// Helm-owned active mute. Older helms omit the field and read as unmuted.
+    #[serde(default)]
+    pub mute: Option<crate::SessionMute>,
+    /// Helm-side activity key while the row is held in the second group.
+    /// Clients use the served order and have no use for the frozen key.
+    #[serde(skip)]
+    pub activity_order_hold: Option<i64>,
     /// How far through this session's notifications every client of this
     /// helm has read (`store::HelmStore::notification_marks`): a
     /// notification whose sequence number is above it is unread, which

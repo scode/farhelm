@@ -97,6 +97,11 @@ fn session_list_body() -> SessionListBody {
             seen_activity_at: Some(1_700_000_090),
             pinned: true,
             pin_position: Some(7),
+            mute: Some(farhelm_proto::SessionMute {
+                until: Some(1_700_003_600_000),
+            }),
+            // Helm-only and never serialized, so the contract has nothing to show for it.
+            activity_order_hold: None,
             notifications_read_through: 3,
         }],
         total: 5,

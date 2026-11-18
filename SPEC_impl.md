@@ -5222,17 +5222,17 @@ installation it is on, so it follows an open session the sidebar's filter hides
   every client written before there was a choice keeps its behavior; an unrecognized word is a 400, like an unknown
   status). `created` is `created_at` DESCENDING, then session id ascending, then HOST ID ascending — the first two are
   the order supervisors have always listed in and the third is what keeps the merged order total across hosts.
-  `activity` leads with an active-first grouping — rows from connected hosts reported Running or Waiting sort above
-  every other row — then the session's effective work-start key descending, and `title` with its collated title
-  ascending; all three then fall into that same creation-order tail, so every order is total and a stable sort of the
-  same rows always yields the same sequence. The effective work-start key is `last_work_started_at` when positive and
-  `created_at * 1000` otherwise, so an older sender or a session with no observed burst keeps a stable creation position
-  rather than moving with ordinary activity or piling up at the epoch. The title collation is Rust's `str::to_lowercase`
-  compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a string, as `İ` does),
-  which is neither SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The result is
-  case-insensitive and otherwise ordinal, deliberately not locale-aware (that is an ICU dependency and a per-user
-  setting this product does not have). The sort happens in Rust, in memory, over the whole merged fleet, on every
-  request; nothing about the order is stored, indexed, or cut.
+  `activity` starts with connected Waiting rows and connected Running rows free to move under the mute rules below, then
+  the session's effective or frozen work-start key descending. `title` starts with its collated title ascending; all
+  three then fall into that same creation-order tail, so every order is total and a stable sort of the same rows always
+  yields the same sequence. The effective work-start key is `last_work_started_at` when positive and `created_at * 1000`
+  otherwise, so an older sender or a session with no observed burst keeps a stable creation position rather than moving
+  with ordinary activity or piling up at the epoch. The title collation is Rust's `str::to_lowercase` compared as code
+  points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a string, as `İ` does), which is neither
+  SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The result is case-insensitive and otherwise
+  ordinal, deliberately not locale-aware (that is an ICU dependency and a per-user setting this product does not have).
+  The sort happens in Rust, in memory, over the whole merged fleet, on every request. The only stored activity-order
+  value is the key held by a mute.
 - Ordering is not filtering, and the two are kept apart: a sort changes the sequence, never the membership, so neither
   `total` nor `matching` moves with it. Past the cap the sequence does decide which rows the reply reaches — the counts
   describe the whole filtered view, while the array is what fits — so "membership unchanged" is about the underlying
@@ -5537,6 +5537,23 @@ installation it is on, so it follows an open session the sidebar's filter hides
   that entry's UUID; unowned, ambiguous or unrepresentable values clear. Spelling alone never supplies provenance. New
   public writes require full-reference syntax but permit stale references; null and sparse updates keep their existing
   meanings. A version-only synthetic rewind may clear an already-qualified selection rather than guess.
+
+- Session mutes live in `session_mutes`, keyed by the same entry and session pair as pins. An active row has a fixed
+  Unix-millisecond deadline or no deadline, and the work-start key held while muted. An ended row also has the
+  work-start stamp observed at unmute, so the list uses the held key and second group until the live stamp advances.
+  Connected Waiting uses the live key and first group throughout. The sort reads these values without updating the
+  database. List and detail replies carry the active mute and its optional deadline.
+
+  `PUT /api/sessions/{id}/mute` takes an explicit mute or unmute action. Like pinning it resolves ownership without
+  contacting the host. Muting an already-muted session keeps its deadline. Ending a mute, by request or by timer,
+  advances the existing seen stamp and releases the mute in the same transaction. The timer subscribes to the fleet
+  revision before reading the earliest deadline and wakes for either a revision or that deadline. It uses the last
+  observation the helm can serve for that session. The cache read shares the mute transition's transaction, so a refresh
+  cannot advance activity between the observation and the write. If no observation remains, the timer ends the mute
+  without advancing the seen stamp. The timed write matches the deadline it observed so a newer mute survives. Expiry
+  checks also run when the helm starts. With a deadline armed, the timer checks wall time at least once a minute to
+  account for clock adjustments or suspend. Replace copies an active mute and its pin in one transaction before deleting
+  the original. Confirmed Delete clears the mute and any held key before clearing the seen stamp.
 
 - Shared pins live in `session_pins`, keyed by `(host_id, session_id)` since helm schema 63, with a NOT NULL signed
   `position` since schema 74. The 73→74 step rebuilds the presence-only table using the same DDL as fresh creation,
