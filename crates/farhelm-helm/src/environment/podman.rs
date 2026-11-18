@@ -116,6 +116,33 @@ struct ContainerInfo {
     labels: BTreeMap<String, String>,
 }
 
+/// Whether this host row records the container, at any place (a second SSH
+/// route can reach the same Podman storage): by canonical ID once recorded,
+/// since a later container may take a name the recorded one gave up, and by
+/// the reserved name only while create is unconfirmed.
+fn host_records_container(binding: &crate::store::PodmanBinding, id: &str, name: &str) -> bool {
+    match binding.container_id.as_deref() {
+        Some(recorded) => recorded == id,
+        None => binding.name == name,
+    }
+}
+
+/// A recipe owns its helpers through every route to the same storage. Each
+/// record holds the reserved name until Podman confirms the canonical ID.
+fn recipe_records_container(state: &recipes::RecipeState, id: &str, name: &str) -> bool {
+    state
+        .podman
+        .values()
+        .flat_map(|place| {
+            [
+                place.builder_container_id.as_deref(),
+                place.preparer_container_id.as_deref(),
+            ]
+        })
+        .flatten()
+        .any(|recorded| recorded == id || recorded == name)
+}
+
 impl Podman {
     /// Observe the current connected lease without retaining its listener or
     /// client. The common host projection exposes this alongside credentials.
@@ -724,9 +751,9 @@ impl Podman {
         .await
     }
 
-    /// The Containers section may delete an unrecorded leftover only. A
-    /// recorded row goes through ordinary host removal and its actor hold;
-    /// recorded recipe helpers go through guarded recipe cleanup instead.
+    /// The Containers section may delete a leftover only when no place records
+    /// it. Host rows go through ordinary removal and its actor hold. Recorded
+    /// recipe helpers go through guarded recipe cleanup.
     pub(crate) async fn delete_leftover(&self, place: HostId, id: &str) -> anyhow::Result<()> {
         canonical(id)?;
         let Some(info) = self.inspect(place, id).await? else {
@@ -746,19 +773,11 @@ impl Podman {
         let recorded_host = rows
             .iter()
             .filter_map(|row| row.podman.as_ref())
-            .any(|binding| {
-                binding.place_host == place
-                    && (binding.container_id.as_deref() == Some(id) || binding.name == info.name)
-            });
+            .any(|binding| host_records_container(binding, &info.id, &info.name));
         let recipes = self.0.store.tensorlake_recipe_rows().await?;
-        let recorded_recipe = recipes.iter().any(|(_, _, state)| {
-            state.podman.get(&place).is_some_and(|state| {
-                [&state.builder_container_id, &state.preparer_container_id]
-                    .into_iter()
-                    .flatten()
-                    .any(|recorded| recorded == id || recorded == &info.name)
-            })
-        });
+        let recorded_recipe = recipes
+            .iter()
+            .any(|(_, _, state)| recipe_records_container(state, &info.id, &info.name));
         let live = info
             .labels
             .get("farhelm.recipe")
@@ -770,9 +789,9 @@ impl Podman {
         self.remove_container(place, id, role).await
     }
 
-    /// Include unfinished session-owned rows: an interrupted launch can leave
-    /// a real container without ever creating a session. Recipe helpers remain
-    /// recipe cleanup's responsibility, including after an interrupted build.
+    /// An interrupted launch can leave a container without a session. Offer
+    /// cleanup for that row only at its recorded place, since another SSH route
+    /// can see the same container. Recorded helpers belong to recipe cleanup.
     ///
     /// Every place is asked at once: the route is bounded as a whole
     /// ([`list_leftovers`]), so a sequential walk would make the bound cover
@@ -814,28 +833,24 @@ impl Podman {
         let rows = self.0.store.list_hosts().await?;
         let mut result = Vec::new();
         for (place, owned) in discovered {
-            for item in owned {
-                let recipe_helper = recipes.iter().any(|(_, _, state)| {
-                    state.podman.get(&place).is_some_and(|state| {
-                        [&state.builder_container_id, &state.preparer_container_id]
-                            .into_iter()
-                            .flatten()
-                            .any(|id| id == &item.id || id == &item.name)
-                    })
-                });
-                if recipe_helper {
+            'container: for item in owned {
+                if recipes
+                    .iter()
+                    .any(|(_, _, state)| recipe_records_container(state, &item.id, &item.name))
+                {
                     continue;
                 }
-                let host = rows
+                let mut host = None;
+                for (row, binding) in rows
                     .iter()
-                    .find(|row| {
-                        row.podman.as_ref().is_some_and(|binding| {
-                            binding.place_host == place
-                                && (binding.container_id.as_deref() == Some(&item.id)
-                                    || binding.name == item.name)
-                        })
-                    })
-                    .map(|row| row.id);
+                    .filter_map(|row| row.podman.as_ref().map(|binding| (row, binding)))
+                    .filter(|(_, binding)| host_records_container(binding, &item.id, &item.name))
+                {
+                    if binding.place_host != place {
+                        continue 'container;
+                    }
+                    host.get_or_insert(row.id);
+                }
                 if let Some(host) = host
                     && !self.0.store.cached_sessions(host).await?.is_empty()
                 {
