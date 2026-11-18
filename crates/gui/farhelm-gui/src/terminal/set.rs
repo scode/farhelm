@@ -35,8 +35,8 @@
 //!   so a pending lifecycle request refuses it (SPEC.md, "Lifecycle operations"), and it is unavailable while a question,
 //!   dialog or menu holds the keyboard, which covers an open lifecycle question (the session's questions hang from its
 //!   row and header, and are not modal); its refusal shows on the session's row and header as "Open tab: " and the helm's
-//!   words. The tab it opened is chosen and focused once the helm has both answered and listed it, in whichever order
-//!   those come. Each tab's × (`DELETE /api/sessions/{id}/tabs/{tab}`) runs on that tab's own key, so siblings close
+//!   words. If the user waited, the tab it opened is chosen and focused once the helm has answered and listed it, in
+//!   either order. Each tab's × (`DELETE /api/sessions/{id}/tabs/{tab}`) runs on that tab's own key, so siblings close
 //!   side by side and a close holds none of the session's lifecycle actions; it asks first, hung under the ×, naming the
 //!   tab and that its shell and everything it started die, unless **Skip session confirmations** is on (SPEC.md: the
 //!   switch skips "terminal-tab Close"). A refused close shows under the strip on that tab alone ("Close tab: " and the
@@ -214,8 +214,8 @@ fn ask_to_close(
     );
 }
 
-/// Choose shell tab `id` in `set` and focus its terminal, in `window`, for the press marked `mark` (see
-/// [`TerminalSet::choose`]).
+/// Show the new shell and focus it only if the user waited for the reply and row update. Choosing it hides the
+/// current terminal, so even a switch without an explicit focus move could redirect the user's next key.
 fn choose_in(
     set: &Entity<TerminalSet>,
     id: String,
@@ -223,6 +223,9 @@ fn choose_in(
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
+    if focus::has_moved_on(&mark, cx) {
+        return;
+    }
     let set = set.clone();
     let _ = window.update(cx, move |_, window, cx| {
         set.update(cx, |set, cx| set.choose(Some(id), &mark, window, cx));
@@ -290,7 +293,7 @@ pub struct TerminalSet {
     /// Whether the terminals are inert ([`TerminalSet::set_inert`]), which new tabs take on too.
     inert: bool,
     /// A tab New terminal opened that the pushed row does not list yet, with the press that asked and its window: it is
-    /// chosen once it is listed.
+    /// chosen once it is listed if the user waited.
     opened: Option<(String, Mark, AnyWindowHandle)>,
     /// Follows the pushed row's tab list.
     _tabs_follow: session::ObservingCurrent,
@@ -535,7 +538,7 @@ impl TerminalSet {
         {
             self.chosen = None;
         }
-        // The tab New terminal opened, now listed: chosen after this update, which is the set's own.
+        // The requested tab can be chosen after this update releases the set.
         if let Some((id, _, _)) = &self.opened
             && self.tabs.iter().any(|tab| &tab.id == id)
             && let Some((id, mark, window)) = self.opened.take()
@@ -773,10 +776,11 @@ impl TerminalSet {
     }
 
     /// Open a shell tab in the session (New terminal), under the session's own key, so a pending lifecycle request
-    /// refuses it and it holds the session's lifecycle actions while it runs. Once the helm answers with the new tab,
-    /// the tab is chosen and its terminal takes focus (unless the user moved on since `mark`), as the old app selected
-    /// a tab it opened; a refusal shows on the session's row and header ("Open tab: " and the helm's words). Not keyed
-    /// for retries: a duplicate tab is visible and closes on its own, and the button sends once per press.
+    /// refuses it and it holds the session's lifecycle actions while it runs. Once the helm has answered and listed
+    /// the new tab, the tab is chosen and its terminal takes focus if the user has not moved on since `mark`, as the
+    /// old app selected a tab it opened; a refusal shows on the session's row and header ("Open tab: " and the helm's
+    /// words). Not keyed for retries: a duplicate tab is visible and closes on its own, and the button sends once per
+    /// press.
     fn open_tab(set: &Entity<TerminalSet>, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
         let key = set.read(cx).key.clone();
         let (Some(operations), Ok(path)) = (
@@ -807,7 +811,7 @@ impl TerminalSet {
                 if set.read(cx).tabs.iter().any(|tab| tab.id == id) {
                     choose_in(&set, id, mark, window, cx);
                 } else {
-                    // The reply can come before the pushed row lists the tab: choose it when it does.
+                    // The reply can beat the pushed row. The mark must still hold when the tab is listed.
                     set.update(cx, |set, _| set.opened = Some((id, mark, window)));
                 }
             })
