@@ -269,6 +269,66 @@ consequences.
   — An old page can interpret pasted JSON as terminal commands. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
+- [`header-actions-follow-unseen-session.md`](header-actions-follow-unseen-session.md) — A Stop, Restart, Replace or
+  Delete aimed at one session can act on a different session when the selection just changed. Skipping confirmations can
+  make the wrong action take effect immediately.
+
+- [`session-actions-use-unseen-liveness.md`](session-actions-use-unseen-liveness.md) — Deleting an ended session can
+  kill an agent that restarted after the screen was drawn. Stop, Restart and Replace can also act on more running work
+  than the window showed.
+
+- [`wayland-file-drop-uses-entry-position.md`](wayland-file-drop-uses-entry-position.md) — Dragging across a terminal
+  and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
+  when the pointer moves.
+
+- [`wayland-enter-overtakes-pending-text-paste.md`](wayland-enter-overtakes-pending-text-paste.md) — On Wayland, Enter
+  can run the command already on the line while Farhelm is still fetching pasted text meant to finish it. The paste can
+  then arrive at the next prompt.
+
+- [`folder-create-approval-loses-target-identity.md`](folder-create-approval-loses-target-identity.md) — A launch
+  approval can still describe the old SSH destination after Farhelm has chosen its replacement. Allow can start the
+  agent and its wrapper on the replacement machine.
+
+- [`websocket-trace-logs-desktop-credential.md`](websocket-trace-logs-desktop-credential.md) — When WebSocket trace
+  logging is enabled, Farhelm’s logs can contain a credential that grants access to the running app’s terminal, command,
+  and file-transfer APIs.
+
+- [`concealed-terminal-cells-change-link-target.md`](concealed-terminal-cells-change-link-target.md) — A printed link
+  can look like one site but open another when the terminal hides part of the address. Farhelm’s ordinary printed-link
+  click does not disclose that difference.
+
+- [`terminal-selection-copies-concealed-text.md`](terminal-selection-copies-concealed-text.md) — Selecting a visible
+  line in the terminal can copy hidden text along with it. Pasting it into another shell or application can use more
+  than you selected by sight.
+
+- [`masked-fields-expose-secrets-to-text-services.md`](masked-fields-expose-secrets-to-text-services.md) — Farhelm
+  covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
+  edit it.
+
+- [`codex-login-file-rendered-in-cleartext.md`](codex-login-file-rendered-in-cleartext.md) — The Codex credential editor
+  shows the entire selected login file, including live access and refresh tokens. Someone looking at the screen or a
+  recording can see them.
+
+- [`stale-checkout-settings-overwrite-cli-edits.md`](stale-checkout-settings-overwrite-cli-edits.md) — Saving the
+  post-clone command from a Settings window that was already open can erase newer edits you made from the command line.
+  Using the old view’s Use default can also clear a newer host-folder override.
+
+- [`retired-session-delete-removes-reused-container-name.md`](retired-session-delete-removes-reused-container-name.md) —
+  Deleting an old experimental container session can remove someone’s later container if it uses the same Podman name.
+  That removes the new container’s files and running work.
+
+- [`tensorlake-pending-create-adopts-replacement-sandbox.md`](tensorlake-pending-create-adopts-replacement-sandbox.md) —
+  If an interrupted Tensorlake create never reached the provider or its original sandbox was removed, retrying a build
+  or deleting a host or recipe can terminate a replacement sandbox using the reserved name.
+
+- [`container-leftover-delete-races-first-session.md`](container-leftover-delete-races-first-session.md) — A container
+  can appear as a leftover while Farhelm is still launching its first session. If you open Delete then and confirm after
+  the launch finishes, it can delete the new session and its work.
+
+- [`podman-container-clone-inherits-leftover-ownership.md`](podman-container-clone-inherits-leftover-ownership.md) — A
+  container you clone and use independently can show up in Settings as a Farhelm leftover. Deleting it from that list
+  permanently removes the clone and its work.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -455,7 +515,80 @@ consequences.
   — An old open page requires reload after the grid-only update. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
+- [`header-questions-follow-anchor-across-sessions.md`](header-questions-follow-anchor-across-sessions.md) — A Restart
+  or similar question can stay under the next session's button even though answering it still acts on the original
+  session.
+
+- [`omitted-session-row-drops-live-tabs.md`](omitted-session-row-drops-live-tabs.md) — A list update can take away the
+  shell tab you’re using and make the agent terminal receive your next typing. The shell on the host can keep running.
+
+- [`interrupted-upload-notice-lost-on-session-removal.md`](interrupted-upload-notice-lost-on-session-removal.md) — When
+  you switch away during an upload and the old session is replaced or deleted, Farhelm can cancel the upload without
+  ever showing you that it stopped.
+
+- [`late-composition-commit-reaches-previous-terminal.md`](late-composition-commit-reaches-previous-terminal.md) — Text
+  from an input method or dead key can go to the shell tab you just left if the platform is still using that tab's input
+  handler.
+
+- [`sequence-following-enter-does-not-count-as-moving-on.md`](sequence-following-enter-does-not-count-as-moving-on.md) —
+  After using Enter to start a quick-launch sequence, you can press Enter again in the still-open terminal while the
+  launch is pending. The launch can then open its own session as if you hadn’t used the terminal in the meantime.
+
+- [`upload-path-pastes-into-restarted-agent.md`](upload-path-pastes-into-restarted-agent.md) — If you restart a session
+  during an upload, the file can finish normally while its path is pasted into the new agent, possibly in a different
+  conversation.
+
+- [`session-delete-shortcut-ignores-composition.md`](session-delete-shortcut-ignores-composition.md) — Pressing the
+  session Delete shortcut while composing text can delete the open session, including its processes, when Skip session
+  confirmations is enabled.
+
+- [`wayland-terminal-paste-ignores-file-list.md`](wayland-terminal-paste-ignores-file-list.md) — Copying a file in a
+  Wayland file manager and pasting into Farhelm can paste its text representation or do nothing instead of attaching the
+  file.
+
+- [`enter-falls-through-after-dismiss-or-approval.md`](enter-falls-through-after-dismiss-or-approval.md) — Holding Enter
+  to dismiss an empty quick-launch sequence or answer an approval can submit a line already sitting in the terminal. A
+  second quick Enter can also reach the terminal after an approval card disappears.
+
+- [`terminal-file-requests-can-wait-indefinitely.md`](terminal-file-requests-can-wait-indefinitely.md) — A terminal file
+  link can stay at “Checking…” or “Downloading…” indefinitely while the host still appears connected and the rest of
+  Farhelm works.
+
+- [`stalled-tab-request-resets-healthy-helm-channel.md`](stalled-tab-request-resets-healthy-helm-channel.md) — A host
+  slow to open or close a shell tab can make Farhelm reconnect to a helm that was still answering. If you were editing a
+  new session in the meantime, the launcher closes and loses that draft.
+
+- [`desktop-state-rewrite-blocks-startup.md`](desktop-state-rewrite-blocks-startup.md) — If its desktop settings file
+  cannot be read, decoded or rewritten, Farhelm can stop at a startup alert while sessions keep running in the
+  background.
+
+- [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
+  Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
+  act on the existing sandbox.
+
+- [`retargeted-ssh-alias-can-forget-live-container.md`](retargeted-ssh-alias-can-forget-live-container.md) — If an SSH
+  alias starts reaching a different machine or login account, Farhelm can report the old container deleted and remove it
+  from Hosts even though it is still on the original machine.
+
+- [`managed-ubuntu-bootstrap-pid1-stop-can-time-out.md`](managed-ubuntu-bootstrap-pid1-stop-can-time-out.md) — On some
+  Linux Podman setups, a first Managed Ubuntu build can finish installing packages and still fail each time before it
+  can save an image.
+
+- [`podman-recipe-cleanup-tries-parent-before-child.md`](podman-recipe-cleanup-tries-parent-before-child.md) — Deleting
+  an unused container recipe can keep failing because Farhelm tries to remove an image that its own second image still
+  needs. Retrying can make the same attempt every time.
+
+- [`podman-place-probe-bypasses-host-identity-refusal.md`](podman-place-probe-bypasses-host-identity-refusal.md) —
+  Farhelm can treat two SSH entries for the same machine and account as usable container places even while its ordinary
+  host connection refuses the duplicate.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
+
+- [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
+  leftover sandbox whose name has no helm tag is labelled as another helm's.
+
+- [`open-url-card-without-host-shows-no-site.md`](open-url-card-without-host-shows-no-site.md) — An open-link card for a
+  URL without a parsed host shows no site row; whether such a URL reaches a card is unverified.
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
   tunnel ports occupied while individual close requests fail.
@@ -3487,3 +3620,51 @@ consequences.
 - [`trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md`](trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md)
   — Retiring the byte renderer removes overline support from served terminals. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
+  typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
+
+- [`wayland-drop-lost-before-file-list-arrives.md`](wayland-drop-lost-before-file-list-arrives.md) — Releasing a file
+  over a terminal before the file manager has returned its list can do nothing. Farhelm gives no indication that it
+  missed the drop.
+
+- [`approval-answer-acknowledged-after-expiry.md`](approval-answer-acknowledged-after-expiry.md) — If you answer as an
+  approval expires, Farhelm can remove the card without telling you that the agent's request expired. An Always allow
+  setting can still have been saved.
+
+- [`checkout-status-bypasses-host-text.md`](checkout-status-bypasses-host-text.md) — A launcher status line can show
+  repository-search errors without Farhelm’s usual treatment of invisible or right-to-left characters.
+
+- [`gui-command-debug-includes-secret-body.md`](gui-command-debug-includes-secret-body.md) — A future diagnostic that
+  prints a GUI command could expose a token or login file included in that request.
+
+- [`linux-second-launch-lost-during-quit.md`](linux-second-launch-lost-during-quit.md) — If you reopen Farhelm while the
+  old window is quitting, the new process can say it handed off to that window and exit. The old process then exits too,
+  leaving no window.
+
+- [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
+  without typing can undo a host rename that just happened through an approved agent request.
+
+- [`layout-preference-save-failures-are-silent.md`](layout-preference-save-failures-are-silent.md) — The sidebar width,
+  terminal text size and host rail expansion can briefly change and then revert without telling you the helm could not
+  save them.
+
+- [`closing-settings-can-hide-ntfy-save-refusal.md`](closing-settings-can-hide-ntfy-save-refusal.md) — If you save an
+  ntfy setting and close Settings before the helm refuses the write, the window can lose the refusal. Reopening shows
+  the old value with no explanation.
+
+- [`partial-host-edit-reports-whole-failure.md`](partial-host-edit-reports-whole-failure.md) — A single approved host
+  edit can change the alias and then fail to change the icon or color. The failure message can leave out that the alias
+  already changed.
+
+- [`tunnel-listener-stops-on-single-accept-error.md`](tunnel-listener-stops-on-single-accept-error.md) — One listener
+  error can leave a tunnel’s port visible in Farhelm after it stopped accepting connections. The next list refresh can
+  remove the mapping without a reason.
+
+- [`linux-helm-allows-mac-only-tunnel-open.md`](linux-helm-allows-mac-only-tunnel-open.md) — The Linux desktop shares a
+  helm route that will open a localhost tunnel for an authenticated caller. Its own terminal UI only offers the action
+  on macOS.
+
+- [`linux-docs-capture-follow-ups.md`](linux-docs-capture-follow-ups.md) — The README hero still uses the Mac workflow
+  by default. A small Templates button crop would fail the publisher’s size check if a page uses it, and the template
+  search crop catches a warning below the search box.
