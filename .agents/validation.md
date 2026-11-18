@@ -109,11 +109,11 @@ systemd or SSH substrate ran.
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, the two-host fixture
   reserves two, and the real Podman fixture reserves all four. The release gate runs this same selection, including the
   farhelm integration targets, after preparing rootless Podman, the runner's systemd user manager and bus environment, a
-  verified transient user scope, its offline Ubuntu image, and the GPUI build packages named below. It narrows every
-  later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run this suite.
-  Do not also run the old full libtest battery. Every terminal a test's supervisor creates is a terminal host: the e2e
-  suite's in-process harness and its real supervisor process fixture start hosts from the built `farhelm`, and the
-  supervisor's own unit tests that need a real terminal run in terminal hosts their test binary starts from itself
+  verified transient user scope, its offline Ubuntu image, and the GPUI build packages named below. The workspace
+  doctests keep the same package selection to reuse build outputs. Ordinary CI does not run this suite. Do not also run
+  the old full libtest battery. Every terminal a test's supervisor creates is a terminal host: the e2e suite's
+  in-process harness and its real supervisor process fixture start hosts from the built `farhelm`, and the supervisor's
+  own unit tests that need a real terminal run in terminal hosts their test binary starts from itself
   (`hosts::test_program`, glibc Linux only). A few tests still start a real tmux server: the tests of ending old
   terminals at startup, which build an earlier release's server by hand, the test-state cleanup's tests of a server a
   killed test left behind, and the test of a user's own tmux (stock `/usr/bin/tmux`) under a session's scope. They use
@@ -886,16 +886,19 @@ systemd or SSH substrate ran.
   43 of them took 305 s on a loaded development machine shared with other agents on 2026-11-15, the second run's start
   and stop included (42 took 137 s on a build worker that day; 114 s for 39, 98 s for 37 and 91 s for 34 steps earlier,
   62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first
-  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
-  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
-  menu, session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included), Mark read and Mark unread,
-  quick switcher, host rail (Add host among its entries, an avatar's setup or update warning, an avatar's menu and
-  expansion) and its foot (Hosts, the Settings gear and the Expand control), the Hosts attention list, status segments,
-  host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog, Welcome card or the start
-  dialogs (the Welcome card and announcements at a window start), Trash button and dialog, Keyboard shortcuts overview,
-  approval cards or their region, the helm's approval path, sidebar width or divider, terminal attach, replay, paste,
-  text input, scrollback or text size, the order menu (Compact included), compact rows, pins and the order hold, the
-  heading's New, the row's summary card, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  unless given `--no-build`. Linux needs headless Mutter, `dbus-run-session` and Mesa's software renderer (`mutter`,
+  `dbus-daemon`, `mesa-vulkan-drivers` and `libegl-mesa0`). macOS needs a logged-in GUI session of the same user. The
+  x86_64 Linux release gate runs it after the desktop tests with `--kind release` and the shared release evidence root.
+  The harness builds the debug app with the automation bridge, `farhelm`, `farhelm-fixtures` and `gpui-agent` in the
+  same Cargo target directory. Run it when the app's session list, row menu, session header, Delete, Rename, Stop,
+  Restart, Replace (its YOLO question included), Mark read and Mark unread, quick switcher, host rail (Add host among
+  its entries, an avatar's setup or update warning, an avatar's menu and expansion) and its foot (Hosts, the Settings
+  gear and the Expand control), the Hosts attention list, status segments, host menu, Remove host, host Update and host
+  Uninstall, Help menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and announcements at
+  a window start), Trash button and dialog, Keyboard shortcuts overview, approval cards or their region, the helm's
+  approval path, sidebar width or divider, terminal attach, replay, paste, text input, scrollback or text size, the
+  order menu (Compact included), compact rows, pins and the order hold, the heading's New, the row's summary card, the
+  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,
@@ -1128,9 +1131,9 @@ systemd or SSH substrate ran.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, the desktop app's
 lints, the OMP reporter asset scenarios, the website build and its feedback endpoint tests, installer validation, the
-dependency license and source policy, generated-workflow validation, and the agent-instructions check; costly Rust and
-CentOS gates run in the x86_64 Linux release artifact job, and the desktop app's and GPUI crates' tests in both it and
-the macOS one. If either workflow changes, update this list in the same change.
+dependency license and source policy, generated-workflow validation, and the agent-instructions check. The x86_64 Linux
+release artifact job runs the workspace Rust tests, the GPUI end-to-end smoke and CentOS provisioning. Both it and the
+macOS job run the desktop app's and GPUI crates' tests. If either workflow changes, update this list in the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build
