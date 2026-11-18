@@ -24,9 +24,9 @@ use farhelm_proto::{
     CommandLaunch, DeleteGuard, LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch,
 };
 use gpui::{
-    Bounds, Context, DriverNode, FocusHandle, IntoElement, Modifiers, ParentElement as _, Pixels,
-    Render, ScrollDelta, ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div,
-    point, px, size,
+    Bounds, Context, DriverNode, FocusHandle, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
+    Modifiers, ParentElement as _, Pixels, Render, ScrollDelta, ScrollEvent, Styled as _,
+    TestAppContext, VisualTestContext, Window, div, point, px, size,
 };
 use serde_json::json;
 
@@ -1413,4 +1413,81 @@ fn an_agents_host_add_arriving_leaves_a_typed_add_host_draft_alone(cx: &mut Test
         "the draft is untouched"
     );
     assert!(alias_focused(cx), "the arrival left focus in the alias");
+}
+
+/// SPEC.md, "Agent-spawned sessions": "Opening is not approval", and repeated Enter cannot answer a new question.
+/// Opening the prefilled Add host dialog is a chance to review the agent's request. Enter on the armed card moves
+/// focus to the destination on key-down. Repeats of that press must send neither Allow nor a probe. After release,
+/// a fresh Enter in the destination sends exactly one Allow for the displayed destination.
+#[gpui::test]
+fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) {
+    use crate::hosts::add::tests::{alias, destination, destination_focused};
+
+    let mut add = stop("add-1", "build");
+    add.action = ApprovalAction::HostAdd {
+        destination: "ops@new.example".to_owned(),
+        alias: Some("newbox".to_owned()),
+    };
+    let (mut helm, cx, _terminal) = open(cx, &[add]);
+    let opener = "approval-add-1-answer-allow";
+    assert!(answers_presses(cx, opener), "premise: the card is armed");
+    for _ in 0..20 {
+        if focused_id(cx).as_deref() == Some(opener) {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(opener),
+        "premise: Tab reached Open add dialog"
+    );
+    assert!(!any_open(cx), "premise: Add host has yet to open");
+
+    let enter = Keystroke::parse("enter").expect("Enter keystroke");
+    let press = |cx: &mut VisualTestContext, is_held| {
+        cx.simulate_event(KeyDownEvent {
+            native_key: None,
+            keystroke: enter.clone(),
+            is_held,
+            prefer_character_input: false,
+        });
+        settle(cx);
+    };
+    let release = |cx: &mut VisualTestContext| {
+        cx.simulate_event(KeyUpEvent {
+            native_key: None,
+            keystroke: enter.clone(),
+        });
+        settle(cx);
+    };
+    press(cx, false);
+    assert!(any_open(cx), "Enter opened Add host on key-down");
+    assert!(
+        destination_focused(cx),
+        "premise: the destination has focus"
+    );
+    assert_eq!(destination(cx), "ops@new.example");
+    assert_eq!(alias(cx), "newbox");
+    assert!(helm.commands().is_empty(), "opening sent nothing");
+
+    press(cx, true);
+    cx.executor().advance_clock(ARM_DELAY);
+    press(cx, true);
+    let sent = helm.commands();
+    assert!(sent.is_empty(), "held Enter sent requests: {sent:?}");
+
+    release(cx);
+    assert!(helm.commands().is_empty(), "releasing Enter sent nothing");
+    assert!(
+        destination_focused(cx),
+        "premise: the destination still has focus"
+    );
+    press(cx, false);
+    release(cx);
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/approvals/add-1");
+    assert_eq!(
+        body,
+        json!({ "answer": "allow", "host_add": { "destination": "ops@new.example" } })
+    );
 }

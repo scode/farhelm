@@ -186,7 +186,8 @@ pub struct DraftInput {
 impl DraftInput {
     /// A field showing `value` (the raw value from the store) over a draft of it, untouched. `field` reaches this
     /// within the editor `V`; `on_submit` runs when the user presses Enter in the field (an editor's Save, usually),
-    /// which never happens in a growing box, where Enter types a line break.
+    /// which never happens in a growing box, where Enter types a line break. It runs for held repeats too; an editor
+    /// whose Enter must act once per press uses [`Self::with_submit`] instead.
     ///
     /// The draft owns `input`'s one subscription ([`TextInputState::subscribe`]): the editor must not subscribe to
     /// `input` or a clone of it, and follows the user's edits through [`DraftInput::draft`] instead.
@@ -198,10 +199,31 @@ impl DraftInput {
         window: &mut Window,
         cx: &mut Context<V>,
     ) -> DraftInput {
+        Self::with_submit(
+            value,
+            input,
+            field,
+            move |view, _, window, cx| on_submit(view, window, cx),
+            window,
+            cx,
+        )
+    }
+
+    /// As [`Self::new`], subscription rule included, for an editor that needs the Enter submission's `held` flag: a
+    /// repeat still reports `held` when the first press went to another control (the button that opened the dialog,
+    /// say), so the editor can act only on a fresh press.
+    pub(crate) fn with_submit<V: 'static>(
+        value: &str,
+        input: TextInputState,
+        field: fn(&mut V) -> &mut DraftInput,
+        on_submit: impl Fn(&mut V, bool, &mut Window, &mut Context<V>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<V>,
+    ) -> DraftInput {
         input.set_text(value.to_owned(), window, cx);
         let events = input.subscribe(window, cx, move |view, event, window, cx| match event {
             TextInputEvent::Changed => field(view).edited(window, cx),
-            TextInputEvent::Submitted { .. } => on_submit(view, window, cx),
+            TextInputEvent::Submitted { held } => on_submit(view, held, window, cx),
         });
         DraftInput {
             draft: Draft::load(value.to_owned()),

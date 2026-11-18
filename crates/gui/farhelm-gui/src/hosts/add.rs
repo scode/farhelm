@@ -638,20 +638,20 @@ impl AddHostDialog {
             }
         }
         let destination_field = TextInputState::new(window, cx);
-        let destination = DraftInput::new(
+        let destination = DraftInput::with_submit(
             &destination,
             destination_field,
             |dialog: &mut Self| &mut dialog.destination,
-            Self::add,
+            Self::submit_ssh_field,
             window,
             cx,
         );
         let alias_field = TextInputState::new(window, cx);
-        let alias = DraftInput::new(
+        let alias = DraftInput::with_submit(
             &alias,
             alias_field,
             |dialog: &mut Self| &mut dialog.alias,
-            Self::add,
+            Self::submit_ssh_field,
             window,
             cx,
         );
@@ -795,6 +795,15 @@ impl AddHostDialog {
             Body::Tensorlake(form) => form.clone().update(cx, |form, cx| form.proceed(window, cx)),
             Body::Ssh => self.add(window, cx),
         }
+    }
+
+    /// An agent's waiting request needs a fresh Enter. The press that opened the prefilled dialog can still be
+    /// repeating when the destination gets focus, and opening the dialog is only a chance to review the request.
+    fn submit_ssh_field(&mut self, held: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if held && self.pending().is_some() {
+            return;
+        }
+        self.add(window, cx);
     }
 
     /// Add: refuse what can be refused without contacting anything, then refuse while a session launch is in flight,
