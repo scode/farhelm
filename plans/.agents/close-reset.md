@@ -58,15 +58,14 @@ Moving off it keeps the working copy clean without destroying it; record the old
 log so the leftover can be found.
 
 Either reset leaves ignored files alone, since jj never sees them. That keeps the checkout's build caches (`target/`,
-`node_modules/`, `.ci-tmux/`, and the like) for the next plan, and it also leaves the other ignored files (release
-drafts, delegation records, saved authentication state) where their owners expect them. A monitor's baseline commit is
-not a reason to skip the reset.
+`node_modules/`, and the like) for the next plan, and it also leaves the other ignored files (release drafts, delegation
+records, saved authentication state) where their owners expect them. A monitor's baseline commit is not a reason to skip
+the reset.
 
 ### Pruning build leftovers
 
 NOTE: This is not a `cargo clean`. The point is to keep the next plan's build incremental, so everything it would reuse
-stays: compiled third-party dependencies, build-script outputs, `.ci-tmux/`, `.ci-nextest/`, `node_modules/`, and the dx
-web build.
+stays: compiled third-party dependencies, build-script outputs, `.ci-nextest/`, `node_modules/`, and the dx web build.
 
 Because the resets leave ignored files alone, a checkout that runs plan after plan accumulates build output nobody will
 use again, and an executor checkout has been seen to reach well over a hundred gigabytes this way. Most of it is rustc's
