@@ -426,23 +426,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   indent members under their header. Recorded by the maintainer on 2026-11-18 from the plan's review. Plan:
   `plans/queue/session-group-follow-ups.md`.
 
-- **Clone: keep invisible characters when a copied folder or name is edited.** Since gpui-last-mile-fixes (#4059), Clone
-  shows invisible characters in the copied folder and session name spelled out (`<U+200B>`), using the rule the command
-  fields already had. The first keystroke in the field turns those spellings into literal text: type a letter and delete
-  it, and the field looks unchanged, but the launch uses a folder path containing the eight characters `<U+200B>`, or a
-  title containing `<U+202E>`. A wrong folder path is hard to spot. Turn spellings that are still in the edited text
-  back into the characters they stand for (about 10 to 15 lines in
-  `crates/gui/farhelm-gui/src/launcher/view/shown_text.rs`), for the folder and name and likely the command fields too;
-  the test `clone_shows_its_copied_folder_and_name_escaped_and_editable` pins today's behavior. In the same area: in
-  Restart with and Replace with, the suspended-host refusal (#4056) says "Resume it in Hosts, then launch" while the
-  button says Restart or Replace; word the ending per mode. Also from the same plan's re-review, test cleanup worth a
-  few dozen lines: cases added under old test names (`a_retired_container_setup_is_refused`,
-  `a_row_names_a_custom_model_escaped`, `local_home_moves_to_the_local_host`, and
-  `a_suspend_in_flight_leaves_new_available`, which drives the whole launcher UI to build a draft a helper already
-  builds), and copy-pasted neighbours in `launch_tests.rs` and `environment_recents_tests.rs`. Found by a skeptical
-  re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18. Plan:
-  `plans/queue/clone-keeps-invisible-characters.md`.
-
 - **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
   field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete
   to a model at all. Asked for by the maintainer on 2026-11-18 while planning `model-families`, which records the latest

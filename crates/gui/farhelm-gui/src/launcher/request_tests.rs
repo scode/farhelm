@@ -125,25 +125,37 @@ fn refusals_name_the_first_thing_to_fix() {
     assert_eq!(draft.refusal(target(&hosts, None), None), None);
 }
 
-/// A paused environment is an explicit user action away from being usable. Both providers and a stopped environment
-/// name the chosen host and Resume instead of suggesting another host; the draft remains refused before any create.
-/// A stopped one is called stopped, as its Hosts row labels it, never suspended.
+/// Paused and stopped environments require an explicit Resume in Hosts. The refusal keeps the chosen host's escaped
+/// name and its state, and tells the user which action to retry after resuming in each launcher mode.
 #[test]
 fn a_suspended_environment_names_the_resume_needed_before_launch() {
     let mut hosts = hosts();
     let mut draft = draft();
     draft.host = Some(2);
+    let source = session(agent_launch(codex()), RestartOffer::Resume);
+    let drafts = [
+        (&draft, "launch"),
+        (&LaunchDraft::clone_of(&source, Some(2)), "launch"),
+        (
+            &LaunchDraft::restart_with("source", &source, Some(2)).expect("source can resume"),
+            "restart",
+        ),
+        (
+            &LaunchDraft::replace_with("source", &source, Some(2)),
+            "replace",
+        ),
+    ];
     for kind in ["tensorlake", "podman"] {
         hosts[1].kind = kind.into();
         hosts[1].name = "work\u{202e}box".into();
-        for (state, expected) in [
+        for (state, state_word) in [
             (
                 HostStateView::Suspended {
                     observed_at: 1,
                     suspended_by_farhelm_at: Some(1),
                     resume_failed: None,
                 },
-                "work<U+202E>box is suspended. Resume it in Hosts, then launch.",
+                "suspended",
             ),
             // A stopped environment is named stopped, as its Hosts row labels it, never suspended.
             (
@@ -151,16 +163,20 @@ fn a_suspended_environment_names_the_resume_needed_before_launch() {
                     start_failed: None,
                     waiting_for_place: false,
                 },
-                "work<U+202E>box is stopped. Resume it in Hosts, then launch.",
+                "stopped",
             ),
         ] {
             hosts[1].state = state;
-            assert_eq!(
-                draft.refusal(target(&hosts, None), None).as_deref(),
-                Some(expected),
-                "{kind} {:?}",
-                hosts[1].state
-            );
+            for (draft, action) in drafts {
+                let expected =
+                    format!("work<U+202E>box is {state_word}. Resume it in Hosts, then {action}.");
+                assert_eq!(
+                    draft.refusal(target(&hosts, None), None).as_deref(),
+                    Some(expected.as_str()),
+                    "{kind} {:?}",
+                    draft.mode,
+                );
+            }
         }
     }
     hosts[1].state = HostStateView::Stopped {

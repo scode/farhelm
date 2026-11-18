@@ -371,7 +371,7 @@ fn a_picked_folder_does_not_filter_the_next_list(cx: &mut TestAppContext) {
 /// Why: Local home is a deliberate choice of this machine, not just a folder. A Clone's inherited host starts
 /// unchecked for Save as template. Local home counts as a hand pick so the user can carry the local host in a template.
 #[gpui::test]
-fn local_home_moves_to_the_local_host(cx: &mut TestAppContext) {
+fn local_home_moves_and_marks_the_host_chosen(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_with_hosts(
         cx,
         LaunchDraft::clone_of(

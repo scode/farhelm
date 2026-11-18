@@ -677,7 +677,7 @@ and
   `launcher::view_tests::the_host_picker_browses_with_arrows_and_enter`, and a newer managed checkout not counting as
   the last folder in `launcher::recents_tests::the_remembered_folder_is_the_newest_plain_folder_launch`.
 - The superseded cases' non-key halves: Home and the history's folders setting the folder (360) in
-  `launcher::folder_list_tests::{local_home_moves_to_the_local_host, focusing_the_folder_lists_recent_folders_and_resets}`,
+  `launcher::folder_list_tests::{local_home_moves_and_marks_the_host_chosen, focusing_the_folder_lists_recent_folders_and_resets}`,
   a recent filling on a click and launching on Enter while search only fills (459) in
   `launcher::recents_view_tests::a_click_fills_and_enter_launches` and
   `launcher::search_view_tests::a_recent_setup_from_search_fills_and_launches_nothing`, and Browse picks only selecting
@@ -1015,7 +1015,7 @@ while its create is out); the search cases in `launcher::search_tests` (the quer
 `launcher::search_view_tests` (the box); the folder dropdown's cases ("composer folder dropdown preserves keyboard
 launch and grouped history": the recents, filtering, the refused Enter that closes the list, Escape then typing, Escape
 before the launcher, Tab, and eight recents after Reset to home; and the local-home reset) in
-`launcher::folder_list_tests::{focusing_the_folder_lists_recent_folders_and_resets, enter_takes_a_highlighted_row_and_otherwise_launches, typing_filters_reopens_and_drops_the_highlight, a_picked_folder_does_not_filter_the_next_list, escape_and_tab_close_the_list_first, local_home_moves_to_the_local_host, a_late_answer_for_another_host_is_dropped}`;
+`launcher::folder_list_tests::{focusing_the_folder_lists_recent_folders_and_resets, enter_takes_a_highlighted_row_and_otherwise_launches, typing_filters_reopens_and_drops_the_highlight, a_picked_folder_does_not_filter_the_next_list, escape_and_tab_close_the_list_first, local_home_moves_and_marks_the_host_chosen, a_late_answer_for_another_host_is_dropped}`;
 the recent-setups strip's cases ("composer recent slots appear only with matches", "composer Enter on a focused recent
 launches the filled setup", "composer recent rows lead with the harness", "composer recent rows list only explicit
 choices", "compact recents distinguish guarded defaults and own-setting", "composer reserves no space for recents when
@@ -1063,14 +1063,15 @@ shown in the `app-launcher-folder-list` scene.
 - "composer saved defaults clear explicit choices without posting":
   `launcher::search_view_tests::a_defaults_only_setup_clears_explicit_choices_without_launching`.
 - "composer local-home reset takes over a remote clone destination":
-  `launcher::folder_list_tests::local_home_moves_to_the_local_host`. Local home checks the template's Host box even when
-  the host was already local in
+  `launcher::folder_list_tests::local_home_moves_and_marks_the_host_chosen`. Local home checks the template's Host box
+  even when the host was already local in
   `launcher::folder_list_tests::local_home_checks_the_template_host_even_when_already_local`.
 - The folder heading keeping focus and the cut folder's full path on hover:
   `launcher::folder_list_tests::a_folder_heading_keeps_focus_and_a_cut_row_shows_its_full_path`. Launch with the list
   open sends the typed folder once in
   `launcher::folder_list_tests::a_press_on_launch_uses_the_typed_folder_with_its_list_open`.
-- A recent replacing the old choice notice in `launcher::recents_view_tests::a_retired_container_setup_is_refused`.
+- A usable recent setup clearing a retired container refusal in
+  `launcher::recents_view_tests::taking_a_usable_setup_clears_the_retired_container_refusal`.
 - A second Enter on the model field after a pick leaves the chosen model alone in
   `launcher::view_tests::the_model_list_filters_and_enter_picks_the_highlighted_row`.
 - The arrow highlight brought into view, then the first result selected again after a miss:
@@ -1090,7 +1091,7 @@ shown in the `app-launcher-folder-list` scene.
 - "composer escapes a restored custom model while submitting its raw bytes": the field in
   `launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped` (the draft keeps the raw id), the
   strip's row, the model field after the pick, and the create in
-  `launcher::recents_view_tests::a_row_names_a_custom_model_escaped`.
+  `launcher::recents_view_tests::{a_row_names_a_custom_model_escaped, a_recent_model_fills_escaped_and_launches_verbatim}`.
 - "composer isolates strong RTL destination and model summary values": the footer draws them as host text, whose
   isolation is
   `host_text::tests::{a_right_to_left_host_part_reorders_only_within_its_isolate, on_macos_core_text_keeps_a_sentence_flowing_and_its_host_parts_isolated}`;
@@ -1275,8 +1276,8 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
 - A launch on a suspended environment or a stopped one that offers Resume names its host and asks you to resume it in
-  Hosts, then launch. Resume before create is a near-term TODO item, as SPEC.md's interim Topology note records. Both
-  providers' refusals are checked by
+  Hosts. The advice says to launch, restart or replace according to the launcher mode. Resume before create is a
+  near-term TODO item, as SPEC.md's interim Topology note records. Both providers' refusals are checked by
   `launcher::request_tests::a_suspended_environment_names_the_resume_needed_before_launch`; quick launch reveals the
   advice after "Not launched." in `templates::dispatch_tests::a_suspended_quick_launch_asks_to_resume_its_named_host`.
 - While a new environment's recipe is chosen, the composer search's folder rows and Browse are refused in the old words,

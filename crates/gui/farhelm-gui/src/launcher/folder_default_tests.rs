@@ -396,8 +396,11 @@ fn push_host(
     settle(cx);
 }
 
-/// Edit the open launcher's draft directly, and let it draw. Shared with the Restart with tests.
-pub(super) fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
+/// Apply `edit` directly to the open launcher's draft, to prepare it for a test of what the user does next. Use this
+/// when the individual field gestures are outside the test's contract and the draft must remain inside the launcher
+/// the user opened. It does not resync the field texts, so a field can still show the old value afterwards: assert on
+/// the draft or on what a press sends, not on what the fields read.
+pub(crate) fn edit_draft(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
     cx.update(|_, cx| {
         let launcher =
             layers::last_opened::<super::view::Launcher>(cx).expect("a launcher is open");

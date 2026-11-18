@@ -221,6 +221,7 @@ pub(super) enum Refusal {
     Plain(String),
     ResumeHost {
         name: HostText,
+        state: &'static str,
         advice: &'static str,
     },
 }
@@ -230,7 +231,11 @@ impl Refusal {
     pub(super) fn append_to(&self, line: HostSentence) -> HostSentence {
         match self {
             Self::Plain(words) => line.text(words.clone()),
-            Self::ResumeHost { name, advice } => line.host(name).text(*advice),
+            Self::ResumeHost {
+                name,
+                state,
+                advice,
+            } => line.host(name).text(*state).text(*advice),
         }
     }
 }
@@ -427,8 +432,9 @@ impl LaunchDraft {
         {
             return Some(Refusal::ResumeHost {
                 name: display_name(host),
-                advice: ProviderUi(provider)
-                    .suspended_launch_advice(matches!(host.state, HostStateView::Stopped { .. })),
+                state: ProviderUi(provider)
+                    .suspended_launch_state(matches!(host.state, HostStateView::Stopped { .. })),
+                advice: self.resume_host_advice(),
             });
         }
         let words = match (&self.mode, view) {
@@ -446,6 +452,15 @@ impl LaunchDraft {
             }
         };
         words.map(Refusal::Plain)
+    }
+
+    /// Resume is a separate action in Hosts. Name what this launcher will do after the host comes back.
+    fn resume_host_advice(&self) -> &'static str {
+        match self.mode {
+            Mode::New | Mode::Clone => " Resume it in Hosts, then launch.",
+            Mode::RestartWith(_) => " Resume it in Hosts, then restart.",
+            Mode::ReplaceWith { .. } => " Resume it in Hosts, then replace.",
+        }
     }
 
     /// The Agent tab as the launch it would send: `None` without an agent type. The flags and the wrapper are taken

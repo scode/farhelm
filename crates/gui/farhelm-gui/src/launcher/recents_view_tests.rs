@@ -267,29 +267,39 @@ fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppConte
     assert!(!strip_shown(cx), "Restart with has no strip");
 }
 
-/// A setup carrying a retired container choice is refused with the shared reason under the agent choices, and the
-/// draft is unchanged. Such a setup supports Delete only (SPEC.md, "Retired containerized sessions"). Taking a usable
-/// setup afterward retires the refusal, which described the previous choice.
-#[gpui::test]
-fn a_retired_container_setup_is_refused(cx: &mut TestAppContext) {
+/// Put the retired setup beside a usable one so a refusal can be tested both alone and before a second choice.
+fn retired_and_usable_setups() -> serde_json::Value {
     let mut retired = chosen(LaunchHarness::Codex, None, None, None);
     retired.container = Some(
         serde_json::from_value(json!({ "engine": "podman", "image": "old", "api_proxy_port": 1 }))
             .unwrap(),
     );
-    let (_helm, cx) = new_in_tmp(
-        cx,
-        &history(vec![
-            launched("/tmp", &retired),
-            launched("/tmp", &chosen(LaunchHarness::Claude, None, None, None)),
-        ]),
-    );
+    history(vec![
+        launched("/tmp", &retired),
+        launched("/tmp", &chosen(LaunchHarness::Claude, None, None, None)),
+    ])
+}
+
+/// A setup carrying a retired container choice supports Delete only. Refuse it with that reason and keep the draft.
+#[gpui::test]
+fn a_retired_container_setup_is_refused(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_in_tmp(cx, &retired_and_usable_setups());
     let before = draft(cx);
     test_support::click(cx, "launcher-recent-0");
     assert_eq!(draft(cx), before, "nothing changed");
     assert!(
         name_of(cx, "launcher-choice-notice").is_some_and(|notice| notice.contains("Delete only")),
         "the shared reason is said under the agent choices"
+    );
+}
+
+/// A usable choice clears the refusal from the previous row, so it never appears to describe the new draft.
+#[gpui::test]
+fn taking_a_usable_setup_clears_the_retired_container_refusal(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_in_tmp(cx, &retired_and_usable_setups());
+    test_support::click(cx, "launcher-recent-0");
+    assert!(
+        name_of(cx, "launcher-choice-notice").is_some_and(|notice| notice.contains("Delete only"))
     );
     assert!(name_of(cx, "launcher-recent-1").is_some_and(|label| label.contains("Claude")));
     test_support::click(cx, "launcher-recent-1");
@@ -413,21 +423,30 @@ fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
     );
 }
 
-/// A row's name and hover help draw a custom model id escaped, as every host value is. Why: the model id is whatever
-/// the user typed, and a hidden direction mark in it would otherwise reorder the words a screen reader and the hover
-/// help say (SPEC.md: host text is escaped "including in accessible names").
+/// One custom model with a direction override, to distinguish its displayed spelling from its launch value.
+const HIDDEN_MODEL: &str = "m\u{202e}x";
+
+/// A recent setup carrying the model that both the row and the launcher field must present safely.
+fn hidden_model_setup() -> serde_json::Value {
+    history(vec![launched(
+        "/tmp",
+        &chosen(LaunchHarness::Codex, Some(HIDDEN_MODEL), None, None),
+    )])
+}
+
+/// Escape the custom model in the row's accessible name, where a hidden direction mark could reorder the words.
 #[gpui::test]
 fn a_row_names_a_custom_model_escaped(cx: &mut TestAppContext) {
-    let raw = "m\u{202e}x";
-    let answer = history(vec![launched(
-        "/tmp",
-        &chosen(LaunchHarness::Codex, Some(raw), None, None),
-    )]);
-    let (mut helm, cx) = new_in_tmp(cx, &answer);
+    let (_helm, cx) = new_in_tmp(cx, &hidden_model_setup());
     let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
     assert!(name.contains("Model: m<U+202E>x"), "{name}");
     assert!(!name.contains('\u{202e}'), "{name}");
+}
 
+/// Picking the row fills the draft without launching. The field shows the model escaped and Launch sends its raw value.
+#[gpui::test]
+fn a_recent_model_fills_escaped_and_launches_verbatim(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_in_tmp(cx, &hidden_model_setup());
     test_support::click(cx, "launcher-recent-0");
     assert_eq!(super::view_tests::model_text(cx), "m<U+202E>x");
     assert!(
@@ -439,5 +458,8 @@ fn a_row_names_a_custom_model_escaped(cx: &mut TestAppContext) {
     let [create] = sent.as_slice() else {
         panic!("expected one create with the saved model: {sent:?}");
     };
-    assert_eq!(create.body.as_ref().unwrap()["launch"]["model"], raw);
+    assert_eq!(
+        create.body.as_ref().unwrap()["launch"]["model"],
+        HIDDEN_MODEL
+    );
 }

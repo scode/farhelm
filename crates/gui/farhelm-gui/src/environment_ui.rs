@@ -180,18 +180,15 @@ impl ProviderUi {
         }
     }
 
-    /// Why an existing environment cannot take a launch while paused or stopped. The desktop app currently requires
-    /// an explicit Resume in Hosts; this advice must not imply that pressing Launch starts the machine itself.
-    /// The caller draws the host's name as host text before this advice. `stopped` names a stopped environment as
-    /// stopped, the way its Hosts row labels it: Stopped is never labelled Suspended (SPEC.md, "Container sessions").
-    pub(crate) fn suspended_launch_advice(self, stopped: bool) -> &'static str {
+    /// The state clause of the refusal for a launch on an existing environment that is paused or stopped. The caller
+    /// draws the host's name as host text before it and adds the advice to resume it in Hosts, ending with the action
+    /// its launcher mode was trying to take; that advice must not imply that pressing Launch starts the machine itself.
+    /// `stopped` names a stopped environment as stopped, the way its Hosts row labels it: Stopped is never labelled
+    /// Suspended (SPEC.md, "Container sessions").
+    pub(crate) fn suspended_launch_state(self, stopped: bool) -> &'static str {
         match (self.0, stopped) {
-            (ProviderKind::Tensorlake | ProviderKind::Podman, false) => {
-                " is suspended. Resume it in Hosts, then launch."
-            }
-            (ProviderKind::Tensorlake | ProviderKind::Podman, true) => {
-                " is stopped. Resume it in Hosts, then launch."
-            }
+            (ProviderKind::Tensorlake | ProviderKind::Podman, false) => " is suspended.",
+            (ProviderKind::Tensorlake | ProviderKind::Podman, true) => " is stopped.",
         }
     }
 
