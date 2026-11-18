@@ -372,6 +372,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **Launcher models.** replace gpt-6.1-sol with gpt-6.2-sol as the models in the launcher, same with astra (6 to 6.2)
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
