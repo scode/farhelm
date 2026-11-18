@@ -296,6 +296,8 @@ pub enum Icon {
     Branch,
     /// The same bell with its body filled: a session row's bell with something unread (the old app's loud `BellIcon`).
     BellFilled,
+    /// A slashed bell for session mute. The ordinary bells open the session's notifications.
+    BellOff,
     /// A question mark in a circle: the host rail foot's Help button, drawn in the Settings gear's 16-pixel box and
     /// stroke so the two read as a pair (the old app's `HelpIcon`).
     Help,
@@ -441,6 +443,7 @@ impl Icon {
         Icon::Bell,
         Icon::Branch,
         Icon::BellFilled,
+        Icon::BellOff,
         Icon::Help,
         Icon::External,
         Icon::Adjust,
@@ -543,6 +546,7 @@ impl Icon {
             Icon::Bell => "icons/bell.svg",
             Icon::Branch => "icons/branch.svg",
             Icon::BellFilled => "icons/bell-filled.svg",
+            Icon::BellOff => "icons/bell-off.svg",
             Icon::Help => "icons/help.svg",
             Icon::External => "icons/external.svg",
             Icon::Adjust => "icons/adjust.svg",
@@ -677,6 +681,7 @@ impl Assets {
             "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
             "icons/key.svg" => Some(include_bytes!("../assets/icons/key.svg")),
             "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
+            "icons/bell-off.svg" => Some(include_bytes!("../assets/icons/bell-off.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

@@ -280,7 +280,8 @@ impl Badge {
     }
 }
 
-/// Whether `row`'s mark pulses ([`Live::pulses`]): a running session on a connected host.
+/// Whether a live status mark pulses when drawn for this row: a running
+/// session on a connected host.
 pub(crate) fn pulses(row: &SessionRow) -> bool {
     live(row).is_some_and(|live| live.pulses(row.stale))
 }
@@ -301,11 +302,18 @@ pub(crate) fn live(row: &SessionRow) -> Option<Live> {
 }
 
 /// Whether the session has output nobody has looked at: its latest activity is newer than the stamp the helm recorded
-/// the last time a client had it open, or nothing is recorded at all (never opened, or marked unread). SPEC.md,
-/// "Status".
+/// the last time a client had it open, or nothing is recorded at all (never opened, or marked unread). Muted work
+/// stays out of the unseen state on every surface. SPEC.md, "Status".
 pub(crate) fn unseen(row: &SessionRow) -> bool {
-    row.seen_activity_at
-        .is_none_or(|seen| row.info.effective_activity() > seen)
+    !muted(row)
+        && row
+            .seen_activity_at
+            .is_none_or(|seen| row.info.effective_activity() > seen)
+}
+
+/// The helm serves this until the mute actually ends and its seen stamp is in place.
+pub(crate) fn muted(row: &SessionRow) -> bool {
+    row.mute.is_some()
 }
 
 /// What `row`'s status shows anywhere but its sidebar row (the quick switcher's rows, the menu header): an exit with no
@@ -350,12 +358,20 @@ pub(crate) struct EndedWords {
 impl EndedWords {
     /// The wording as one line, a sentence under `id` when it quotes the host.
     pub(crate) fn line(&self, id: SharedString) -> Line {
+        if self.host.is_some() {
+            self.sentence(id).into()
+        } else {
+            Line::from(self.words.clone())
+        }
+    }
+
+    /// The ended wording in a form that can take a qualifier. Escape host
+    /// details before adding app text such as a mute deadline.
+    pub(super) fn sentence(&self, id: SharedString) -> HostSentence {
+        let sentence = HostSentence::new(id).text(self.words.clone());
         match &self.host {
-            Some(host) => HostSentence::new(id)
-                .text(self.words.clone())
-                .host(host)
-                .into(),
-            None => Line::from(self.words.clone()),
+            Some(host) => sentence.host(host),
+            None => sentence,
         }
     }
 }

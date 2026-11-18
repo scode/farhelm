@@ -151,6 +151,8 @@ pub(crate) fn zone(cx: &App) -> Zone {
 
 // ---- Clock text ------------------------------------------------------------------------------------------------------
 
+const SECS_PER_DAY: i64 = 86_400;
+
 /// An instant's calendar date and time of day in a zone, which the public forms below write out.
 struct Civil {
     year: i64,
@@ -163,7 +165,6 @@ struct Civil {
 
 /// The instant `seconds` since the epoch as a date and time of day in `zone`. Times before 1970 land on their own day.
 fn civil(seconds: i64, zone: Zone) -> Civil {
-    const SECS_PER_DAY: i64 = 86_400;
     // Saturating, so a nonsense stamp near the ends of `i64` still gives some date rather than overflowing.
     let local = seconds.saturating_add(zone.offset_at(seconds));
     // Euclidean division, so a time before 1970 lands on its own day rather than reflecting around the epoch.
@@ -205,4 +206,97 @@ pub(crate) fn date(seconds: i64, zone: Zone) -> String {
 pub(crate) fn clock(seconds: i64, zone: Zone) -> String {
     let at = civil(seconds, zone);
     format!("{:02}:{:02}", at.hour, at.minute)
+}
+
+/// The first local 06:00 strictly after the click, as an instant to store
+/// on the helm. Check the offsets on either side of a clock change against
+/// the date itself: adding 24 hours to an instant can land an hour off.
+pub(crate) fn next_morning(now: i64, zone: Zone) -> i64 {
+    let day = local_day(now, zone);
+    // If a clock change skips a morning, try the following date. If it
+    // repeats 06:00, either occurrence can be the next one.
+    for day in day..=day + 2 {
+        let local = day.saturating_mul(SECS_PER_DAY).saturating_add(6 * 3_600);
+        let next = [
+            local.saturating_sub(SECS_PER_DAY),
+            local,
+            local.saturating_add(SECS_PER_DAY),
+        ]
+        .into_iter()
+        .map(|probe| local.saturating_sub(zone.offset_at(probe)))
+        .filter(|&at| at > now && at.saturating_add(zone.offset_at(at)) == local)
+        .min();
+        if let Some(next) = next {
+            return next;
+        }
+    }
+    now.saturating_add(SECS_PER_DAY)
+}
+
+/// A mute deadline is stored in milliseconds. Write it in the viewer's
+/// zone, including the date when today or tomorrow would be ambiguous.
+pub(crate) fn mute_label(until: Option<i64>, now: Option<i64>, zone: Zone) -> String {
+    match until {
+        Some(until) => format!("Muted until {}", mute_end(until, now, zone)),
+        None => "Muted".to_owned(),
+    }
+}
+
+/// When a mute ending at `until` (Unix milliseconds) ends, as the mark and the Mute menu's choices both say it:
+/// `18:40` today, `tomorrow 06:00`, or the full date and time otherwise.
+pub(crate) fn mute_end(until: i64, now: Option<i64>, zone: Zone) -> String {
+    let until = until.div_euclid(1_000);
+    let day = local_day(until, zone);
+    match now.map(|now| day - local_day(now, zone)) {
+        Some(0) => clock(until, zone),
+        Some(1) => format!("tomorrow {}", clock(until, zone)),
+        _ => minute(until, zone),
+    }
+}
+
+/// Local calendar days since the epoch, for deciding which date a time falls on.
+fn local_day(seconds: i64, zone: Zone) -> i64 {
+    seconds
+        .saturating_add(zone.offset_at(seconds))
+        .div_euclid(SECS_PER_DAY)
+}
+
+#[cfg(test)]
+mod mute_tests {
+    use super::*;
+
+    /// Before 06:00 the same date counts, and at 06:00 the next date is
+    /// required. The returned moment also formats in the viewer's zone.
+    #[test]
+    fn morning_uses_the_next_local_six() {
+        let zone = Zone::fixed(3_600);
+        assert_eq!(next_morning(3_600, zone), 18_000);
+        assert_eq!(next_morning(18_000, zone), 104_400);
+        assert_eq!(
+            mute_label(Some(18_000_000), Some(3_600), zone),
+            "Muted until 06:00"
+        );
+        assert_eq!(
+            mute_label(Some(104_400_000), Some(18_000), zone),
+            "Muted until tomorrow 06:00"
+        );
+        assert_eq!(mute_label(None, Some(18_000), zone), "Muted");
+    }
+
+    /// A morning after the spring clock change uses the new offset even
+    /// when the user set the mute under the old one.
+    #[test]
+    fn morning_uses_the_offset_after_the_clock_change() {
+        struct Spring;
+        impl TimeZone for Spring {
+            fn refresh(&self) {}
+
+            fn offset_at(&self, seconds: i64) -> Option<i32> {
+                Some(if seconds < 3_600 { 3_600 } else { 7_200 })
+            }
+        }
+        let zone = Zone(Kind::Platform(&Spring));
+        assert_eq!(next_morning(0, zone), 14_400);
+        assert_eq!(clock(14_400, zone), "06:00");
+    }
 }

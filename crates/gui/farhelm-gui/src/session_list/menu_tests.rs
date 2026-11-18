@@ -245,6 +245,7 @@ fn the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection(cx: &mu
     for next in [
         "session-menu-seen",
         "session-menu-pin",
+        "session-menu-mute",
         "session-menu-clone",
         "session-menu-replace-with",
         "session-menu-replace",
@@ -258,6 +259,69 @@ fn the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection(cx: &mu
     test_support::keys(cx, "escape");
     assert!(!any_layer(cx));
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+}
+
+/// The row menu sends a one-hour deadline from the click, and a pushed
+/// mute hides the seen control. Clicking the bell ends the mute without
+/// opening the session underneath it.
+#[gpui::test]
+fn the_row_menu_mutes_and_the_bell_unmutes_its_session(cx: &mut TestAppContext) {
+    use super::tests::TEST_NOW;
+
+    let a = session("a");
+    let b = session("b").status(json!({ "state": "idle" })).seen(None);
+    let (mut fake, cx) = open_main(cx, snapshot(&[(a, 0), (b.clone(), 0)], false));
+    let dot = test_support::bounds(cx, "session-seen-b");
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert!(
+        deletes(&mut fake).is_empty(),
+        "no Delete while opening the fixture"
+    );
+    test_support::settle(cx);
+
+    test_support::click(cx, "session-menu-b");
+    assert!(
+        drawn(cx, "session-menu-mute"),
+        "the premise: b can be muted"
+    );
+    test_support::click(cx, "session-menu-mute");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute-hour"));
+    let until = (TEST_NOW + 3_600) * 1_000;
+    test_support::keys(cx, "enter");
+    let commands = fake.commands();
+    assert_eq!(commands.len(), 1);
+    let command = &commands[0];
+    assert_eq!(command.method, Method::Put);
+    assert_eq!(command.path, "/api/sessions/b/mute");
+    assert_eq!(
+        command.body,
+        Some(json!({"action": "mute", "until": until}))
+    );
+
+    push(&mut fake, &["a", "b"], &[(b.muted(Some(until)), 0)], cx);
+    fake.reply(command.id, 200, None);
+    test_support::settle(cx);
+    assert!(!drawn(cx, "session-seen-b"));
+    let bell = test_support::bounds(cx, "session-mute-bell-b");
+    // The bell is drawn a little larger than the dot (an outline glyph needs it) but in the same slot, centred where
+    // the dot was, so nothing else in the row moves.
+    assert_eq!(
+        bell.center(),
+        dot.center(),
+        "the bell occupies the old dot's slot"
+    );
+    let name = label_of(cx, "session-mute-bell-b").unwrap();
+    assert!(name.starts_with("Idle — Muted until tomorrow 00:59 — Unmute"));
+    test_support::click(cx, "session-menu-b");
+    assert!(drawn(cx, "session-menu-unmute"));
+    assert!(!drawn(cx, "session-menu-seen"));
+    test_support::keys(cx, "escape");
+    test_support::click(cx, "session-mute-bell-b");
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert_eq!(
+        sent(&mut fake),
+        [("/api/sessions/b/mute".into(), json!({"action": "unmute"}))]
+    );
 }
 
 /// SPEC.md: a menu goes away "when the thing it is about is gone (a deleted session's open menu, say)", and focus
@@ -336,6 +400,11 @@ fn the_menu_and_its_commands_say_whose_they_are_and_what_each_does(cx: &mut Test
             "session-menu-pin",
             "Pin to top",
             "Keep this session above unpinned ones",
+        ),
+        (
+            "session-menu-mute",
+            "Mute",
+            "Stop routine work turning it blue or moving it up",
         ),
         ("session-menu-clone", "Clone", "New session, keep this one"),
         (
@@ -698,7 +767,7 @@ fn the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it(cx: &mut Test
     for (key, expected) in [
         ("down", "session-menu-replace-with"),
         ("up", "session-menu-clone"),
-        ("up", "session-menu-pin"),
+        ("up", "session-menu-mute"),
     ] {
         test_support::keys(cx, key);
         assert_eq!(focused_id(cx).as_deref(), Some(expected), "after {key}");
@@ -706,7 +775,7 @@ fn the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it(cx: &mut Test
     test_support::redraw(cx);
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("session-menu-pin"),
+        Some("session-menu-mute"),
         "the resting pointer does not take the highlight back"
     );
 
@@ -714,7 +783,7 @@ fn the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it(cx: &mut Test
     test_support::settle(cx);
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("session-menu-pin"),
+        Some("session-menu-mute"),
         "leaving the menu leaves the highlight where it is"
     );
     cx.simulate_mouse_move(clone, None, Modifiers::none());
@@ -1401,8 +1470,8 @@ fn a_refusal_shows_on_the_row_until_the_next_delete_starts(cx: &mut TestAppConte
 /// (`tests/sidebar.spec.ts`, "a retained refusal stays inside a bottom-row menu's scrolling panel", at reference commit
 /// `24bc0580`, whose 120-word refusal this reuses). Specified: in a window of the app's least size, with b's Delete
 /// refused in 120 words, b's reopened menu lies inside the window with focus on Rename, drawn wholly inside the menu,
-/// and the refusal runs past the menu's bottom; End reaches Delete, drawn wholly inside the menu (the commands fit
-/// unscrolled, so this checks reach, not the reveal); a wheel turn over the menu brings the refusal's end inside it, and
+/// and the refusal runs past the menu's bottom; End reaches Delete, drawn wholly inside the menu;
+/// a wheel turn over the menu brings the refusal's end inside it, and
 /// the menu stays where it was; with Rename scrolled out above the menu, Home focuses it and scrolls it wholly inside.
 #[gpui::test]
 fn a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window(cx: &mut TestAppContext) {
@@ -1411,7 +1480,11 @@ fn a_long_refusal_scrolls_inside_a_menu_that_stays_in_a_small_window(cx: &mut Te
     cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
     test_support::settle(cx);
     deletes(&mut fake);
-    choose_delete(cx, "session-menu-b");
+    // At this size the menu can clip its final command before scrolling.
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "end");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
+    test_support::keys(cx, "enter");
     test_support::click(cx, "prompt-confirm");
     let [(id, _)] = deletes(&mut fake)[..] else {
         panic!("one Delete was sent");

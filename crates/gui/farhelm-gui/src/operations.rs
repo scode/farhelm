@@ -180,6 +180,8 @@ pub enum Work {
     /// The session's Pin to top or Unpin (`PUT /api/sessions/{id}/pin`), from its row's menu (`session_list::pins`),
     /// on the session's own key like Mark read, so its other actions are unavailable while it runs. Not supersedable.
     Pin,
+    /// Write the session's shared mute, or end it and mark its current work seen.
+    Mute,
     /// The session's Move up or Move down among the pins (`PUT /api/sessions/{id}/pin-order`), from its row's menu, on
     /// the session's own key. Apart from [`Work::Pin`] because the old app named the two refusals differently ("Pin:"
     /// and "Move pin:"). Not supersedable: each press names the neighbor it was drawn with.
@@ -257,6 +259,7 @@ impl Work {
             Work::RetryHost => false,
             Work::AdoptHost => false,
             Work::Pin => false,
+            Work::Mute => false,
             Work::MovePin => false,
             Work::Suspend => false,
             Work::Resume => false,
@@ -296,6 +299,7 @@ impl Work {
             Work::RetryHost => false,
             Work::AdoptHost => true,
             Work::Pin => false,
+            Work::Mute => false,
             Work::MovePin => false,
             Work::Suspend => false,
             Work::Resume => false,

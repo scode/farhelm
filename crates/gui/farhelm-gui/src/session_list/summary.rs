@@ -178,6 +178,8 @@ pub(crate) struct Summary {
     pub(crate) status: Option<CardStatus>,
     /// Whether the session's status is only last-known (its host is not connected).
     pub(crate) stale: bool,
+    /// A row's mute wording in this viewer's clock, beside its real status.
+    muted: Option<String>,
     /// The agent line, a sentence under `id`: [`agent_line`].
     pub(crate) agent: HostSentence,
     pub(crate) facts: Vec<Fact>,
@@ -235,6 +237,7 @@ impl Summary {
             title: HostText::from_host(row.info.title.as_str()),
             status,
             stale: row.stale,
+            muted: super::mute::label(row, now, zone),
             agent: agent_line(
                 SharedString::from(format!("{SUMMARY_ID_PREFIX}{key}-agent")),
                 row,
@@ -339,6 +342,7 @@ impl Render for SummaryCard {
 /// The card's drawing: the old `.session-summary` header, body and footer, the running mark at pulse step `pulse`.
 fn draw(key: &str, summary: &Summary, palette: &Palette, pulse: u64) -> AnyElement {
     let id = |part: &str| SharedString::from(format!("{SUMMARY_ID_PREFIX}{key}{part}"));
+    let pulse = if summary.muted.is_some() { 0 } else { pulse };
     let status = summary.status.map(|status| {
         let ink = status.ink(palette, summary.stale);
         div()
@@ -390,7 +394,15 @@ fn draw(key: &str, summary: &Summary, palette: &Palette, pulse: u64) -> AnyEleme
                 .text_size(SMALL_TEXT)
                 .text_color(theme::color(palette.fg_1))
                 .child(summary.agent.clone()),
-        );
+        )
+        .children(summary.muted.as_ref().map(|muted| {
+            div()
+                .id(id("-mute"))
+                .mt(px(3.))
+                .text_size(SMALL_TEXT)
+                .text_color(theme::color(palette.fg_1))
+                .child(muted.clone())
+        }));
     let body = div()
         .flex()
         .flex_col()

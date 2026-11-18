@@ -139,6 +139,8 @@ pub struct Observation {
     /// The session that stays quiet: the open session while its window is active, or `None`. Its waiting, its turn
     /// finishing and its own approval requests do not ring (they are still consumed).
     pub quiet: Option<String>,
+    /// Sessions whose shared mute silences the turn-finished sound only.
+    pub muted: HashSet<String>,
     /// The switches as they are now. A disabled event is consumed like a played one.
     pub switches: Switches,
 }
@@ -151,10 +153,20 @@ pub struct Observation {
 /// list and is presented again (a later listing repeating it) must not ring a second time.
 #[derive(Debug, Default)]
 pub struct SoundRules {
-    /// The previous observation's view and statuses; `None` until the first observation, which is silent.
-    previous: Option<(u64, BTreeMap<String, Status>)>,
+    /// `None` until the first observation, which is silent.
+    previous: Option<Previous>,
     /// Every approval id observed in this UI session, pending or not.
     seen_approvals: HashSet<String>,
+}
+
+/// The status edges the window can hear start at its last observation.
+/// Mute belongs to that observation too, since two helm changes can reach
+/// a window in a single listing.
+#[derive(Debug)]
+struct Previous {
+    view: u64,
+    statuses: BTreeMap<String, Status>,
+    muted: HashSet<String>,
 }
 
 /// One status or approval change that may raise a sound, and the session it concerns (for the quiet check).
@@ -175,15 +187,19 @@ impl SoundRules {
     /// the quiet session. A quiet or disabled event never hides a less urgent audible one, and however many sessions
     /// change at once, one observation plays at most one sound.
     pub fn observe(&mut self, current: Observation) -> Option<Sound> {
-        let sound = self.previous.as_ref().and_then(|(view, statuses)| {
+        let sound = self.previous.as_ref().and_then(|previous| {
             // A changed view has no status history to compare against: its statuses are recorded, not judged.
-            let statuses = (*view == current.view).then_some(statuses);
+            let statuses = (previous.view == current.view).then_some(&previous.statuses);
             let events = self.events(statuses, &current);
-            choose(&events, &current)
+            choose(&events, &current, &previous.muted)
         });
         self.seen_approvals
             .extend(current.approvals.into_iter().map(|approval| approval.id));
-        self.previous = Some((current.view, current.statuses));
+        self.previous = Some(Previous {
+            view: current.view,
+            statuses: current.statuses,
+            muted: current.muted,
+        });
         sound
     }
 
@@ -222,12 +238,24 @@ impl SoundRules {
     }
 }
 
-/// The most urgent enabled sound with an event outside the quiet session, or `None`.
-fn choose(events: &[Event<'_>], current: &Observation) -> Option<Sound> {
+/// Filter each event before choosing a sound, so a quiet or muted session
+/// cannot suppress an audible event from another session. A finishing
+/// observation that also removes the mute stays quiet: the window may
+/// have missed the finish while it was muted. The next observed unmuted
+/// turn can ring normally.
+fn choose(
+    events: &[Event<'_>],
+    current: &Observation,
+    previously_muted: &HashSet<String>,
+) -> Option<Sound> {
     Sound::PRIORITY.into_iter().find(|&sound| {
         current.switches.enabled(sound)
             && events.iter().any(|event| {
-                event.sound == sound && current.quiet.as_deref() != Some(event.session)
+                event.sound == sound
+                    && current.quiet.as_deref() != Some(event.session)
+                    && (sound != Sound::TurnFinished
+                        || (!current.muted.contains(event.session)
+                            && !previously_muted.contains(event.session)))
             })
     })
 }
@@ -259,6 +287,7 @@ mod tests {
                 })
                 .collect(),
             quiet: None,
+            muted: HashSet::new(),
             switches: Switches::default(),
         }
     }
@@ -475,6 +504,41 @@ mod tests {
             turn_finished: false,
         };
         assert_eq!(start().observe(everything(None, none)), None);
+    }
+
+    /// Muting a session only consumes its turn-finished sound. The same
+    /// session can still catch the user's attention with a wait or approval.
+    #[test]
+    fn mute_consumes_the_turn_finished_sound_only() {
+        let start = || after(obs(&[("a", Running)], &[]));
+        let muted = |status, approvals| Observation {
+            muted: HashSet::from(["a".to_owned()]),
+            switches: all_on(),
+            ..obs(&[("a", status)], approvals)
+        };
+        assert_eq!(start().observe(muted(Idle, &[])), None);
+        assert_eq!(start().observe(muted(Waiting, &[])), Some(Sound::Waiting));
+        assert_eq!(
+            start().observe(muted(Idle, &[("new", "a")])),
+            Some(Sound::Approval)
+        );
+    }
+
+    /// The fleet can deliver the finished turn and the end of mute
+    /// together. Keep that edge quiet, then ring for a new unmuted turn.
+    #[test]
+    fn finish_and_end_of_mute_in_one_update_stay_quiet() {
+        let at = |status| Observation {
+            switches: all_on(),
+            ..obs(&[("a", status)], &[])
+        };
+        let mut rules = after(Observation {
+            muted: HashSet::from(["a".to_owned()]),
+            ..at(Running)
+        });
+        assert_eq!(rules.observe(at(Idle)), None);
+        assert_eq!(rules.observe(at(Running)), None);
+        assert_eq!(rules.observe(at(Idle)), Some(Sound::TurnFinished));
     }
 
     /// The defaults are SPEC.md's: waiting and approval on, turn finished off. A running-to-idle edge under the

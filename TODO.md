@@ -392,9 +392,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   together as activity changes and show when a collapsed group contains a session that needs attention. Plan:
   `plans/queue/session-groups.md`.
 
-- **Mute a session.** the ability to "mute" a session so it doesnt turn blue and doesn't promote as recent for a while
-  or permanently. Plan: `plans/queue/mute-sessions.md`.
-
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks

@@ -55,7 +55,8 @@
 //! after it move up. Choosing it closes the menu, which leaves focus on the menu's button, and then sends the request.
 //! In the same group come Pin to top or Unpin, then Move up and Move down where the row has a displayed pin that way
 //! ([`super::pins`]), each closing the menu the same way before its request goes out, so focus stays on the moved row's
-//! button.
+//! button. Mute follows the pin actions and opens its own duration menu. A muted row offers Unmute there and omits
+//! the seen toggle, since the helm marks its current activity seen when the mute ends.
 //!
 //! After a separator come the launcher's two, Clone and Replace with…, in the old menu's group of "make a new
 //! session from this one" commands, ahead of Replace. Choosing one closes the menu, which leaves focus on its button,
@@ -124,6 +125,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use farhelm_helm_client::{Collections, PathError};
+use farhelm_proto::SessionMuteRequest;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, FocusHandle, InteractiveElement, IntoElement,
@@ -138,7 +140,7 @@ use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{
     HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Role, Tier, home_end_keys,
-    menu_separator, toggle_arrow_keys,
+    menu_separator, submenu, toggle_arrow_keys,
 };
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -384,6 +386,7 @@ impl SessionList {
         };
         let mark = Mark::take(cx);
         let rename_focus = cx.focus_handle().tab_stop(true);
+        let mute_focus = cx.focus_handle().tab_stop(true);
         let delete_focus = cx.focus_handle().tab_stop(true);
         // A retired session's menu holds Delete alone, so its first command is Delete too.
         let retired = session::current_store(cx).is_some_and(|store| {
@@ -402,6 +405,7 @@ impl SessionList {
             key: key.to_owned(),
             list,
             rename_focus,
+            mute_focus,
             delete_focus,
             scroll: ScrollHandle::new(),
         });
@@ -592,7 +596,7 @@ pub(crate) fn refused(key: &str, cx: &App) -> bool {
         || environment::held(key, cx)
 }
 
-/// Send `command`, one of the row's own requests (a seen toggle, a pin, a move), through the operation store under
+/// Send `command`, a row's metadata request, through the operation store under
 /// `key`'s session key, so it is that session's one request in flight and its other actions wait for it. Nothing waits
 /// for the reply: a refusal is the store's to keep and the row's to show ([`outcome`]), and a success needs nothing,
 /// since the helm has pushed its effect by the time it replies. Nothing is sent while the session already has a
@@ -706,6 +710,8 @@ pub(super) struct RowMenu {
     list: WeakEntity<SessionList>,
     /// The Rename command's focus handle: the menu's first command, where a click or Down opens it and Home goes.
     rename_focus: FocusHandle,
+    /// The mute item keeps its keyboard position as the helm changes its state.
+    mute_focus: FocusHandle,
     /// The Delete command's focus handle: the menu's last command, where Up on the closed button opens it and End
     /// goes. Delete is last whichever commands the row offers, as in the old menu's order.
     delete_focus: FocusHandle,
@@ -725,7 +731,7 @@ impl Render for RowMenu {
             .w(px(PANEL_WIDTH))
             .max_h(crate::notices_bell::window_cap(window))
             .overflow_y_scroll();
-        focus::scroll_region(self.contents(panel, cx), &self.scroll)
+        focus::scroll_region(self.contents(panel, window, cx), &self.scroll)
     }
 }
 
@@ -733,7 +739,12 @@ impl RowMenu {
     /// The menu's header, its commands and the session's refusal or notice line, drawn into `panel` from the store as
     /// it reads now; `panel` stays empty while the session is gone from the store, until the frame that drops its row
     /// closes the menu.
-    fn contents(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn contents(
+        &self,
+        panel: Stateful<Div>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
@@ -923,19 +934,26 @@ impl RowMenu {
         )
         .focus(&self.delete_focus);
         // A retired session's menu holds Delete alone (the module docs), the same item every row's menu ends with.
+        let pinned = super::pins::menu_items(&self.list, &self.key, row, busy, cx);
+        let muted = (!retired).then_some(status::muted(row));
+        let header = MenuHeader::new(
+            &title,
+            summary(&self.key, row, environment.map(Environment::label)),
+        );
+        let actions = actions_label(&row.info.title);
+        let mute = muted.map(|muted| self.mute_item(muted, busy, window, cx));
         let items = div()
             .id("session-menu-items")
             .role(Role::Menu)
-            .aria_label(actions_label(&row.info.title))
+            .aria_label(actions)
             .flex()
             .flex_col()
             .when(!retired, |items| {
                 items
                     .child(rename)
                     .children(seen_item)
-                    .children(super::pins::menu_items(
-                        &self.list, &self.key, row, busy, cx,
-                    ))
+                    .children(pinned)
+                    .children(mute)
                     .child(menu_separator(cx))
                     .children(environment_items)
                     .child(clone)
@@ -948,12 +966,57 @@ impl RowMenu {
             })
             .child(delete);
         panel
-            .child(MenuHeader::new(
-                &title,
-                summary(&self.key, row, environment.map(Environment::label)),
-            ))
+            .child(header)
             .child(items)
             .children(outcome::menu_line(&self.key, cx))
+    }
+
+    /// An active mute has a single way to end from the row menu. An
+    /// unmuted row opens the shared durations menu without closing this one.
+    fn mute_item(&self, muted: bool, busy: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+        let (list, key) = (self.list.clone(), self.key.clone());
+        let apply = move |request, window: &mut Window, cx: &mut App| {
+            let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
+            if !refused(&key, cx) {
+                super::mute::send(&key, request, cx);
+            }
+        };
+        let (id, label, help) = if muted {
+            (
+                "session-menu-unmute",
+                "Unmute",
+                "End the mute and mark the session seen",
+            )
+        } else {
+            (
+                "session-menu-mute",
+                "Mute",
+                "Stop routine work turning it blue or moving it up",
+            )
+        };
+        let item = MenuItem::new(
+            id,
+            Icon::BellOff,
+            label,
+            HoverHelp::tooltip(help),
+            Role::MenuItem,
+        )
+        .description(help)
+        .disabled(busy)
+        .focus(&self.mute_focus);
+        if muted {
+            return item
+                .on_click(move |_, window, cx| apply(SessionMuteRequest::Unmute, window, cx))
+                .into_any_element();
+        }
+        submenu(
+            id.into(),
+            item,
+            &self.mute_focus,
+            move |cx| super::mute::durations(id, apply.clone(), cx),
+            window,
+            cx,
+        )
     }
 
     /// An environment session's own commands, at the head of the Clone group (the module docs): Suspend or Resume, as

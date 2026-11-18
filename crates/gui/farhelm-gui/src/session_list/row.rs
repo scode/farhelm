@@ -30,6 +30,8 @@
 //! A session with notifications has a bell before its age, in the age track ([`crate::notices_bell`], which draws it
 //! and its list and keeps its press from the open control), so the track widens by the bell on that row only and its
 //! title gives way, as the old activity column did with the bell's slot in it.
+//! A mute has its own slashed bell ([`super::mute`]). It takes the dot's slot except during a connected wait, when it
+//! sits next to the title and leaves the waiting mark visible. An ended row has the mute in its help.
 //!
 //! **Compact rows.** With the helm-wide compact preference on ([`Steps::compact`]), every row is its first line alone:
 //! no ended line and no last line. SPEC.md, "Session list": "The second line is hidden when the helm-wide compact
@@ -328,12 +330,15 @@ pub(crate) fn row(
     }
     let label = label.host(&title).accessible_name();
     let item_label = label.clone();
+    let muted = super::mute::label(row, steps.now, steps.zone);
     let words: Line = if compact {
-        compact_help(&id, row, cause).into()
+        compact_help(&id, row, cause, muted.as_deref()).into()
     } else {
-        match Badge::word(badge.as_ref()) {
-            Some(word) => format!("{word} — open this session"),
-            None => "Open this session".to_owned(),
+        match (Badge::word(badge.as_ref()), muted.as_deref()) {
+            (Some(word), Some(muted)) => format!("{word} · {muted} — open this session"),
+            (None, Some(muted)) => format!("Unclassified · {muted} — open this session"),
+            (Some(word), None) => format!("{word} — open this session"),
+            (None, None) => "Open this session".to_owned(),
         }
         .into()
     };
@@ -346,8 +351,13 @@ pub(crate) fn row(
     };
     // A compact row's ended status is a mark in the live dot's place; a noncompact row's is its ended line.
     let ended_mark = compact
-        .then(|| ended_mark(&id, row, palette, selected))
+        .then(|| ended_mark(&id, row, palette, selected, muted.as_deref()))
         .flatten();
+    let activity_mark = if super::mute::replaces_dot(row) {
+        Some(super::mute::bell(session, selected, steps, cx))
+    } else {
+        live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx))
+    };
     let identity = div()
         .flex()
         .flex_row()
@@ -361,10 +371,9 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                // The live dot is also the seen toggle ([`super::seen`]); a compact ended mark is no control.
-                .children(
-                    live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx)),
-                )
+                // Mute uses the dot's slot. Only a connected wait keeps
+                // its own dot and shows the bell after the title instead.
+                .children(activity_mark)
                 .children(ended_mark),
         )
         // The locality slot, kept at its width whether or not the session's host can be placed.
@@ -410,7 +419,13 @@ pub(crate) fn row(
             Some(guard) => {
                 delete::progress(session.key, guard, steps.spinner, selected, cx).into_any_element()
             }
-            None => title_element(&title, retired, inks),
+            None => title_element(
+                &title,
+                retired,
+                inks,
+                super::mute::after_title(row)
+                    .then(|| super::mute::bell(session, selected, steps, cx)),
+            ),
         })
         // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`), or a compact
         // suspended row's pause mark in its place.
@@ -510,16 +525,23 @@ pub(crate) fn row(
 /// its own, gives way, so the retirement stays readable however narrow the sidebar is. The two are separate text
 /// elements, since a host value is always one of its own, so the prefix's closing space is drawn as a gap between them
 /// rather than left to each shaper's handling of a run's trailing space.
-fn title_element(title: &HostText, retired: bool, inks: Inks) -> AnyElement {
+/// A waiting row's bell sits against the title while the group takes the
+/// remaining width. Only the title text gives way when space runs short.
+fn title_element(
+    title: &HostText,
+    retired: bool,
+    inks: Inks,
+    bell: Option<AnyElement>,
+) -> AnyElement {
     let styled = |element: gpui::Div| {
         element
             .text_size(metrics::TEXT_ROW_TITLE)
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::color(inks.title))
     };
-    let host = host_text::element(title).flex_1().min_w_0().truncate();
-    if !retired {
-        return styled(host).into_any_element();
+    let host = host_text::element(title).min_w_0().truncate();
+    if !retired && bell.is_none() {
+        return styled(host.flex_1()).into_any_element();
     }
     styled(
         div()
@@ -527,15 +549,21 @@ fn title_element(title: &HostText, retired: bool, inks: Inks) -> AnyElement {
             .min_w_0()
             .flex()
             .flex_row()
+            .when(bell.is_some(), |title| title.items_center())
             .gap(TITLE_PREFIX_GAP),
     )
-    .child(
+    .children(retired.then(|| {
         div()
             .flex_none()
             .whitespace_nowrap()
-            .child(super::retired::TITLE_PREFIX.trim_end()),
-    )
-    .child(host)
+            .child(super::retired::TITLE_PREFIX.trim_end())
+    }))
+    .child(if bell.is_some() {
+        host.flex_initial()
+    } else {
+        host.flex_1()
+    })
+    .children(bell)
     .into_any_element()
 }
 
@@ -609,22 +637,26 @@ fn ended_mark(
     row: &SessionRow,
     palette: &Palette,
     selected: bool,
+    muted: Option<&str>,
 ) -> Option<impl IntoElement + use<>> {
     let glyph = status::EndedGlyph::of(row)?;
     let words = status::ended_words(row, true)?;
     let id = SharedString::from(format!("{row_id}{ENDED_ID_SUFFIX}"));
     // The words quote the host after the app's own (a stop annotation, a launch failure's detail), so help naming them
     // is a sentence, which escapes them as the screen does.
-    let help = match &words.host {
-        Some(host) => HoverHelp::sentence(
-            HostSentence::new(SharedString::from(format!("{id}-help")))
-                .text(words.words.clone())
-                .host(host),
-        ),
-        None => HoverHelp::tooltip(words.words.clone()),
+    let sentence = |id| {
+        let mut line = words.sentence(id);
+        if let Some(muted) = muted {
+            line = line.text(" · ").text(muted);
+        }
+        line
+    };
+    let help = match (&words.host, muted) {
+        (None, None) => HoverHelp::tooltip(words.words.clone()),
+        _ => HoverHelp::sentence(sentence(SharedString::from(format!("{id}-help")))),
     };
     let help = HelpPlace::Row { selected }.place(help);
-    let name = words.line(id.clone()).accessible_text();
+    let name = sentence(id.clone()).accessible_name();
     let ink = glyph.color(palette, selected);
     Some(
         StatusMark::new(id.clone(), name.clone(), help, Role::Image, name)
@@ -670,6 +702,7 @@ fn compact_help(
     row_id: &SharedString,
     row: &SessionRow,
     cause: Option<&'static str>,
+    muted: Option<&str>,
 ) -> HostSentence {
     let mut help = HostSentence::new(SharedString::from(format!("{row_id}-help")));
     let mut first = true;
@@ -687,6 +720,11 @@ fn compact_help(
         }
     } else if let Some(live) = status::live(row) {
         help = separate(help).text(live.word());
+    } else if muted.is_some() {
+        help = separate(help).text("Unclassified");
+    }
+    if let Some(muted) = muted {
+        help = separate(help).text(muted);
     }
     if let Some(cause) = cause {
         help = separate(help).text(cause);

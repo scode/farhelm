@@ -77,6 +77,7 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         // The old app's pin lines (`on_pin` and `on_move_pin` in `list/view.rs`): a pin's and a move's refusals are
         // told apart by their names.
         Work::Pin => Some("Pin: "),
+        Work::Mute => Some("Mute: "),
         Work::MovePin => Some("Move pin: "),
         // The old list's error slot for an environment's Suspend and Resume ("Sandbox: " for either provider, as the
         // old `HeaderAction::Sandbox` wrote it), and Stop's for Stop and suspend, which the old list ran as a Stop
@@ -217,6 +218,7 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
+        | Work::Mute
         | Work::MovePin
         | Work::Suspend
         | Work::Resume

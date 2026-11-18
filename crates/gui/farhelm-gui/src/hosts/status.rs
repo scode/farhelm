@@ -191,6 +191,7 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
+        | Work::Mute
         | Work::MovePin
         | Work::Suspend
         | Work::Resume
