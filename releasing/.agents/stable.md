@@ -23,22 +23,24 @@ to deploy the website while the notes are still a draft, say so before deploying
 The version, announcements and any upgrade-floor raise are settled when the stable release is requested, and from then
 on nothing waits for the maintainer until the tag's build is running. Apply `releasing/AGENTS.md`, "Rules for every
 release", to compare the previous stable's floor with the proposed main base and obtain acceptance of a raise. An
-earlier-base choice pauses this default main-based procedure there, before step 1. A request that names a version
-settles the version. So does a request that follows a release candidate: when the most recent published release,
-prereleases included and ordered by publication time (the same lookup as `releasing/.agents/rc.md`, "Cutting an RC
-release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and `vX.Y.Z` does not exist yet, the version is `X.Y.Z`. Announce it without
-asking about the version again. Only when neither applies, or the version's tag already exists, ask which version to
-cut, and ask it in the same reply that acknowledges the request, before any other work; never stop later for it. The
-base is not a question: it is always the changelog PR's merge commit (step 5). The maintainer asked for this on
-2026-10-16, after the v0.29.0 attempt stopped with every pre-tag check passing to confirm a version that rc.3 had
-already settled. The tag's build gate is the slowest part of a release and the one that turns up the failures to fix
-forward, so it starts the moment the pre-tag checks pass.
+earlier-base choice pauses this default main-based procedure there, before step 1.
+
+Use the version named in the request. If the request omits it, look up the most recent published release, including
+prereleases and ordered by publication time (the same lookup as `releasing/.agents/rc.md`, "Cutting an RC release"). If
+it is `X.Y.Z-rc.N` or `X.Y.Z-dev.N`, use `X.Y.Z`. If it is stable, increment the minor version and reset the patch to
+zero. For example, after stable `v0.40.0`, cut `v0.41.0`.
+
+Check that the chosen version's tag is available, then announce the version in the request-settling reply. Ask which
+version to cut in that reply only if neither the request nor the lookup yields a version, or the chosen tag already
+exists. The release branch starts at the changelog PR's merge commit (step 5). Settle the version up front so the tag's
+build gate can start as soon as the pre-tag checks pass. The v0.29.0 attempt stopped there to confirm a version that
+rc.3 had already settled.
 
 In that same request-settling reply, show main's selected announcements for `X.Y.Z` and its prereleases and ask whether
-to add or change any, per `releasing/AGENTS.md`, "In-app announcements". Ask even when the version is already settled by
-an RC or the request, and when there was no earlier RC; "no" is enough. This is separate from the release-note wording
-review that runs alongside the tag build. Wait for the announcement answer before step 1, and carry any additions or
-changes in step 4's changelog PR. Stable re-cuts carry over the settled list without asking again.
+to add or change any, per `releasing/AGENTS.md`, "In-app announcements". Ask even when the version is already settled,
+including when there was no earlier RC. "No" is enough. This is separate from the release-note wording review that runs
+alongside the tag build. Wait for the announcement answer before step 1, and carry any additions or changes in step 4's
+changelog PR. Stable re-cuts carry over the settled list without asking again.
 
 1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Review every required commit since the last
    stable release. Read the commit and PR when a fragment is `MISSING`. Draft entries for changes that meet the criteria
