@@ -7,6 +7,11 @@ attempt is cut per `releasing/.agents/stable.md`, "Re-cutting a stable release".
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+>
+> NOTE: When the release stops to wait on the maintainer at a point where this procedure already waits (a question it
+> says to ask, a line or task only they can do, an approval or verdict, a problem you cannot get past), send an urgent
+> notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That adds no stops: what runs without
+> asking also runs without a notification.
 
 When a release attempt of any kind, stable, RC or dev, turns up a problem, the default is to fix forward without
 stopping to ask: fix it on a branch off the latest main, land the fix on main, and cut the next attempt from main's new

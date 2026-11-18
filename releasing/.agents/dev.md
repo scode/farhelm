@@ -5,6 +5,11 @@ procedure itself is `releasing/.agents/rc.md`, which that reading list also name
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+>
+> NOTE: When the release stops to wait on the maintainer at a point where this procedure already waits (a question it
+> says to ask, a line or task only they can do, an approval or verdict, a problem you cannot get past), send an urgent
+> notification first, per `releasing/AGENTS.md`, "Notifying the maintainer". That adds no stops: what runs without
+> asking also runs without a notification.
 
 A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure in
 `releasing/.agents/rc.md`, "Cutting an RC release", with `dev` in place of `rc` everywhere — the bump commit is
