@@ -67,10 +67,15 @@ Historical profiles remain usable for status and cleanup.
     expected = {role: profile.values[role + '_base'] for role in ('mac', 'linux')}
     obligations = {'native-screenshot-click-type', 'native-after-reopen', 'clone-permission-carryover',
                    'auth-not-in-bases', 'farhelm-clean', 'linux-codex-ready'}
+    # The receipt attests the local runtime that carries native permissions.
+    # The model and effort belong to the run, whose preflight exercises them.
+    runtime_keys = {'codex', 'python', 'desktop_app'}
+    attested_settings = receipt.get('settings')
     if (receipt.get('format') != 1 or receipt.get('bases') != expected
             or not isinstance(receipt.get('checks'), dict)
             or any(receipt['checks'].get(key) is not True for key in obligations)
-            or receipt.get('settings') != config['settings']):
+            or not isinstance(attested_settings, dict)
+            or any(attested_settings.get(key) != config['settings'][key] for key in runtime_keys)):
         raise Refused('guest-native fixture receipt is incomplete or names different bases/runtime')
     return config
 
@@ -138,7 +143,7 @@ conversation identities, and each session's terminal host and child process
 identities (pid and start identity), in shared_state.json.''')
     return '''P0 carries one old agent session per host into the upgrade. Still on the
 previous release, through the old app's normal GUI launch ONE genuine Codex
-session on local and ONE on the remote host, gpt-6.1-sol low effort, YOLO and
+session on local and ONE on the remote host, using the configured model at low effort, YOLO and
 per-run trust where offered. In each send exactly: Remember the word bluebird.
 What is 17 + 25? Answer in one short sentence. Require a separate actual answer
 42 and completion. ''' + capture + '''
@@ -329,7 +334,7 @@ indistinguishable endpoint as a gap. Retain native image and version/command
 receipts. Do not require the remote supervisor upgraded in this checkpoint.''',
         'local-supervisor-agent': '''Require connected candidate local supervisor; its managed relaunch normally
 upgrades it automatically. Use local Update if the product offers it. Through
-native Farhelm GUI launch ONE genuine Codex session on local, model gpt-6.1-sol,
+native Farhelm GUI launch ONE genuine Codex session on local with the configured model,
 low effort, yolo, per-run trust true. Send: What is 17 + 25? Explain in one short
 sentence. Require separate actual answer 42 with sensible explanation, terminal
 responsiveness and idle/completion. Retain native image and candidate running
@@ -338,7 +343,7 @@ prerequisites.''',
         'remote-supervisor-agent': '''Use native Farhelm remote Update. Require the formerly old remote supervisor
 connected at candidate, independently verify its running systemd user service
 over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
-host, gpt-6.1-sol low effort yolo/trust true where supported. Send: What is 17 +
+host with the configured model at low effort and yolo/trust true where supported. Send: What is 17 +
 25? Explain in one short sentence. Require actual answer 42, explanation,
 responsive terminal and completion. A plain command is insufficient. Retain
 native image plus remote version/service evidence. Leave the old remote
@@ -439,8 +444,8 @@ For every fixture except p0-installer-upgrade, add context.ssh.alias through the
 ordinary Add host GUI, accept its ordinary setup confirmation and require remote
 connected at previous. Then call remote_version.''',
         'local-supervisor-agent': '''Require connected candidate local supervisor, using local Update only if offered.
-Through Farhelm native GUI launch one genuine local Codex session, gpt-6.1-sol
-low effort YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
+Through Farhelm native GUI launch one genuine local Codex session with the configured
+model at low effort, YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
 in one short sentence. Require a separate actual answer 42, sensible explanation,
 responsive terminal and completion. Call versions. Leave the old session from
 old-fixture untouched. Retain actual native images.''',
@@ -450,7 +455,7 @@ dialog. Update now can complete directly, and absence of a confirmation is not
 a failure. Do not change confirmation preferences or repeat a completed update
 to obtain a dialog.
 Require connected candidate remote, then call remote_version. Launch one genuine
-remote Codex session, gpt-6.1-sol low effort YOLO and per-run trust where offered.
+remote Codex session with the configured model at low effort, YOLO and per-run trust where offered.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
 answer 42, explanation, responsive terminal and completion. Leave the old
 remote session from old-fixture untouched. Leave this new session running: the
@@ -460,7 +465,7 @@ remote host Remove and Uninstall checks carry it. Capture native images.''',
         'remote-provision': '''Add context.ssh.alias through native Add host and its ordinary confirmation.
 Require connected candidate remote and call remote_version. Capture native image.''',
         'codex-conversation': '''On the connected candidate local host, launch one genuine session for each
-context.agents entry. For Codex use gpt-6.1-sol, low effort and per-launch YOLO
+context.agents entry. For Codex use the configured model at low effort and per-launch YOLO
 confirmation. Send a small prompt and require a separate meaningful answer,
 responsive terminal and completion. Require a captured conversation in Farhelm,
 not only terminal output. Call inspect_state until its session receipt records
@@ -634,11 +639,21 @@ def task_for(run, pass_id, check_id, context, timeout=1200):
     entry = run.selected(pass_id)
     gui = check_id == 'native-preflight' or entry['required'][check_id]['gui']
     attempt = str(uuid.uuid4())
+    settings = run.profile.values['guest_tester']['settings']
     context = dict(context, verification_helper=context['pass_directory'] + '/' + attempt + '/verify_release.py',
                    fixture_probe=context['pass_directory'] + '/' + attempt + '/fixture_probe.py',
-                   guest_python=run.profile.values['guest_tester']['settings']['python'])
+                   guest_python=settings['python'])
+    build = managed_instructions if context.get('managed_operations') else instructions
+    contract = build(check_id, pass_id, context.get('update_path'))
+    # Older releases may predate the model in their catalog. Their custom
+    # model input lets the session still use the same explicit ID as the tester.
+    if check_id in {'old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent',
+                    'codex-conversation', 'seed-state'}:
+        contract += (f'\nWhen launching a genuine Codex session, select Codex and use the exact model '
+                     f'{settings["model"]}. If it is absent from the catalog, enter and commit that '
+                     'custom model ID in the model field. Verify the selected model before launch '
+                     'and retain native evidence of the model reported by Codex. A fallback model '
+                     'does not satisfy this check.')
     return request({'format': 1, 'attempt': attempt, 'run_id': run.data['run_id'],
                     'pass_id': pass_id, 'check_id': check_id, 'gui': gui, 'timeout_seconds': timeout,
-                    'settings': run.profile.values['guest_tester']['settings'], 'context': context,
-                    'instructions': (managed_instructions if context.get('managed_operations') else instructions)(
-                        check_id, pass_id, context.get('update_path'))})
+                    'settings': settings, 'context': context, 'instructions': contract})
