@@ -4,48 +4,18 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.40.0 - 2026-11-17
 
-**DRAFT release notes - not yet finalized**
+### Changes to release notes going forward
 
-### 🚀 Added
-
-- The new `farhelm licenses` command prints the license notices for the open-source code Farhelm is built from. In the Mac app, the app menu's **Open-Source Notices** item shows the same notices in a window. (#3410, #3421, #3581)
+- Going forward, the requirement to upgrade remote hosts to match the desktop app will no longer be called out as a breaking change. It's just a regular part of upgrading.
+- Going forward, the release notes will be much less complete erring on the side of highlighting only what is more likely to be relevant for a typical user OR highly critical for a small number of users.
 
 ### 🔄 Changed
 
-- Farhelm's window is now a native desktop app, which replaces both the old Mac app and the browser interface. Farhelm no longer serves a web page or offers a browser sign-in, and `farhelm helm token show` and `farhelm helm token rotate` are removed. (#3401, #3404, #3407, #3409, #3426)
-- No Linux desktop app is released yet, so on Linux the Farhelm window is only available from a build of your own, in a Wayland session. Linux machines still work as remote hosts. (#3630)
-- The appearance, the sidebar width, whether the host rail is expanded, the status sound switches and the terminal text size go back to their defaults once after the update. Farhelm now keeps them with your other settings. (#3467, #3523, #3642, #3828)
-- The first launch after the update opens the window at its default size, centered. On a Mac with several displays, a window left on a second display now reopens on the main one. (#3569)
-- The prompt boxes in the session launcher and the template editor now grow with their text up to a limit and then scroll. You can no longer drag them to a new size. (#3475)
-- When Enter or Escape closes the last open dialog or menu, pressing the same key again within half a second does nothing. A double-tapped Escape no longer reaches the terminal and interrupts the agent. (#3592, #3949)
-- Opening a session whose host cannot be reached, or one that has ended, now marks its output as seen. (#3936)
-- The quick switcher (Cmd+K) now lists sessions whose title holds what you typed in one piece above those with the letters scattered through the title. Matches at the start of a word come first, and recent activity orders the sessions within each group. (#3966)
-- EXPERIMENTAL: A launch onto a suspended sandbox or container now stops and asks you to resume it in Hosts first. (#4056)
-
-### 🔧 Fixes worth highlighting
-
-- Approval cards now show a carriage return in an agent's command as `<U+000D>`. Before, a command that Bash runs as two separate commands could look like one command continued onto the next line. (#4076)
-- Holding Enter on an agent's request to add a host no longer approves the host before you have read it. Approving it now takes a fresh press in the **Add host** dialog. (#4084)
-- EXPERIMENTAL: The questions that delete a whole sandbox or container, with every session in it, now start with Cancel focused, in the session list, in bulk Delete and in Hosts. Before, Enter right after one opened destroyed the environment. (#3948, #4082)
-- EXPERIMENTAL: Settings → **Containers** no longer lists a container that belongs to one of your hosts as not on this helm when two of your host entries reach the same machine and account. Before, deleting it from that list destroyed the live container with its sessions and files. (#4083)
-
-### 🗑️ Removed
-
-- Right-clicking in a terminal no longer selects a word or offers Copy. Text outside terminals and text fields can no longer be selected, so copying it takes the app's copy buttons and menu items. (#3516)
-- `farhelm helm setup` is removed. Services it installed on a Linux machine stay installed and keep running, and `farhelm uninstall` no longer stops or removes them. Removing one takes `systemctl --user disable --now` with its name (`farhelm-helm.service` or `farhelm-supervisor.service`) and deleting its file from `~/.config/systemd/user`. (#3870)
-- `farhelm helm run` is removed, along with its `--release-base-url` option and `FARHELM_RELEASE_BASE_URL`. A `farhelm-helm.service` that `farhelm helm setup` installed fails to start once its `farhelm` is replaced with this release. (#3953)
-
-### 🩹 Misc fixes
-
-*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
-
-- EXPERIMENTAL: Deleting or rebuilding a container recipe no longer deletes your own base image when you chose it by its image ID. (#4085)
-- Text from hosts and agents, such as session titles in `farhelm agent sessions`, now shows the rest of Unicode's invisible format characters as escapes. Saving a template whose session name or commands contain one is now refused. (#3423)
-- Removing a host right after its setup or update finished is no longer sometimes refused as busy. (#3744, #3823)
-- EXPERIMENTAL: Hosts now calls sandbox and container hosts Sandbox and Container. Before, it called them Remote, and a container's short name showed as a `podman:` address. A machine being deleted no longer offers Update or a setup rerun, and recipe summaries say "Managed Ubuntu". (#3946, #4004)
-- EXPERIMENTAL: Launching a session in a new sandbox or container now names its steps for its kind, such as "Creating a web container on build-box…". (#3975)
-- EXPERIMENTAL: The session launcher's label for New sandbox or New container with no recipe chosen no longer has a double space in it. (#4019)
-- In the Mac app, hovering the version in the sidebar now shows its reinstall and uninstall commands in full. Before, a long command could be cut off. (#3934)
+- Farhelm has now transitioned fully away from a web based stack for the GUI. It's now based on a native desktop stack based on GPUI. This was a major internal change but should only have minor immediate implications (the interface should feel a little faster). This is mainly in preparation for adding a Linux desktop app.
+- As a result of the migration away from the web stack, a small number of settings are getting reset to defaults in this release: Sidebar width, whether the  navigation rail on the left hand side of the screen is expanded, status sound switches, and terminal text size. Sorry about that! (#3467, #3523, #3642, #3828)
+- The first launch after the update opens the window at its default size, centered. On a Mac with several displays, a window previously left on a second display now reopens on the main one. (#3569)
+- When Enter or Escape closes the last open dialog or menu, pressing the same key again within half a second does nothing. A double-tapped Escape no longer reaches the terminal and interrupts the agent. This is intended to avoid accidentally sending keystrokes to unintended places. (#3592, #3949)
+- The session quick switcher (Cmd+K) now sorts matches in a sensible manner. The previous behavior was pretty broken and not worth even describing :) (#3966)
 
 ## v0.39.0 - 2026-11-13
 

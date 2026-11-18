@@ -62,21 +62,16 @@ instruction for older sections; the checker accepts the historical formats that 
   | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                         |
   | `### 🔧 Fixes worth highlighting` | the fixes a reader should not miss (see `releasing/.agents/changelog.md`, "Format") |
   | `### 🗑️ Removed`                  | removals that are not breaking in practice; breaking ones go under Breaking         |
-  | `### 🩹 Misc fixes`               | every other fix                                                                     |
+  | `### 🩹 Misc fixes`               | historical category for other fixes                                                 |
 
   Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, 🔄 rather than ♻️ for
   Changed because recycling reads as refactoring, and 🩹 for Misc fixes because a bandage reads as a small repair.
   Category headings sit below the release level, so the parser never looks at them and the emoji stay out of the release
   name.
-- Fixes are split in two. Fixes worth highlighting holds a fix (a `fix`, or a `perf` that fixes a performance problem)
-  when a non-trivial share of users is likely to notice it, meaning user-facing behavior on a path people commonly take
-  rather than an obscure corner, or when it fixes a genuinely serious bug: lost or corrupted state or sessions, killed
-  agents, a helm or host that will not start or connect, a security problem. A serious bug that only an extremely rare
-  edge case could ever hit does not qualify. Everything else goes under Misc fixes, which is the kind of thing most
-  projects sum up as one "various bug fixes" bullet; the maintainer wants the complete list published anyway, for
-  transparency. The curating agent makes the initial split on its own judgment and the maintainer reviews it with the
-  rest of the draft. Fragments do not decide it: `kind: fixed` covers both categories, because whether a fix stands out
-  depends on the rest of the release.
+- Fixes worth highlighting covers repairs likely to matter to a typical user and critical fixes that affect a small
+  group of users. Examples include lost or corrupted sessions, killed agents, a helm or host that will not start or
+  connect, or a security problem. The maintainer reviews the selection with the draft. Older releases used Misc fixes
+  for the remaining fixes. The checker still accepts those sections.
 - Misc fixes always opens with exactly this paragraph, then its bullets, and like every category it is omitted when it
   has nothing:
 
@@ -98,21 +93,18 @@ instruction for older sections; the checker accepts the historical formats that 
   The maintainer ruled this on 2026-10-07. The risk report's downgrade check still tells the maintainer, who is the one
   reader that needs it. Sections up to and including `v0.23.0` carry such entries; like every curated section, they stay
   as they are.
-- A release that changes the helm–supervisor protocol version opens its Breaking category with exactly this entry, and a
-  release that does not change it never carries it:
+- Releases through v0.39.0 used the following entry to flag a helm–supervisor protocol change. From v0.40.0, updating
+  remote hosts is treated as part of an ordinary upgrade:
 
   ```
   - This release *requires* you to update your remote hosts. (#N, #M)
   ```
 
-  The references are the PRs that changed the protocol version, in merge order. Nothing else varies: no explanation of
-  the change, no reworded variant, and no second entry saying the same thing in other words. Builds on different
-  protocol versions refuse to connect to each other (SPEC.md's compatibility rules), so every such release strands the
-  hosts left on the old version at `needs update`. The fixed wording and the rule that it appears every time are the
-  point: a reader who does not find the line can rely on its absence to mean their hosts keep working unchanged, which
-  holds only while no release omits it. Sections up to and including `v0.16.0` predate the rule, and several of them
-  changed the protocol without saying so; their silence means nothing, and like every curated section they stay as they
-  are.
+  Those references name the PRs that changed the protocol version, in merge order. Builds on different protocol versions
+  refuse to connect (SPEC.md's compatibility rules). Keep checking the version for the maintainer's release testing.
+- v0.40.0 opens with a one-time `### Changes to release notes going forward` section. Its bullets describe editorial
+  policy and carry no PR references. The first Changed entry also omits references because the desktop migration spanned
+  hundreds of PRs.
 - Entries are written for someone running Farhelm. Name the feature as the UI or CLI names it, say what changed for
   them, and leave out module names, internal mechanisms, and the reason a simpler fix was rejected. Caveats and
   limitations belong in the entry ("launch only; no conversation tracking"), since the alternative is the user finding
@@ -120,15 +112,11 @@ instruction for older sections; the checker accepts the historical formats that 
 
 ## What gets an entry
 
-Every commit on main whose Conventional Commit type is `feat`, `fix`, `perf`, `style`, or `revert`, and every commit of
-any type marked `!`, is expected in the changelog of the next stable release. `style` is on the list because in this
-repository it means UI styling, which users see. `docs`, `refactor`, `test`, `chore`, and `ci` are not expected; add one
-by hand during curation when it matters to a user (a raised requirement on a tool users install, say). A `revert` of
-something that shipped in a stable release is an entry; a revert of something that never shipped only removes the
-original's fragment.
-
-The rule of thumb is exactly that: if a required commit turns out to have nothing user-facing, the maintainer excludes
-it at curation time and nothing else has to happen.
+Review every commit on main whose Conventional Commit type is `feat`, `fix`, `perf`, `style`, or `revert`, and every
+commit of any type marked `!`, when curating the next stable release. `style` includes UI styling users see. Use
+`releasing/EDITORIAL_GUIDANCE.md` to select changes for the public notes, including changes outside those types when
+they matter to the reader (a raised requirement on a tool users install, say). A `revert` of something that shipped in a
+stable release is an entry; a revert of something that never shipped only removes the original's fragment.
 
 A fix is listed as a fix only when the bug it fixes reached users in a stable release. Release candidates and dev builds
 do not count; their changes reach users under the stable release that follows them. So before sorting fixes into the two
