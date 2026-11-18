@@ -429,3 +429,24 @@ above, each having passed its review gate, and the last code PR removing this pl
 a `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-18 (claim 2ab297).
+
+### Where to build and test session mute
+
+Today a session can turn blue and rise in the list while the user is working elsewhere. The agreed mute behavior quiets
+that activity for an hour, until the next 06:00, or until the user unmutes. Questions and approvals can still draw
+attention. The behavior is in the specification draft (#4104). The remaining work needs focused database, ordering and
+desktop checks, plus refreshed screenshots for the menus.
+
+The plan directs all Cargo and desktop validation to the shared remote workers. The worker runner failed before starting
+a command on two attempts, and none of the four workers assigned to executors resolve. I ran `dprint check SPEC.md` and
+`git diff --check` on the specification draft. Both passed. No implementation build or runtime check has started.
+
+May this plan use the executor's local Linux machine for focused builds, Clippy, recorded tests and screenshot capture
+while the workers are unavailable? I recommend allowing it with four Cargo jobs, one build or test command at a time,
+and monitoring for low memory or disk space. The same checks would still run, and may slow other work on the shared
+machine. Keeping the remote-only rule preserves that capacity and leaves this plan, and the session-groups plan that
+reuses its menus, waiting for a reachable worker.
