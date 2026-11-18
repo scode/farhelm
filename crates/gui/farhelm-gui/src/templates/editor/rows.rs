@@ -43,7 +43,7 @@ use crate::components::{
 };
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
-use crate::launcher::draft::{DestinationKind, RunsOn, harness_label};
+use crate::launcher::draft::{DestinationKind, harness_label};
 use crate::launcher::model::{ModelOption, model_options};
 use crate::launcher::view::{
     PlacementEdit, PlacementMode, build_placement_rows, destination_choice,
@@ -513,14 +513,8 @@ impl Rows<'_> {
             self.recipes,
             self.hosts,
             move |edit, window, cx| {
-                // An offered segment can stay visible without anywhere to enter while its place disappears. Drop
-                // that press: `Editor::choose_runs_on(None)` would read it as Existing host and move the template
-                // there, where the launcher's draft ignores the same edit.
-                if matches!(&edit, PlacementEdit::RunsOn(RunsOn::New(_), None)) {
-                    return;
-                }
                 with_editor(&weak, window, cx, |editor, window, cx| match edit {
-                    PlacementEdit::RunsOn(_, target) => editor.choose_runs_on(target, window, cx),
+                    PlacementEdit::RunsOn(target) => editor.choose_runs_on(target, window, cx),
                     PlacementEdit::Recipe(recipe) => {
                         editor.edit_target(window, cx, |target| LaunchTarget::Environment {
                             recipe,

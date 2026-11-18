@@ -10,8 +10,8 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
-    PREFERENCES_KEY, Preferences,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
+    KeyedEntry, PREFERENCES_KEY, Preferences,
 };
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchTarget, Place};
 use gpui::{TestAppContext, VisualTestContext};
@@ -873,6 +873,55 @@ fn retained_choices_and_an_unusable_only_host_stay_in_reach(cx: &mut TestAppCont
     click(cx, "templates-runs-on-New container");
     assert_eq!(target(cx), Some(environment("", Place::PodmanHost(2))));
     assert_eq!(value_of(cx, "templates-recipe"), "Choose a recipe");
+}
+
+/// The template can keep a container choice after its host is forgotten. Pressing the selected New container
+/// segment in that state must keep its recipe and place. An absent destination otherwise looks like Existing host.
+#[gpui::test]
+fn pressing_selected_new_container_with_no_hosts_keeps_the_template_placement(
+    cx: &mut TestAppContext,
+) {
+    let retained = environment("gone", Place::PodmanHost(9));
+    let fields = TemplateFields {
+        kind: Some(LauncherKind::Agent),
+        target: Some(retained.clone()),
+        ..TemplateFields::default()
+    };
+    let (mut helm, cx) = open_fleet(cx, &[template("kept", fields)], &[], vec![]);
+    open_editor(&mut helm, "template-open-kept", cx);
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).expect("the editor has a helm listing");
+        let collections = store.read(cx).collections();
+        assert_eq!(
+            collections
+                .meta(Collection::Hosts)
+                .map(|meta| &meta.availability),
+            Some(&Availability::Available),
+            "the premise: the helm has served its host listing"
+        );
+        assert!(
+            collections.ordered::<HostView>().is_empty(),
+            "the premise: no host can hold containers"
+        );
+    });
+    assert_eq!(target(cx), Some(retained.clone()));
+    let segment = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("templates-runs-on-New container"))
+        .expect("the retained New container segment is drawn");
+    assert_eq!(segment.toggled, Some(gpui::Toggled::True));
+    assert!(
+        !segment.disabled && segment.flags.click,
+        "the segment takes a press"
+    );
+
+    click(cx, "templates-runs-on-New container");
+
+    assert_eq!(target(cx), Some(retained));
+    assert!(
+        !drawn(cx, "templates-host"),
+        "the editor is still on New container"
+    );
 }
 
 /// The Custom words live only in their input, so two things the old separate copy of the words gave must still hold:
