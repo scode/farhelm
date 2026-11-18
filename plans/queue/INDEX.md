@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight d9a93f] `session-group-follow-ups.md` — Session groups: indent members, mark a collapsed group holding the open session, drag sessions into and out of groups
 - [in-flight 8e15a2] `submenus-open-on-hover.md` — Submenus open on hover, keeping their parent item highlighted
 - [in-flight d298d9] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
-- [in-flight eba2fc] `shared-placement-picker.md` — Shared placement picker drops its no-op press and moves to a shared module, with the template editor test
+- [complete] `shared-placement-picker.md` — Shared placement picker drops its no-op press and moves to a shared module, with the template editor test
 - [pending] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
 - [pending] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
 - [pending] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
