@@ -847,7 +847,8 @@ it never retries feedback, uncertain actions or failed cleanup.
                         self.select_update(pass_id, download(ORIGIN + '/latest').decode().strip())
                     context['update_path'] = entry['update_path']
                     if check_id == 'update-discovery' and entry['update_path'] == 'manual':
-                        raise Unavailable('this old updater/candidate combination cannot demonstrate discovery')
+                        raise Unavailable(self.discovery_skip(entry)
+                                          or 'in-app update discovery unavailable on the selected manual path')
                     context['latest_at_selection'] = entry.get('latest_at_selection')
                     context['prior_results'] = entry['results']
                     task = task_for(self, pass_id, check_id, context, turn_timeout(check_id, pass_id, timeout))
@@ -1192,6 +1193,34 @@ the old app supports discovery. Its success cannot stand in for the updater.
         self.save()
         self.note('decision', f'Pass `{pass_id}` selected `{selected}` from observed public default `{latest}`.')
 
+    def discovery_skip(self, entry):
+        """Explain an expected discovery skip backed by the retained update selection.
+
+Planning alone is provisional because the public default can move. An actual
+discovery observation takes precedence over this explanation.
+"""
+        latest = entry.get('latest_at_selection')
+        if (entry.get('id') != 'p0-updater-upgrade' or entry.get('update_path') != 'manual'
+                or latest is None or 'update-discovery' not in entry['required']
+                or 'update-discovery' in entry['results']):
+            return None
+        candidate = self.data['plan']['candidate']
+        try:
+            receipt = artifact(self.directory, 'p0-updater-upgrade/latest-at-selection.json')
+            if (json.loads(receipt) != {'latest': latest, 'update_path': 'manual'}
+                    or update_path(candidate, latest, entry['old_supports_override']) != 'manual'):
+                return None
+        except (OSError, ValueError, RuntimeError, tarfile.TarError):
+            return None
+        channel = f'The public update channel pointed to {latest}.'
+        kind = version(candidate)[4]
+        if kind:
+            label = {'rc': 'release candidate', 'dev': 'development prerelease'}[kind]
+            reason = f'{candidate} is a {label}. The in-app updater only discovers stable releases.'
+        else:
+            reason = f'The {entry["previous"]} app cannot select a stable release before it becomes the public default.'
+        return f'In-app update discovery was skipped as expected. {reason} {channel}'
+
     def add_check(self, pass_id, check_id, gui=False):
         """Keep release-specific obligations in bonus coverage without expanding P0."""
         entry = self.selected(pass_id)
@@ -1391,6 +1420,19 @@ of its fixture's full verdict but excluded from P0's projections.
                                        'fail' if 'fail' in p0_verdicts else
                                        'pass' if all(v == 'pass' for v in p0_verdicts) else 'could not run'),
                             'passes': p0_ids}
+            if p0_ids:
+                updater = self.selected('p0-updater-upgrade')
+                discovery = self.discovery_skip(updater)
+                if discovery:
+                    output['p0']['unavailable_checks'] = {'update-discovery': discovery}
+                    # Retained runs can include later P0 coverage. Their
+                    # evidence must pass before the summary can say so.
+                    remaining = priority_entry(updater, 'P0')
+                    del remaining['required']['update-discovery']
+                    if (self.verdict(remaining) == 'pass'
+                            and all(verdict == 'pass' for key, verdict in zip(p0_ids, p0_verdicts)
+                                    if key != 'p0-updater-upgrade')):
+                        output['p0']['summary'] = f'All runnable P0 checks passed. {discovery}'
             if self.data.get('gui_backend') == 'guest-native':
                 output['p0']['unverified_product_failures'] = [
                     value for value in output['unverified_product_failures'] if value['pass_id'] in p0_ids

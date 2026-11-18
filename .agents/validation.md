@@ -1106,11 +1106,11 @@ systemd or SSH substrate ran.
   verified menu dismissal, conditional product confirmations, terminal-host-only old-session survival and Restart,
   remote menu Remove/re-add and Uninstall sequencing, independent resource-preservation/removal receipts, restart
   process handoffs, calibrated window measurements, gesture-trace and bonus gesture-readiness gates, failure gates and
-  evidence import with fictional fixtures. Use a substrate that permits process-group inspection; Linux continuity cases
-  skip on macOS. These tests prove harness contracts, not native GUI behavior or a release pass. Actual native fixture
-  probes and release checks retain their own private evidence. The guest-only Swift geometry helper needs separate SDK
-  type-check and read-only runtime validation in an owned disposable guest; the portable suite does not exercise that OS
-  API.
+  evidence import with fictional fixtures, including expected RC discovery skip reporting. Use a substrate that permits
+  process-group inspection; Linux continuity cases skip on macOS. These tests prove harness contracts, not native GUI
+  behavior or a release pass. Actual native fixture probes and release checks retain their own private evidence. The
+  guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation in an owned disposable
+  guest; the portable suite does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
   one-time notes policy section, synthetic git histories for the fragment sweep and for reading landed plans' release

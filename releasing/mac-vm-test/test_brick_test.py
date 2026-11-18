@@ -777,6 +777,28 @@ image evidence so cleanup cannot silently skip its new obligation.
         self.assertTrue(all(child.poll() == 0 for child in children))
         self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
 
+    def test_rc_discovery_skip_reports_the_observed_channel(self):
+        """Explain why discovery is unavailable while keeping unrun P0 checks visible."""
+        self.enable_p0(candidate='v0.25.0-rc.1')
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        self.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
+            self.run.select_update('p0-updater-upgrade', 'v0.24.0')
+            p0 = self.run.report()['p0']
+            self.assertEqual(p0['verdict'], 'could not run')
+            self.assertEqual(p0['checks']['installer-upgrade'], 'pass')
+            self.assertEqual(p0['checks']['local-supervisor-agent'], 'could not run')
+            self.assertEqual(p0['unavailable_checks']['update-discovery'],
+                             'In-app update discovery was skipped as expected. v0.25.0-rc.1 is a release candidate. '
+                             'The in-app updater only discovers stable releases. '
+                             'The public update channel pointed to v0.24.0.')
+            self.assertNotIn('summary', p0)
+            receipt = self.run.directory / 'p0-updater-upgrade/latest-at-selection.json'
+            receipt.write_text('{}')
+            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
+
     def test_p0_precedes_bonus_and_uses_distinct_upgrade_fixtures(self):
         """Broader functionality and one successful upgrade path cannot mask another untested path."""
         self.enable_p0()
@@ -796,6 +818,7 @@ image evidence so cleanup cannot silently skip its new obligation.
             self.assertEqual(self.run.selected('p0-updater-upgrade')['update_path'], 'override')
             report = self.run.report()
             self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertNotIn('unavailable_checks', report['p0'])
             self.assertEqual(list(report['p0']['checks']),
                              ['fresh-install-start', 'installer-upgrade', 'click-to-upgrade',
                               'local-supervisor-agent', 'remote-supervisor-agent',
