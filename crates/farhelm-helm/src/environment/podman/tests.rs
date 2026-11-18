@@ -441,7 +441,7 @@ async fn status_and_deletion_preserve_stopped_paused_and_confirmed_absence() {
 }
 
 /// Even an owned superseded image stays recorded while any container uses it.
-/// Once unused, cleanup verifies labels and uses plain image rm, never force.
+/// Once unused, cleanup verifies labels and removes the image without forcing.
 #[farhelm_testtrace::test]
 async fn retired_images_wait_for_users_and_never_force_user_storage() {
     let (_directory, provider, commands, place) = fixture().await;
@@ -480,6 +480,32 @@ async fn retired_images_wait_for_users_and_never_force_user_storage() {
         .unwrap();
     assert!(!removal.iter().any(|arg| arg == "--force" || arg == "-f"));
     assert_eq!(removal.last().unwrap(), ID);
+}
+
+/// Retiring an unused owned image must keep its dangling parents. An untagged
+/// base selected by ID can lose its last reference when its child is removed.
+#[farhelm_testtrace::test]
+async fn retiring_owned_images_preserves_dangling_parents() {
+    let (_directory, provider, commands, place) = fixture().await;
+    provider
+        .edit("dev", place, |state| state.retired_images.push(ID.into()))
+        .await
+        .unwrap();
+    commands.model.lock().unwrap().image_exists = true;
+    assert_eq!(
+        provider.state("dev", place).await.unwrap().retired_images,
+        [ID]
+    );
+
+    provider.retire_images("dev", place).await.unwrap();
+
+    let model = commands.model.lock().unwrap();
+    let removal = model
+        .commands
+        .iter()
+        .find(|argv| argv[1..].starts_with(&["image".into(), "rm".into()]))
+        .expect("the retired image must be removed");
+    assert_eq!(&removal[1..], ["image", "rm", "--no-prune", "--", ID]);
 }
 
 /// An absent tag cannot settle a disconnected commit that may still publish.

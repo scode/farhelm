@@ -739,9 +739,17 @@ impl Podman {
                 if !using.trim().is_empty() {
                     continue;
                 }
+                // --no-prune: without it Podman also deletes the image's dangling parents, and one can be the user's
+                // own untagged recipe base (SPEC.md: user-owned base images are retained).
                 self.require(
                     place,
-                    vec!["image".into(), "rm".into(), "--".into(), id.clone()],
+                    vec![
+                        "image".into(),
+                        "rm".into(),
+                        "--no-prune".into(),
+                        "--".into(),
+                        id.clone(),
+                    ],
                     COMMAND,
                 )
                 .await?;
