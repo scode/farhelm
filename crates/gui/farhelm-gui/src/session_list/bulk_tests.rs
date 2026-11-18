@@ -1526,8 +1526,9 @@ fn a_connected_environments_marked_sessions_each_get_their_own_delete(cx: &mut T
 /// title and answer, not only in a row. Specified, a and b running on a suspended sandbox: Delete asks "Delete marked
 /// sessions and whole environments?", answered "Delete sessions and environments", helped by "Delete each listed
 /// session, and each environment marked as deleted whole with everything in it", with a's row alone, stating the
-/// sandbox's whole-environment warning; the answer sends a's `?delete_sandbox=true` and nothing for b, which is not
-/// held; once it is answered, nothing more is sent, b's row has no line, and both marks are gone.
+/// sandbox's whole-environment warning. Focus starts on Cancel because even unmarked sessions would be destroyed.
+/// Confirming sends a's `?delete_sandbox=true` and holds nothing for b. Once it is answered, nothing more is sent,
+/// b's row has no line, and both marks are gone.
 #[gpui::test]
 fn an_unconnected_environments_marked_sessions_share_one_whole_delete(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, suspended_at(0));
@@ -1556,6 +1557,7 @@ fn an_unconnected_environments_marked_sessions_share_one_whole_delete(cx: &mut T
         label_of(cx, "bulk-target-consequence-a").as_deref(),
         Some(sandbox().whole_delete_warning())
     );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
 
     test_support::click(cx, "prompt-confirm");
     test_support::settle(cx);

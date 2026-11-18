@@ -879,15 +879,17 @@ fn drawn(targets: &[Target]) -> Vec<&Target> {
 
 /// The bulk question about `targets`: "Stop 2 sessions?" or "Delete 1 session?" ([`words`]), with one row per drawn
 /// target in its body ([`drawn`]), and the old dialog's answers and their help. Its answer acts on `targets` as frozen
-/// here. Built both to ask and to reword, which reads only its words and `targets`: where closing returns focus is the
-/// asker's ([`SessionList`]'s `ask_bulk`).
+/// here. A bulk Delete starts on Cancel if any target destroys an entire environment, since that can also destroy work
+/// in unmarked sessions. Rewording keeps the open question's focus. The asker sets where closing returns focus
+/// ([`SessionList`]'s `ask_bulk`).
 fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
+    let whole_delete = action == Lifecycle::Delete && targets.iter().any(Target::whole);
     let Words {
         title,
         answer,
         help,
     } = words(action, &targets);
-    Question::new(
+    let question = Question::new(
         title,
         Answer::new(answer, HoverHelp::tooltip(help), Tier::Danger),
         targets,
@@ -903,7 +905,12 @@ fn question(action: Lifecycle, targets: Targets) -> Question<Targets> {
     .body(move |targets: &Targets, _, cx| {
         let targets = targets.clone();
         cx.new(|_| Rows { action, targets })
-    })
+    });
+    if whole_delete {
+        question.starts_on_cancel()
+    } else {
+        question
+    }
 }
 
 /// The bulk question's body: one row per target, as the question froze them.

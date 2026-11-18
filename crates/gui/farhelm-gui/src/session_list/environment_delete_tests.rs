@@ -26,7 +26,7 @@ use super::tests::{collections, painted, session};
 use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session as ui_session;
-use crate::test_support::{self, frame, meta};
+use crate::test_support::{self, focused_id, frame, meta};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -306,8 +306,8 @@ fn a_containers_count_retires_when_it_is_deleted_and_its_notice_stays(cx: &mut T
 /// about every session in it, listed or not, before anything is sent. Specified, skip on, a running on a suspended
 /// sandbox: the header's Delete is helped by "Delete this session together with its whole sandbox and everything in
 /// it, after you confirm (<shortcut>)"; it asks with the warning and the sandbox's name, answered "Delete session and
-/// sandbox"; nothing is sent before the answer, which sends exactly `?delete_sandbox=true` and never the session lane;
-/// its success shows no band and counts as this window's Delete.
+/// sandbox". Focus starts on Cancel because the Delete destroys everything in the sandbox. Confirming sends exactly
+/// `?delete_sandbox=true`. Its success shows no band and counts as this window's Delete.
 #[gpui::test]
 fn a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, suspended_at(0));
@@ -328,6 +328,7 @@ fn a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete(cx: &mut TestA
         label_of(cx, "prompt-confirm").as_deref(),
         Some("Delete session and sandbox")
     );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
     assert_eq!(deletes(&mut fake), [], "nothing before the answer");
     test_support::click(cx, "prompt-confirm");
     let id = one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
@@ -341,8 +342,8 @@ fn a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete(cx: &mut TestA
 /// whole-container Delete, whose warning must name the container's own losses (no snapshots, which only a sandbox has).
 /// Specified, on a paused container: a's menu describes Delete as "Delete this session together with its whole
 /// container and everything in it"; Delete asks with the container's warning and its name, answered "Delete session
-/// and container" helped by that same description; nothing is sent before the answer, which sends exactly
-/// `?delete_sandbox=true`.
+/// and container" helped by that same description. Focus starts on Cancel because everything in the container would
+/// be lost. Confirming sends exactly `?delete_sandbox=true`.
 #[gpui::test]
 fn a_paused_containers_row_asks_the_whole_container_delete(cx: &mut TestAppContext) {
     const CONTAINER_WHOLE_HELP: &str =
@@ -375,6 +376,7 @@ fn a_paused_containers_row_asks_the_whole_container_delete(cx: &mut TestAppConte
         hover_help(cx, "prompt-confirm").as_deref(),
         Some(CONTAINER_WHOLE_HELP)
     );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
     assert_eq!(deletes(&mut fake), [], "nothing before the answer");
     test_support::click(cx, "prompt-confirm");
     one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
@@ -449,19 +451,11 @@ fn the_header_and_the_shortcut_always_ask_an_environment_delete(cx: &mut TestApp
 
 // ---- "Unasked" ------------------------------------------------------------------------------------------------------
 
-/// The old e2e "a row's unasked environment Delete offers the warned whole-sandbox Delete": "unasked" means nothing was
-/// decided, and SPEC.md answers it with the whole-sandbox Delete, but never without its own warned answer. Specified: a
-/// row's session-lane Delete answered 409 with the helm's unasked marker asks the whole lane's question, with the
-/// warning, answered "Delete session and sandbox", and leaves no line on the row; nothing more is sent until that
-/// answer, which sends exactly `?delete_sandbox=true`; its success counts as this window's Delete.
-#[gpui::test]
-fn a_rows_unasked_delete_offers_the_whole_sandbox_delete(cx: &mut TestAppContext) {
-    let host = environment_host(Provider::Sandbox, connected());
-    let (mut fake, cx) = open(cx, &[(session("a"), 0)], false, &host);
-    deletes(&mut fake);
-    choose_delete(cx, "session-menu-a");
+/// Confirm the open session-lane Delete, check that its question closed, then answer the request 409 with the helm's
+/// "unasked" marker, which is what makes the whole-environment question reopen by itself.
+fn reply_unasked(fake: &mut FakeHelm, cx: &mut VisualTestContext) {
     test_support::click(cx, "prompt-confirm");
-    let id = one_delete(&mut fake, "/api/sessions/a?delete_environment_session=true");
+    let id = one_delete(fake, "/api/sessions/a?delete_environment_session=true");
     assert!(!any_layer(cx), "the premise: the first question closed");
     fake.reply_marked(
         id,
@@ -470,6 +464,18 @@ fn a_rows_unasked_delete_offers_the_whole_sandbox_delete(cx: &mut TestAppContext
         Some(json!(UNASKED)),
     );
     test_support::settle(cx);
+}
+
+/// When the helm could not ask the sandbox's Farhelm, the row offers the warned whole-sandbox Delete. A fresh Enter
+/// dismisses the new question without sending anything, since the user only agreed to the session-lane request.
+/// The warning replaces the row's outcome line, and an explicit confirmation on a retry sends the whole Delete.
+#[gpui::test]
+fn a_rows_unasked_delete_offers_the_whole_sandbox_delete(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(session("a"), 0)], false, &host);
+    deletes(&mut fake);
+    choose_delete(cx, "session-menu-a");
+    reply_unasked(&mut fake, cx);
     assert_eq!(
         label_of(cx, "session-delete-consequence-a").as_deref(),
         Some(SANDBOX_WHOLE_LINE)
@@ -480,6 +486,17 @@ fn a_rows_unasked_delete_offers_the_whole_sandbox_delete(cx: &mut TestAppContext
     );
     assert!(!drawn(cx, "session-outcome-a"), "the question says it");
     assert_eq!(deletes(&mut fake), [], "nothing before the warned answer");
+    test_support::keys(cx, "enter");
+    test_support::settle(cx);
+    assert!(!any_layer(cx), "Enter dismisses the question");
+    assert_eq!(
+        deletes(&mut fake),
+        [],
+        "Enter sends no whole-sandbox Delete"
+    );
+
+    choose_delete(cx, "session-menu-a");
+    reply_unasked(&mut fake, cx);
     test_support::click(cx, "prompt-confirm");
     let id = one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
     fake.reply(id, 200, Some(json!({})));
@@ -487,11 +504,9 @@ fn a_rows_unasked_delete_offers_the_whole_sandbox_delete(cx: &mut TestAppContext
     assert!(deleted_here(cx, "a"));
 }
 
-/// The old e2e "the header's unasked environment Delete reopens as the warned whole-sandbox Delete": the header's
-/// question belongs to the header, so the warned one reopens there, and that Delete's own refusal still shows where
-/// Delete refusals do. Specified: the header's Delete is helped by the session lane's help; its Delete answered 409
-/// unasked asks the whole lane's question; its answer sends exactly `?delete_sandbox=true`; that Delete refused with
-/// "Tensorlake refused the deletion" shows those words on the row and below the header.
+/// The header's whole-sandbox question can arrive while the user waits for the session-lane reply. A fresh Enter
+/// dismisses it without authorizing deletion of the sandbox. An explicit confirmation on a retry sends the whole
+/// Delete, whose refusal still shows on the row and below the header.
 #[gpui::test]
 fn the_headers_unasked_delete_reopens_as_the_whole_sandbox_delete(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
@@ -504,19 +519,22 @@ fn the_headers_unasked_delete_reopens_as_the_whole_sandbox_delete(cx: &mut TestA
         ))
     );
     test_support::click(cx, "session-header-delete");
-    test_support::click(cx, "prompt-confirm");
-    let id = one_delete(&mut fake, "/api/sessions/a?delete_environment_session=true");
-    fake.reply_marked(
-        id,
-        409,
-        vec![HelmMarker::EnvironmentUnasked],
-        Some(json!(UNASKED)),
-    );
-    test_support::settle(cx);
+    reply_unasked(&mut fake, cx);
     assert_eq!(
         label_of(cx, "session-delete-consequence-a").as_deref(),
         Some(SANDBOX_WHOLE_LINE)
     );
+    test_support::keys(cx, "enter");
+    test_support::settle(cx);
+    assert!(!any_layer(cx), "Enter dismisses the question");
+    assert_eq!(
+        deletes(&mut fake),
+        [],
+        "Enter sends no whole-sandbox Delete"
+    );
+
+    test_support::click(cx, "session-header-delete");
+    reply_unasked(&mut fake, cx);
     test_support::click(cx, "prompt-confirm");
     let id = one_delete(&mut fake, "/api/sessions/a?delete_sandbox=true");
     fake.reply(id, 409, Some(json!("Tensorlake refused the deletion")));

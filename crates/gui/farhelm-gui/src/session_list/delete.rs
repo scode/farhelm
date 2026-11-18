@@ -156,7 +156,8 @@ pub(crate) struct Frozen {
 /// (so a long title can never push the consequence out of view), then, for a session in a managed checkout, what
 /// happens to the checkout. Ported from the old row's question with its wording; Cancel keeps the prompt's own wording.
 /// An environment session's question is its lane's instead: the lane's consequence and the environment's name, the
-/// quoted title, no checkout line, and the lane's answer ([`environment_delete`]).
+/// quoted title, no checkout line, and the lane's answer ([`environment_delete`]). The whole lane starts on Cancel
+/// because it can destroy other sessions and their work. That also gives the delayed re-ask its harmless first answer.
 pub(crate) fn question(row: &SessionRow, frozen: Frozen) -> Question<Frozen> {
     let key = frozen.key.clone();
     let title = HostText::from_host(row.info.title.as_str());
@@ -171,7 +172,14 @@ pub(crate) fn question(row: &SessionRow, frozen: Frozen) -> Question<Frozen> {
     };
     let question = Question::new("Delete confirmation", answer, frozen);
     let question = match &environment {
-        Some(asked) => question.line(asked.consequence(&key)),
+        Some(asked) => {
+            let question = question.line(asked.consequence(&key));
+            if asked.lane == environment_delete::Lane::Whole {
+                question.starts_on_cancel()
+            } else {
+                question
+            }
+        }
         None => question.line(consequence(row)),
     };
     let question = question
