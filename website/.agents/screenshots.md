@@ -12,11 +12,10 @@ from a staged fleet and published off main; `docs/docs-shots/SPEC.md` is the des
 staged or rewritten. In short:
 
 A page's shots are declared in `scripts/docs-shots/<page>.py`; see `docs/docs-shots/SPEC.md` for the page module
-contract. `scripts/docs-screenshots.sh --local --only <page>` runs them through the GPUI test harness. On Linux every
-shot stops at the size check because the pictures need a 2x display.
+contract. On Linux, `scripts/docs-screenshots.sh --local --only <page>` runs them at 2x through the GPUI test harness.
 
-For a 2x capture, run `scripts/docs-screenshots.sh --mac <destination>`. This uses the README hero's transport and the
-Mac-wide lock. Annotations and publishing belong to the first page that shows shots again, which the maintainer decides.
+For a full capture, run `scripts/docs-screenshots.sh --local`. Annotations and publishing for docs pages belong to the
+first page that shows shots again, which the maintainer decides. Release shots follow the release procedure.
 
 Published release shots stay frozen. Only `scripts/publish-docs-shots.sh` may push `refs/docs-assets/keep`; never push
 the ref by hand.

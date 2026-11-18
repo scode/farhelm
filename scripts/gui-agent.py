@@ -993,8 +993,8 @@ def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[st
 # `stage_scenario` names the hosts, creates the sessions on them, waits for every status, sets the seen state, and
 # checks each row's permission shield in the window. Ported from the browser suite's `e2e/readme-hero/scenario.ts` and
 # `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). Each session's age and folder, which the
-# old staging rewrote in the helm's replies, reach the app in a file (`session_pins_body`). What a scenario says that is
-# not staged yet (the viewport's scale) is in docs/gui-agent.md, "Scenario runs".
+# old staging rewrote in the helm's replies, reach the app in a file (`session_pins_body`). The window uses the
+# viewport's logical size. On Linux the caller can select its output scale separately.
 
 # The wrappers a scenario session may name, each with the launch harness (`LaunchHarness`'s wire name in
 # crates/farhelm-proto/src/launch.rs) its agent launch asks for. The helm runs each harness's program by its bare name
@@ -1167,8 +1167,8 @@ def scenario_remote_hosts(plan: dict) -> list[str]:
 def scenario_window_size(plan: dict, platform: str = sys.platform) -> str:
     """The `--window-size` a scenario run asks for: the viewport as the app's own drawing, so on Linux larger by the
     window's frame on every side and its title bar on top, the numbers the screenshot batch crops off
-    (`LINUX_FRAME` and `LINUX_TITLE_BAR` in scripts/gui-screenshot-batch.py, which say where they come from). The
-    viewport's `scale` is not applied."""
+    (`LINUX_FRAME` and `LINUX_TITLE_BAR` in scripts/gui-screenshot-batch.py, which say where they come from).
+    These are logical dimensions at any output scale."""
     frame, bar = 0, 0
     if platform.startswith("linux"):
         batch = _sibling("gui-screenshot-batch.py")
@@ -1540,9 +1540,7 @@ def expected_capture_size(plan: dict) -> tuple[int, int]:
 
 def size_problem(actual: tuple[int, int] | None, plan: dict, window: dict) -> str | None:
     """Why a capture of `actual` pixels is not the scenario's picture, or None when it is. `window` is the bridge's
-    `windows` entry, quoted so the message shows the cause: the app fits a first window to its screen, so a window
-    smaller than the viewport means the display is too small, and scale 1 means a Linux run (headless Mutter). The
-    capture stops there; it never resizes the window or rescales the picture."""
+    `windows` entry, quoted to show whether the window fits the display and whether its scale matches the scenario."""
     want = expected_capture_size(plan)
     if actual == want:
         return None
@@ -1551,9 +1549,9 @@ def size_problem(actual: tuple[int, int] | None, plan: dict, window: dict) -> st
     return (
         f"the capture is {got}, but the scenario declares {want[0]}x{want[1]} ({viewport['width']}x"
         f"{viewport['height']} at scale {viewport.get('scale', 1)}); the window is {window.get('width', 0):.0f}x"
-        f"{window.get('height', 0):.0f} points at scale {window.get('scale')}. A window smaller than the viewport "
-        "means the display is too small for the scenario (the app fits its first window to the screen); scale 1 "
-        "means a Linux run, which is for checking the staging and the picture's content, never for the picture"
+        f"{window.get('height', 0):.0f} points at scale {window.get('scale')}. A window smaller than requested "
+        "means the display is too small. On Linux, start the run with a --size that fits the window and the "
+        "scenario's --scale"
     )
 
 
@@ -1651,7 +1649,10 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
     leak_check("after")
     window = json.loads(bridge("windows", "--json"))[0]
     if platform.startswith("linux"):
-        problem = batch.crop_frame(shot, batch.LINUX_FRAME_MARGIN, batch.LINUX_FRAME_BORDER, batch.LINUX_TITLE_BAR)
+        # The app draws its decorations in logical pixels and the bridge captures the whole buffer.
+        scale = int(window["scale"])
+        problem = batch.crop_frame(shot, batch.LINUX_FRAME_MARGIN * scale, batch.LINUX_FRAME_BORDER * scale,
+                                   batch.LINUX_TITLE_BAR * scale)
         if problem:
             raise RuntimeError(f"the Linux window frame could not be cropped off {shot}: {problem}")
     actual = batch.png_size(shot)
@@ -1976,6 +1977,7 @@ def start_mutter(
     command: list[str],
     base: dict[str, str],
     socket_wait: float = 30,
+    scale: int = 1,
 ) -> dict:
     """Start the run's compositor (`command`, normally [`mutter_command`]); return what the app needs to join it.
 
@@ -1986,11 +1988,18 @@ def start_mutter(
     (`org.gnome.Mutter.DisplayConfig` and others) on the bus it runs on, and on the caller's it would compete with a
     desktop session's own compositor for them.
 
+    Mutter takes its integer output scale from org.gnome.desktop.interface. Give only this process tree a private
+    GSettings keyfile and config directory, so the scale and monitor layout cannot come from the user's desktop.
+
     If the compositor does not come up (no Wayland socket within `socket_wait` seconds, or no bus address), everything
     it started is stopped before the error propagates: `run.json` does not exist yet, so `stop` could not find it.
     """
     env = {k: v for k, v in base.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
-    env["XDG_RUNTIME_DIR"] = str(runtime)
+    config = run / "mutter-config"
+    settings = config / "glib-2.0/settings/keyfile"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(f"[org/gnome/desktop/interface]\nscaling-factor={scale}\n")
+    env.update(XDG_RUNTIME_DIR=str(runtime), XDG_CONFIG_HOME=str(config), GSETTINGS_BACKEND="keyfile")
     logs = run / "logs"
     with (logs / "mutter.stdout").open("wb") as stdout, (logs / "mutter.stderr").open("wb") as stderr:
         child = subprocess.Popen(
@@ -2192,7 +2201,8 @@ def start(run: Path, args: list[str]) -> int:
         help="stage the fleet a docs-media scenario.json5 describes: its hosts, sessions, statuses and seen state, "
         "with the window at its viewport (makes the run a staged one; see docs/gui-agent.md, \"Scenario runs\")",
     )
-    parser.add_argument("--size", help="Linux only: Mutter's virtual monitor (default 1600x1200)")
+    parser.add_argument("--size", help="Linux only: Mutter's virtual monitor in logical points (default 1600x1200)")
+    parser.add_argument("--scale", type=int, choices=(1, 2), help="Linux only: Mutter's output scale (default 1)")
     parser.add_argument("--no-build", action="store_true", help="use the binaries already in the target directory")
     parser.add_argument(
         "--lock",
@@ -2267,8 +2277,8 @@ def start(run: Path, args: list[str]) -> int:
         owner = console_owner()
         if owner != os.getuid():
             raise UsageError(f"no GUI session of yours on this Mac (the console belongs to {user_name(owner)})")
-        if options.size:
-            raise UsageError("--size sets Mutter's virtual monitor on Linux; a Mac run uses the real screen")
+        if options.size or options.scale:
+            raise UsageError("--size and --scale set Mutter's virtual monitor on Linux; a Mac run uses the real screen")
     elif not sys.platform.startswith("linux"):
         raise UsageError("runs need Linux or macOS")
     else:
@@ -2344,8 +2354,11 @@ def start(run: Path, args: list[str]) -> int:
     if not mac:
         display = display_name(uuid.uuid4().hex[:8])
         record.update({"runtime": str(run / "runtime"), "display": display})
-        size = options.size or DEFAULT_MONITOR
-        mutter = start_mutter(run, run / "runtime", display, mutter_command(display, size), dict(os.environ))
+        scale = options.scale or 1
+        width, height = parse_size(options.size or DEFAULT_MONITOR)
+        # Mutter's mode is in physical pixels. Keep the requested room for the window at either output scale.
+        size = f"{width * scale}x{height * scale}"
+        mutter = start_mutter(run, run / "runtime", display, mutter_command(display, size), dict(os.environ), scale=scale)
         record.update({"mutter": {"pid": mutter["pid"], "start": mutter["start"]}, "dbus": mutter["dbus"]})
     save()
     ensure_hosts = None

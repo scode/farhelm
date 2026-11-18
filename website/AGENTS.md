@@ -38,12 +38,13 @@ one exception (`website/EDITORIAL_RULES.md` has the details).
 ## Published release notes are frozen
 
 NOTE: Release notes are stable once published. The `CHANGELOG.md` sections of published releases, the generated page,
-`src/release-notes/*.json`, and the release shots with their tests are never part of a change by default: not a
+`src/release-notes/*.json`, and the release shots with their capture steps are never part of a change by default: not a
 screenshot refresh, not a sweep across pages, not a rename or a wording cleanup, and not a UI change that makes an old
 shot look dated. They change only when a task specifically targets them, such as a correction to a published release.
 The tooling holds the screenshots to this (`docs/docs-shots/SPEC.md`, "Release shots are frozen"): once a release shot
-is published, a capture skips it and the publish carries it over unchanged, so its test may stop matching the current UI
-and that is fine. A correction recaptures it with `scripts/docs-screenshots.sh --recapture-release-shot <name>`.
+is published, a capture skips it and the publish carries it over unchanged, so its steps may stop matching the current
+UI and that is fine. For a correction, declare its current steps and recapture it with
+`scripts/docs-screenshots.sh --local --recapture-release-shot <name>`.
 
 ## Previews and reports
 
@@ -141,7 +142,7 @@ Before the first edit, read these in full:
 - `website/.agents/previewing.md`, unless the run is unattended
 
 Fence: the `CHANGELOG.md` sections of published releases, `src/release-notes/*.json`, and published release shots and
-their tests change only when a task specifically targets them; never edit the generated page.
+their capture steps change only when a task specifically targets them; never edit the generated page.
 
 ### Screenshots ("refresh the docs screenshots", adding or changing a docs page's shots)
 

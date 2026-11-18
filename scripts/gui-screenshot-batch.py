@@ -80,8 +80,9 @@ STEP_TIMEOUT_SECONDS = 300
 MONITOR_MARGIN = 200
 MIN_MONITOR = (1600, 1200)
 
-# The frame GPUI Kit draws around a Linux window, in pixels: a margin for its drop shadow (`SHADOW_SIZE` in Kit's
-# window_border.rs, 20 on Linux and 0 elsewhere) and a 1-pixel border inside it, on every side. Under Mutter GPUI draws
+# The frame GPUI Kit draws around a Linux window, in logical pixels (multiplied by the output scale): a margin for its
+# drop shadow (`SHADOW_SIZE` in Kit's window_border.rs, 20 on Linux and 0 elsewhere) and a 1-pixel border inside it, on
+# every side. Under Mutter GPUI draws
 # the window's decorations itself, so the frame is part of the window's surface, and the bridge's screenshot is the
 # whole surface: a 900x700 window showed the app in 858x658 pixels, in a black band (the shadow, drawn over nothing).
 # The old app's pictures show only its page, so a Linux run asks for a window larger by the frame and crops it off,
@@ -105,8 +106,8 @@ LINUX_FRAME = LINUX_FRAME_MARGIN + LINUX_FRAME_BORDER
 LINUX_FRAME_BLACK = 8
 
 # The title bar the Linux window draws for itself under Mutter, which draws none (`linux_title_bar::HEIGHT` in the GUI
-# crate), in pixels, inside Kit's frame at the window's top. The old app's pictures have no title bar, so a Linux run
-# asks for a window taller by it too and crops it off with the frame. `gui-agent.py start --scenario` reads this and
+# crate), in logical pixels (multiplied by the output scale), inside Kit's frame at the window's top. The old app's
+# pictures have no title bar, so a Linux run asks for a window taller by it too and crops it off with the frame. `gui-agent.py start --scenario` reads this and
 # LINUX_FRAME too, to size a scenario's window the same way (`scenario_window_size`).
 LINUX_TITLE_BAR = 34
 

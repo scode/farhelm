@@ -79,11 +79,11 @@ name has left the procedure and should stop.
 
 ## Refreshing the image
 
-The picture is taken on a Mac, the only platform that renders the app at the scenario's scale of 2.
-`scripts/readme-screenshot.sh` ships the checkout's files to the Mac over ssh, builds the app's agent build there,
-stages the fleet, captures and fetches the PNG; its header lists what the Mac and the machine you run it from need, and
-the environment that names the Mac (the script names none). The Mac's display must fit the scenario's window, or the
-capture stops at its size check (`docs/gui-agent.md`, "On a Mac"). Neither machine needs passwordless ssh to itself.
+The hero refresh uses a Mac display at the scenario's scale of 2. `scripts/readme-screenshot.sh` ships the checkout's
+files to the Mac over ssh, builds the app's agent build there, stages the fleet, captures and fetches the PNG; its
+header lists what the Mac and the machine you run it from need, and the environment that names the Mac (the script names
+none). The Mac's display must fit the scenario's window, or the capture stops at its size check (`docs/gui-agent.md`,
+"On a Mac"). Neither machine needs passwordless ssh to itself.
 
 - `scripts/readme-screenshot.sh --mac <destination>` prints the PNG's path (`target/readme-hero/readme-hero.png` unless
   `--output` says otherwise). The capture refuses a picture that shows a machine path, the account's ssh spelling or the
