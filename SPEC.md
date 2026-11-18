@@ -2455,59 +2455,92 @@ Host setup, removal, uninstall and refusal dialogs normally pin their header and
 scrolls the whole card, so every explanation and control stays reachable. A shortened heading retains the full
 destination in the body.
 
-Pinned sessions appear first in the sidebar in a manual order shared by every client of the helm, independent of the
-list's chosen sort. A new pin goes at the bottom of the pinned group; unpinning and pinning again puts it there again.
-Move up and Move down in the row menu rearrange pins relative to the displayed neighbor. Unpinned rows keep the chosen
-list order below. Pins work even when the session's host is unreachable; host selection and other filters still apply
-without changing the stored order. Under most recent activity, even a stale pin comes before connected running and
-waiting work. The quick switcher keeps its existing activity order and does not group pins first. Deleting a session
-removes its pin; Replace and Replace with carry the pin and its position to the new session, and Restart keeps it on the
-same id.
+The sidebar shows the global pins first, then the session groups in their manual order, then ungrouped unpinned
+sessions. Within a group, its pins appear in their manual order before its other members. The list's chosen sort orders
+unpinned sessions within their group or within the ungrouped part of the list. Activity can move a session within that
+part, and membership and group order stay fixed. The helm stores group names, order, membership, collapse and pin
+positions so every client shares them. The quick switcher keeps its existing order and does not arrange rows by pins or
+groups.
 
-Hovering an eligible pinned row reveals a grip beside its name. Dragging that grip within the pinned group shows the row
-lifted and a drop line; release moves it relative to the pin at that line. Escape, interrupted pointer capture or
-releasing outside the pinned group cancels. Dragging never pins or unpins a row, crosses the separator, or rearranges
-unpinned rows. The row menu remains the keyboard way to rearrange pins. A newly pinned row waiting for the order hold to
-end has neither a grip nor Move actions until it joins the movable group.
+The session row menu and the marked-rows metadata menu share a **Move to group** submenu. **New group…** opens a naming
+dialog and creates one group containing the targeted sessions. When creating or renaming a group, the helm trims the
+name and refuses an empty name or one another group already has, ignoring case. The dialog shows the refusal. New groups
+go at the end of the group order. A session belongs to at most one group. Every existing group is a destination, even if
+a filter hides its header. The submenu also offers **Remove from group** and skips marked rows that are already where
+they would go. In a grouped pin's row menu, **Global pins** names the action that removes its membership. A pin moved
+through the menu stays pinned and goes last among its new area's pins. Retired containerized sessions retain their
+Delete-only actions and are ineligible for a group move.
+
+**Pin to top** adds a pin at the bottom of its group's pins, or at the bottom of the global pins for an ungrouped
+session. Unpin keeps the session in its group, if any, and pinning it again appends it in that same area. **Move up**
+and **Move down** rearrange pins relative to the displayed neighbors within their area. Pins work even while a host is
+unreachable. Host and status filters narrow the displayed rows while preserving the stored order. Delete removes the
+pin, Restart keeps it, and Replace and Replace with carry it at its current position.
+
+A group header shows its name, a collapse toggle and its count. A keyboard user can reach the toggle, which exposes its
+expanded state to assistive technology. The header shows the member count, or **N of M** with an active filter, where N
+members match out of M. Groups with no matches are hidden. An incomplete count follows the list's partial-reply warning
+rule below. Collapsing hides all of the group's rows, including pins, and other clients show the same collapsed state. A
+collapsed header draws the dot of its most urgent matching member with a live attention color: waiting (red), unseen
+idle (blue), then running (green). A muted member counts only while waiting on a connected host. The dot uses the same
+mark as its row and the tooltip names that member and status. The header only draws the dot while collapsed and a member
+qualifies. Its accessible text gives the same information. Marks and row actions follow the displayed rows.
+
+The header menu offers **Rename**, **Ungroup**, **Move up** and **Move down** when available. Ungroup removes the group
+and makes its members ungrouped. Its pinned members stay pinned and append to the global pins in their group order. A
+group disappears when its last member moves out or is deleted, including when its last membership disappears with a
+removed host entry. Groups can hold sessions from several hosts. Membership belongs to the session on its host entry.
+Restart keeps it, Replace and Replace with carry it and the pin's position, and Delete removes it.
+
+Hovering an eligible pinned row reveals a grip beside its name. Dragging the grip lifts the row and shows a drop line. A
+pin can move within its area or into the global pins or an expanded group's pin area. It lands before or after the pin
+at the drop line, or as the first pin in an empty area. Dragging preserves pin status and the order of unpinned rows.
+The group header reuses the pin grip drag to move the group among groups. A pin move is refused if the moved pin or its
+neighbor has left the expected area. Escape, interrupted pointer capture or release outside a valid drop area cancels.
+The row and header menus retain the keyboard actions for these moves. A newly pinned row waiting for the order hold to
+end has neither a grip nor Move actions until it joins a movable area.
 
 Among unpinned sessions, the option labelled most recent activity sorts connected running and waiting sessions first,
-then every other session — idle, unclassified, ended, and anything on an unreachable host. Inside each group the order
-is the most recent observed START of a work burst: a session promotes when it moves from known idle or waiting into
-running (both idle-to-running and waiting-to-running count) and when it starts waiting on the user, since a question for
-the user is work the user should see; later output inside that burst, and a question that stays on screen, leave the
-position alone. Only a change the supervisor itself observed between two of its own looks counts: the first look after a
-supervisor restart, a session restart, or a recovery from failed screen captures only establishes where the session
-stands. Moving between the groups is what idling and completion do — a finished session drops below still-running work
-without its burst key moving, and a session returning to running rejoins the first group on that same key. Creation time
-is the stable fallback where an older supervisor has no work-start observation. The last-activity time shown in the row
-and the seen/unseen comparison stay independent of the order: they describe when the agent was last working (see Status)
-and neither moves a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees
-without keeping a private rank.
+then every other session — idle, unclassified, ended, and anything on an unreachable host. Within each of these two sort
+buckets the order is the most recent observed START of a work burst: a session promotes when it moves from known idle or
+waiting into running (both idle-to-running and waiting-to-running count) and when it starts waiting on the user, since a
+question for the user is work the user should see; later output inside that burst, and a question that stays on screen,
+leave the position alone. Only a change the supervisor itself observed between two of its own looks counts: the first
+look after a supervisor restart, a session restart, or a recovery from failed screen captures only establishes where the
+session stands. Idling and completion change the sort bucket. A finished session drops below still-running work within
+its part of the list without its burst key moving, and a session returning to running sorts with running work on that
+same key. Creation time is the stable fallback where an older supervisor has no work-start observation. The
+last-activity time shown in the row and the seen/unseen comparison stay independent of the order: they describe when the
+agent was last working (see Status) and neither moves a row. The sort buckets and the key are authoritative helm and
+supervisor data, so every client agrees without keeping a private rank.
 
 A muted session sorts with idle and ended sessions on the work-start key it had when muted. While it is waiting on a
-connected host, it joins the first group on its real work-start key so the question can promote it. When the wait ends,
-it returns to the frozen key. Ending the mute keeps the row in the second group on that key until the next observed work
-start, even if it is still running. A connected session waiting on the user still belongs in the first group. The
-sidebar's pinned rows keep their pin positions. The quick switcher uses the same recently active order, including mute's
-effect on it. Status filters use the real status.
+connected host, it sorts with active work on its real work-start key so the question can promote it. When the wait ends,
+it returns to the frozen key. Ending the mute keeps the row sorted with idle and ended sessions on that key until the
+next observed work start, even if it is still running. A connected session waiting on the user still sorts with active
+work. The sidebar's pinned rows keep their pin positions. The quick switcher uses the same recently active order,
+including mute's effect on it. Status filters use the real status.
 
 A client holds back reordering while the pointer is over the list, so a row does not move out from under the pointer on
-its way to a click. The hold is display-only and its snapshot is discarded when it ends: the shared pin order and chosen
-unpinned order stay authoritative, and the client shows them again as soon as the pointer leaves the list or has been
-completely still over it for 5 seconds (a scroll counts as movement). During a hold, rows keep updating in place; a
-session that disappears is removed at once, since a deleted session must not stay clickable; and a new session appears
-at the bottom of the list, moving no row above it, until the hold ends and it takes its place. Changing the list's host,
-filter, or order is asking for a different list, so the hold does not apply to it. While a session row's menu is open,
-the hold is kept until the menu closes, even if the pointer leaves the list or stays still, because releasing it would
-move the very row the menu belongs to; pointer movement over the list starts the 5 seconds of stillness over. Pins
-present in both the original held snapshot and the current reply follow their shared manual order within the slots those
-pins already hold, so a manual move takes effect without waiting for the hold to end. Other pin and unpin changes update
-in place during a hold and move to their grouped positions when it ends. Newly pinned rows offer no Move actions until
-then, including a new pin contiguous with the leading pinned run; original pins cannot use that new pin as a Move
-neighbor during the hold. A muted pin glyph immediately before the title names a pinned row in its tooltip and
-accessible text. A heavier separator with a small gap below follows the displayed leading contiguous run of pinned rows,
-only when an unpinned row follows; there is no Pinned heading. A newly pinned row held below that run does not move the
-separator there, and unpinning a row inside the run shortens it immediately.
+its way to a click. The hold is display-only and its snapshot is discarded when it ends. The shared pin order, group
+order and chosen unpinned order stay authoritative, and the client shows them again as soon as the pointer leaves the
+list or has been completely still over it for 5 seconds (a scroll counts as movement). During a hold, rows keep updating
+in place; a session that disappears is removed at once, since a deleted session must not stay clickable; and a new
+session appears at the bottom of the list, moving no row above it, until the hold ends and it takes its place. Changing
+the list's host, filter, or order is asking for a different list, so the hold does not apply to it. An open row or group
+menu or its naming dialog keeps the hold even if the pointer leaves the list or stays still. Movement over the list
+starts the 5 seconds of stillness over. Original groups and original pins still pinned in their held area follow the
+shared manual order in their existing slots. When this window completes a cross-area drag, the pin moves into its new
+area in the hold at once. Other membership changes and pin or unpin changes update rows in place until the hold ends,
+when the rows take their proper places. Group headers follow the held rows. Collapsing or expanding a group applies at
+once. Newly pinned rows offer no grip or Move actions until the hold ends, and original pins cannot use them as Move
+neighbors.
+
+A muted pin glyph immediately before the title names a pinned row in its tooltip and accessible text. The heavier
+separator with a small gap follows the displayed leading contiguous run of global pins when anything follows. The
+sidebar needs no Pinned heading. The same separator follows the last group when ungrouped sessions follow. A lighter
+separator follows a group's displayed leading run of pins when unpinned members follow. A new pin held below an area's
+leading run does not extend its separator, and unpinning a row inside the run shortens it immediately.
 
 Without effective marks, the list carries a count beside its title: **N**, or **N of M** when narrowed, where N matched
 and M is the whole fleet. A truncated reply or an unsupported filter retains its explicit warning rather than claiming a
@@ -2749,9 +2782,9 @@ client keeps its own copy, so a window shows the same colour after a restart or 
 UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all; otherwise it
 reads SEEN.
 
-Pins, seen stamps, mutes and notification read/cleared marks belong to the session on its particular host entry. They
-survive editing, retargeting or adopting that entry, but removing it and adding the host again starts those values
-fresh. On upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
+Pins, group membership, seen stamps, mutes and notification read/cleared marks belong to the session on its particular
+host entry. They survive editing, retargeting or adopting that entry, but removing it and adding the host again starts
+those values fresh. On upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
 
 The session row menu offers **Mute** beside the pin action on an eligible unmuted session. Retired containerized
 sessions still offer only Delete. The row menu and the marked-rows metadata menu use the same **Mute** submenu. **For 1
