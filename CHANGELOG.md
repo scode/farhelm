@@ -2,6 +2,18 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.41.0 - 2026-11-18
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- You can organize sessions into named groups in the sidebar, pin sessions within a group, and collapse a group while still seeing its most urgent session status. (#4112, #4114)
+- You can mute a session for an hour, until the next 6 a.m. on your device, or until you unmute it. While muted, routine activity stays quiet and leaves the session in place, and questions and approvals still get your attention. (#4106, #4108)
+
+### 🔄 Changed
+
+- The session launcher now suggests `gpt-6.2-sol` and `gpt-6.2-astra` for Codex, Goose, Pi, OMP, and OpenCode. Codex offers Low, Medium, and High effort for Astra. (#4099)
+
 ## v0.40.0 - 2026-11-17
 
 ### Changes to release notes going forward
