@@ -1044,9 +1044,9 @@ systemd or SSH substrate ran.
   rewritten to the pushed commit together or not at all, that a dry run touches nothing, and that reading the scenario
   through the loader leaves no bytecode in `scripts/`. Run it, with `shellcheck`, when the script or
   `scripts/scenario_json5.py` changes; seconds, no network, needs ImageMagick's `convert` and `identify`.
-- `shellcheck -x scripts/readme-screenshot.sh scripts/docs-screenshots.sh scripts/media-mac.sh` and `bash -n` on each of
-  those files — the two capture commands and their shared Mac shipment. Run these when any of the three changes. To
-  exercise the transport itself, run both commands with `--mac <destination>` on the test Mac.
+- `shellcheck scripts/readme-screenshot.sh scripts/docs-screenshots.sh` and `bash -n` on each of those files — the two
+  capture commands. Run these when either changes. To exercise the README hero's Mac transport itself, run
+  `scripts/readme-screenshot.sh --mac <destination>` on the test Mac.
 - `python3 -I scripts/test-scenario-json5.py` — the docs-media scenario loader (`scripts/scenario_json5.py`), which
   reads the subset of JSON5 the three `scenario.json5` files under `docs/` use: each of them parses into its viewport,
   hosts and sessions; line comments, unquoted keys and trailing commas are translated without touching strings holding

@@ -76,6 +76,6 @@ new release shots in `scripts/docs-shots/release-notes.py` and list them under t
 
 The command keeps its bulk capture record and local preview output. Use `--only <page>` for drafting. A full capture
 skips published release shots so the publisher can carry them over unchanged. Publishing belongs to a docs refresh or
-the release screenshot procedure. The Mac transport is still available and uses the README hero's SSH settings,
-preflight and lock. `scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it
-by hand or commit a screenshot on main. Changing that script means running its `--self-test`, which needs no network.
+the release screenshot procedure. The docs shots have no Mac route; only the README hero is captured on a Mac.
+`scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it by hand or commit a
+screenshot on main. Changing that script means running its `--self-test`, which needs no network.

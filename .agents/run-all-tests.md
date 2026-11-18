@@ -117,8 +117,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `scripts/publish-docs-shots.sh --self-test`
 - `scripts/publish-readme-hero.sh --self-test` and `shellcheck scripts/publish-readme-hero.sh`, and
   `python3 -I scripts/test-scenario-json5.py` (the scenario loader the hero publisher reads its size through)
-- `shellcheck -x scripts/readme-screenshot.sh scripts/docs-screenshots.sh scripts/media-mac.sh` and `bash -n` on each of
-  the three scripts (the capture commands and shared Mac shipment)
+- `shellcheck scripts/readme-screenshot.sh scripts/docs-screenshots.sh` and `bash -n` on both scripts (the capture
+  commands)
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check` and `deno test -A` on

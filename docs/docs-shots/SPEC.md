@@ -37,9 +37,9 @@ the end even after a failure.
 
 ## Where the images live
 
-PNGs are never committed on main. Captures made locally or fetched from a Mac go to the gitignored
-`website/public/docs-shots-local/<page>/<shot>.png`, where the docs preview can show them. A failed run prints its run
-directory, retained with its full capture and failure messages.
+PNGs are never committed on main. Captures go to the gitignored `website/public/docs-shots-local/<page>/<shot>.png`,
+where the docs preview can show them. A failed run prints its run directory, retained with its full capture and failure
+messages.
 
 The existing publisher builds a snapshot, a root commit holding every shot the docs reference, and points
 `refs/docs-assets/keep` at a keeper whose parents are the new snapshot, snapshots replaced less than six weeks ago, and

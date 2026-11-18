@@ -230,7 +230,6 @@ def main() -> int:
     parser.add_argument("--check-selection", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--only")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--lock", type=Path, help="shared GUI lock, held by gui-agent from build through stop")
     parser.add_argument("--recapture-release-shot", action="append", default=[], metavar="NAME")
     options = parser.parse_args()
     if options.out is None and not options.check_selection:
@@ -256,8 +255,6 @@ def main() -> int:
         frame, title_bar = batch.LINUX_FRAME, batch.LINUX_TITLE_BAR
     if options.no_build:
         start.append("--no-build")
-    if options.lock:
-        start += ["--lock", str(options.lock)]
     failed = True
     try:
         if gui.main([str(run), *start]) == 0:
