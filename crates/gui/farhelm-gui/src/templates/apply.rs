@@ -482,10 +482,9 @@ fn replay(
     // 3. The agent launch's choices. The fold has refused any of these on the command kind.
     match &fields.model {
         Some(Some(id)) => {
-            // The fold names the model's agent type even when this template did not (a model only one agent type
-            // offers picks that type, as typing it by hand does). A model the catalog lists for that type is a pick
-            // from the list; any other id is typed for that type, as a custom model. The fold's own owner field does
-            // not tell the two apart, since it keeps an owner for a listed model too.
+            // Replay the fold's agent choice even if the template named only a model. A retired model can infer
+            // its former agent without a catalog row, so use the same edit as a custom model from launch history.
+            // That edit can set the agent and keeps the model as a custom ID.
             if let Some(harness) = applied.harness {
                 let spelled = harness.catalog_model_id(id);
                 let listed = context.catalog.is_some_and(|catalog| {
@@ -496,7 +495,7 @@ fn replay(
                 let edit = if listed {
                     draft.choose_catalog_model(harness, id, context.catalog, remembered(harness))
                 } else {
-                    draft.choose_custom_model(id, context.catalog)
+                    draft.choose_history_model(harness, id, context.catalog, remembered(harness))
                 };
                 *notice = Some(edit.notice);
             }

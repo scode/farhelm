@@ -652,7 +652,7 @@ follows the agent-version support rule under "Supported user environments".
 
 OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
 choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
-`opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.1-sol`, and `opencode/gpt-6-astra`. The custom-model
+`opencode/gpt-6-luna`, `opencode/gpt-5.6-terra`, `opencode/gpt-6.2-sol`, and `opencode/gpt-6.2-astra`. The custom-model
 field also accepts a bare Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`,
 and either spelling of a suggested model is that OpenCode model even where another harness offers the same bare name;
 another provider prefix is refused. OpenCode has no offered effort choices. Its only offered permission is YOLO,
@@ -661,8 +661,8 @@ generic activity status with no hooks, conversation capture/resume, or waiting-s
 
 Goose, Pi, and OMP are agent types. Each uses its configured model when none is chosen. For an explicit OpenRouter
 choice, Farhelm suggests `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `z-ai/glm-5.3`, `openai/gpt-6-luna`,
-`openai/gpt-5.6-terra`, `openai/gpt-6.1-sol`, and `openai/gpt-6-astra`; a literal custom OpenRouter id remains available
-after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `yolo`
+`openai/gpt-5.6-terra`, `openai/gpt-6.2-sol`, and `openai/gpt-6.2-astra`; a literal custom OpenRouter id remains
+available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `yolo`
 (preselected), `approve`, `smart approve`, and `chat` modes. An omitted Goose permission means YOLO and explicitly sets
 `GOOSE_MODE=auto`. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking and has only the
 visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve`
@@ -1217,6 +1217,12 @@ agent choice is independent of that destination:
   template that fails current save rules, the control says "Delete permanently" before deletion and no undo is offered.
   The label the user saw decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete"
   always does, even if the template list changed in between. Closing the dialog ends its undo notice.
+
+  Saved-template model compatibility is an exception to applying edits as if made by hand. If neither the template nor
+  the launcher names an agent and the loaded catalog has no match for the model ID, four retired IDs can still pick
+  their former agent. The bare `gpt-6.1-sol` and `gpt-6-astra` pick Codex, and `opencode/gpt-6.1-sol` and
+  `opencode/gpt-6-astra` pick OpenCode. The original ID stays as a custom model. This applies in the desktop app and to
+  CLI launches from a template.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
   it directly in the desktop app when no dialog is open, without showing the launcher on success. While the session

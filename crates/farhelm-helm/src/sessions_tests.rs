@@ -530,7 +530,8 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
 ///
 /// This test keeps both routes on the real router. It proves the catalog is
 /// available without a create request and that history is scoped through the
-/// connected host identity before it becomes client-visible.
+/// connected host identity before it becomes client-visible. History keeps
+/// the saved model ID when the catalog starts suggesting a newer one.
 #[farhelm_testtrace::test]
 async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let harness = rest_harness::idle_helm().await;
@@ -565,11 +566,11 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
             .expect("catalog array")
             .iter()
             .any(|model| {
-                model["id"] == "gpt-6-astra"
+                model["id"] == "gpt-6.2-astra"
                     && model["harness"] == "codex"
-                    && model["efforts"] == serde_json::json!(["high"])
+                    && model["efforts"] == serde_json::json!(["low", "medium", "high"])
             }),
-        "the endpoint must expose the same constrained known model the helm compiles"
+        "the endpoint must offer Astra with the helm's full Codex effort list"
     );
 
     let (history_status, history) =
