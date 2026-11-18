@@ -234,7 +234,15 @@ native acceptance state. Remote upgrade belongs to its later checkpoint.'''
             raise ValueError('manual installation cannot satisfy updater discovery')
         return 'Call prior_receipts for established premises.\n' + discovery + '\nDo not restart in this checkpoint.'
     if update_path == 'manual':
-        return 'Call prior_receipts. Call install_candidate while the old app runs.\n' + restart
+        return '''Call prior_receipts. Call install_candidate while the old app runs.
+After installation the old app can take about a minute to notice the changed
+installed version. Sample fresh native state until the version readout turns
+red or its current accessibility label explicitly offers Restart to update.
+An unchanged Check for updates readout means keep observing. When the restart
+offer appears, open its menu by clicking the readout itself at coordinates
+from a fresh native screenshot. The accessibility ID can expire while the
+readout changes. Capture the visible menu before proceeding.
+''' + restart
     combined = pass_id.startswith('upgrade-')
     result = 'Call prior_receipts for established premises.\n' + (discovery + '\n' if combined else '') + restart
     if update_path == 'override':

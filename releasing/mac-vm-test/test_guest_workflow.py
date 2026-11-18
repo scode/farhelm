@@ -68,6 +68,13 @@ independent updater check. These assertions cover instructions, not live UI.
                     self.assertIn('custom model ID', envelope['instructions'])
                     self.assertNotIn('gpt-6.1-sol', envelope['instructions'])
 
+    def test_manual_installer_waits_for_native_restart_readiness(self):
+        """The installer can finish before the old app replaces its Check for updates control."""
+        text = self.envelope('p0-installer-upgrade', 'update-relaunch', 'manual', managed=True)['instructions']
+        self.assertLess(text.index('Call install_candidate'), text.index('keep observing'))
+        self.assertLess(text.index('keep observing'), text.index('clicking the readout itself'))
+        self.assertLess(text.index('Capture the visible menu'), text.index('brick_ui method restart'))
+
 
 class OldSessionInstructionsTests(unittest.TestCase):
     """Pin what P0's old-session turns are told, in both the managed and the plain envelope.

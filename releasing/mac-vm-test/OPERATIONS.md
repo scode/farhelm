@@ -43,6 +43,11 @@ manager through both the command channel and an SSH login. Stop the bases with g
 and absence of Farhelm binaries/state. Once frozen, create new clones for all tests. Do not start or provision the bases
 again to prepare a pass.
 
+When the configured model fails on an older guest CLI, test the current complete official CLI package in owned clones.
+The provider can reject the requested model on an older client even when the same login works on a newer one. Check both
+model inference and native tool use, including the package's companion executables. Adopt replacement bases after
+fresh-clone validation and retain the earlier profile and stopped bases for historical runs.
+
 ## Create and supervise a pass
 
 Run from the source checkout. Set `test_run` to a **new** private directory outside repositories, `journal` to the
