@@ -221,22 +221,40 @@ pub(super) fn drop_target(
     clip: Bounds<Pixels>,
     at: Point<Pixels>,
 ) -> Option<Target> {
+    drop_in_band(rows, Some(source), clip, at)
+}
+
+/// Resolve the insertion line in one ordered band. The source's index is
+/// only meaningful when the source occupies a slot in this band.
+fn drop_in_band(
+    rows: &[(&str, Bounds<Pixels>)],
+    source: Option<&str>,
+    clip: Bounds<Pixels>,
+    at: Point<Pixels>,
+) -> Option<Target> {
     let (first, last) = (rows.first()?, rows.last()?);
     let top = first.1.top().max(clip.top());
     let bottom = last.1.bottom().min(clip.bottom());
     if at.x < clip.left() || at.x >= clip.right() || at.y < top || at.y >= bottom {
         return None;
     }
-    let source_ix = rows.iter().position(|(key, _)| *key == source)?;
-    let others = || rows.iter().enumerate().filter(|(ix, _)| *ix != source_ix);
+    let source_ix = match source {
+        Some(source) => Some(rows.iter().position(|(key, _)| *key == source)?),
+        None => None,
+    };
+    let others = || {
+        rows.iter()
+            .enumerate()
+            .filter(|(ix, _)| Some(*ix) != source_ix)
+    };
     let (ix, placement) = match others().find(|(_, (_, bounds))| at.y < bounds.center().y) {
         Some((ix, _)) => (ix, Placement::Before),
         None => (others().next_back()?.0, Placement::After),
     };
-    let stays = match placement {
-        Placement::Before => ix == source_ix + 1,
-        Placement::After => ix + 1 == source_ix,
-    };
+    let stays = source_ix.is_some_and(|source| match placement {
+        Placement::Before => ix == source + 1,
+        Placement::After => ix + 1 == source,
+    });
     (!stays).then(|| Target {
         neighbor: rows[ix].0.to_owned(),
         placement,

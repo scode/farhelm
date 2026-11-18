@@ -36,6 +36,7 @@
 //! truncates beside the glyph as it does on every row, and the glyph's line box is held to its own size so that a
 //! pinned row is no taller than an unpinned one.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
@@ -82,6 +83,11 @@ fn order_key<'a>(session: &Listed<'a>) -> (i64, i64, &'a str) {
     )
 }
 
+/// Compare two pins by the helm's total order, including ties left by Replace.
+pub(super) fn by_position(a: &Listed, b: &Listed) -> Ordering {
+    order_key(a).cmp(&order_key(b))
+}
+
 /// `rows`, in the helm's order, with the pinned rows moved ahead of the rest: a stable partition, then the leading pinned
 /// block in the shared manual order when the listing carries it ([`manual_order`]). Unpinned rows keep the helm's
 /// order, whatever the chosen sort.
@@ -90,7 +96,7 @@ pub(super) fn pinned_first(mut rows: Vec<Listed<'_>>) -> Vec<Listed<'_>> {
     rows.sort_by_key(|session| !session.row.pinned);
     if manual_order(&rows) {
         let leading = rows.iter().take_while(|session| session.row.pinned).count();
-        rows[..leading].sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+        rows[..leading].sort_by(by_position);
     }
     rows
 }
@@ -122,6 +128,12 @@ pub(super) fn neighbors(
         })
         .map(|session| session.key)
         .collect();
+    ordered_neighbors(&movable)
+}
+
+/// Neighbors of every item in one displayed manual order. The edges have
+/// only one direction, and a lone item still has an entry for its grip.
+fn ordered_neighbors(movable: &[&str]) -> HashMap<String, Neighbors> {
     movable
         .iter()
         .enumerate()
@@ -295,10 +307,23 @@ pub(super) fn menu_items(
             });
         })
     };
-    let moves = [Direction::Up, Direction::Down]
+    std::iter::once(pin)
+        .chain(move_items(list, key, &neighbors, busy))
+        .collect()
+}
+
+/// Build the Move actions from the neighbors drawn on screen. Both
+/// directions use the same focus return and relative placement.
+fn move_items<'a>(
+    list: &'a WeakEntity<SessionList>,
+    key: &'a str,
+    neighbors: &'a Neighbors,
+    busy: bool,
+) -> impl Iterator<Item = MenuItem> + 'a {
+    [Direction::Up, Direction::Down]
         .into_iter()
-        .filter_map(|direction| {
-            let neighbor = direction.target(&neighbors)?.to_owned();
+        .filter_map(move |direction| {
+            let neighbor = direction.target(neighbors)?.to_owned();
             let (list, key) = (list.clone(), key.to_owned());
             Some(
                 MenuItem::new(
@@ -319,8 +344,7 @@ pub(super) fn menu_items(
                     });
                 }),
             )
-        });
-    std::iter::once(pin).chain(moves).collect()
+        })
 }
 
 // ---- The requests ----------------------------------------------------------------------------------------------------
