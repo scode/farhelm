@@ -345,11 +345,10 @@ the agent itself fails to start, for example because it is not installed on that
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
 
-If you try to launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume) or
-[container](/docs/agents/containerized-sessions/#stopping-and-deleting), Farhelm shows the host's name and asks you to
-resume it first. For example, **devbox is suspended. Resume it in Hosts, then launch.** If a stopped container offers
-**Resume**, the message says "is stopped". A [quick launch](/docs/using/launch-templates/#quick-launch) to a suspended
-Tensorlake host is refused for the same reason.
+If you try to launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume), Farhelm shows the
+host's name and asks you to resume it first. For example, **devbox is suspended. Resume it in Hosts, then launch.**
+A [quick launch](/docs/using/launch-templates/#quick-launch) to a suspended Tensorlake host is refused for the same
+reason.
 
 If the host does not answer within 20 seconds, the launcher comes back without **Not launched.** and says the request is
 still being carried out: the session may still start and appear in the session list. Your choices stay in the launcher.
