@@ -69,3 +69,127 @@ when a mute ends, that clicks reach a child menu, that a marked session whose mu
 rechecked, that the waiting bell sits beside the title, and that focus in a short menu reveals the highlighted choice.
 The sound review prompted the rule for a single update that shows both a finished turn and an ended mute. The desktop
 shares one duration menu, reads the helm's activity order, and uses its existing clock and sound paths.
+
+### Landing
+
+#### What landed with it
+
+Since the stack was based, main gained only notes: a FLAKES.md entry with its TODO.md and known-flakes lines (#4097), a
+TODO.md entry about quick switcher screenshots (#4102), and review-queue items (#4109). None of them touches the helm's
+database, the session list, menus or sounds, and none interacted with this plan. The rebase applied cleanly. The helm
+schema stays one step ahead of main, at 86.
+
+This landing was reviewed with extra skepticism at your request, both by me and by an independent reviewer. Neither
+found the work over-built for what the plan asked. The plan itself calls for:
+
+- a helm table and an expiry timer;
+- a shared submenu;
+- a marked-rows menu that can list a changing set of actions.
+
+The code is in proportion to that. The edge cases both reviews traced all hold:
+
+- Delete, Replace or a new mute racing a timed expiry;
+- an unreachable host;
+- a muted session that starts waiting;
+- marked rows that change while the Mute submenu is open.
+
+#### Fixes made while landing
+
+I ran the app and took screenshots of the row menu, the Mute submenu, and muted running, idle, waiting and ended
+sessions, before and after these fixes:
+
+- **The muted bell was too small to read.** It was drawn at the status dot's 8 pixels. At normal scale that is about as
+  big as the dot itself, and the slashed outline blurs into a smudge. It is now 10 pixels, the size of the ended marks
+  that share its slot, and centred where the dot was, so nothing else in the row moves. The two tests that pinned the
+  bell to the dot's exact bounds now check that it keeps the dot's position.
+- **The menus say what muting does and when it ends.**
+  - The row menu's Mute line now reads "Stop routine work turning it blue or moving it up" instead of "Choose how long
+    to mute this session".
+  - Each duration choice now says when it would end: "Ends 18:40", "Ends tomorrow 06:00", "Ends when you unmute it".
+    Before, the tooltips only repeated the labels. This also makes "Until tomorrow morning" honest when chosen before
+    06:00, since it then ends the same morning.
+  - The marked-rows menu says "Mute the marked sessions that are not muted", matching Pin's wording.
+  - The changed row menu reference screenshots (light and dark) are republished.
+- **A helm test fixture missed the new table.** The test that rebuilds a very old helm database from today's schema must
+  drop every newer table. It did not drop the mute table, so two checkout configuration tests failed. The executor's
+  test selection did not include them. The fixture now drops it, as its own comment asks of every new table.
+- **Smaller fixes.**
+  - The helm's HTTP contract test no longer sets the helm-only sort field, which is never sent.
+  - A comment the store refactor dropped (why a cached session whose payload names another session is refused) is back.
+
+#### Things you should know that the report does not say
+
+- **The Mute submenu opens on click, Enter or Right only, not on hover**, as most desktop submenus do. While it is open,
+  its parent item loses the highlight. The session groups plan reuses this component for four submenus, so whether it
+  should open on hover is worth deciding before that plan runs.
+- **The row menu no longer fits at the app's minimum window size.** With Mute added it scrolls, and Delete sits below
+  the fold in the reference screenshot.
+- **"Order hold" now means two things.** SPEC.md uses it for the pause in reordering while the pointer is over the list.
+  The code now also uses it for the pre-mute place a muted session keeps. Renaming the mute one would avoid confusion;
+  it touches several crates.
+- **The helm's frozen sort key rides on the session row type that the desktop app also reads**, marked never-sent. It
+  works, but it puts a helm-only sort input into the shared protocol type. Passing it beside the rows into the sort
+  would keep the contract clean.
+- **Mute waits on the same lock that tunnel opening holds while it connects**, so a Mute can wait behind a slow tunnel.
+  The lock stops a late Mute from bringing back a row Delete just removed; pins live with the same race without it.
+- **No test covers a mute ending through the timer while the helm runs.** The only expiry test starts the helm after the
+  deadline has passed.
+
+#### Checks
+
+The stack changes the helm's database and ordering, the shared protocol, and the desktop app's session list, menus and
+sounds. The landing therefore ran:
+
+- the lints;
+- the whole test suites of the GUI crates, the helm and the protocol;
+- the app's end-to-end smoke;
+- the screenshot goldens;
+- a hands-on run of the app for screenshots.
+
+The builds ran locally. The test suites and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the stack rebased onto main, before the landing fixes:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and `python3 -B scripts/check-gui-lints.py`: passed.
+- `scripts/check-foundation-paths.py` (from the base revision), for each of the four PRs against the one below it:
+  passed.
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`89d963eb-b416-4a14-8497-1f35ff0af00c`).
+
+On the fixed app code:
+
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py --no-build`), on a boat: 49 steps passed, with the
+  clipboard paste step skipped as always on Linux (`5a502007-2678-446a-b799-c210b0d851e0`).
+- `cargo nextest run -p farhelm-gui -p farhelm-grid-model -p farhelm-input-mapping -p farhelm-helm -p farhelm-proto`
+  from a locally built archive, split in three across boats:
+  - 1758 passed;
+  - 1692 passed and 1 failed;
+  - 1716 passed and 3 failed.
+  - Runs: `c52b1c5d-0025-4dc9-88d1-e143bee4dd43`, `94b6a3db-e24a-4557-aaec-8b43c686b9b7`,
+    `8eaabe33-1891-4333-a3f7-17754f137e39`.
+- **The failures:**
+  - Two GUI tests pinned the bell to the dot's exact size, which the size fix changed.
+  - Two helm checkout configuration tests failed on the old-database fixture described above.
+  - Both kinds are fixed.
+- **Runtime skips:** two helm tests skipped at runtime because the archive does not carry a full `farhelm` binary. They
+  are provisioning over the local transport and the uninstall stop. Neither touches mute; that coverage is missing from
+  this run.
+
+After the test fixes, which changed only tests and the old-database fixture, on the final tree, locally:
+
+- `cargo fmt --all -- --check`, `dprint check` and
+  `cargo clippy -p farhelm-gui -p farhelm-helm --all-targets -- -D warnings`: passed.
+- `cargo nextest run -p farhelm-gui -p farhelm-helm --lib` for the session list's menu and compact tests and the helm's
+  checkout configuration tests: 74 passed (`321b96f9-233d-467a-8522-685c7ce90f62`).
+- `python3 scripts/check-gui-goldens.py` against the republished references: passed
+  (`fbf92ff1-ed8d-420e-97f8-fda112252bd1`).
+
+The boat suite and smoke runs were reused for the final commit, since only tests changed after them.
+
+Skipped:
+
+- The rest of the Rust workspace and the desktop process's tests: the change stays in the helm, the protocol and the GUI
+  crates.
+- The Linux app lifecycle: startup and quit are untouched.
+- The Mac-only checks.
