@@ -20567,3 +20567,890 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: moot and removed on 2026-11-17 with the end of the GPUI migration, without further triage (maintainer's
   instruction): The stale shortcut state in this report requires browser credential sharing and an auth-skew remount.
+
+## trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-deliberate-old-tmux-terminal-retirement.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Its protocol 77 stream removal is specified in SPEC_impl.md "Grid
+  streams".
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-legacy-tmux-retirement-process-history-loss.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-retirement-of-old-private-tmux-terminals.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Restart between terminal hosts still carries scrollback, as the finding
+  checked.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-old-terminal-retirement-history-loss.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." The Lifecycle clause it quotes has since lost its old-terminal part; the
+  Old terminals bullet alone covers it.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-explicit-old-private-tmux-terminal-retirement.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-old-tmux-terminal-retirement.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-specified-private-tmux-startup-retirement-loss.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-private-tmux-startup-retirement-process-history-loss.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Tabs already in terminal hosts are kept ("A session whose agent or tabs
+  already run in terminal hosts keeps them.").
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." The guarded-Delete and spare-checkout routes it excludes were handled
+  under their own items.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-legacy-tmux-retirement-work-history-loss.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-startup-retirement-of-private-tmux-work.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-accepted-retirement-of-old-tmux-terminals.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Its narrower claim, that deleting the tests removed history carry-over
+  between terminal hosts, is wrong: that path remains.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Its claim that deleting the old stream code added a loss is wrong; nothing
+  calls it.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-retired-tmux-restart-does-not-migrate-scrollback.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the retirement the finding describes is
+  current behavior. The supervisor that owns the state directory ends the old private tmux server before it reloads
+  sessions (service/core.rs, core/old_terminals.rs), sweeps what ran there one agent or tab at a time within a 15 s
+  budget, and never gives an old-kind row a terminal again. SPEC.md "Terminal experience", "Old terminals" bullet,
+  accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it, and with it everything
+  that still ran in an old terminal … one whose agent had already ended keeps its outcome, but its terminal's last
+  screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server or to stop what ran
+  there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same,
+  accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending the old
+  private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's Restart or
+  Delete: the conversion commits regardless." Its side route, inherited history in a failed launch's error quote after
+  the restarted terminal grows, stays queued as trailing-restart-seed-history-promoted-into-launch-excerpt.md and its
+  duplicates.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the uninstall plan has no tmux step, so
+  an old tmux server that already outlived a stopped supervisor keeps running after uninstall. SPEC.md accepts it:
+  "Uninstall has no tmux step of its own … but one that outlived a supervisor stopped before uninstall (on a host never
+  updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."
+  SPEC_impl.md adds the failed-startup-cleanup case.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed or timed-out
+  startup sweep only warns and the conversion to interrupted commits anyway. The duplicate-agent route is narrower than
+  claimed: Restart of a session without a terminal first reaps the previous run's scope and markers and refuses to
+  relaunch if that fails. Either way the residual is the one the specifications accept. SPEC.md "Terminal experience",
+  "Old terminals" bullet, accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it,
+  and with it everything that still ran in an old terminal … one whose agent had already ended keeps its outcome, but
+  its terminal's last screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server
+  or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended
+  all the same, accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending
+  the old private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's
+  Restart or Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-startup-failure-versus-restart-reap.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed or timed-out
+  startup sweep only warns and the conversion to interrupted commits anyway. The duplicate-agent route is narrower than
+  claimed: Restart of a session without a terminal first reaps the previous run's scope and markers and refuses to
+  relaunch if that fails. Either way the residual is the one the specifications accept. SPEC.md "Terminal experience",
+  "Old terminals" bullet, accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it,
+  and with it everything that still ran in an old terminal … one whose agent had already ended keeps its outcome, but
+  its terminal's last screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server
+  or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended
+  all the same, accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending
+  the old private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's
+  Restart or Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed or timed-out
+  startup sweep only warns and the conversion to interrupted commits anyway. The duplicate-agent route is narrower than
+  claimed: Restart of a session without a terminal first reaps the previous run's scope and markers and refuses to
+  relaunch if that fails. Either way the residual is the one the specifications accept. SPEC.md "Terminal experience",
+  "Old terminals" bullet, accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it,
+  and with it everything that still ran in an old terminal … one whose agent had already ended keeps its outcome, but
+  its terminal's last screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server
+  or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended
+  all the same, accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending
+  the old private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's
+  Restart or Delete: the conversion commits regardless." The removed migration banner never showed for these sessions,
+  and the old app is gone.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed or timed-out
+  startup sweep only warns and the conversion to interrupted commits anyway. The duplicate-agent route is narrower than
+  claimed: Restart of a session without a terminal first reaps the previous run's scope and markers and refuses to
+  relaunch if that fails. Either way the residual is the one the specifications accept. SPEC.md "Terminal experience",
+  "Old terminals" bullet, accepts it in so many words: "A supervisor that finds that tmux server when it starts ends it,
+  and with it everything that still ran in an old terminal … one whose agent had already ended keeps its outcome, but
+  its terminal's last screen, which lived in the server, is gone; old tabs are closed." and "A failure to end the server
+  or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended
+  all the same, accepting that a Restart could then start a second agent beside one still running." SPEC_impl.md "Ending
+  the old private tmux server" repeats both, adding "A sweep that runs out of time leaves the rest for the session's
+  Restart or Delete: the conversion commits regardless."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history): the cited code, the old app's
+  restart_consequence and its self-rewording confirmation, was deleted with the old desktop app (#3407, 1eb4e3751). The
+  GPUI header Restart (#3532, f78ea9482) fixes its wording when it opens; its only sentence is "Still running —
+  restarting stops the agent and its whole process tree first:" and confirming always sends consent to stop, so nothing
+  now says there is nothing left to stop. The remaining one-click Restart of an interrupted session reaping survivors is
+  accepted by SPEC.md "Old terminals" ("left for the session's Delete") and SPEC_impl.md ("leaves the rest for the
+  session's Restart or Delete").
+- Decision: already fixed (#3407, #3532); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history): the cited code, the old app's
+  restart_consequence and its self-rewording confirmation, was deleted with the old desktop app (#3407, 1eb4e3751). The
+  GPUI header Restart (#3532, f78ea9482) fixes its wording when it opens; its only sentence is "Still running —
+  restarting stops the agent and its whole process tree first:" and confirming always sends consent to stop, so nothing
+  now says there is nothing left to stop. The remaining one-click Restart of an interrupted session reaping survivors is
+  accepted by SPEC.md "Old terminals" ("left for the session's Delete") and SPEC_impl.md ("leaves the rest for the
+  session's Restart or Delete").
+- Decision: already fixed (#3407, #3532); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the window is real. The startup step
+  reads each old pane's environment by bare process number after the process-table snapshot, with no start-time recheck
+  (core/old_terminals.rs, procs::read_environ), so a number reused in between could make a new terminal-host tab look
+  like an old pane and get swept. The window is a synchronous loop with no waits; sweep roots carry (number, start time)
+  pairs. SPEC_impl.md "Runtime state": "Process-number reuse inside a short window is accepted, for now. Decided
+  2026-10-05." covers reuse between reading a number and checking it, and excludes only carrying a bare number across
+  unbounded waits or asynchronous work, which does not happen here. A cheap optional hardening is re-checking the pane's
+  start time after reading its environment.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-snapshot-unvalidated-pane-owner.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the window is real. The startup step
+  reads each old pane's environment by bare process number after the process-table snapshot, with no start-time recheck
+  (core/old_terminals.rs, procs::read_environ), so a number reused in between could make a new terminal-host tab look
+  like an old pane and get swept. The window is a synchronous loop with no waits; sweep roots carry (number, start time)
+  pairs. SPEC_impl.md "Runtime state": "Process-number reuse inside a short window is accepted, for now. Decided
+  2026-10-05." covers reuse between reading a number and checking it, and excludes only carrying a bare number across
+  unbounded waits or asynchronous work, which does not happen here. A cheap optional hardening is re-checking the pane's
+  start time after reading its environment.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): route confirmed. When startup cannot
+  reach the old tmux server, or its sweep fails or runs out of budget, an old agent or tab of the session survives
+  unlisted; the desktop app shows the session with nothing alive and sends the nothing-alive Delete guard; the
+  supervisor's check does not see old-terminal leftovers; teardown sweeps the whole session and kills the survivor. That
+  contradicts SPEC.md "Lifecycle operations" ("a Delete or Replace whose prompt said nothing was alive … is refused if
+  the agent or any terminal tab is running"), but it fully matches FILTER.md "Upgrades from older releases combined with
+  another rare condition": the trigger needs an old-terminal agent or tab carried through the upgrade plus a startup
+  connection or cleanup fault, and the whole consequence is lost processes within the affected session, which that
+  filter covers; none of its exclusions (broken update, corrupted database, bricked install, security) applies. The next
+  supervisor start retries ending the server. Replace's nothing-alive guard has the same gap. Here the survivor is a
+  hidden old tab of a session whose agent had moved to a terminal host.
+- Decision: skipped under the triage rule for findings matched by a review filter (2026-11-18 highest-bucket triage); a
+  filter match says nothing about whether the behavior is acceptable in code.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): route confirmed. When startup cannot
+  reach the old tmux server, or its sweep fails or runs out of budget, an old agent or tab of the session survives
+  unlisted; the desktop app shows the session with nothing alive and sends the nothing-alive Delete guard; the
+  supervisor's check does not see old-terminal leftovers; teardown sweeps the whole session and kills the survivor. That
+  contradicts SPEC.md "Lifecycle operations" ("a Delete or Replace whose prompt said nothing was alive … is refused if
+  the agent or any terminal tab is running"), but it fully matches FILTER.md "Upgrades from older releases combined with
+  another rare condition": the trigger needs an old-terminal agent or tab carried through the upgrade plus a startup
+  connection or cleanup fault, and the whole consequence is lost processes within the affected session, which that
+  filter covers; none of its exclusions (broken update, corrupted database, bricked install, security) applies. The next
+  supervisor start retries ending the server. Replace's nothing-alive guard has the same gap. Here the survivor is the
+  old agent or part of its process tree.
+- Decision: skipped under the triage rule for findings matched by a review filter (2026-11-18 highest-bucket triage); a
+  filter match says nothing about whether the behavior is acceptable in code.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-page-raw-json-paste-grid-control.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-legacy-browser-grid-json-input-reinterpretation.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading and git history, not run): the route existed only
+  in v0.39.0, the one release with grid-only terminals that still served a browser page. A tab loaded from v0.38.0 or
+  earlier and left open across the update sent a paste as one binary message, which the v0.39.0 helm relayed as grid
+  input and the supervisor decoded as GridInput::Text, turning a literal JSON paste into unbracketed terminal input.
+  v0.40.0 removed the browser interface and browser sign-in (#3401, 6ef88c9a4), the old webview desktop app (#3407,
+  1eb4e3751) and `farhelm helm run` (#3953, 156f1703f); SPEC.md says Farhelm serves no browser UI and every helm refuses
+  a request that carries an Origin (crates/farhelm-helm/src/middleware.rs origin_is_allowed, wrapping the whole router
+  including the terminal socket), and an old tab has no credential the helm accepts. The old v0.38/v0.39 lines were
+  spot-checked; the old page's mount gates and xterm's bracketed-paste default rest on the reviewers' reading.
+- Decision: already fixed (#3401, #3407, #3953); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-raster-default-native-opening-policy.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the default open-on-click list includes
+  common raster image types and exempts them from the settings warning, exactly as SPEC.md "Local authority and trust
+  between hosts" specifies ("amended 2026-11-12 at the maintainer's request: the default also lists .png, .jpg, .jpeg,
+  .gif, .webp, .bmp and .avif" and "The click authorizes this transfer across the host boundary, including for
+  agent-controlled files."); crates/farhelm-proto/src/open_extensions.rs matches and SVG keeps its warning. No route
+  that opens a file without the modifier-click was claimed or found.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed initial
+  environment launch, including one whose session-create reply was lost after the agent started, deletes only that
+  launch's new environment (provisioning/tensorlake_add.rs; Replace never takes this path). SPEC.md "Sandbox sessions":
+  "If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it
+  attempts to delete that newly created sandbox and snapshots … This may end an agent that started before its reply was
+  lost. … Transparent recovery of an ambiguous launch is not promised." SPEC.md "Container sessions": "An ordinary
+  failed initial launch may discard its newly created container, including after a lost session-create reply."
+  SPEC_impl.md: "Lost create replies need no special reconciliation: the newly created resource may be destroyed."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-fresh-environment-launch-ambiguous-create-cleanup.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed initial
+  environment launch, including one whose session-create reply was lost after the agent started, deletes only that
+  launch's new environment (provisioning/tensorlake_add.rs; Replace never takes this path). SPEC.md "Sandbox sessions":
+  "If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it
+  attempts to delete that newly created sandbox and snapshots … This may end an agent that started before its reply was
+  lost. … Transparent recovery of an ambiguous launch is not promised." SPEC.md "Container sessions": "An ordinary
+  failed initial launch may discard its newly created container, including after a lost session-create reply."
+  SPEC_impl.md: "Lost create replies need no special reconciliation: the newly created resource may be destroyed."
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-fresh-environment-ambiguous-create-cleanup.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that a failed initial
+  environment launch, including one whose session-create reply was lost after the agent started, deletes only that
+  launch's new environment (provisioning/tensorlake_add.rs; Replace never takes this path). SPEC.md "Sandbox sessions":
+  "If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it
+  attempts to delete that newly created sandbox and snapshots … This may end an agent that started before its reply was
+  lost. … Transparent recovery of an ambiguous launch is not promised." SPEC.md "Container sessions": "An ordinary
+  failed initial launch may discard its newly created container, including after a lost session-create reply."
+  SPEC_impl.md: "Lost create replies need no special reconciliation: the newly created resource may be destroyed." Its
+  second consequence, a hand relaunch after only the desktop app's reply was lost creating a second environment, is the
+  unpromised transparent recovery; the app tells the user to check Hosts first, and losing only that reply never
+  triggers cleanup.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-container-place-retarget-authority-is-unverified-after-investigation.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the route is real. An agent's
+  container-creation card captures only the place host's id and name, and after Allow the launch goes to the entry's
+  current route, so a destination changed in Hosts while the card waited (possible only while that host has no
+  containers or recipe images) runs the agent and installs the recipe's credentials on the new machine. SPEC.md
+  "Topology" (confirmed 2026-10-10) accepts it: "Approvals, settings changes and confirmed operations therefore follow
+  the entry. One still in flight when the destination changes or a new identity is adopted (an approved stop, restart,
+  rename, create or clone, …) may be carried out against the entry's new machine, and Farhelm adds no check of the
+  installation identity to prevent that." The environment module docs say the same on purpose. Leftover inconsistency,
+  not acted on: SPEC_impl.md says "A launch is also refused if the target host's connection changed while the card
+  waited", which holds for ordinary agent launches but not environment cards; SPEC.md governs observable behavior.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the route is real. An agent's
+  container-creation card captures only the place host's id and name, and after Allow the launch goes to the entry's
+  current route, so a destination changed in Hosts while the card waited (possible only while that host has no
+  containers or recipe images) runs the agent and installs the recipe's credentials on the new machine. SPEC.md
+  "Topology" (confirmed 2026-10-10) accepts it: "Approvals, settings changes and confirmed operations therefore follow
+  the entry. One still in flight when the destination changes or a new identity is adopted (an approved stop, restart,
+  rename, create or clone, …) may be carried out against the entry's new machine, and Farhelm adds no check of the
+  installation identity to prevent that." The environment module docs say the same on purpose. Leftover inconsistency,
+  not acted on: SPEC_impl.md says "A launch is also refused if the target host's connection changed while the card
+  waited", which holds for ordinary agent launches but not environment cards; SPEC.md governs observable behavior.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the route is real. An agent's
+  container-creation card captures only the place host's id and name, and after Allow the launch goes to the entry's
+  current route, so a destination changed in Hosts while the card waited (possible only while that host has no
+  containers or recipe images) runs the agent and installs the recipe's credentials on the new machine. SPEC.md
+  "Topology" (confirmed 2026-10-10) accepts it: "Approvals, settings changes and confirmed operations therefore follow
+  the entry. One still in flight when the destination changes or a new identity is adopted (an approved stop, restart,
+  rename, create or clone, …) may be carried out against the entry's new machine, and Farhelm adds no check of the
+  installation identity to prevent that." The environment module docs say the same on purpose. Leftover inconsistency,
+  not acted on: SPEC_impl.md says "A launch is also refused if the target host's connection changed while the card
+  waited", which holds for ordinary agent launches but not environment cards; SPEC.md governs observable behavior. Its
+  original sub-claim, that a standing permission or Always allow could approve an environment launch, is incorrect:
+  farhelm-proto/src/approvals.rs makes LaunchEnvironment require a direct Allow.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## folder-create-approval-loses-target-identity.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): the route is real (a destination change
+  and new installation around an agent's create card can send the create to the new machine) and documented as a choice
+  in agent_requests.rs ("nothing here pins an incarnation to prevent that"). SPEC.md "Topology" (confirmed 2026-10-10)
+  names "an approved … create" carried out against the entry's new machine as accepted, with no installation-identity
+  check. Ordinary launches additionally refuse a change during the card wait.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-podman-owned-image-rm-default-prunes-user-base.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading): already fixed by da8366b7f, "fix: keep a user's
+  Podman base image when retiring recipe images (#4085)". Owned-image removal now passes --no-prune
+  (environment/podman/build.rs, asserted in podman/tests.rs), and the helm has no other image-removal path.
+- Decision: already fixed (#4085); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-podman-owned-image-removal-recursively-prunes-user-base.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading): already fixed by da8366b7f, "fix: keep a user's
+  Podman base image when retiring recipe images (#4085)". Owned-image removal now passes --no-prune
+  (environment/podman/build.rs, asserted in podman/tests.rs), and the helm has no other image-removal path.
+- Decision: already fixed (#4085); recorded without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-warned-whole-environment-delete-includes-unmarked-peers.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed that bulk Delete gives marked
+  sessions of an environment the helm could not ask the warned whole-environment Delete, which also destroys unmarked
+  and unlisted sessions. SPEC.md "Sandbox sessions": "Marked sessions of a sandbox the helm could not ask when the modal
+  opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which." SPEC_impl.md: "The
+  warned whole-sandbox Delete may subsequently destroy any leftover session, listed or unlisted. This is accepted
+  product behavior". Containers follow the same rule; the desktop app shows the warning on that lane.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications (2026-11-18 highest-bucket
+  triage); this is accepted behavior, not a completed fix.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): route confirmed. Startup's spare-claim
+  protection treats every old-terminal launch row as not live whether or not retirement stopped it (service/core.rs), so
+  a preparation that survived the end of old terminals (a fault or used-up sweep budget) has its spare claim deleted;
+  the deletion's check that a folder was not moved runs only after that folder's contents are gone (checkout_trash.rs),
+  while the surviving take moves folders into the new checkout without the cache lock (spare_take.rs). Files are lost
+  only if a second session started in that unfinished checkout writes into a moved folder during the deletion. It needs
+  an update straight from v0.31-v0.33 (spare takes shipped in v0.31, terminal hosts became the default in v0.34) to
+  v0.39 or later during preparation, plus the fault and a narrow race. It contradicts SPEC.md "Managed checkouts"
+  ("except claims still in a live launch's clone stage") only when the old launch really is alive. FILTER.md "Upgrades
+  from older releases combined with another rare condition" fits: carried-over state plus rare conditions, consequence
+  lost work within the affected checkout, no exclusion applies. The judgment call that files written by the second
+  session inside the affected checkout count as within the affected sessions was put to the maintainer, who accepted it.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): filtered
+  by FILTER.md "Upgrades from older releases combined with another rare condition"; a filter match says nothing about
+  whether the behavior is acceptable in code.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): route confirmed. Startup's spare-claim
+  protection treats every old-terminal launch row as not live whether or not retirement stopped it (service/core.rs), so
+  a preparation that survived the end of old terminals (a fault or used-up sweep budget) has its spare claim deleted;
+  the deletion's check that a folder was not moved runs only after that folder's contents are gone (checkout_trash.rs),
+  while the surviving take moves folders into the new checkout without the cache lock (spare_take.rs). Files are lost
+  only if a second session started in that unfinished checkout writes into a moved folder during the deletion. It needs
+  an update straight from v0.31-v0.33 (spare takes shipped in v0.31, terminal hosts became the default in v0.34) to
+  v0.39 or later during preparation, plus the fault and a narrow race. It contradicts SPEC.md "Managed checkouts"
+  ("except claims still in a live launch's clone stage") only when the old launch really is alive. FILTER.md "Upgrades
+  from older releases combined with another rare condition" fits: carried-over state plus rare conditions, consequence
+  lost work within the affected checkout, no exclusion applies. The judgment call that files written by the second
+  session inside the affected checkout count as within the affected sessions was put to the maintainer, who accepted it.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): filtered
+  by FILTER.md "Upgrades from older releases combined with another rare condition"; a filter match says nothing about
+  whether the behavior is acceptable in code.
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 highest-bucket triage.

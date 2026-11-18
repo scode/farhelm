@@ -1735,3 +1735,436 @@
   earlier releases wrote, spec rewrite) and that it would remove this race. No code change. Remove the feedback file and
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `pending`.
+
+## session-actions-use-unseen-liveness.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The desktop app builds a
+  lifecycle action's precondition from the session as the store holds it at the click, not as the clicked frame drew it
+  (session_list/menu.rs documents "The row as the store holds it now: what any question is drawn from and any
+  precondition is taken from"; the skipped Delete sends at once; the launcher reads its warning state at the press).
+  GPUI dispatches a click to the previous frame's handlers, so a push landing in that frame can make a nothing-alive
+  Delete carry an agent-alive precondition. SPEC.md "Lifecycle operations" (confirmed 2026-10-01): "When the session
+  setting skips a prompt, the click authorizes only the state the screen showed, under the same guards. The request
+  carries the matching precondition"; the launcher "carries the precondition matching what the launcher showed at the
+  click". Bucket stays highest: the route kills a restarted agent without consent.
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Delete, Stop, Restart, Replace and the Restart with / Replace with launcher send the precondition
+  matching the state the clicked frame drew, so the supervisor refuses when more is alive than was shown. Uses the
+  shared standard and mechanism the user required on 2026-11-18 (Q3; see header-actions-follow-unseen-session.md), not
+  an ad hoc per-site fix; the mechanism itself counts against that item, not this gate. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: pending
+
+## trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The route it established
+  used the removed webview app's display delay, but the GPUI port has the same design: "Stop and suspend" on a sandbox
+  or container session builds its two guards (agent running again, tabs opened) from the session in the live store at
+  the click (session_list/environment.rs, menu.rs, stop.rs), and GPUI dispatches a click to the previous frame's
+  handlers (established for session-actions-use-unseen-liveness.md). SPEC.md "Lifecycle operations": "a Stop whose click
+  showed an ended agent is refused if the agent is alive again or cannot be confirmed ended, before stopping anything".
+  The same bug was fixed for the old app in #3337. Bucket: high until the GPUI route is shown end to end, highest once
+  it is.
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: The environment Stop and suspend in the row menu and the header carries guards and verb from the
+  state the clicked frame drew, with a test. Uses the shared standard and mechanism the user required on 2026-11-18 (Q3;
+  see header-actions-follow-unseen-session.md), not an ad hoc per-site fix; the mechanism itself counts against that
+  item, not this gate. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the
+  queue removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
+  feedback file and its index entry in the same change.
+- Execution: pending
+
+## trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed as an ordering regression.
+  detach_naturally in crates/farhelm-supervisor/src/service/connection.rs releases the attachments lock before the old
+  attachment (and the input side whose drop cancels its pump) is dropped, while detach_stalled drops it first and the
+  version before the reviewed range did too. SPEC_impl.md: "An attachment that ends drops the input its pump had not
+  handed to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement
+  attachment sends." FILTER.md "A displaced input task resumes inside an in-progress handoff" does not match (it covers
+  only an already-polled send). The trigger is not established for shipped clients (it needs the output stream to fail
+  while the terminal lives, and there is no await in the gap), so the bucket is other; it would move to highest if a
+  shipped producer were shown.
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
+- Completion criteria: Natural detach drops the old attachment's input side before releasing the lock, as detach_stalled
+  does (about 5 lines, optional test). Size gate: about 100 lines of diff (code, tests and docs, not counting
+  TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
+  to the user. Remove the feedback file and its index entry in the same change.
+- Execution: pending
+
+## trailing-update-survival-reassurance-omits-old-terminal-retirement.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The installer's closing line
+  after every update ("Quit and reopen Farhelm to finish updating. Your sessions keep running.", scripts/install.sh),
+  SPEC.md's Restart to update and Durability ("must not interrupt its sessions … only a host reboot takes sessions
+  down"), SPEC_impl.md's Restart to update and the update and remote-Update docs all promise survival with no exception
+  for the one update whose first supervisor start ends old tmux terminals (SPEC.md "Terminal experience", "Old
+  terminals"). #3375 (78e9d68) deliberately put the unqualified wording back, "accepting that the installer prints it
+  during that one update too", but that decision lived only in its commit message, so SPEC.md contradicts itself.
+  plans/queue/retire-old-terminal-announcement.md does not touch these texts. Bucket: highest by the letter of the rules
+  (a statement that could lead a reader into losing work); the loss itself is accepted.
+- Decision: the user picked "Keep the wording; write the exception down" (2026-11-18 highest-bucket triage page, Q1), in
+  their words: "omg yes some agent removed this wording. sigh. This is a general product feature. Some nit pick about a
+  particular upgrade flow and a user not having done the restarts etc doesn't overturn this. These are general
+  principles and statements about how the product operates, not a lawyer's contract". Principle: Farhelm's general
+  statements about how the product behaves (sessions survive updates and supervisor restarts) describe its ordinary
+  operation; a narrow, separately specified exception in one upgrade flow does not make them wrong and is not a reason
+  to qualify them everywhere.
+- Completion criteria: SPEC.md states the principle (general product statements describe ordinary operation and are not
+  qualified for every separately specified exception), and the "Old terminals" bullet or Durability notes that the
+  survival statements are deliberately left unqualified for the update that ends old terminals. The survival wording in
+  the installer, SPEC.md, SPEC_impl.md and the docs stays as it is. Remove this feedback file and the two below, with
+  their index entries, in the same change.
+- Execution: pending
+
+## trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md
+
+- Outcome: `fix spec`.
+- Assessment: the same defect as `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`, reached
+  through SPEC_impl.md's Restart to update text; confirmed the same way.
+- Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
+- Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
+- Execution: pending
+
+## trailing-old-terminal-migration-unconditional-session-survival-assurance.md
+
+- Outcome: `fix spec`.
+- Assessment: the same defect as `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`, reached
+  through the installer's closing line; confirmed the same way (whether the run counts as an update depends only on the
+  install result, and the message has no old-terminal condition).
+- Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
+- Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
+- Execution: pending
+
+## retired-session-delete-removes-reused-container-name.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Delete of a retired container
+  session runs `podman rm -f --ignore farhelm-<session uuid>` and checks only that the name is gone afterwards
+  (crates/farhelm-supervisor/src/container.rs), so an unrelated container someone later created under that exact name is
+  force-removed. The finding's suggested label check cannot work: the old creator set no labels. The "upgrade plus rare
+  condition" filter does not clearly match, because the loss is outside the affected session. Bucket: highest (route
+  established in code).
+- Decision: the user picked "Yes: the reserved namespace is Farhelm's" (2026-11-18 highest-bucket triage page, Q2).
+  Principle: what someone puts under Farhelm's reserved resource names or ownership labels (`farhelm-<session id>`
+  containers, the `farhelm-build-<tag>-` and `farhelm-sess-<tag>-` Tensorlake prefixes, the `farhelm.helm` and
+  `farhelm.role` Podman labels) may be treated, and destroyed, as Farhelm's.
+- Completion criteria: one SPEC.md paragraph (about 5-10 lines) states that principle, where the reserved names and
+  labels are specified, so reviews stop raising deliberate reuse of them. No code change. Remove this feedback file,
+  `tensorlake-pending-create-adopts-replacement-sandbox.md` and `podman-container-clone-inherits-leftover-ownership.md`,
+  with their index entries, in the same change.
+- Execution: pending
+
+## tensorlake-pending-create-adopts-replacement-sandbox.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. With a create recorded as
+  outstanding, build retry, host Delete and recipe Delete look the sandbox up by its reserved name and adopt and
+  terminate whatever has it, snapshots included (tensorlake/build.rs reconcile_builder, tensorlake/hosts.rs); the build
+  retry asks nothing. SPEC_impl.md allows name recovery under an outstanding create and SPEC.md reserves the prefixes,
+  but neither said whether a sandbox someone deliberately created under them may be destroyed. Bucket: highest.
+- Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
+  highest-bucket triage page, Q2); see that entry for the principle.
+- Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
+- Execution: pending
+
+## podman-container-clone-inherits-leftover-ownership.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): mechanism confirmed. Ownership of Podman
+  containers is labels only (environment/podman.rs, as SPEC_impl.md specifies), so a `podman container clone` that keeps
+  them is listed under Settings → Containers not on this helm and Delete removes it (that clones keep labels is Podman's
+  documented behavior, not checked with a run). The prompt names that container and warns everything in it will be
+  removed, so the deletion is within consent. Bucket: high.
+- Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
+  highest-bucket triage page, Q2); see that entry for the principle.
+- Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
+- Execution: pending
+
+## header-actions-follow-unseen-session.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The open session's header
+  (Stop, Restart, Replace, Delete, environment Suspend/Resume) and the interrupted-session card's Replace look up the
+  open session and its state when the click is handled (session_pane/header.rs open_key and menu::actionable;
+  session_pane/card.rs), while GPUI dispatches the click to the previous frame's handlers. So when the open session
+  changes from A to B (the command line deletes A and the window selects B), a click on A's header in that frame acts on
+  B, immediately with Skip session confirmations on. The sub-second race filter does not apply (it excludes acting on
+  the wrong session). SPEC.md "Lifecycle operations" says the click authorizes only the state the screen showed;
+  applying that to the targeted session is a reading, not its words. Bucket: highest.
+- Decision: the user picked "Yes for the target and the drop point; spec note for paste order" (2026-11-18
+  highest-bucket triage page, Q3), in their words: "But this must not be done in a random ad hoc way for the two places.
+  We need to establish a clear pattern that all components can use that have this problem. I don't want this to turn
+  into a whack-a-mole. We need to set the standard, spec it, and have an implementation that implements the key
+  mechanisms that get reused whenever this problem arises." Principle: a user action in the desktop app acts only on
+  what the frame it landed in showed (which session, its state, where a drop landed), and this is one specified standard
+  with one reusable mechanism, not per-site fixes.
+- Completion criteria: SPEC.md (and SPEC_impl.md for the mechanism) state the standard that an action acts on what the
+  clicked frame showed: its target and the state its consent or precondition is taken from. The desktop app gets one
+  reusable mechanism for capturing what a control drew and acting on that, and the header controls and the card's
+  Replace use it. The mechanism is what `session-actions-use-unseen-liveness.md` and
+  `trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md` (both already `fix code`) are fixed
+  with too, so they are planned together rather than as separate ad hoc fixes. Tests show a stale-frame click acting on
+  the drawn session or being refused. Expect this to exceed a single small PR; plan it as such. Remove the feedback file
+  and its index entry in the same change.
+- Execution: pending
+
+## wayland-file-drop-uses-entry-position.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed in GPUI's Wayland backend (the
+  vendored `gpui-pre-linux` crate, vendor/gpui-pre-linux/src/linux/wayland/client.rs): while the drag's file list is
+  being read, pointer motion is ignored, and when the read finishes the drag position is set to the entry point; a drop
+  with no motion since is delivered there, and the terminal accepts a drop anywhere on its pane. So a file dragged in
+  over the terminal and released over the sidebar can be uploaded to the session's host. Releasing before the list
+  arrives is discarded safely. The sub-second filter does not apply (a local file crosses to a host). Bucket: highest
+  (route established in code; narrow trigger).
+- Decision: settled by the same pick as `header-actions-follow-unseen-session.md` (2026-11-18 highest-bucket triage
+  page, Q3), with the user's instruction that this follow one specified standard and reusable mechanism, not an ad hoc
+  fix; see that entry.
+- Completion criteria: a drop is delivered where the pointer was when it was released (the latest position recorded
+  while the file list was being read), as a new patch layer on the vendored GPUI Linux crate with its patch file
+  (vendor/README.md), plus a unit test. Where the standard from `header-actions-follow-unseen-session.md` applies to
+  drop delivery, follow it rather than inventing a separate rule. Remove the feedback file and its index entry in the
+  same change.
+- Execution: pending
+
+## wayland-enter-overtakes-pending-text-paste.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism. On Wayland
+  a paste waits for the asynchronous clipboard read (and only behind earlier pastes), while typed keys are sent at once
+  (terminal/attached.rs), so Enter can run a half-typed command before the pasted rest arrives, which then lands at the
+  next prompt. macOS reads the clipboard synchronously. Needs a slow clipboard source or a key-injection macro. SPEC.md
+  declines to add complexity for slow clipboards. Bucket: high (highest only if a different command running than the one
+  composed counts as lost work in itself).
+- Decision: settled by the same pick as `header-actions-follow-unseen-session.md` (2026-11-18 highest-bucket triage
+  page, Q3): spec note for paste order.
+- Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
+  still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
+  entry in the same change.
+- Execution: pending
+
+## concealed-terminal-cells-change-link-target.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Concealed cells are not drawn
+  (crates/gui/farhelm-gui/src/terminal.rs) but link detection reads their characters
+  (crates/gui/farhelm-grid-model/src/links.rs), so a printed link that looks like one address can open another with no
+  preview, contradicting the rationale "what is shown is what opens" (SPEC.md "Terminal experience") and bypassing the
+  approval `farhelm agent open-url` would need. Text in the background color cannot reasonably be detected. Bucket:
+  highest.
+- Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
+  Q4).
+- Completion criteria: link detection stops at concealed cells, with a test; SPEC.md says concealed text is not part of
+  a printed link and text drawn in the background color is out of scope. Remove the feedback file and its index entry in
+  the same change.
+- Execution: pending
+
+## terminal-selection-copies-concealed-text.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism (selection
+  copies concealed characters, crates/gui/farhelm-grid-model/src/selection.rs), but it grants nothing a program cannot
+  already do: SPEC.md accepts programs replacing the clipboard through OSC 52. Matches xterm and the old app. Bucket:
+  other.
+- Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
+  Q4).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## websocket-trace-logs-desktop-credential.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The desktop app's internal
+  helm credential travels in a WebSocket header (crates/farhelm-helm-client/src/ws.rs); tungstenite 0.29.0 logs the
+  whole handshake request at trace level, and the desktop app honors RUST_LOG and forwards that library's logs
+  (crates/farhelm-desktop/src/lib.rs). Opt-in (default levels are info/debug); harm needs the log plus local access
+  while the app runs. Whether the helm's server side logs the header was not checked. Bucket: high (highest arguable as
+  security-impacting).
+- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
+- Completion criteria: the library's handshake trace is always off whatever RUST_LOG says (about 5-10 lines), and the
+  helm side is checked for the same header in its logs. Remove the feedback file and its index entry in the same change.
+- Execution: pending
+
+## codex-login-file-rendered-in-cleartext.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The Codex login field in
+  Settings → Credentials is an unmasked growing text box and a chosen auth.json's whole text, live access and refresh
+  tokens included, is put into it (settings/credentials/editor.rs), a deliberate port from the old app; every other
+  credential field is masked. SPEC.md allows a pasted or selected auth.json but says nothing about showing it. Bucket:
+  high (highest if on-screen display counts as disclosure).
+- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
+- Completion criteria: after choosing a file the editor shows its name and whether it validated, not its contents; a
+  pasted value is not displayed back in cleartext either. About 30-60 lines. Remove the feedback file and its index
+  entry in the same change.
+- Execution: pending
+
+## masked-fields-expose-secrets-to-text-services.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The UI kit hands a
+  masked field's real text to the OS input machinery on request and macOS Secure Event Input is never turned on; on
+  Wayland the vendored backend never shares the text with the input method, so that half is weaker than claimed. No
+  input method was shown to store or send what it reads; Copy and Cut are already blocked for masked fields. A fix needs
+  patches to the UI kit and both platform layers. Bucket: other.
+- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## stale-checkout-settings-overwrite-cli-edits.md
+
+- Outcome: `fix spec+code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Settings → Checkouts reads
+  the all-hosts post-clone command and host folder overrides once when it opens (settings/checkout_field.rs); an edited
+  field is saved without the value it was based on and the helm checks only for "nothing changed"
+  (crates/farhelm-helm/src/checkout_config.rs), so a command-line change made meanwhile is overwritten, and Use default
+  can clear a newer folder override. SPEC.md: "A GUI write must not undo a change an agent or the command line made
+  while that view was open"; the 2026-10-21 exception names only templates and number keys. Bucket: high (the folder
+  variant alone other).
+- Decision: the user picked "Refuse for what a launch runs; overwrite for bindings" (2026-11-18 highest-bucket triage
+  page, Q6), in their words: "this behavior should be SPECed. ideally we have a common mechanism/representation for
+  these things. minimize duplication as this ends up in various places oer time." Principle: a GUI save of configuration
+  a launch runs or depends on is refused when the value changed since the view read it; convenience bindings stay
+  last-write-wins; this is specified once and implemented through one shared mechanism.
+- Completion criteria: SPEC.md states the rule (which settings are compare-and-set and which are last-write-wins, in
+  line with the 2026-10-26 convenience-state decision), and SPEC_impl.md the shared mechanism. A save carries the value
+  it was based on, the helm refuses a mismatch, and the window re-reads, through one common representation that later
+  settings reuse rather than per-field code; the post-clone command and host folder overrides use it, with tests. Remove
+  the feedback file and its index entry in the same change.
+- Execution: pending
+
+## template-number-key-save-overwrites-committed-binding.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed by reading (timing not run).
+  The Templates window builds the whole number-key map from its pushed copy at the click, and the helm holds pushes back
+  while a slow request is in flight, so a change can undo an agent's binding on another key. SPEC.md accepts
+  last-write-wins for number keys; a binding takes a moment to redo; the 2026-10-26 triage discarded the close
+  quick-launch analogue. Bucket: other.
+- Decision: the user picked "Refuse for what a launch runs; overwrite for bindings" (2026-11-18 highest-bucket triage
+  page, Q6); the spec statement of that split is carried by `stale-checkout-settings-overwrite-cli-edits.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## trailing-removed-tmux-stale-target-fallback.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): incorrect. Terminal cleanup asks the
+  selected host to shut down and otherwise ends only the identity-checked process it adopted, or a host whose tag names
+  the session (core/host_launch.rs, hosts/terminal.rs); no tmux target lookup remains. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## trailing-removed-lone-legacy-tab-lifecycle-oracles.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (git history): incorrect as a shipped or current problem. The
+  test deletion (#3360, 647f0227) and the end of old terminals (#3362, dbfc69751) are adjacent commits that first
+  shipped together in v0.39.0, so no release served old tabs without those tests, and old tabs no longer exist. Bucket:
+  other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## trailing-osc52-classifier-removal-clipboard-read-disclosure.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): incorrect. The supervisor's emulator
+  drops OSC 52 read requests and passes on only writes (crates/farhelm-terminal-emulator/src/effects.rs), and the app
+  reads the clipboard only on a user paste, meeting SPEC.md "an OSC 52 READ is never answered with clipboard contents".
+  The removed classifier belonged to the browser path, which no longer exists. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## trailing-restart-seed-history-promoted-into-launch-excerpt.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. Restart seeds the
+  previous run's history above a blank screen at the old size (core/host_restart.rs); the vendored emulator pulls
+  history into view when the terminal grows (vendor/alacritty_terminal grid/resize.rs); the never-started launch's error
+  quote reads the visible screen (service/launch_artifacts.rs), so after growing it can quote the session's own previous
+  run. The cross-session disclosure is refuted. SPEC_impl.md ("a Restart's new host starts with a blank screen, so no
+  quote reaches back into the previous run") and the launch_artifacts.rs doc comment are inaccurate once the terminal
+  grows. Not reproduced. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): fix spec.
+- Completion criteria: SPEC_impl.md and the launch_artifacts.rs doc comment say that after a Restart the quote may
+  include lines of the same session's previous run when the terminal grew before the failure (about 10 lines). No
+  behavior change. Remove the feedback file and its index entry in the same change.
+- Execution: pending
+
+## trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed in code, very unlikely. A
+  supervisor test fixture stores only the process-group number of host-run fake agents and SIGKILLs that group at
+  teardown with no identity check (crates/farhelm-supervisor/src/service/core.rs tests), so after a stall longer than
+  the fake agent's 25 s sleep and a full process-number wrap, an unrelated group of the same user could be killed. Test
+  tooling only. FILTER.md's process-number filter excludes storing a number for later use. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
+  group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
+  lines in the test code). Remove the feedback file and its index entry in the same change.
+- Execution: pending
+
+## trailing-agent-environment-target-history-admission-lacks-origin.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): its highest sub-claim (an approved
+  command or trust changing during provisioning) is incorrect: the launch is fixed before the card. The rest (agent-made
+  environments changing the New dialog's remembered container host and pushing out recent setups) is confirmed and
+  duplicates `trailing-environment-history-admits-agent-origin.md`, which stays queued.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): discard as
+  a duplicate.
+- Completion criteria: Remove the feedback file and its index entry; leave
+  `trailing-environment-history-admits-agent-origin.md` queued.
+- Execution: pending
+
+## trailing-ui-host-retry-selects-delete-from-live-phase.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The menu now labels the
+  destructive retry "Finish the deletion" (#3896); the choice is still made at click time (hosts/remedies.rs), but the
+  helm accepts the request only for an environment whose seal-triggered destruction already failed
+  (sessions/sandbox.rs), a destruction the user already confirmed and that SPEC.md says is never lifted. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: pending
+
+## container-leftover-delete-races-first-session.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): mechanism confirmed. Settings →
+  Containers not on this helm lists any row-backed container with no cached sessions, without checking for a launch in
+  progress (environment/podman.rs), and the answer sends a host Delete with no "still no sessions" check
+  (settings/containers.rs); during the launch the removal is refused as busy, after it the new session is removed. The
+  prompt warns about everything in the container, but SPEC.md "Container sessions" limits the list to failed cleanup and
+  interrupted launches. The window lasts the whole launch. Bucket: high.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: containers whose first launch is still in progress are left out of the list (about 15-30 lines,
+  with a test). Remove the feedback file and its index entry in the same change.
+- Execution: pending
+
+## trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): unresolved. Delete ends a tab's terminal
+  host through the general path that accepts "gone" as success (core/host_launch.rs), while tab Close confirms the
+  process first (core/host_tabs.rs end_tab_host), but every failed connect already goes through a process-table check
+  that turns "socket gone" into "unavailable" when a process naming the socket is found (hosts/client.rs), and no
+  shipped route to a live host with an undiscoverable socket was found. Duplicates in the other bucket:
+  `trailing-delete-gone-adopted-tab-host-without-process-confirmation.md`,
+  `trailing-delete-held-gone-host-skips-adopted-process-confirmation.md`. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry (the two other-bucket duplicates were not part of
+  this decision).
+- Execution: pending
