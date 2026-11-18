@@ -470,9 +470,10 @@ pub(crate) fn session_entry(key: &str) -> KeyedEntry {
     ))
     .unwrap();
     let mut value = fixture["sessions"][0].clone();
-    // The HTTP example pins the shape of a live mute. GUI fixtures start
-    // unmuted unless a test explicitly sets one.
+    // The HTTP example covers viewer metadata. The common GUI fixture
+    // starts unmuted and ungrouped until a test names either choice.
     value["mute"] = serde_json::Value::Null;
+    value["group"] = serde_json::Value::Null;
     KeyedEntry {
         key: key.into(),
         value,

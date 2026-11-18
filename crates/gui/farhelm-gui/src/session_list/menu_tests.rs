@@ -245,6 +245,7 @@ fn the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection(cx: &mu
     for next in [
         "session-menu-seen",
         "session-menu-pin",
+        "session-menu-group",
         "session-menu-mute",
         "session-menu-clone",
         "session-menu-replace-with",
@@ -359,7 +360,7 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "session-menu"));
 }
 
-/// Every row has a menu button and the same eight commands, so a screen reader user can only tell which session a menu
+/// Every row has a menu button and the same commands, so a screen reader user can only tell which session a menu
 /// acts on from its name, and each command needs its words to say what it does. The old `sidebar.spec.ts` pinned this
 /// in "the actions menu exposes a real menu-button relationship" and "the session flyout sits beside its row with a
 /// titled, described menu" (reference commit `24bc0580`), together with opening the menu not scrolling its row. What
@@ -367,7 +368,7 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
 /// an accessible property apart from the painted line (`components/menu_item.rs` makes the painted line the item's
 /// accessible description). Specified, with a open: b's button is named "Session actions for b"; opening its menu
 /// leaves b's row where it was; the commands sit in a menu, apart from the header, named "Session actions for b"; each
-/// of the eight is a menu item named by its label that paints the old item's description inside itself (the table
+/// of them is a menu item named by its label that paints its description inside itself (the table
 /// below); choosing Delete closes the menu and asks in a dialog that quotes b's title.
 #[gpui::test]
 fn the_menu_and_its_commands_say_whose_they_are_and_what_each_does(cx: &mut TestAppContext) {
@@ -400,6 +401,11 @@ fn the_menu_and_its_commands_say_whose_they_are_and_what_each_does(cx: &mut Test
             "session-menu-pin",
             "Pin to top",
             "Keep this session above unpinned ones",
+        ),
+        (
+            "session-menu-group",
+            "Move to group",
+            "Keep related sessions together",
         ),
         (
             "session-menu-mute",

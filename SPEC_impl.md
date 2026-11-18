@@ -5567,27 +5567,28 @@ installation it is on, so it follows an open session the sidebar's filter hides
   revision only when membership changes. A new pin appends after the stored maximum; retries retain its position, and
   unpin/re-pin appends again. Only an overflowing maximum requires compaction before appending, in the same transaction.
   Listing and detail rows carry `pinned: bool` and `pin_position: integer | null`; the list reads positions in one batch
-  for both cached and identity-less live rows. The helm sort stays unchanged for the quick switcher. The sidebar stably
-  partitions accepted replies, orders the pinned partition by that total key before applying its reorder hold, and
-  computes the separator from the resulting display. A hold retains displayed IDs and original pin membership across
-  reply reconciliation: original pins still pinned now sort within their held slots; other rows keep their slots,
-  disappearing IDs are removed, and new IDs append. Reconciliation adopts the displayed IDs without recapturing pin
-  membership. Move neighbors come from the displayed leading run of original, still-pinned rows, excluding pins added
-  during the hold even when contiguous. Missing or mixed pin positions retain the older stable partition with no Move
-  controls. Move up and Move down close the row's menu at acceptance, returning focus to its menu button, go through the
-  operation store under the session's key, and show a refusal on the row
-  (`crates/gui/farhelm-gui/src/session_list/pins.rs`). Nothing is drawn in advance and there is no client write queue:
-  the helm pushes the new order before it replies. Dragging a movable pin by its grip
-  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs`) sends that same one move, naming the pin at the drop line and
-  a side. The grip is no Tab stop, since the row's menu is the keyboard way to reorder. From the press to the release
-  the drag follows the pointer across the window in the capture phase; where a drop would land is worked out afresh from
-  the movable rows as last drawn, and only the lift and the drop line are painted before the move is sent. Escape, a
-  release the window never saw, the row ceasing to be movable, the listing becoming unavailable or the Hosts panel
-  taking the rows' place cancels the drag with nothing sent. Replace copies a source pin and its position to the new id
-  before requesting the source's deletion, so a pin write failure leaves the source intact; if deletion fails both
-  surviving sessions can be pinned at the same position. An already-pinned replacement keeps its position. Positions
-  deliberately are not unique, and their total order is `(position, host_id, session_id)`. Confirmed deletion clears the
-  old pin best effort, like the other viewer metadata.
+  for both cached and identity-less live rows. The quick switcher reads the helm's order. The sidebar partitions the
+  listing into global pins, groups and the ungrouped tail. Each expanded group uses the same pin partition, leading run
+  and separator code as the global pins. The hold captures the uncollapsed layout, then the frame projects collapse,
+  visible marks, controls and neighbors from it. Held rows keep their bands as membership changes. Original groups and
+  original pins still eligible in their bands follow the manual order within their existing slots. The same slot
+  reconciliation orders both. New rows append at the bottom until the hold ends, and disappeared rows go at once. A
+  group whose metadata disappeared while held keeps its header as long as held members are still visible.
+
+  Move up and Move down reuse the same menu actions, focus return and relative placement for pins and group headers
+  (`crates/gui/farhelm-gui/src/session_list/pins.rs`). Missing or mixed pin positions keep the stable partition and
+  withhold pin moves. One grip gesture keeps the pointer capture, focus and Escape rules for either kind of item
+  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs`). It samples insertion bands against the last drawn bounds and
+  clips them to the viewport. An expanded group without visible pins takes its first pin at the header's bottom edge.
+  With no visible global pins, the first group header's top edge serves as their insertion line. The helm pushes order
+  and membership before replying. A successful cross-area drop moves the held slot in the initiating window on that
+  reply. Other membership changes keep their held slots. Interrupted capture, a hidden or unavailable list, or a source
+  that ceases to be movable cancels the gesture without a write.
+
+  Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
+  failure leaves the source intact. If deletion fails, both survivors can be pinned at the same position. Positions have
+  the total order `(position, host_id, session_id)` to cover those ties. A replay keeps existing replacement choices and
+  appends a pin if its area changes. Confirmed deletion clears the old pin like the other viewer metadata.
 
   `PUT /api/sessions/{id}/pin-order` requires `{neighbor: full_session_reference, placement: "before" | "after"}`. Both
   sessions must be known to the helm, including cached sessions on unreachable hosts, and both must still be pinned; a
@@ -5619,6 +5620,10 @@ installation it is on, so it follows an open session the sidebar's filter hides
   hidden by the filter still appears in Move to group. Each row carries its group ID. The UI channel pushes the roster
   as session collection metadata, so a rename or collapse does not rewrite each member entry. These writes use the same
   helm-local viewer preamble for session ownership and only publish after a committed change.
+
+  The row and marked menus share a single destination submenu. Both group naming actions use the session Rename editor's
+  draft and refusal behavior. Collapse uses the sidebar's queued preference writer with one sparse write key per group,
+  so a second click can change the displayed choice while the first write settles.
 
 ## Ntfy waiting alerts
 

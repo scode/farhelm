@@ -1,5 +1,6 @@
-//! The Rename editor: a modal dialog that changes one session's title, opened from a row's menu or with the Rename
-//! shortcut.
+//! The naming editor changes a session title, changes a group name or
+//! creates one group for a selection. All three share the draft and focus
+//! rules. The helm validates the name for its subject.
 //!
 //! SPEC.md, "Lifecycle operations": "A list rename opens in a modal editor owned by the list rather than by the
 //! row-actions popup." The editor is a dialog of the layer manager, centered over a veil, not a popover anchored to a
@@ -59,8 +60,9 @@ mod tests;
 
 use std::rc::Rc;
 
-use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
+use farhelm_proto::session_requests::UpdateSessionGroup;
+use farhelm_proto::ui_channel::{Availability, Collection, SessionRow};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div,
@@ -76,6 +78,9 @@ use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{local_state, session};
+
+use super::SessionList;
+use super::groups;
 
 /// Open the Rename editor for the session the helm files under `key`, on top of everything else in `window`. The one
 /// opener: the row menu's Rename item calls it, and so does the shortcut ([`open_for_selected`]).
@@ -170,7 +175,52 @@ fn open_returning(
             true,
         ),
     };
-    let editor = cx.new(|cx| RenameEditor::new(key.to_owned(), &title, naming, &store, window, cx));
+    open_editor(
+        Subject::Session {
+            key: key.to_owned(),
+            naming,
+        },
+        &title,
+        returns_to,
+        mark,
+        window,
+        cx,
+    )
+}
+
+/// Open the same editor for a named group or for one new group containing
+/// the selected sessions. The helm owns group-name validation.
+pub(super) fn group(
+    id: Option<i64>,
+    sessions: Vec<String>,
+    marked: Option<WeakEntity<SessionList>>,
+    returns_to: ReturnTo,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let subject = id.map_or_else(|| Subject::NewGroup { sessions, marked }, Subject::Group);
+    let operations = session::current_operations(cx)?;
+    if operations.read(cx).in_flight(&subject.key()).is_some() {
+        return None;
+    }
+    let store = session::current_store(cx)?;
+    let title = subject.title(store.read(cx).collections())?;
+    open_editor(subject, &title, returns_to, mark, window, cx)
+}
+
+/// One dialog lifecycle for names from any list item. A layer belongs to
+/// its editor even when the list moves or hides the item beneath it.
+fn open_editor(
+    subject: Subject,
+    title: &str,
+    returns_to: ReturnTo,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let store = session::current_store(cx)?;
+    let editor = cx.new(|cx| RenameEditor::new(subject, title, &store, window, cx));
     let start = editor.read(cx).title.input().focus_handle(cx);
     let weak = editor.downgrade();
     // Enter on the dialog itself (after a click on its empty space) saves, unless Save is unavailable.
@@ -233,10 +283,85 @@ pub(crate) fn open_for_selected(window: &mut Window, cx: &mut App) {
     let _ = open_returning(&key, &mark, Mode::Ordinary(ReturnTo::Home), window, cx);
 }
 
-/// The open editor: which session it renames, its draft and field, what it shows about the session, and its layer.
+/// Model the subject separately from the dialog so session-only naming and
+/// absence rules cannot affect a group rename or creation.
+#[derive(Clone)]
+enum Subject {
+    Session {
+        key: String,
+        naming: bool,
+    },
+    Group(i64),
+    NewGroup {
+        sessions: Vec<String>,
+        marked: Option<WeakEntity<SessionList>>,
+    },
+}
+
+impl Subject {
+    /// A save shares the subject's operation key with its other edits.
+    fn key(&self) -> OpKey {
+        match self {
+            Self::Session { key, .. } => OpKey::session(key),
+            Self::Group(id) => OpKey::session_group(*id),
+            Self::NewGroup { .. } => OpKey::new_session_group(),
+        }
+    }
+
+    /// Follow pushed names until the user types. Creation starts blank.
+    fn title(&self, collections: &Collections) -> Option<String> {
+        match self {
+            Self::Session { key, .. } => collections
+                .get::<SessionRow>(key)
+                .map(|row| row.info.title.clone()),
+            Self::Group(id) => groups::roster(collections)
+                .iter()
+                .find(|group| group.id == *id)
+                .map(|group| group.name.clone()),
+            Self::NewGroup { .. } => Some(String::new()),
+        }
+    }
+
+    /// The group roster is complete even under a filter. A failed read
+    /// does not prove disappearance. New group creation validates its targets.
+    fn unavailable(&self, collections: &Collections, has_title: bool) -> bool {
+        match self {
+            Self::Session { key, .. } => session::listing_proves_gone(collections, key),
+            Self::Group(_) => {
+                !has_title
+                    && collections
+                        .meta(Collection::Sessions)
+                        .is_some_and(|meta| meta.availability == Availability::Available)
+            }
+            Self::NewGroup { .. } => false,
+        }
+    }
+
+    /// Send the exact draft so the subject's writer owns validation.
+    fn command(&self, draft: &str) -> Result<Command, PathError> {
+        match self {
+            Self::Session { key, .. } => command(key, draft),
+            Self::Group(id) => groups::update(
+                *id,
+                UpdateSessionGroup {
+                    name: Some(draft.to_owned()),
+                    ..Default::default()
+                },
+            ),
+            Self::NewGroup { sessions, .. } => groups::create(draft, sessions),
+        }
+    }
+
+    /// Quick launch's follow-up naming keeps its untouched title locally.
+    fn naming_session(&self) -> bool {
+        matches!(self, Self::Session { naming: true, .. })
+    }
+}
+
+/// The open naming dialog tracks one subject and keeps the draft even if
+/// the subject disappears while the user is typing.
 pub(crate) struct RenameEditor {
-    /// The session's key. Fixed for the editor's life: the editor renames this session or nothing.
-    key: String,
+    subject: Subject,
     /// The title the store holds now, shown escaped above the field. Kept when the session drops out of the listing.
     current: HostText,
     /// The title field (one row that keeps pasted line feeds) over its draft: the raw title until the user edits it,
@@ -244,8 +369,6 @@ pub(crate) struct RenameEditor {
     title: DraftInput,
     /// Whether a complete listing has proved the session gone, which disables Save.
     unavailable: bool,
-    /// Naming mode (the module docs): a save of the current title keeps it without a request.
-    naming: bool,
     /// Set right after the layer opens; taken when the editor closes itself, so it closes once.
     layer: Option<LayerId>,
     /// The store's pushes.
@@ -257,9 +380,8 @@ impl RenameEditor {
     /// mode with the whole title selected when `naming` is set. The store is the current UI session's; a reset closes
     /// every dialog (`layers::close_all`), so the editor never outlives it.
     fn new(
-        key: String,
+        subject: Subject,
         title: &str,
-        naming: bool,
         store: &Entity<HelmStore>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -273,18 +395,17 @@ impl RenameEditor {
             window,
             cx,
         );
-        if naming {
+        if subject.naming_session() {
             title_field.input().select_all(window, cx);
         }
         let pushes = cx.observe_in(store, window, |editor, store, window, cx| {
             editor.pushed(&store, window, cx)
         });
         RenameEditor {
-            key,
+            subject,
             current: HostText::from_host(title),
             title: title_field,
             unavailable: false,
-            naming,
             layer: None,
             _pushes: pushes,
         }
@@ -294,10 +415,8 @@ impl RenameEditor {
     /// the session gone. A session missing from a listing that proves nothing keeps the last title it showed.
     fn pushed(&mut self, store: &Entity<HelmStore>, window: &mut Window, cx: &mut Context<Self>) {
         let collections = store.read(cx).collections();
-        self.unavailable = session::listing_proves_gone(collections, &self.key);
-        let title = collections
-            .get::<SessionRow>(&self.key)
-            .map(|row| row.info.title.clone());
+        let title = self.subject.title(collections);
+        self.unavailable = self.subject.unavailable(collections, title.is_some());
         if let Some(title) = title {
             self.current = HostText::from_host(title.as_str());
             self.title.follow(&title, window, cx);
@@ -313,16 +432,18 @@ impl RenameEditor {
             return;
         }
         // Naming keeps the name the session has now, byte for byte, without asking the supervisor to set it again.
-        if self.naming && self.title.input().text(cx).as_ref() == self.current.raw() {
+        if self.subject.naming_session()
+            && self.title.input().text(cx).as_ref() == self.current.raw()
+        {
             return self.cancel(window, cx);
         }
-        let key = self.key.clone();
+        let subject = self.subject.clone();
         let handle = window.window_handle();
         let started = DraftInput::save(
             self,
             |editor| &mut editor.title,
-            &OpKey::session(&key),
-            |title| command(&key, title),
+            &subject.key(),
+            |title| subject.command(title),
             window,
             cx,
             move |editor, settled, cx| {
@@ -331,9 +452,18 @@ impl RenameEditor {
                 }
             },
         );
-        if let Err(not_started) = started {
-            // Another operation started on the session meanwhile, or the window went inert; the draft is untouched.
-            tracing::debug!(?not_started, "rename not sent");
+        match started {
+            Ok(()) => {
+                // A marked metadata choice clears its marks when it sends
+                // the write. Cancel before dispatch leaves them available.
+                if let Subject::NewGroup {
+                    marked: Some(list), ..
+                } = &self.subject
+                {
+                    let _ = list.update(cx, |list, cx| list.clear_marks(cx));
+                }
+            }
+            Err(not_started) => tracing::debug!(?not_started, "name not sent"),
         }
     }
 
@@ -375,19 +505,68 @@ impl Render for RenameEditor {
         let palette = theme::palette(cx);
         let busy = self.title.draft().is_saving();
         let weak = cx.weak_entity();
+        let (heading, summary, field, help, unavailable) = match self.subject {
+            Subject::Session { .. } => (
+                "Rename session",
+                "Change this session's title",
+                "New session title",
+                "The session's new title; Enter saves it",
+                "This session is no longer available; copy the draft or Cancel",
+            ),
+            Subject::Group(_) => (
+                "Rename group",
+                "Change this group's name",
+                "New group name",
+                "The group's new name. Enter saves it.",
+                "This group is no longer available. You can copy the draft or cancel.",
+            ),
+            Subject::NewGroup { .. } => (
+                "New group",
+                "Name this group of sessions",
+                "Group name",
+                "Enter saves the name and creates the group.",
+                "",
+            ),
+        };
+        // The buttons' words follow what is being named: a group has a name, not a title, and a new group is created,
+        // so Save says Create and Cancel says nothing is made.
+        let (save_label, save_help, cancel_help, close_label, close_help) = match self.subject {
+            Subject::Session { .. } => (
+                "Save",
+                "Save the new title",
+                "Cancel: keep the current title",
+                "Close rename",
+                "Close rename; keep the current title",
+            ),
+            Subject::Group(_) => (
+                "Save",
+                "Save the new name",
+                "Cancel: keep the current name",
+                "Close rename",
+                "Close rename; keep the current name",
+            ),
+            Subject::NewGroup { .. } => (
+                "Create",
+                "Create the group",
+                "Cancel: create no group",
+                "Close new group",
+                "Close new group; create no group",
+            ),
+        };
+        let creating = matches!(self.subject, Subject::NewGroup { .. });
         // `.rename-body`: the current title, the field and what the editor has to say, 10 pixels apart.
         let body = div()
             .flex()
             .flex_col()
             .gap(px(10.))
-            .child(
+            .children((!creating).then(|| {
                 // `.rename-current-title`: one line, cut with an ellipsis, in the quieter text color.
                 host_text::element(&self.current)
                     .min_w_0()
                     .truncate()
                     .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.fg_1)),
-            )
+                    .text_color(theme::color(palette.fg_1))
+            }))
             .child(
                 // The selector is for tests, which find the field by where it is drawn.
                 div()
@@ -395,8 +574,8 @@ impl Render for RenameEditor {
                     .child(TextInput::new(
                         "rename-title",
                         self.title.input(),
-                        "New session title",
-                        HoverHelp::tooltip("The session's new title; Enter saves it"),
+                        field,
+                        HoverHelp::tooltip(help),
                     )),
             )
             .children(self.unavailable.then(|| {
@@ -404,7 +583,7 @@ impl Render for RenameEditor {
                     .debug_selector(|| "rename-unavailable".into())
                     .text_size(metrics::TEXT_SM)
                     .text_color(theme::color(palette.warn))
-                    .child("This session is no longer available; copy the draft or Cancel")
+                    .child(unavailable)
             }))
             .children(self.title.draft().refusal().map(|refusal| {
                 // The helm's words may quote the refused title, so they are host text: escaped, as one labelled node.
@@ -416,7 +595,7 @@ impl Render for RenameEditor {
         let cancel = Button::new(
             "rename-cancel",
             "Cancel",
-            HoverHelp::tooltip("Cancel: keep the current title"),
+            HoverHelp::tooltip(cancel_help),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -424,8 +603,8 @@ impl Render for RenameEditor {
         .on_click(on_editor(weak.clone(), RenameEditor::cancel));
         let save = Button::new(
             "rename-save",
-            "Save",
-            HoverHelp::tooltip("Save the new title"),
+            save_label,
+            HoverHelp::tooltip(save_help),
             Role::Button,
         )
         .tier(Tier::Primary)
@@ -434,11 +613,11 @@ impl Render for RenameEditor {
         .busy(busy)
         .disabled(self.unavailable)
         .on_click(on_editor(weak.clone(), RenameEditor::save));
-        DialogFrame::new("rename", "Rename session", body, vec![cancel, save])
-            .summary("Change this session's title")
+        DialogFrame::new("rename", heading, body, vec![cancel, save])
+            .summary(summary)
             .close(
-                "Close rename",
-                HoverHelp::tooltip("Close rename; keep the current title"),
+                close_label,
+                HoverHelp::tooltip(close_help),
                 busy,
                 // A dismissal, so the editor's dismissal hook decides, as it does for Escape. Called from the click,
                 // not from inside an update of the editor: the hook reads the editor.

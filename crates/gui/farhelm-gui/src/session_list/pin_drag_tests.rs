@@ -52,7 +52,7 @@ fn move_put(key: &str, neighbor: &str, placement: &str) -> (Method, String, Valu
     (
         Method::Put,
         format!("/api/sessions/{key}/pin-order"),
-        json!({ "neighbor": neighbor, "placement": placement }),
+        json!({ "neighbor": neighbor, "placement": placement, "areas": { "source": "ungrouped", "destination": "ungrouped" } }),
     )
 }
 
@@ -286,6 +286,102 @@ fn a_drop_on_the_drop_line_sends_one_move_that_the_hold_shows_at_once(cx: &mut T
     away(cx);
     assert_eq!(row_order(&frame(cx)), ["c", "a", "b", "v", "u"]);
     assert!(sent(&mut fake).is_empty(), "and nothing more was sent");
+}
+
+/// The shared grip uses the header's bottom edge when a group has no
+/// eligible pins, even if its former pin is still shown in a held slot.
+/// Only the initiating window's successful reply moves the source slot.
+#[gpui::test]
+fn an_empty_group_accepts_its_first_pin_and_moves_the_held_slot(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let roster = vec![group(10, "Work", 2, false), group(20, "Other", 1, true)];
+    let order = ["global", "member", "old", "other"];
+    let state = grouped_snapshot(
+        &[
+            session("global").pinned(1),
+            session("member").grouped(10),
+            session("old").pinned(3).grouped(10),
+            session("other").grouped(20),
+        ],
+        roster,
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    away(cx);
+    sent(&mut fake);
+    let header = |cx: &mut VisualTestContext| bounds_of(cx, "session-group-10");
+    assert!(item(cx, "global").bottom() <= header(cx).top());
+    press_grip(cx, "global");
+    let mut meta = listing_meta(&order, 4, false);
+    meta.session_groups = vec![group(10, "Work", 1, false), group(20, "Other", 2, true)];
+    fake.push(change(meta, &[session("old").pinned(3).grouped(20)], &[]));
+    test_support::settle(cx);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["global", "old", "member"],
+        "the old pin still occupies its held slot"
+    );
+    let bounds = header(cx);
+    let target = point(bounds.center().x, bounds.bottom() - px(3.));
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-pin-drop-group/10:after"));
+    release(cx, target);
+    let [command] = &fake.commands()[..] else {
+        panic!("one move")
+    };
+    assert_eq!(command.path, "/api/sessions/global/group");
+    assert_eq!(
+        command.body,
+        Some(json!({"target": {"group": 10}, "pin_source": "ungrouped"}))
+    );
+    let mut meta = listing_meta(&order, 4, false);
+    meta.session_groups = vec![group(10, "Work", 2, false), group(20, "Other", 2, true)];
+    fake.push(change(
+        meta,
+        &[session("global").pinned(2).grouped(10)],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert!(
+        item(cx, "global").bottom() <= header(cx).top(),
+        "a membership push alone keeps the held slot"
+    );
+    fake.reply(command.id, 200, None);
+    test_support::settle(cx);
+    assert!(
+        header(cx).bottom() <= item(cx, "global").top(),
+        "the completed drop moves the pin into its group"
+    );
+}
+
+/// The group header grip uses the pin gesture's line and relative request
+/// while accepting other headers as neighbors.
+#[gpui::test]
+fn a_group_drag_names_the_header_neighbor(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let state = grouped_snapshot(
+        &[session("a").grouped(10), session("b").grouped(20)],
+        vec![group(10, "First", 1, true), group(20, "Second", 1, true)],
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    sent(&mut fake);
+    assert_eq!(
+        label_of(cx, "session-pin-grip-group/20").as_deref(),
+        Some("Drag group")
+    );
+    press_grip(cx, "group/20");
+    let first = bounds_of(cx, "session-group-10");
+    let target = point(first.center().x, first.top() + px(3.));
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-pin-drop-group/10:before"));
+    release(cx, target);
+    assert_eq!(
+        sent(&mut fake),
+        vec![(
+            Method::Put,
+            "/api/session-groups/20/order".into(),
+            json!({"neighbor": 10, "placement": "before"})
+        )]
+    );
 }
 
 /// The other side of the drop line: a release below the last pin's middle puts the dragged pin after it, the route's

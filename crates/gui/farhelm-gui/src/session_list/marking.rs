@@ -211,9 +211,20 @@ pub(super) enum Write {
     Mute,
     /// End an existing mute and mark its current work seen in the helm.
     Unmute,
+    /// The destination is chosen in the shared group submenu.
+    Group,
     /// Mark read or Mark unread, as the row's own menu would send it: Mark read carries the activity stamp the drawn
     /// row showed, so that output arriving after the draw stays unseen.
     Seen(Toggle),
+}
+
+/// A submenu supplies the value missing from its offered action. The
+/// same dispatcher applies direct and submenu choices to marked rows.
+#[derive(Clone, Copy)]
+enum Choice {
+    Direct,
+    Mute(SessionMuteRequest),
+    Group(super::groups::Destination),
 }
 
 /// The targets of `drawn` still shown (`displayed`) and still marked when the action runs, with their drawn values: a
@@ -238,15 +249,17 @@ pub(super) enum MetadataAction {
     Unpin,
     Mute,
     Unmute,
+    MoveGroup,
     Read,
     Unread,
 }
 
 impl MetadataAction {
     /// Every action, in the menu's order.
-    pub(super) const ALL: [MetadataAction; 6] = [
+    pub(super) const ALL: [MetadataAction; 7] = [
         MetadataAction::Pin,
         MetadataAction::Unpin,
+        MetadataAction::MoveGroup,
         MetadataAction::Mute,
         MetadataAction::Unmute,
         MetadataAction::Read,
@@ -268,6 +281,7 @@ impl MetadataAction {
             MetadataAction::Unpin => row.pinned.then_some(Write::Pin(false)),
             MetadataAction::Mute => (!status::muted(row)).then_some(Write::Mute),
             MetadataAction::Unmute => status::muted(row).then_some(Write::Unmute),
+            MetadataAction::MoveGroup => Some(Write::Group),
             MetadataAction::Read => seen::offered(row)
                 .filter(|toggle| matches!(toggle, Toggle::Read(_)))
                 .map(Write::Seen),
@@ -288,6 +302,7 @@ impl MetadataAction {
             MetadataAction::Unpin => "Unpin",
             MetadataAction::Mute => "Mute",
             MetadataAction::Unmute => "Unmute",
+            MetadataAction::MoveGroup => "Move to group",
             MetadataAction::Read => "Mark read",
             MetadataAction::Unread => "Mark unread",
         }
@@ -300,6 +315,7 @@ impl MetadataAction {
             MetadataAction::Unpin => "Unpin the marked sessions that are pinned",
             MetadataAction::Mute => "Mute the marked sessions that are not muted",
             MetadataAction::Unmute => "Unmute the marked sessions that are muted",
+            MetadataAction::MoveGroup => "Move marked sessions into or out of a group",
             MetadataAction::Read => "Treat unseen output in eligible marked sessions as seen",
             MetadataAction::Unread => "Show new output again in eligible marked sessions",
         }
@@ -312,6 +328,7 @@ impl MetadataAction {
             MetadataAction::Unpin => "session-marked-menu-unpin",
             MetadataAction::Mute => "session-marked-menu-mute",
             MetadataAction::Unmute => "session-marked-menu-unmute",
+            MetadataAction::MoveGroup => "session-marked-menu-group",
             MetadataAction::Read => "session-marked-menu-read",
             MetadataAction::Unread => "session-marked-menu-unread",
         }
@@ -322,6 +339,7 @@ impl MetadataAction {
         match self {
             MetadataAction::Pin | MetadataAction::Unpin => Icon::Pin,
             MetadataAction::Mute | MetadataAction::Unmute => Icon::BellOff,
+            MetadataAction::MoveGroup => Icon::Folder,
             MetadataAction::Read | MetadataAction::Unread => Icon::MarkSeen,
         }
     }
@@ -511,7 +529,11 @@ impl SessionList {
         let anchor = local_state::selected(cx);
         // A clone of the shared slice, so the marks can be borrowed mutably beside it.
         let entries = self.entries.clone();
-        let displayed: Vec<&str> = entries.iter().map(|(key, _)| key.as_str()).collect();
+        let displayed: Vec<&str> = entries
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .filter(|key| super::groups::header_id(key).is_none())
+            .collect();
         self.current
             .current(cx)
             .marks
@@ -801,14 +823,13 @@ impl SessionList {
     fn apply_metadata(
         &mut self,
         drawn: &[Target],
-        duration: Option<SessionMuteRequest>,
+        choice: Choice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        use super::groups::{self, Destination};
+        self.close_marked_menu(window, cx);
         let mark = Mark::take(cx);
-        if let Some(menu) = self.marked_menu_open(window, cx) {
-            layers::close(menu, window, cx);
-        }
         let shown = self.marking.shown();
         let mut targets = admitted(drawn, &shown, &self.current.current(cx).marks);
         // A child menu can stay open while the helm changes individual
@@ -817,12 +838,24 @@ impl SessionList {
             let action = match target.write {
                 Write::Mute => MetadataAction::Mute,
                 Write::Unmute => MetadataAction::Unmute,
+                Write::Group => {
+                    return match choice {
+                        Choice::Group(Destination::New) => {
+                            groups::eligible_member(&target.key, None, cx)
+                        }
+                        Choice::Group(Destination::Existing(group)) => {
+                            groups::eligible_member(&target.key, Some(group), cx)
+                        }
+                        _ => false,
+                    };
+                }
                 Write::Pin(_) | Write::Seen(_) => return true,
             };
             self.marking.offers().iter().any(|offer| {
                 offer.action == action && offer.targets.iter().any(|row| row.key == target.key)
             })
         });
+        let mut naming = Vec::new();
         for target in targets {
             // The row menu draws these items unavailable then (`menu::refused`); the bulk action says so on the row.
             if menu::refused(&target.key, cx) {
@@ -830,6 +863,7 @@ impl SessionList {
                     Write::Pin(_) => (Work::Pin, "Pin"),
                     Write::Mute => (Work::Mute, "Mute"),
                     Write::Unmute => (Work::Mute, "Unmute"),
+                    Write::Group => (Work::SessionGroup, "Move to group"),
                     Write::Seen(_) => (Work::Seen, "Seen"),
                 };
                 bulk::not_started(&target.key, work, label, cx);
@@ -838,16 +872,47 @@ impl SessionList {
             match target.write {
                 Write::Pin(pinned) => pins::send_pin(&target.key, pinned, cx),
                 Write::Mute => {
-                    if let Some(request) = duration {
+                    if let Choice::Mute(request) = choice {
                         mute::send(&target.key, request, cx);
                     }
                 }
                 Write::Unmute => mute::send(&target.key, SessionMuteRequest::Unmute, cx),
+                Write::Group => match choice {
+                    Choice::Group(Destination::New) => naming.push(target.key),
+                    Choice::Group(Destination::Existing(group)) => {
+                        groups::move_member(&target.key, group, cx)
+                    }
+                    _ => {}
+                },
                 Write::Seen(toggle) => seen::send(&target.key, toggle, cx),
             }
         }
-        self.clear_marks(cx);
-        focus::focus_control(&self.order_focus, &mark, window, cx);
+        if matches!(choice, Choice::Group(Destination::New)) {
+            // Name the toggle so cancellation before dispatch returns to it.
+            // After dispatch it is gone and the focus coordinator recovers
+            // to a drawn control, even though the bar still owns the handle.
+            let returns_to = focus::ReturnTo::Control(self.marking.menu_focus.clone());
+            if !naming.is_empty()
+                && let Some(layer) = super::rename::group(
+                    None,
+                    naming,
+                    Some(cx.weak_entity()),
+                    returns_to,
+                    &mark,
+                    window,
+                    cx,
+                )
+            {
+                self.current.current(cx).rows.borrow_mut().opened(
+                    "marked/group",
+                    layer,
+                    menu::Opened::Question,
+                );
+            }
+        } else {
+            self.clear_marks(cx);
+            focus::focus_control(&self.order_focus, &mark, window, cx);
+        }
     }
 }
 
@@ -889,6 +954,27 @@ impl Render for MarkedMenu {
                 drawn.push(focus.clone());
                 let list = self.list.clone();
                 let id = action.item_id();
+                if action == MetadataAction::MoveGroup {
+                    let keys = targets.iter().map(|target| target.key.clone()).collect();
+                    return Some(super::groups::move_menu(
+                        id,
+                        focus,
+                        super::groups::MoveTargets::Marked(keys),
+                        false,
+                        move |destination, window, cx| {
+                            let _ = list.update(cx, |list, cx| {
+                                list.apply_metadata(
+                                    &targets,
+                                    Choice::Group(destination),
+                                    window,
+                                    cx,
+                                )
+                            });
+                        },
+                        window,
+                        cx,
+                    ));
+                }
                 let item = MenuItem::new(
                     id,
                     action.icon(),
@@ -898,9 +984,9 @@ impl Render for MarkedMenu {
                 )
                 .description(action.description())
                 .focus(focus);
-                let apply = move |duration, window: &mut Window, cx: &mut App| {
+                let apply = move |choice, window: &mut Window, cx: &mut App| {
                     let _ = list.update(cx, |list, cx| {
-                        list.apply_metadata(&targets, duration, window, cx);
+                        list.apply_metadata(&targets, choice, window, cx);
                     });
                 };
                 Some(if action == MetadataAction::Mute {
@@ -912,7 +998,7 @@ impl Render for MarkedMenu {
                             let apply = apply.clone();
                             mute::durations(
                                 id,
-                                move |request, window, cx| apply(Some(request), window, cx),
+                                move |request, window, cx| apply(Choice::Mute(request), window, cx),
                                 cx,
                             )
                         },
@@ -920,7 +1006,7 @@ impl Render for MarkedMenu {
                         cx,
                     )
                 } else {
-                    item.on_click(move |_, window, cx| apply(None, window, cx))
+                    item.on_click(move |_, window, cx| apply(Choice::Direct, window, cx))
                         .into_any_element()
                 })
             })

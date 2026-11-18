@@ -87,6 +87,8 @@ pub(crate) struct Fixture {
     pin: Option<i64>,
     /// The shared mute served by the helm, including an indefinite mute.
     mute: Option<farhelm_proto::SessionMute>,
+    /// Group membership makes sense only with a group in the fixture roster.
+    group: Option<i64>,
     /// The agent kind the supervisor recorded, in the helm's wire form (`generic` for a command it knows nothing
     /// about), when the test names one; else the helm fixture's, `codex`.
     agent_kind: Option<&'static str>,
@@ -116,11 +118,16 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         no_launch_repository: false,
         pin: None,
         mute: None,
+        group: None,
         agent_kind: None,
     }
 }
 
 impl Fixture {
+    pub(super) fn grouped(mut self, group: i64) -> Self {
+        self.group = Some(group);
+        self
+    }
     /// The row lists `tabs` terminal tabs.
     pub(crate) fn tabs(mut self, tabs: usize) -> Self {
         self.tabs = tabs;
@@ -275,6 +282,7 @@ impl Fixture {
         value["pinned"] = json!(self.pin.is_some());
         value["pin_position"] = json!(self.pin);
         value["mute"] = json!(self.mute);
+        value["group"] = json!(self.group);
         if self.no_launch_repository {
             value["github_repo"] = Value::Null;
         }

@@ -85,21 +85,36 @@ impl<T: Clone + PartialEq + Debug + 'static> QueuedPreference<T> {
         what: &'static str,
         cx: &mut Context<V>,
     ) {
+        Self::choose_with_key(view, field, choice, OpKey::preferences(), write, what, cx);
+    }
+
+    /// The group's collapsed flag uses its own operation key. It shares
+    /// the same latest-choice queue as the preference row's fields.
+    pub(super) fn choose_with_key<V: 'static>(
+        view: &mut V,
+        field: Field<V, T>,
+        choice: T,
+        key: OpKey,
+        write: impl Fn(&T) -> Result<Command, PathError> + Copy + 'static,
+        what: &'static str,
+        cx: &mut Context<V>,
+    ) {
         let Some(operations) = session::current_operations(cx) else {
             return;
         };
         let queue = field(view);
         queue.queued = Some(choice);
         if queue.watching.as_ref().map(|(id, _)| *id) != Some(operations.entity_id()) {
+            let observed_key = key.clone();
             let subscription = cx.observe(&operations, move |view, operations, cx| {
                 // Only the current store's key: a retired store (a reset) sends nothing more.
                 if session::current_operations(cx).is_some_and(|current| current == operations) {
-                    send(view, field, write, what, cx);
+                    send(view, field, &observed_key, write, what, cx);
                 }
             });
             field(view).watching = Some((operations.entity_id(), subscription));
         }
-        send(view, field, write, what, cx);
+        send(view, field, &key, write, what, cx);
         cx.notify();
     }
 }
@@ -110,16 +125,13 @@ impl<T: Clone + PartialEq + Debug + 'static> QueuedPreference<T> {
 fn send<V: 'static, T: Clone + PartialEq + Debug + 'static>(
     view: &mut V,
     field: Field<V, T>,
-    write: Write<T>,
+    key: &OpKey,
+    write: impl Fn(&T) -> Result<Command, PathError> + Copy + 'static,
     what: &'static str,
     cx: &mut Context<V>,
 ) {
-    let busy = session::current_operations(cx).is_none_or(|operations| {
-        operations
-            .read(cx)
-            .in_flight(&OpKey::preferences())
-            .is_some()
-    });
+    let busy = session::current_operations(cx)
+        .is_none_or(|operations| operations.read(cx).in_flight(key).is_some());
     let queue = field(view);
     if busy || queue.draft.is_saving() {
         return;
@@ -137,10 +149,11 @@ fn send<V: 'static, T: Clone + PartialEq + Debug + 'static>(
         queue.queued = Some(choice);
         return;
     }
+    let next_key = key.clone();
     let started = drafts::save(
         view,
         move |view: &mut V| &mut field(view).draft,
-        &OpKey::preferences(),
+        key,
         write,
         cx,
         move |view, settled, cx| {
@@ -150,7 +163,7 @@ fn send<V: 'static, T: Clone + PartialEq + Debug + 'static>(
             }
             // A choice queued behind this write goes out now, whatever the order the store's observers run in (the
             // module docs, "When the queue sends").
-            send(view, field, write, what, cx);
+            send(view, field, &next_key, write, what, cx);
         },
     );
     if let Err(not_started) = started {

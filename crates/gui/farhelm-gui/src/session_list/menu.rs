@@ -151,6 +151,9 @@ use crate::prompt::{self, Question};
 use crate::theme::metrics;
 use crate::{local_state, session};
 
+use super::groups::{self, Destination, MoveTargets};
+use super::rename;
+
 /// The id prefix of a row's menu button; the rest is the session's key.
 pub(crate) const BUTTON_ID_PREFIX: &str = "session-menu-";
 
@@ -305,13 +308,24 @@ pub(super) fn menu_button(
     let selector_id = id.clone();
     let (list, keyed_list) = (list.clone(), list.clone());
     let (toggled, keyed) = (key.to_owned(), key.to_owned());
+    let (label, help) = if groups::header_id(key).is_some() {
+        (
+            format!(
+                "Group actions for {}",
+                MenuHeader::clamp_name(&HostText::from_host(title))
+            ),
+            "Rename, reorder or ungroup",
+        )
+    } else {
+        (actions_label(title), ACTIONS_HELP)
+    };
     let toggle = IconButton::new(
         id,
         Icon::More,
-        actions_label(title),
+        label,
         // Beside the sidebar, as every row hover is; the ring follows the button's corners inside its 1-pixel edge.
         HelpPlace::Row { selected }
-            .place(HoverHelp::tooltip(ACTIONS_HELP))
+            .place(HoverHelp::tooltip(help))
             .ring_radius(metrics::RADIUS_SM - px(1.)),
         Role::Button,
     )
@@ -387,6 +401,7 @@ impl SessionList {
         let mark = Mark::take(cx);
         let rename_focus = cx.focus_handle().tab_stop(true);
         let mute_focus = cx.focus_handle().tab_stop(true);
+        let group_focus = cx.focus_handle().tab_stop(true);
         let delete_focus = cx.focus_handle().tab_stop(true);
         // A retired session's menu holds Delete alone, so its first command is Delete too.
         let retired = session::current_store(cx).is_some_and(|store| {
@@ -406,6 +421,7 @@ impl SessionList {
             list,
             rename_focus,
             mute_focus,
+            group_focus,
             delete_focus,
             scroll: ScrollHandle::new(),
         });
@@ -457,6 +473,35 @@ impl SessionList {
     ) {
         self.close_menu(key, window, cx);
         let _ = super::rename::open(key, mark, window, cx);
+    }
+
+    /// Open the shared naming editor with this menu's focus return. Its
+    /// layer keeps the order hold until the name is saved or cancelled.
+    pub(super) fn group_name_from_menu(
+        &mut self,
+        key: &str,
+        id: Option<i64>,
+        sessions: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mark = Mark::take(cx);
+        self.close_menu(key, window, cx);
+        if let Some(editor) = rename::group(
+            id,
+            sessions,
+            None,
+            focus::ReturnTo::Opener,
+            &mark,
+            window,
+            cx,
+        ) {
+            self.current
+                .current(cx)
+                .rows
+                .borrow_mut()
+                .opened(key, editor, Opened::Question);
+        }
     }
 
     /// The menu's Mark read or Mark unread was chosen: close the menu, then send `toggle`, the action the item was drawn
@@ -603,18 +648,34 @@ pub(crate) fn refused(key: &str, cx: &App) -> bool {
 /// request in flight, while the window is inert, or for a key that cannot be a path segment (which no helm serves);
 /// each is logged.
 pub(super) fn send(key: &str, command: Result<Command, PathError>, cx: &mut App) {
+    send_for(&OpKey::session(key), command, cx);
+}
+
+/// The ordinary operation path for both a row and a group header.
+pub(super) fn send_for(key: &OpKey, command: Result<Command, PathError>, cx: &mut App) {
+    send_with(key, command, cx, |_, _| {});
+}
+
+/// A cross-area drop uses the same request path, and its successful reply
+/// also moves the held display slot in the initiating window.
+pub(super) fn send_with(
+    key: &OpKey,
+    command: Result<Command, PathError>,
+    cx: &mut App,
+    then: impl FnOnce(&crate::operations::Settled, &mut App) + 'static,
+) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
     let Ok(command) = command else {
-        tracing::warn!("a session key that cannot be a path segment was not sent a row request");
+        tracing::warn!("an item key that cannot be a path segment was not sent a list request");
         return;
     };
     let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, |_, _| {})
+        operations.start(key, command, cx, then)
     });
     if let Err(refused) = started {
-        tracing::debug!(?refused, "a row request was not sent");
+        tracing::debug!(?refused, "a list request was not sent");
     }
 }
 
@@ -712,6 +773,8 @@ pub(super) struct RowMenu {
     rename_focus: FocusHandle,
     /// The mute item keeps its keyboard position as the helm changes its state.
     mute_focus: FocusHandle,
+    /// Move to group is a submenu and needs its own stable focus handle.
+    group_focus: FocusHandle,
     /// The Delete command's focus handle: the menu's last command, where Up on the closed button opens it and End
     /// goes. Delete is last whichever commands the row offers, as in the old menu's order.
     delete_focus: FocusHandle,
@@ -745,6 +808,9 @@ impl RowMenu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        if let Some(id) = groups::header_id(&self.key) {
+            return self.group_contents(id, panel, cx);
+        }
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
@@ -942,6 +1008,33 @@ impl RowMenu {
         );
         let actions = actions_label(&row.info.title);
         let mute = muted.map(|muted| self.mute_item(muted, busy, window, cx));
+        let group = (!retired).then(|| {
+            let (list, key) = (self.list.clone(), self.key.clone());
+            groups::move_menu(
+                "session-menu-group",
+                &self.group_focus,
+                MoveTargets::Row(key.clone()),
+                busy,
+                move |destination, window, cx| {
+                    let _ = list.update(cx, |list, cx| {
+                        if refused(&key, cx) {
+                            return;
+                        }
+                        match destination {
+                            Destination::New => {
+                                list.group_name_from_menu(&key, None, vec![key.clone()], window, cx)
+                            }
+                            Destination::Existing(target) => {
+                                list.close_menu(&key, window, cx);
+                                groups::move_member(&key, target, cx);
+                            }
+                        }
+                    });
+                },
+                window,
+                cx,
+            )
+        });
         let items = div()
             .id("session-menu-items")
             .role(Role::Menu)
@@ -953,6 +1046,7 @@ impl RowMenu {
                     .child(rename)
                     .children(seen_item)
                     .children(pinned)
+                    .children(group)
                     .children(mute)
                     .child(menu_separator(cx))
                     .children(environment_items)
@@ -969,6 +1063,80 @@ impl RowMenu {
             .child(header)
             .child(items)
             .children(outcome::menu_line(&self.key, cx))
+    }
+
+    /// Group headers share the row menu's layer, keyboard navigation and
+    /// focus return, but send writes under the group's operation key.
+    fn group_contents(&self, id: i64, panel: Stateful<Div>, cx: &App) -> Stateful<Div> {
+        let Some(store) = session::current_store(cx) else {
+            return panel;
+        };
+        let Some(group) = groups::roster(store.read(cx).collections())
+            .iter()
+            .find(|group| group.id == id)
+        else {
+            return panel;
+        };
+        let operation = OpKey::session_group(id);
+        let busy = session::current_operations(cx)
+            .is_some_and(|operations| operations.read(cx).in_flight(&operation).is_some());
+        let title = HostText::from_host(group.name.as_str());
+        let rename = MenuItem::new(
+            "session-group-rename",
+            Icon::Edit,
+            "Rename",
+            HoverHelp::tooltip("Change the group name"),
+            Role::MenuItem,
+        )
+        .description("Give this group a new name")
+        .disabled(busy)
+        .focus(&self.rename_focus)
+        .on_click({
+            let (list, key) = (self.list.clone(), self.key.clone());
+            move |_, window, cx| {
+                let _ = list.update(cx, |list, cx| {
+                    list.group_name_from_menu(&key, Some(id), Vec::new(), window, cx)
+                });
+            }
+        });
+        let ungroup = MenuItem::new(
+            "session-group-ungroup",
+            Icon::Folder,
+            "Ungroup",
+            HoverHelp::tooltip("Remove this group and keep its sessions"),
+            Role::MenuItem,
+        )
+        .description("Keep the sessions and their pins")
+        .disabled(busy)
+        .focus(&self.delete_focus)
+        .on_click({
+            let (list, key) = (self.list.clone(), self.key.clone());
+            move |_, window, cx| {
+                let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
+                send_for(&operation, groups::ungroup(id), cx);
+            }
+        });
+        let moves = super::pins::group_move_items(&self.list, &self.key, busy, cx);
+        panel
+            .on_key_down(home_end_keys(
+                self.rename_focus.clone(),
+                self.delete_focus.clone(),
+            ))
+            .child(MenuHeader::new(
+                &title,
+                HostSentence::new("group-menu-summary").text("Session group"),
+            ))
+            .child(
+                div()
+                    .id("session-group-menu-items")
+                    .role(Role::Menu)
+                    .aria_label("Group actions")
+                    .flex()
+                    .flex_col()
+                    .child(rename)
+                    .children(moves)
+                    .child(ungroup),
+            )
     }
 
     /// An active mute has a single way to end from the row menu. An

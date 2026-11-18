@@ -181,8 +181,9 @@ impl RowHover {
         ))
     }
 
-    /// Record that the pointer is over the row (`hovered`) or not; only a change redraws.
-    fn set(&self, hovered: bool, cx: &mut App) {
+    /// Record that the pointer is over the row (`hovered`) or not; only a change redraws. A group header records its
+    /// hover here too, under its header key, so its grip and menu button reveal the way a row's do.
+    pub(super) fn set(&self, hovered: bool, cx: &mut App) {
         self.0.update(cx, |state, cx| {
             if *state != hovered {
                 *state = hovered;

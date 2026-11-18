@@ -1,9 +1,7 @@
-//! Dragging a pinned row by its grip to another place in the pinned group: the pointer's way to make the move that Move
-//! up and Move down make from the row's menu.
+//! One grip gesture reorders pins and group headers. A pin can also cross
+//! into the global pins or an expanded group's pin area.
 //!
-//! SPEC.md, "Session list": "Hovering an eligible pinned row reveals a grip beside its name. Dragging that grip within
-//! the pinned group shows the row lifted and a drop line; release moves it relative to the pin at that line. Escape,
-//! interrupted pointer capture or releasing outside the pinned group cancels." Ported from the old app's `pin_drag.rs`
+//! SPEC.md, "Session list". The grip, capture and drop line come from the old app's `pin_drag.rs`
 //! and `assets/pin-order.js` (the gesture), `list/row.rs` (the grip, its name and help, and when it could not drag) and
 //! the stylesheet's `.session-pin-grip`, `[data-pin-dragging]` and `[data-pin-drop]` rules at the reference commit.
 //! Here's the TLDR:
@@ -57,9 +55,9 @@
 //!   drop would land is worked out afresh at every move and at the release ([`drop_target`]) from the movable rows as
 //!   last drawn, and shown as a 2-pixel accent line inside the top or bottom edge of the pin it names. Nothing moves in
 //!   advance: the rows stay put until the helm pushes the new order.
-//! - **The drop.** A release on a drop line sends one move through the route the menu's items use, naming that pin and
-//!   the side of it ([`pins::send_move`]); the order hold lets the helm's new order through at once, as it does for a
-//!   Move from the menu. A release outside the group, on the row's own slot or before the lift sends nothing.
+//! - **The drop.** A release on a drop line sends a relative move or appends as the first visible pin in an empty area.
+//!   The source area comes from the press. For a cross-area drop the initiating window moves the held slot on success.
+//!   A release outside a valid band, on the original slot or before the lift sends nothing.
 //! - **The list cancels too.** The drag ends with nothing sent when its row stops being movable (deleted, unpinned, a
 //!   request of its session in flight), when its row is scrolled so far away that it is no longer drawn, when the
 //!   listing becomes unavailable, or when the Hosts panel takes the rows' place: the old list root that a failed
@@ -77,6 +75,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupMembership, SessionGroupTarget};
 use gpui::{
     AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, Div, Hsla, InteractiveElement,
     IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
@@ -84,14 +83,15 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use super::SessionList;
 use super::menu::{self, SharedRows};
 use super::pins::{self, Placement};
 use super::row_marks::HelpPlace;
+use super::{SessionList, groups};
 use crate::actions::Dismiss;
 use crate::components::{HoverHelp, Role, with_hover_help};
 use crate::focus::{self, Mark};
 use crate::layers;
+use crate::operations::{OpKey, Outcome};
 use crate::theme::{self, Palette, Token};
 
 /// The id prefix of a row's grip; the rest is the session's key. Not `session-row-`, which the
@@ -135,18 +135,44 @@ pub(super) struct Target {
     pub(super) placement: Placement,
 }
 
+/// Group headers move among headers. Pins move among the bands of any
+/// expanded group and the global pins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Area {
+    Groups,
+    Pins(SessionGroupTarget),
+}
+
+/// The movable entries of one band in display order. An empty pin band
+/// can name the nearest header edge as its insertion line.
+pub(super) struct Band {
+    pub(super) area: Area,
+    pub(super) items: Vec<String>,
+    pub(super) empty: Option<Target>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Drop {
+    area: Area,
+    line: Target,
+    empty: bool,
+}
+
 /// A drag in progress, from the press on a grip to its release or cancellation.
 #[derive(Debug)]
 struct Drag {
     /// The dragged row's session key.
     source: String,
+    /// Fix the source area when the drag begins. Another client's move
+    /// removes this grip from that area and cancels the gesture.
+    area: Area,
     /// Where the press was, in window coordinates.
     origin: Point<Pixels>,
     /// Whether the pointer has moved [`LIFT_DISTANCE`] from `origin` since the press: the row shows lifted, and only
     /// then can a drop land.
     lifted: bool,
     /// Where a drop would land now, as the drop line shows it.
-    target: Option<Target>,
+    target: Option<Drop>,
     /// Whether the window was active at the press. Only such a drag ends when the window goes inactive: a headless
     /// compositor reports its window inactive throughout, and a drag there must still work.
     began_active: bool,
@@ -160,7 +186,7 @@ pub(super) struct PinDrag {
     drag: Option<Drag>,
     /// The movable pins in the order the last frame drew them; empty while the listing is unavailable or the Hosts
     /// panel shows, so no grip is drawn then and a drag on cancels.
-    movable: Vec<String>,
+    bands: Vec<Band>,
     /// Each movable row's bounds as the last frame drew it: its whole list item, the lines under it included and the
     /// separator after the pinned run not, as the old row's rectangle was. Only rows the list drew are here.
     bounds: HashMap<String, Bounds<Pixels>>,
@@ -171,9 +197,26 @@ pub(super) type Shared = Rc<RefCell<PinDrag>>;
 
 impl PinDrag {
     /// Start a frame: forget the rows the last frame drew, and take `movable`, this frame's movable pins in order.
-    fn start_frame(&mut self, movable: Vec<String>) {
+    fn start_frame(&mut self, bands: Vec<Band>) {
         self.bounds.clear();
-        self.movable = movable;
+        self.bands = bands;
+    }
+
+    /// Only a movable item can start a drag. An empty edge has bounds but
+    /// does not grant a grip to its anchor.
+    fn area_of(&self, key: &str) -> Option<Area> {
+        self.bands
+            .iter()
+            .find(|band| band.items.iter().any(|item| item == key))
+            .map(|band| band.area)
+    }
+
+    /// Record the bounds of each movable item and each empty-area edge.
+    fn records(&self, key: &str) -> bool {
+        self.bands.iter().any(|band| {
+            band.items.iter().any(|item| item == key)
+                || band.empty.as_ref().is_some_and(|edge| edge.neighbor == key)
+        })
     }
 
     /// Whether `key`'s row is drawn lifted now.
@@ -186,15 +229,47 @@ impl PinDrag {
     /// The side of `key`'s row the drop line is drawn on now, if it is the drop target.
     fn drop_on(&self, key: &str) -> Option<Placement> {
         let target = self.drag.as_ref()?.target.as_ref()?;
-        (target.neighbor == key).then_some(target.placement)
+        (target.line.neighbor == key).then_some(target.line.placement)
     }
 
-    /// The movable rows the last frame drew, in order, with their bounds.
-    fn drawn_rows(&self) -> Vec<(&str, Bounds<Pixels>)> {
-        self.movable
+    /// A header can land among headers. A pin can land within any visible
+    /// pin band, with each band tested independently of adjacent groups.
+    fn target(&self, drag: &Drag, clip: Bounds<Pixels>, at: Point<Pixels>) -> Option<Drop> {
+        self.bands
             .iter()
-            .filter_map(|key| self.bounds.get(key).map(|bounds| (key.as_str(), *bounds)))
-            .collect()
+            .filter(|band| match drag.area {
+                Area::Groups => band.area == Area::Groups,
+                Area::Pins(_) => matches!(band.area, Area::Pins(_)),
+            })
+            .find_map(|band| {
+                if let Some(line) = &band.empty {
+                    if drag.area == band.area {
+                        return None;
+                    }
+                    let bounds = self.bounds.get(&line.neighbor)?;
+                    let (top, bottom) = match line.placement {
+                        Placement::Before => (bounds.top(), bounds.center().y),
+                        Placement::After => (bounds.center().y, bounds.bottom()),
+                    };
+                    return inside_band(clip, at, top, bottom).then(|| Drop {
+                        area: band.area,
+                        line: line.clone(),
+                        empty: true,
+                    });
+                }
+                let rows: Vec<_> = band
+                    .items
+                    .iter()
+                    .filter_map(|key| self.bounds.get(key).map(|bounds| (key.as_str(), *bounds)))
+                    .collect();
+                let source = (drag.area == band.area).then_some(drag.source.as_str());
+                let line = drop_in_band(&rows, source, clip, at)?;
+                Some(Drop {
+                    area: band.area,
+                    line,
+                    empty: false,
+                })
+            })
     }
 }
 
@@ -215,6 +290,7 @@ impl PinDrag {
 /// Rows the list did not draw (far from the view) are not in `rows`. That cannot change the answer for a point inside
 /// the view: the list draws a margin of rows beyond each edge, so the rows on either side of any such point are drawn,
 /// and "before this one" or "after that one" names the same place either way.
+#[cfg(test)]
 pub(super) fn drop_target(
     rows: &[(&str, Bounds<Pixels>)],
     source: &str,
@@ -233,9 +309,7 @@ fn drop_in_band(
     at: Point<Pixels>,
 ) -> Option<Target> {
     let (first, last) = (rows.first()?, rows.last()?);
-    let top = first.1.top().max(clip.top());
-    let bottom = last.1.bottom().min(clip.bottom());
-    if at.x < clip.left() || at.x >= clip.right() || at.y < top || at.y >= bottom {
+    if !inside_band(clip, at, first.1.top(), last.1.bottom()) {
         return None;
     }
     let source_ix = match source {
@@ -259,6 +333,15 @@ fn drop_in_band(
         neighbor: rows[ix].0.to_owned(),
         placement,
     })
+}
+
+/// All insertion bands are clipped to the visible list, including a
+/// half-header target for an empty area.
+fn inside_band(clip: Bounds<Pixels>, at: Point<Pixels>, top: Pixels, bottom: Pixels) -> bool {
+    at.x >= clip.left()
+        && at.x < clip.right()
+        && at.y >= top.max(clip.top())
+        && at.y < bottom.min(clip.bottom())
 }
 
 // ---- The row's part ----------------------------------------------------------------------------------------------------
@@ -310,7 +393,7 @@ pub(super) fn paint(
     cx: &mut App,
 ) -> RowPaint {
     let state = shared.borrow();
-    if !state.movable.iter().any(|movable| movable == key) {
+    if !state.records(key) {
         return RowPaint {
             grip: None,
             lifted: false,
@@ -321,8 +404,10 @@ pub(super) fn paint(
     let palette = *theme::palette(cx);
     let lifted = state.lifted(key);
     let drop_on = state.drop_on(key);
+    let movable = state.area_of(key).is_some();
     drop(state);
-    let can_drag = !menu::refused(key, cx)
+    let can_drag = movable
+        && !refused(key, cx)
         && !retired_row(key, cx)
         && !rows.borrow_mut().asks(key, window, cx);
     let grip = can_drag.then(|| {
@@ -394,12 +479,17 @@ fn grip(
     } else {
         palette.fg_1
     };
-    let help = HelpPlace::Row { selected }.place(HoverHelp::tooltip(GRIP_HELP));
+    let (label, words) = if groups::header_id(key).is_some() {
+        ("Drag group", "Drag to reorder groups")
+    } else {
+        (GRIP_LABEL, GRIP_HELP)
+    };
+    let help = HelpPlace::Row { selected }.place(HoverHelp::tooltip(words));
     let selector = id.clone();
     let grip = div()
         .id(id.clone())
         .role(Role::Button)
-        .aria_label(GRIP_LABEL)
+        .aria_label(label)
         .absolute()
         .top_0()
         .left_0()
@@ -442,6 +532,20 @@ fn retired_row(key: &str, cx: &App) -> bool {
             .get::<farhelm_proto::ui_channel::SessionRow>(key)
             .is_some_and(super::retired::is)
     })
+}
+
+/// Group operations have their own busy key. Rows also inherit their
+/// lifecycle and confirmation rules from their ordinary menu.
+fn refused(key: &str, cx: &App) -> bool {
+    match groups::header_id(key) {
+        Some(id) => crate::session::current_operations(cx).is_none_or(|operations| {
+            operations
+                .read(cx)
+                .in_flight(&OpKey::session_group(id))
+                .is_some()
+        }),
+        None => menu::refused(key, cx),
+    }
 }
 
 /// The grip's focus handle, kept in its element state.
@@ -564,17 +668,17 @@ impl SessionList {
     /// window when its activation changes, so this frame comes.
     pub(super) fn pin_drag_frame(
         &mut self,
-        movable: Vec<String>,
+        bands: Vec<Band>,
         window_active: bool,
         cx: &mut Context<Self>,
     ) -> Shared {
         let shared = self.pin_drag(cx);
         let gone = {
             let mut state = shared.borrow_mut();
-            state.start_frame(movable);
+            state.start_frame(bands);
             state.drag.as_ref().is_some_and(|drag| {
-                !state.movable.contains(&drag.source)
-                    || menu::refused(&drag.source, cx)
+                state.area_of(&drag.source) != Some(drag.area)
+                    || refused(&drag.source, cx)
                     || (drag.began_active && !window_active)
             })
         };
@@ -595,18 +699,19 @@ impl SessionList {
         cx: &mut Context<Self>,
     ) -> bool {
         let shared = self.pin_drag(cx);
-        {
+        let area = {
             let state = shared.borrow();
-            if state.drag.is_some()
-                || !state.movable.iter().any(|movable| movable == key)
-                || menu::refused(key, cx)
-                || retired_row(key, cx)
-            {
+            if state.drag.is_some() || refused(key, cx) || retired_row(key, cx) {
                 return false;
             }
-        }
+            let Some(area) = state.area_of(key) else {
+                return false;
+            };
+            area
+        };
         shared.borrow_mut().drag = Some(Drag {
             source: key.to_owned(),
+            area,
             origin: at,
             lifted: false,
             target: None,
@@ -637,7 +742,69 @@ impl SessionList {
         };
         cx.notify();
         if let (true, Some(target)) = (drag.lifted, drag.target) {
-            pins::send_move(&drag.source, &target.neighbor, target.placement, cx);
+            self.send_drop(&drag.source, drag.area, target, cx);
+        }
+    }
+
+    /// The same relative move serves keyboard and grip. With no neighbor,
+    /// the visible destination's first pin uses the membership append.
+    fn send_drop(&mut self, key: &str, source: Area, drop: Drop, cx: &mut Context<Self>) {
+        let Target {
+            neighbor,
+            placement,
+        } = drop.line;
+        match (source, drop.area) {
+            (Area::Groups, Area::Groups) => pins::send_move(key, &neighbor, placement, None, cx),
+            (Area::Pins(source), Area::Pins(destination)) => {
+                let areas = PinMoveAreas {
+                    source,
+                    destination,
+                };
+                if source == destination {
+                    pins::send_move(key, &neighbor, placement, Some(areas), cx);
+                    return;
+                }
+                let command = if drop.empty {
+                    groups::membership(
+                        key,
+                        SessionGroupMembership {
+                            target: destination,
+                            pin_source: Some(source),
+                        },
+                    )
+                } else {
+                    pins::move_command(key, &neighbor, placement, Some(areas))
+                };
+                let key = key.to_owned();
+                let list = cx.weak_entity();
+                menu::send_with(&OpKey::session(&key), command, cx, move |settled, cx| {
+                    if let Outcome::Done(_) = settled.outcome {
+                        let _ = list.update(cx, |list, cx| {
+                            let current = crate::session::current_store(cx).is_some_and(|store| {
+                                store
+                                    .read(cx)
+                                    .collections()
+                                    .get::<farhelm_proto::ui_channel::SessionRow>(&key)
+                                    .is_some_and(|row| {
+                                        row.pinned && row.group == destination.group()
+                                    })
+                            });
+                            if current {
+                                let band = destination
+                                    .group()
+                                    .map_or(groups::Band::GlobalPins, groups::Band::Group);
+                                list.current.current(cx).hold.crossed(
+                                    &key,
+                                    band,
+                                    (!drop.empty).then_some((&neighbor, placement)),
+                                );
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            }
+            _ => {}
         }
     }
 
@@ -664,9 +831,9 @@ impl SessionList {
             return false;
         };
         let source = drag.source.clone();
-        if !state.movable.contains(&source)
+        if state.area_of(&source) != Some(drag.area)
             || !state.bounds.contains_key(&source)
-            || menu::refused(&source, cx)
+            || refused(&source, cx)
         {
             state.drag = None;
             return true;
@@ -679,7 +846,7 @@ impl SessionList {
             dx.hypot(dy) >= LIFT_DISTANCE
         };
         let target = if lifted {
-            drop_target(&state.drawn_rows(), &source, clip, at)
+            state.target(drag, clip, at)
         } else {
             None
         };

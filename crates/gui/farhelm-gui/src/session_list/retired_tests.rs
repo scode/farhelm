@@ -323,6 +323,7 @@ fn an_ordinary_container_sessions_row_keeps_its_commands(cx: &mut TestAppContext
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-group",
             "session-menu-mute",
             "session-menu-suspend",
             "session-menu-stop-and-suspend",

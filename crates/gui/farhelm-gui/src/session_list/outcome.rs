@@ -79,6 +79,7 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         Work::Pin => Some("Pin: "),
         Work::Mute => Some("Mute: "),
         Work::MovePin => Some("Move pin: "),
+        Work::SessionGroup => Some("Move to group: "),
         // The old list's error slot for an environment's Suspend and Resume ("Sandbox: " for either provider, as the
         // old `HeaderAction::Sandbox` wrote it), and Stop's for Stop and suspend, which the old list ran as a Stop
         // with its suspend flag set.
@@ -220,6 +221,7 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::Pin
         | Work::Mute
         | Work::MovePin
+        | Work::SessionGroup
         | Work::Suspend
         | Work::Resume
         | Work::StopAndSuspend
