@@ -38,6 +38,18 @@
 // The changelog text goes into MDX, so `{`, `}` and `<` outside code spans are
 // escaped: MDX would otherwise read them as an expression or a tag, and an
 // entry like "the <path> argument" would break the build or vanish.
+//
+// The one exception is the folded full list. A release section from v0.42.0 on
+// can end with a `<details>` block ("All other changes") holding everything
+// the maintainer did not highlight, and its three frame lines must reach MDX
+// as real HTML so the list starts folded here as it does on GitHub. Only those
+// exact lines pass through unescaped (releasing/check-changelog.py holds the
+// file to that frame); a `<` anywhere else still goes through escapeMdx.
+//
+// Screenshots belong to highlights only, so entries inside the fold are never
+// matched against a release's screenshot list: a shot whose PR only the fold
+// cites is unplaced and fails the build, rather than showing up folded away
+// (or twice, when a PR has a highlight and an unrelated full-list entry).
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -52,6 +64,13 @@ export const changelogPath = join(websiteDir, '..', 'CHANGELOG.md');
 export const screenshotsDir = join(websiteDir, 'src', 'release-notes');
 
 const pagePath = join(websiteDir, 'src', 'content', 'docs', 'docs', 'release-notes.mdx');
+
+/**
+ * The folded full list's frame lines, exactly as releasing/check-changelog.py
+ * requires them (`FOLD_OPEN`, `FOLD_SUMMARY`, `FOLD_CLOSE` there). They are
+ * the only changelog lines the page passes to MDX as markup.
+ */
+const FOLD_FRAME = new Set(['<details>', '<summary>All other changes</summary>', '</details>']);
 
 /** A docs shot name, `<page>/<shot>` in lowercase kebab case (docs/docs-shots/SPEC.md). */
 const SHOT_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -131,11 +150,22 @@ function releaseBody(tag, lines) {
   const shots = screenshotsFor(tag);
   const placed = new Set();
   const out = [];
+  let inFold = false;
   for (const line of lines) {
-    // A category heading ("### 🚀 Added") goes one level down, so the page's
-    // "On this page" column lists the releases alone, not every category.
-    out.push(line.startsWith('### ') ? `#${escapeMdx(line)}` : escapeMdx(line));
-    if (!line.startsWith('- ')) continue;
+    if (FOLD_FRAME.has(line)) {
+      if (line === '<details>') inFold = true;
+      if (line === '</details>') inFold = false;
+      out.push(line);
+      continue;
+    }
+    // A category heading ("### 🚀 Added", or "#### 🔧 Fixed" inside the fold)
+    // goes one level down, so the page's "On this page" column lists the
+    // releases alone, not every category. Outside the fold a "####" line is
+    // one of v0.12.0's or v0.13.0's Highlights subsections, and stays as it
+    // always rendered: published release notes are frozen.
+    const category = line.startsWith('### ') || (inFold && line.startsWith('#### '));
+    out.push(category ? `#${escapeMdx(line)}` : escapeMdx(line));
+    if (inFold || !line.startsWith('- ')) continue;
     const cited = citedNumbers(line);
     const mine = shots.filter((shot) => cited.includes(shot.entry));
     if (mine.length === 0) continue;

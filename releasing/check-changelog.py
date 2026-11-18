@@ -10,10 +10,12 @@ writes to the repository; every mode reports and exits non-zero on a problem.
 
 `format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layouts the process has used:
 one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; recognized category headings in their prescribed
-order; and entries with the required PR references. Current sections use one-paragraph bullets in every category, while
-older curated sections retain their historical Highlights subsections. The newest section, and only that one, may open
-with the fixed draft notice while its wording is still in review. The checker is deliberately narrower than what dist
-accepts, so a violation here is a curation slip, not a dist failure. It runs in the release gate on every tag.
+order; and entries with the required PR references. Current sections use one-paragraph bullets in every category, and
+may end with the folded full list (a `<details>` block with its own `####` categories) below the highlighted ones, while
+older curated sections retain their historical layouts, such as Misc fixes or Highlights subsections. The newest
+section, and only that one, may open with the fixed draft notice while its wording is still in review. The checker is
+deliberately narrower than what dist accepts, so a violation here is a curation slip, not a dist failure. It runs in the
+release gate on every tag.
 
 `fragments` answers "did every user-facing change since the last stable release leave a changelog fragment". It walks
 the commits since the merge base with the last stable tag, picks out the Conventional Commit types the process says
@@ -65,19 +67,53 @@ CHANGELOG_NAME = "CHANGELOG.md"
 FRAGMENTS_DIR = Path("releasing") / "changelog.d"
 FRAGMENT_README = "README.md"
 
-# The category table IS the format: names, emoji, and order are all fixed here and nowhere else.
-# `releasing/.agents/changelog.md`, "Format", repeats it in prose for humans; if the two ever disagree, this table is
-# what the gate enforces.
+# The category tables ARE the format: names, emoji, and order are all fixed here and nowhere else.
+# `releasing/.agents/changelog.md`, "Format", repeats them in prose for humans; if the two ever disagree, these tables
+# are what the gate enforces.
 #
-# Fixes come in two categories. Fixes worth highlighting holds the ones a reader should not miss; Misc fixes is the long
-# tail most projects would collapse into one "various bug fixes" line, listed in full for transparency. Misc fixes sits
-# last, below Removed, because it is the part of a release a reader can most safely skip.
+# A current section has two tiers. Its `###` categories are the highlights: the entries the maintainer settled at
+# planning time, wrote at release time, or promoted from the agent's proposals. Below them, folded away, comes the full
+# list the agent writes of everything else that changed for users (`FOLD_*` below). Fixes worth highlighting is the
+# highlights' fix category; every other fix goes in the fold's Fixed.
 CATEGORIES: tuple[tuple[str, str], ...] = (
     ("Breaking", "\U0001f4a5"),  # collision
     ("Added", "\U0001f680"),  # rocket
     ("Changed", "\U0001f504"),  # counterclockwise arrows
     ("Fixes worth highlighting", "\U0001f527"),  # wrench
     ("Removed", "\U0001f5d1️"),  # wastebasket with emoji presentation selector
+)
+
+# The full list sits at the very end of a section, inside an HTML `<details>` block whose first two lines are exactly
+# these. A `<details>` block in `CHANGELOG.md` itself, rather than a fold the website adds, is what makes the list start
+# folded in the GitHub release body too, since dist copies the section verbatim and GitHub renders the element. The
+# blank line after the summary and before `FOLD_CLOSE` is what lets GitHub and MDX read the Markdown inside as Markdown.
+# The categories inside are `####` headings, so that the parser's `###` categories end where the fold begins.
+FOLD_OPEN = "<details>"
+FOLD_SUMMARY = "<summary>All other changes</summary>"
+FOLD_CLOSE = "</details>"
+FOLD_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("Breaking", "\U0001f4a5"),
+    ("Added", "\U0001f680"),
+    ("Changed", "\U0001f504"),
+    ("Fixed", "\U0001f527"),
+    ("Removed", "\U0001f5d1️"),
+)
+
+# The first version curated with the fold. Sections before it keep whichever earlier table `categories_for` gives them,
+# and may not carry a fold.
+FIRST_FOLD_VERSION = (0, 42, 0)
+
+# GitHub renders raw HTML inside Markdown, so an entry that mentions `</details>` in plain text would close the fold
+# early on the GitHub release (the website escapes it, so the two would silently disagree). In a fold-era section the
+# frame's tags may appear only as the frame itself, or inside a code span. The code-span pattern is the same heuristic
+# the website generator uses, which is enough for the entries this file holds.
+FRAME_TAG_RE = re.compile(r"</?\s*(details|summary)\b", re.IGNORECASE)
+CODE_SPAN_RE = re.compile(r"`+[^`]*`+")
+
+# From the fix split until the fold replaced it, the long tail of fixes went under a Misc fixes category at the end of
+# the section, listed in full for transparency. Sections from v0.26.0 through v0.41.0 use this table.
+MISC_FIXES_CATEGORIES: tuple[tuple[str, str], ...] = (
+    *CATEGORIES,
     ("Misc fixes", "\U0001fa79"),  # adhesive bandage
 )
 
@@ -127,7 +163,12 @@ def categories_for(version: str) -> tuple[tuple[str, str], ...]:
     A version is held to the layout that was current when it was curated, which is what lets the format change without
     a rewrite of the sections already published under the old one. `version` must already be a valid `X.Y.Z`.
     """
-    categories = PRE_SPLIT_CATEGORIES if _version_tuple(version) <= LAST_PRE_SPLIT_VERSION else CATEGORIES
+    if _version_tuple(version) <= LAST_PRE_SPLIT_VERSION:
+        categories = PRE_SPLIT_CATEGORIES
+    elif _version_tuple(version) < FIRST_FOLD_VERSION:
+        categories = MISC_FIXES_CATEGORIES
+    else:
+        categories = CATEGORIES
     if version in LEGACY_HIGHLIGHTS_VERSIONS:
         categories = (LEGACY_HIGHLIGHTS, *categories)
     if version == RELEASE_NOTES_POLICY_VERSION:
@@ -244,6 +285,10 @@ def check_changelog_format(text: str) -> list[str]:
             problems.append(f"{where}: v{release.version} is not older than the release above it; newest goes first")
         previous = current
         may_be_draft = release is releases[0]
+        # GitHub's HTML block that `</details>` starts runs until a blank line, so the next release's heading directly
+        # below it would render as plain text when the file itself is viewed on GitHub.
+        if release is not releases[-1] and release.body and release.body[-1] == FOLD_CLOSE:
+            problems.append(f"{where} (v{release.version}): `{FOLD_CLOSE}` needs a blank line below it before the next release")
         problems.extend(
             f"{where} (v{release.version}): {item}"
             for item in _check_release_body(release.version, release.body, may_be_draft)
@@ -270,16 +315,94 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
         if not may_be_draft:
             problems.append("only the newest section may still be a draft; finalize this one before cutting another release")
         lines = lines[first + 1 :]
+    if _version_tuple(version) >= FIRST_FOLD_VERSION:
+        problems.extend(
+            f"`{line[:60]}`: a `details` or `summary` tag outside code spans could open or close the fold on GitHub;"
+            " put it in backticks"
+            for line in lines
+            if line not in (FOLD_OPEN, FOLD_SUMMARY, FOLD_CLOSE) and FRAME_TAG_RE.search(CODE_SPAN_RE.sub("", line))
+        )
+    lines, fold, fold_problems = _split_fold(version, lines)
+    problems.extend(fold_problems)
+
     allowed = categories_for(version)
-    headings = {f"### {emoji} {name}" if emoji else f"### {name}": name for name, emoji in allowed}
-    order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
+    categories, stray, heading_problems = _split_categories(lines, "### ", allowed)
+    problems.extend(heading_problems)
+    if any(line.strip() for line in stray):
+        problems.append("text before the first category heading; a release holds only categories and the fold")
+    # A release whose every change went into the full list has no highlights, and that is a legitimate release.
+    if not categories and fold is None:
+        problems.append("a release needs at least one category")
+    problems.extend(_check_categories(version, categories, allowed))
+
+    if fold is not None:
+        fold_categories, fold_stray, fold_heading_problems = _split_categories(fold, "#### ", FOLD_CATEGORIES)
+        fold_problems = list(fold_heading_problems)
+        if any(line.strip() for line in fold_stray):
+            fold_problems.append("text between the summary and the first category heading")
+        if not fold_categories:
+            fold_problems.append("the fold needs at least one category; omit the fold when it would be empty")
+        fold_problems.extend(_check_categories(version, fold_categories, FOLD_CATEGORIES, historical=False))
+        problems.extend(f"in the folded full list: {item}" for item in fold_problems)
+    return problems
+
+
+def _split_fold(version: str, lines: list[str]) -> tuple[list[str], list[str] | None, list[str]]:
+    """Separate a section's highlights from its folded full list, checking the fold's fixed frame.
+
+    Returns the lines above the fold, the lines between the summary and `FOLD_CLOSE` (None when there is no fold), and
+    the problems with the frame. The fold must be the last thing in the section, because the website and GitHub both
+    show it as one closed block at the end, and anything after it would read as part of the highlights while sitting
+    below the full list. A section older than `FIRST_FOLD_VERSION` carrying one is refused rather than accepted, so a
+    new section cannot be given a fold under an old version number and an old one cannot grow one in a sweep.
+    """
+    start = next((index for index, line in enumerate(lines) if line == FOLD_OPEN), None)
+    if start is None:
+        return lines, None, []
+    above, rest = lines[:start], lines[start + 1 :]
+    if _version_tuple(version) < FIRST_FOLD_VERSION:
+        return above, None, [f"`{FOLD_OPEN}`: only sections curated from v{'.'.join(map(str, FIRST_FOLD_VERSION))} on have the folded full list"]
+
+    problems: list[str] = []
+    if above and above[-1].strip():
+        problems.append(f"`{FOLD_OPEN}` needs a blank line above it")
+    content = [index for index, line in enumerate(rest) if line.strip()]
+    if not content or rest[content[-1]] != FOLD_CLOSE:
+        problems.append(f"the fold must end with `{FOLD_CLOSE}` on the section's last line")
+        end = len(rest)
+    else:
+        end = content[-1]
+        if rest[end - 1].strip():
+            problems.append(f"`{FOLD_CLOSE}` needs a blank line above it, or GitHub shows the last entry as raw Markdown")
+    body = rest[:end]
+    if any(line in (FOLD_OPEN, FOLD_CLOSE) for line in body):
+        problems.append("a section has at most one fold, and nothing inside it may open or close another")
+    if not body or body[0] != FOLD_SUMMARY:
+        problems.append(f"`{FOLD_OPEN}` must be followed directly by exactly `{FOLD_SUMMARY}`")
+        return above, body, problems
+    if len(body) < 2 or body[1].strip():
+        problems.append(f"`{FOLD_SUMMARY}` needs a blank line below it, or GitHub shows the fold's Markdown as raw text")
+    return above, body[1:], problems
+
+
+def _split_categories(
+    lines: list[str], prefix: str, allowed: tuple[tuple[str, str], ...]
+) -> tuple[list[tuple[str, list[str]]], list[str], list[str]]:
+    """Group lines under the category headings at one level (`### ` or `#### `), against the given table.
+
+    Returns the categories in file order, each as its name and body lines ("?" for an unknown heading, which is also
+    reported), the lines before the first heading, and the problems with headings. Fenced code is honored so a heading
+    inside an example does not start a category.
+    """
+    headings = {f"{prefix}{emoji} {name}" if emoji else f"{prefix}{name}": name for name, emoji in allowed}
     categories: list[tuple[str, list[str]]] = []
     stray: list[str] = []
+    problems: list[str] = []
     in_fence = False
     for line in lines:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
-        if not in_fence and line.startswith("### "):
+        if not in_fence and line.startswith(prefix):
             name = headings.get(line)
             if name is None:
                 listed = ", ".join(f"`{heading}`" for heading in headings)
@@ -289,12 +412,19 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
                 categories.append((name, []))
             continue
         (categories[-1][1] if categories else stray).append(line)
+    return categories, stray, problems
 
-    if any(line.strip() for line in stray):
-        problems.append("text before the first category heading; a release holds only categories")
-    if not categories:
-        problems.append("a release needs at least one category")
 
+def _check_categories(
+    version: str, categories: list[tuple[str, list[str]]], allowed: tuple[tuple[str, str], ...], historical: bool = True
+) -> list[str]:
+    """Check category order and each category's body; `historical` enables the shapes only old `###` sections use.
+
+    The fold's categories pass `historical=False`: a fold exists only in sections newer than every historical exception,
+    and its Fixed must not be read as the pre-split Fixed or its Changed as v0.40.0's.
+    """
+    problems: list[str] = []
+    order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
     last_order = -1
     for name, body in categories:
         if name == "?":
@@ -308,13 +438,13 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
         if not any(line.strip() for line in body):
             problems.append(f"category `{name}` is empty; omit a category with no entries")
             continue
-        if name == LEGACY_HIGHLIGHTS[0]:
+        if historical and name == LEGACY_HIGHLIGHTS[0]:
             category_problems = _check_highlights(body)
-        elif name == "Misc fixes":
+        elif historical and name == "Misc fixes":
             category_problems = _check_misc_fixes(body)
-        elif name == RELEASE_NOTES_POLICY[0]:
+        elif historical and name == RELEASE_NOTES_POLICY[0]:
             category_problems = _check_bullets(body, uncited_leading_entries=None)
-        elif version == RELEASE_NOTES_POLICY_VERSION and name == "Changed":
+        elif historical and version == RELEASE_NOTES_POLICY_VERSION and name == "Changed":
             category_problems = _check_bullets(body, uncited_leading_entries=1)
         else:
             category_problems = _check_bullets(body)
@@ -945,12 +1075,13 @@ Notable user-facing changes in each stable release.
 
 
 # The reference changelog above predates the fix split (its versions sit below `LAST_PRE_SPLIT_VERSION`), so it
-# exercises the rules every layout shares and the retained Fixed category. This one is the current layout.
+# exercises the rules every layout shares and the retained Fixed category. This one is the layout between the fix split
+# and the fold, with Misc fixes at the end.
 SPLIT_CHANGELOG = f"""# Changelog
 
 Notable user-facing changes in each stable release.
 
-## v1.1.0 - 2027-02-01
+## v0.31.0 - 2027-02-01
 
 ### \U0001f527 Fixes worth highlighting
 
@@ -967,11 +1098,54 @@ Notable user-facing changes in each stable release.
 - A rare fix. (#23)
 - Another rare fix. (#24, #25)
 
-## v1.0.0 - 2027-01-01
+## v0.30.0 - 2027-01-01
 
 ### \U0001f680 Added
 
 - Everything. (#1)
+"""
+
+
+# The current layout: highlights, then the folded full list, below a release in the Misc fixes layout that it follows.
+FOLD_CHANGELOG = f"""# Changelog
+
+Notable user-facing changes in each stable release.
+
+## v0.42.0 - 2027-03-01
+
+### \U0001f680 Added
+
+- A feature the maintainer highlighted. (#31)
+
+### \U0001f527 Fixes worth highlighting
+
+- A fix most users would notice. (#32)
+
+{FOLD_OPEN}
+{FOLD_SUMMARY}
+
+#### \U0001f4a5 Breaking
+
+- A flag only scripts used is gone; drop it from yours. (#33)
+
+#### \U0001f504 Changed
+
+- A small change. (#34)
+
+#### \U0001f527 Fixed
+
+- A rare fix. (#35)
+- Another rare fix. (#36, #37)
+
+{FOLD_CLOSE}
+
+## v0.41.0 - 2027-02-01
+
+### \U0001fa79 Misc fixes
+
+{MISC_FIXES_PREAMBLE}
+
+- An older rare fix. (#23)
 """
 
 
@@ -1098,12 +1272,12 @@ def self_test() -> int:
 
     # The draft notice lets a stable tag go out before its wording is approved, so the format has to admit it, but only
     # in the one place the procedure puts it: the newest section's first line, verbatim.
-    newest_heading = "## v1.1.0 - 2027-02-01\n\n"
+    newest_heading = "## v0.31.0 - 2027-02-01\n\n"
     draft = SPLIT_CHANGELOG.replace(newest_heading, f"{newest_heading}{DRAFT_NOTICE}\n\n")
     expect(check_changelog_format(draft) == [], "the format check accepts the draft notice on the newest section")
     _preamble, draft_releases = parse_changelog(draft)
     expect(is_draft(draft_releases[0]) and not is_draft(draft_releases[1]), "is_draft tells a draft section from a finished one")
-    older_heading = "## v1.0.0 - 2027-01-01\n\n"
+    older_heading = "## v0.30.0 - 2027-01-01\n\n"
     draft_variants = {
         "the draft notice on an older section": SPLIT_CHANGELOG.replace(older_heading, f"{older_heading}{DRAFT_NOTICE}\n\n"),
         "a reworded draft notice": SPLIT_CHANGELOG.replace(newest_heading, f"{newest_heading}**Draft notes**\n\n"),
@@ -1115,6 +1289,70 @@ def self_test() -> int:
         ),
     }
     for what, text in draft_variants.items():
+        expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    # The fold's frame is raw HTML that GitHub and the website's MDX only render as a closed block of Markdown when its
+    # lines and blank lines are exactly so, and nothing else checks them before a release body is published.
+    expect(check_changelog_format(FOLD_CHANGELOG) == [], "the folded full list passes the format check")
+    fold_only = FOLD_CHANGELOG.replace(
+        "### \U0001f680 Added\n\n- A feature the maintainer highlighted. (#31)\n\n"
+        "### \U0001f527 Fixes worth highlighting\n\n- A fix most users would notice. (#32)\n\n",
+        "",
+    )
+    expect(check_changelog_format(fold_only) == [], "a release with nothing highlighted, only the fold, passes")
+    expect(
+        check_changelog_format(FOLD_CHANGELOG.replace(f"\n{FOLD_OPEN}\n{FOLD_SUMMARY}", f"\n{FOLD_OPEN}\n{FOLD_SUMMARY}\n", 1)) == [],
+        "extra blank lines inside the fold pass",
+    )
+    in_code = FOLD_CHANGELOG.replace("- A rare fix. (#35)", "- Exported pages now end with `</details>` correctly. (#35)")
+    expect(check_changelog_format(in_code) == [], "a frame tag inside a code span passes")
+    with_draft = FOLD_CHANGELOG.replace("## v0.42.0 - 2027-03-01\n\n", f"## v0.42.0 - 2027-03-01\n\n{DRAFT_NOTICE}\n\n")
+    expect(check_changelog_format(with_draft) == [], "the draft notice works with the fold")
+    fold_text = FOLD_CHANGELOG[FOLD_CHANGELOG.index(FOLD_OPEN) : FOLD_CHANGELOG.index(FOLD_CLOSE) + len(FOLD_CLOSE)]
+    fold_variants = {
+        "Misc fixes in a section after it was retired": FOLD_CHANGELOG.replace(
+            f"{fold_text}\n", f"### \U0001fa79 Misc fixes\n\n{MISC_FIXES_PREAMBLE}\n\n- A rare fix. (#35)\n"
+        ),
+        "a fold in a section older than the fold": SPLIT_CHANGELOG.replace(
+            "- Another rare fix. (#24, #25)\n", f"- Another rare fix. (#24, #25)\n\n{fold_text}\n"
+        ),
+        "a reworded summary": FOLD_CHANGELOG.replace(FOLD_SUMMARY, "<summary>Everything else</summary>"),
+        "a missing summary": FOLD_CHANGELOG.replace(f"{FOLD_SUMMARY}\n", ""),
+        "no blank line after the summary": FOLD_CHANGELOG.replace(f"{FOLD_SUMMARY}\n\n", f"{FOLD_SUMMARY}\n"),
+        "no blank line before the close": FOLD_CHANGELOG.replace(f"(#36, #37)\n\n{FOLD_CLOSE}", f"(#36, #37)\n{FOLD_CLOSE}"),
+        "no blank line before the fold": FOLD_CHANGELOG.replace(f"(#32)\n\n{FOLD_OPEN}", f"(#32)\n{FOLD_OPEN}"),
+        "a fold that never closes": FOLD_CHANGELOG.replace(f"{FOLD_CLOSE}\n", ""),
+        "text after the fold": FOLD_CHANGELOG.replace(f"{FOLD_CLOSE}\n", f"{FOLD_CLOSE}\n\n- Late. (#38)\n"),
+        "a highlight category below the fold": FOLD_CHANGELOG.replace(
+            f"{FOLD_CLOSE}\n", f"{FOLD_CLOSE}\n\n### \U0001f680 Added\n\n- Late. (#38)\n"
+        ),
+        "a second fold": FOLD_CHANGELOG.replace(f"{FOLD_CLOSE}\n", f"{FOLD_CLOSE}\n\n{fold_text}\n"),
+        "fold categories out of order": FOLD_CHANGELOG.replace(
+            "#### \U0001f4a5 Breaking\n\n- A flag only scripts used is gone; drop it from yours. (#33)\n\n", ""
+        ).replace("#### \U0001f527 Fixed", "#### \U0001f4a5 Breaking\n\n- Late. (#33)\n\n#### \U0001f527 Fixed"),
+        "a highlight category name inside the fold": FOLD_CHANGELOG.replace(
+            "#### \U0001f527 Fixed", "#### \U0001f527 Fixes worth highlighting"
+        ),
+        "a `###` heading inside the fold": FOLD_CHANGELOG.replace("#### \U0001f504 Changed", "### \U0001f504 Changed"),
+        "text before the fold's first category": FOLD_CHANGELOG.replace(
+            f"{FOLD_SUMMARY}\n\n", f"{FOLD_SUMMARY}\n\nEverything else.\n\n"
+        ),
+        "an empty fold": FOLD_CHANGELOG.replace(
+            fold_text, f"{FOLD_OPEN}\n{FOLD_SUMMARY}\n\n{FOLD_CLOSE}"
+        ),
+        "a fold bullet without a PR reference": FOLD_CHANGELOG.replace("- A rare fix. (#35)", "- A rare fix."),
+        "an empty release": fold_only.replace(f"{fold_text}\n", ""),
+        "a closing details tag in an entry's text": FOLD_CHANGELOG.replace(
+            "- A rare fix. (#35)", "- Exported pages now end with </details> correctly. (#35)"
+        ),
+        "a summary tag in a highlight's text": FOLD_CHANGELOG.replace(
+            "- A feature the maintainer highlighted. (#31)", "- Folded <summary> lines now render. (#31)"
+        ),
+        "no blank line between the fold and the next release": FOLD_CHANGELOG.replace(
+            f"{FOLD_CLOSE}\n\n## v0.41.0", f"{FOLD_CLOSE}\n## v0.41.0"
+        ),
+    }
+    for what, text in fold_variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
 
     good_fragment = "---\nkind: added\npr: 12, 13\n---\n\nThe thing.\n"

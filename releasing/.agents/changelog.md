@@ -33,9 +33,9 @@ process applies to sections curated after the change; the checker must retain co
 release in flight does not require retroactive edits. When a new format is introduced, update the checker and its
 fixtures to recognize both the new format and the older formats that remain in the file.
 
-The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, and the single
-`### 🔧 Fixed` category in every section up to and including `v0.25.0`. It is a record of already-curated sections, not
-permission to use those layouts in a new release.
+The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, the single `### 🔧 Fixed`
+category in every section up to and including `v0.25.0`, and the Misc fixes category in sections from `v0.26.0` through
+`v0.41.0`. It is a record of already-curated sections, not permission to use those layouts in a new release.
 
 ## Format
 
@@ -53,48 +53,72 @@ instruction for older sections; the checker accepts the historical formats that 
   `releasing/.agents/stable.md`, "Cutting a stable release"), and the notice travels with it into the GitHub release, so
   anyone who reads the release page before it is finalized knows the text will change. Only the newest section may carry
   it, and the approved text never does. The checker holds the canonical copy.
-- Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
+- A release has two tiers: the highlights, then the full list of everything else, folded away. Which entries are
+  highlights is the maintainer's call (`releasing/.agents/changelog.md`, "Highlights and the full list"); the tiers
+  share the meaning of each category. The highlights come first, as categories in this order and with these emoji, each
+  omitted when it has nothing:
 
-  | Heading                           | Holds                                                                               |
-  | --------------------------------- | ----------------------------------------------------------------------------------- |
-  | `### 💥 Breaking`                 | `feat!` and any other type marked `!`; anything a user must act on                  |
-  | `### 🚀 Added`                    | `feat`                                                                              |
-  | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                         |
-  | `### 🔧 Fixes worth highlighting` | the fixes a reader should not miss (see `releasing/.agents/changelog.md`, "Format") |
-  | `### 🗑️ Removed`                  | removals that are not breaking in practice; breaking ones go under Breaking         |
-  | `### 🩹 Misc fixes`               | historical category for other fixes                                                 |
+  | Heading                           | Holds                                                                       |
+  | --------------------------------- | --------------------------------------------------------------------------- |
+  | `### 💥 Breaking`                 | `feat!` and any other type marked `!`; anything a user must act on          |
+  | `### 🚀 Added`                    | `feat`                                                                      |
+  | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                 |
+  | `### 🔧 Fixes worth highlighting` | fixes                                                                       |
+  | `### 🗑️ Removed`                  | removals that are not breaking in practice; breaking ones go under Breaking |
 
   Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, 🔄 rather than ♻️ for
-  Changed because recycling reads as refactoring, and 🩹 for Misc fixes because a bandage reads as a small repair.
-  Category headings sit below the release level, so the parser never looks at them and the emoji stay out of the release
-  name.
-- Fixes worth highlighting covers repairs likely to matter to a typical user and critical fixes that affect a small
-  group of users. Examples include lost or corrupted sessions, killed agents, a helm or host that will not start or
-  connect, or a security problem. The maintainer reviews the selection with the draft. Older releases used Misc fixes
-  for the remaining fixes. The checker still accepts those sections.
-- Misc fixes always opens with exactly this paragraph, then its bullets, and like every category it is omitted when it
-  has nothing:
+  Changed because recycling reads as refactoring. Category headings sit below the release level, so the parser never
+  looks at them and the emoji stay out of the release name.
+- The full list comes last in the section, inside exactly this frame, and is omitted when it has nothing:
+
+  ```
+  <details>
+  <summary>All other changes</summary>
+
+  #### 💥 Breaking
+
+  - ...
+
+  #### 🔧 Fixed
+
+  - ...
+
+  </details>
+  ```
+
+  Its categories are `#### 💥 Breaking`, `#### 🚀 Added`, `#### 🔄 Changed`, `#### 🔧 Fixed` and `#### 🗑️ Removed`, in
+  that order, each omitted when it has nothing. The `<details>` block is written into `CHANGELOG.md` itself, rather than
+  added by the website, because dist copies the section into the GitHub release verbatim: this way the list starts
+  folded there as well as on the website's Release notes page. The frame lines are fixed, the blank line after the
+  summary and before `</details>` is what makes GitHub and the website read the Markdown in between as Markdown, and the
+  website generator passes exactly those frame lines through as markup; the checker holds the canonical copies. Sections
+  up to and including v0.41.0 have no full list, and none is added to them.
+- Sections from v0.26.0 through v0.41.0 end with a `### 🩹 Misc fixes` category instead (🩹 because a bandage reads as a
+  small repair), which opens with exactly this paragraph before its bullets:
 
   ```
   *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
   ```
 
-  The wording is fixed so that it is not one more thing to review per release; the checker holds the canonical copy.
-- Every category is bullets, after Misc fixes' fixed opening paragraph: one `-` item per entry, one paragraph, ending in
-  its PR reference as `(#N)` or `(#N, #M)`.
+  The full list replaced it from v0.42.0 on; a new section has no Misc fixes.
+- Every category is bullets (after Misc fixes' fixed opening paragraph, in the sections that have one): one `-` item per
+  entry, one paragraph, ending in its PR reference as `(#N)` or `(#N, #M)`.
 - One paragraph per physical line, however long. `CHANGELOG.md` and the fragments are excluded from dprint in
   `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every newline as a
   line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker tolerates
   indented continuation lines as part of an item, but do not write them.
-- A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
-  not only what changed.
+- A Breaking entry says what the user must do about it (re-run a setup step, drop a flag from a script), not only what
+  changed. Updating remote hosts to match the desktop app is not such an action: it is part of every ordinary upgrade,
+  so a helm–supervisor protocol change is not Breaking and gets no entry of its own in either tier (see the protocol
+  bullet below).
 - That a release cannot be downgraded from is not Breaking, and it gets no entry at all. Most releases upgrade the
   helm's or the supervisor's database, so an older build refusing to open it afterwards is the normal case, not news.
   The maintainer ruled this on 2026-10-07. The risk report's downgrade check still tells the maintainer, who is the one
   reader that needs it. Sections up to and including `v0.23.0` carry such entries; like every curated section, they stay
   as they are.
 - Releases through v0.39.0 used the following entry to flag a helm–supervisor protocol change. From v0.40.0, updating
-  remote hosts is treated as part of an ordinary upgrade:
+  remote hosts is treated as part of an ordinary upgrade, and no entry says it, in the highlights or in the full list
+  (the maintainer announced this in v0.40.0's notes, 2026-11-17):
 
   ```
   - This release *requires* you to update your remote hosts. (#N, #M)
@@ -110,22 +134,50 @@ instruction for older sections; the checker accepts the historical formats that 
   limitations belong in the entry ("launch only; no conversation tracking"), since the alternative is the user finding
   them.
 
+## Highlights and the full list
+
+The highlights are short on purpose: the few changes most worth a reader's time, each worded or approved by the
+maintainer. Everything else that changed for users goes in the full list below them, folded by default, so a reader who
+wants the whole picture still gets it without the highlights turning into a laundry list. The maintainer chose this
+split on 2026-11-18, after v0.40.0 had cut the long tail from the notes altogether.
+
+Only the maintainer puts an entry in the highlights. An entry gets there in one of three ways:
+
+- It is a plan's release-note entry (`releasing/.agents/changelog.md`, "Plans' release notes"), settled at planning
+  time.
+- The maintainer writes it during the release.
+- The agent proposes it and the maintainer accepts. In the draft, a proposed entry sits in the full list, with a callout
+  on the review page saying why it might deserve highlighting, and moves up only when the maintainer says so; a declined
+  proposal stays where it is. Propose what clears the bar in `releasing/EDITORIAL_GUIDANCE.md` (changes likely to matter
+  to a typical user, and critical ones that affect a small group), and always propose a Breaking entry the user must act
+  on, since that is the entry a reader skimming the highlights can least afford to miss.
+
+The full list is the agent's to write: an entry for every change that "What gets an entry" selects and that the
+highlights do not already describe, in the same user-facing voice as any entry, following
+`releasing/EDITORIAL_GUIDANCE.md`. Not repeating a highlight there is best effort, not a rule to agonize over: a PR
+whose work a highlight describes gets no full-list entry for that same work, though one that also did something else can
+still get an entry for the other part. The full list is on the review page with the rest of the section and the
+maintainer can comment on it or edit it (their wording is reproduced exactly, as anywhere else), and their approval
+covers it, but the procedure does not ask them to go through it entry by entry.
+
 ## What gets an entry
 
 Review every commit on main whose Conventional Commit type is `feat`, `fix`, `perf`, `style`, or `revert`, and every
-commit of any type marked `!`, when curating the next stable release. `style` includes UI styling users see. Use
-`releasing/EDITORIAL_GUIDANCE.md` to select changes for the public notes, including changes outside those types when
-they matter to the reader (a raised requirement on a tool users install, say). A `revert` of something that shipped in a
-stable release is an entry; a revert of something that never shipped only removes the original's fragment.
+commit of any type marked `!`, when curating the next stable release. `style` includes UI styling users see. Every
+change a user could notice gets an entry in one of the two tiers; leave out only what has no user-facing effect, or what
+a rule here excludes. Use `releasing/EDITORIAL_GUIDANCE.md` for wording and for the highlight proposals, and include
+changes outside those types when they matter to the reader (a raised requirement on a tool users install, say). A
+`revert` of something that shipped in a stable release is an entry; a revert of something that never shipped only
+removes the original's fragment.
 
 A fix is listed as a fix only when the bug it fixes reached users in a stable release. Release candidates and dev builds
-do not count; their changes reach users under the stable release that follows them. So before sorting fixes into the two
-fix categories, check each one against the previous stable tag: when the code or feature it fixes is not in that tag, it
-gets no fix entry. A fix to something new in this release folds into that feature's entry, which cites its PR and
-describes the feature as it now behaves; anything else is dropped. A fix that is partly both keeps a fix entry for the
-part that shipped, and only that part. A fragment's `kind: fixed` does not settle this: a fix to unreleased work should
-have edited that work's fragment instead (`AGENTS.md`, "Changelog fragments"), and often has not. The maintainer made
-this the default for every release on 2026-10-16, after the v0.29.0 sweep turned up ten fixes whose bugs had only ever
+do not count; their changes reach users under the stable release that follows them. So before listing a fix, in either
+tier, check it against the previous stable tag: when the code or feature it fixes is not in that tag, it gets no fix
+entry. A fix to something new in this release folds into that feature's entry, which cites its PR and describes the
+feature as it now behaves; anything else is dropped. A fix that is partly both keeps a fix entry for the part that
+shipped, and only that part. A fragment's `kind: fixed` does not settle this: a fix to unreleased work should have
+edited that work's fragment instead (`AGENTS.md`, "Changelog fragments"), and often has not. The maintainer made this
+the default for every release on 2026-10-16, after the v0.29.0 sweep turned up ten fixes whose bugs had only ever
 existed between stable releases.
 
 ## Fragments: what a PR leaves behind
@@ -152,11 +204,13 @@ conversation and cannot resume one.
 The front matter is a leading `---` block, YAML-style, because a `---` line directly under text is a setext heading to
 Markdown (the first draft of this format had dprint rewrite `kind: added` over a `---` into `## kind: added`); a leading
 block is the one shape every Markdown tool treats as metadata. `kind:` is one of `breaking`, `added`, `changed`,
-`fixed`, `removed`, or `none`, naming the category the entry lands in (`fixed` lands in one of the two fix categories,
-chosen at curation). `none` records a required commit that was considered and has nothing user-facing; its body says
-why, so curation can tell an omission from a decision. An optional `pr: 123` (or `pr: 123, 456`) line claims PR numbers
-when the fragment is written after its change merged, or covers several PRs at once; a fragment added in the change's
-own commit needs no `pr:` because the sweep pairs it with the commit that added it.
+`fixed`, `removed`, or `none`, naming the category the entry lands in, in whichever tier curation puts it (`fixed` is
+Fixes worth highlighting or the full list's Fixed). `none` records a required commit that was considered and has nothing
+user-facing; its body says why, so curation can tell an omission from a decision. A change whose only effect on users is
+that remote hosts must be updated to match, such as a protocol version bump, is `none`, not `breaking`. An optional
+`pr: 123` (or `pr: 123, 456`) line claims PR numbers when the fragment is written after its change merged, or covers
+several PRs at once; a fragment added in the change's own commit needs no `pr:` because the sweep pairs it with the
+commit that added it.
 
 The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
 accumulated wording rules: the first paragraph is the entry candidate, and further paragraphs supply context for
@@ -173,13 +227,15 @@ questions on a local page"). The answer goes into the plan file as one `## Relea
 one of:
 
 - the entry: its first paragraph is the entry text, and any further paragraphs are context for the release agent, as in
-  a fragment. It is the maintainer's wording, whether they wrote it or accepted the planner's proposal.
-- `No release note needed.`
+  a fragment. It is the maintainer's wording, whether they wrote it or accepted the planner's proposal, and it is a
+  highlight.
+- `No release note needed.`: the work gets no highlight. It says nothing about the full list.
 - `No release note now; ask during the release.`
 
 The two fixed answers are spelled exactly so, because `releasing/check-changelog.py plans` tells them from an entry by
-their text. A plan file written before this rule has no section; curate its work from the fragments as before. A
-`## Decisions` entry that changes the release note wins over the section, like any Decision over the plan body.
+their text. A plan file written before this rule has no section; curate its work from the fragments into the full list,
+as for work outside the planning system. A `## Decisions` entry that changes the release note wins over the section,
+like any Decision over the plan body.
 
 The plan file is usually gone by the time of the release, since approving a landed plan deletes it.
 `python3 releasing/check-changelog.py plans` reads every plan whose landing was recorded since the last stable release
@@ -201,39 +257,50 @@ landing has PRs on main and no record at all. So:
 
 At curation, each plan's answer works like this:
 
-- An entry is the default entry for the work it describes, used word for word: the maintainer supplied that wording, and
+- An entry is the highlight for the work it describes, used word for word: the maintainer supplied that wording, and
   `releasing/.agents/stable.md`, "Cutting a stable release", step 2, applies to it. The only changes allowed without
   asking are the format's: one `-` bullet on one physical line (dprint wraps plan files, so the paragraph arrives
   hard-wrapped), and its PR references. It cites the plan's PRs that merged in this range and that do what the entry
   describes, which by default is every one of them that carries a required type or a fragment. The plan's entry takes
   the place of those PRs' fragments that describe the same work, and of any entry step 1 would write for one of them
-  that is `MISSING`. A fragment from one of the plan's PRs that describes something else (a pre-existing bug fixed along
-  the way, say) is curated as usual. The agent sorts the entry into a category by the rules in
-  `releasing/.agents/changelog.md`, "Format".
-- `No release note needed.` leaves the plan's work out of the draft: the fragments that describe it, and any entry step
-  1 would write for a `MISSING` commit of the plan's. This is the maintainer's decision, not a proposed exclusion, but
-  it is listed with the proposed exclusions in step 2's handover message so the maintainer sees what it removed.
+  that is `MISSING`, so the full list does not repeat it. A fragment from one of the plan's PRs that describes something
+  else (a pre-existing bug fixed along the way, say) goes into the full list as usual. The agent sorts the entry into a
+  highlight category by the rules in `releasing/.agents/changelog.md`, "Format".
+- `No release note needed.` means the maintainer wants no highlight for the plan's work. Curate the work into the full
+  list from its fragments, exactly as for work outside the planning system: an entry when it changed something for
+  users, nothing when it did not. The agent may still propose a highlight for it, as for any full-list entry, when the
+  work turned out to clear the bar.
 - `No release note now; ask during the release.` means the maintainer wants to write this one at release time. Draft an
   entry from the fragments (or from the PRs, when they left only `kind: none` fragments or none) as for any other work,
-  and mark it on the review page as the plan the maintainer deferred, asking them to supply their own text or approve
-  the draft.
+  put it in the full list, and mark it on the review page as the plan the maintainer deferred, asking them to supply
+  their own text or approve the draft as a highlight. It is agent wording, so it moves up only on that answer: an
+  approval of the whole section with the deferred question unanswered leaves it in the full list. The tag is pushed with
+  the draft before the maintainer answers (`releasing/.agents/stable.md`, "Cutting a stable release"), and an unanswered
+  deferral must not put agent wording among the highlights there.
 - A malformed note (the `plans` mode says so: an empty section, or more than one) is treated as no note: curate the work
-  from the fragments, and call it out so the maintainer can supply the entry.
+  from the fragments into the full list, and call it out so the maintainer can supply a highlight.
 
-Two rules in this file fix what an entry must or must not say, and they win over a plan's wording, because a reader
+Three rules in this file fix what an entry must or must not say, and they win over a plan's wording, because a reader
 relies on them holding in every release: the rule in `releasing/.agents/changelog.md`, "What gets an entry", that a fix
-to unreleased work folds into that work's entry rather than standing as a fix, and the rule in
-`releasing/.agents/changelog.md`, "Format", that no entry mentions downgrades. Where one applies, the draft follows the
-rule (folding the fix, cutting the caveat), and the page shows the plan's wording exactly as it was, beside the callout
-that says which rule changed it. Nothing else changes the maintainer's wording.
+to unreleased work folds into that work's entry rather than standing as a fix, and the rules in
+`releasing/.agents/changelog.md`, "Format", that no entry mentions downgrades and none says remote hosts must be updated
+to match. Where one applies, the draft follows the rule (folding the fix, cutting the caveat, or leaving out an entry
+that said nothing else), and the page shows the plan's wording exactly as it was, beside the callout that says which
+rule changed it. Nothing else changes the maintainer's wording.
 
-Before handing over the review page, check every plan entry, and every "no release note needed", against what actually
-landed, and call out the obvious inaccuracies you can detect. The entry was written against a plan, and plans drift: a
-block answer or a follow-up changes the scope, an executor takes a different fork than the plan expected, a name in the
-UI comes out differently, a part never lands. The evidence is the plan file and its Decisions at the landing, the plan's
-report (`git show` it at the same commit, under `plans/reports/`), the PRs' diffs and descriptions, and their fragments,
-which say where the built work departs from the plan's entry (`plans/.agents/executing.md`, "Executing one plan", step
-8). The checks, at least:
+A plan's entry is a highlight for what this release ships. When the plan's in-range PRs do not deliver what the entry
+describes (its main work merged before this range, so the entry would announce a shipped feature again, say), the entry
+does not go in the highlights: curate the in-range work into the full list, and show the entry on the page with a
+callout, so the maintainer can supply a highlight for what actually ships or leave it there. Draft notes go public with
+the tag before review, so this is decided before the page is handed over, not left to the review.
+
+Before handing over the review page, check every plan entry against what actually landed, and call out the obvious
+inaccuracies you can detect. The entry was written against a plan, and plans drift: a block answer or a follow-up
+changes the scope, an executor takes a different fork than the plan expected, a name in the UI comes out differently, a
+part never lands. The evidence is the plan file and its Decisions at the landing, the plan's report (`git show` it at
+the same commit, under `plans/reports/`), the PRs' diffs and descriptions, and their fragments, which say where the
+built work departs from the plan's entry (`plans/.agents/executing.md`, "Executing one plan", step 8). The checks, at
+least:
 
 - the entry describes behavior, a name, a control, a flag or a limitation that differs from what landed;
 - it describes something that did not land in this release, or that an earlier round already shipped in a stable release
@@ -241,17 +308,16 @@ which say where the built work departs from the plan's entry (`plans/.agents/exe
 - it would be a fix entry for a bug that never reached a stable release;
 - it breaks a rule in `releasing/.agents/changelog.md`, "Format", or `releasing/EDITORIAL_GUIDANCE.md` (internal names,
   a missing action for a Breaking entry), including the rules above that win over its wording;
-- it says the same thing as another entry in the draft;
-- "no release note needed" on work whose PRs made a user-facing change.
+- it says the same thing as another entry in the draft.
 
-A callout is a highlight on the review page, never an edit to the maintainer's text except where a rule above wins: say
-what looks wrong and the evidence (a PR, a Decision, a line of the report), and offer replacement wording when it is
+A callout is a marked note on the review page, never an edit to the maintainer's text except where a rule above wins:
+say what looks wrong and the evidence (a PR, a Decision, a line of the report), and offer replacement wording when it is
 obvious, for the maintainer to accept as a suggestion. The scratch Markdown file keeps the maintainer's entry as it was
-until they change it. A plan with no bullet in the draft (one whose note said no release note was needed, a deferred one
-with nothing to draft from, a malformed one) still gets a row on the page with its PR links, so a callout on it has a
-place to sit and the maintainer can still add an entry there. Name every plan with a callout in the message that hands
-over the page, too. "Obvious" sets the bar on purpose: this is a check for mistakes a careful reader of the PRs would
-catch, not a license to second-guess the maintainer's choice of words.
+until they change it. A plan with no highlight in the draft (one whose note said no release note was needed, a deferred
+one with nothing to draft from, a malformed one) still gets a row on the page with its PR links and its full-list
+entries, if any, so a callout on it has a place to sit and the maintainer can still add a highlight there. Name every
+plan with a callout in the message that hands over the page, too. "Obvious" sets the bar on purpose: this is a check for
+mistakes a careful reader of the PRs would catch, not a license to second-guess the maintainer's choice of words.
 
 ## The checker
 

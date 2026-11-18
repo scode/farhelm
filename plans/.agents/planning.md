@@ -142,17 +142,19 @@ answers. Here's what it needs:
 - Facts that are not questions (the delegation mode, where the plan files go) are stated on the page or in chat, not
   asked.
 - Every plan's box carries a release note question, even when the plan has nothing else to ask; it is the maintainer's
-  one chance to write the plan's changelog entry before the release (`releasing/.agents/changelog.md`, "Plans' release
-  notes"). Show your proposed entry as page text, written for someone running Farhelm per
-  `releasing/.agents/changelog.md`, "Format", and `releasing/EDITORIAL_GUIDANCE.md`, so the maintainer can comment on it
-  or suggest edits. Below it goes a picker with three choices: use the entry as shown, "No release note needed", and "No
-  release note now (ask during the release)". Mark "use the entry" recommended for work a user would notice, and "No
-  release note needed" for work with no user-facing effect. Text in the picker's free-text field is the maintainer's own
-  entry and replaces yours, unless it reads as a comment or a question, which you answer on the page. A suggested edit
-  on your entry changes exactly what it suggests; apply it to the page and keep the question open until a pick or the
-  maintainer's own text settles it. Write the settled answer into the goal file without polishing it: the maintainer's
-  wording is reproduced exactly, here and at the release. A merged plan gets one question and one entry for all of its
-  work.
+  one chance to write the plan's highlight in the release notes before the release (`releasing/.agents/changelog.md`,
+  "Plans' release notes", and "Highlights and the full list"). Show your proposed entry as page text, written for
+  someone running Farhelm per `releasing/.agents/changelog.md`, "Format", and `releasing/EDITORIAL_GUIDANCE.md`, so the
+  maintainer can comment on it or suggest edits. Below it goes a picker with three choices: use the entry as shown, "No
+  release note needed", and "No release note now (ask during the release)". Say on the page that "No release note
+  needed" means no highlight, and that the release agent still lists the work in the folded full list when it changed
+  something for users. Mark "use the entry" recommended for work that clears the highlight bar in
+  `releasing/EDITORIAL_GUIDANCE.md`, and "No release note needed" for anything else. Text in the picker's free-text
+  field is the maintainer's own entry and replaces yours, unless it reads as a comment or a question, which you answer
+  on the page. A suggested edit on your entry changes exactly what it suggests; apply it to the page and keep the
+  question open until a pick or the maintainer's own text settles it. Write the settled answer into the goal file
+  without polishing it: the maintainer's wording is reproduced exactly, here and at the release. A merged plan gets one
+  question and one entry for all of its work.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
