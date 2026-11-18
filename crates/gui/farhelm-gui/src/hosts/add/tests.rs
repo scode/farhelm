@@ -113,9 +113,15 @@ pub(crate) fn open_dialog(cx: &mut VisualTestContext) {
     click(cx, "rail-add-host");
     assert!(any_open(cx), "the premise: Add host opened");
     assert!(
-        field_focused(cx, |dialog| &dialog.destination),
+        destination_focused(cx),
         "the premise: focus starts in the destination field"
     );
+}
+
+/// Whether the open dialog's destination field holds focus. Keyboard tests use this to check the handoff from the
+/// opener.
+pub(crate) fn destination_focused(cx: &mut VisualTestContext) -> bool {
+    field_focused(cx, |dialog| &dialog.destination)
 }
 
 /// Type `text` into the focused field.
