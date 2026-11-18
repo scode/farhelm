@@ -377,6 +377,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Session groups.** Let users group related sessions in the session list and collapse each group. Keep sessions
   together as activity changes and show when a collapsed group contains a session that needs attention.
 
+- **Mute a session.** the ability to "mute" a session so it doesnt turn blue and doesn't promote as recent for a while
+  or permanently
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
