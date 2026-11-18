@@ -14,16 +14,22 @@
   // Scale 2 so the images stay crisp: the docs show each one at half its
   // pixel size. Wider than the hero's so the session launcher, which keeps
   // its own width, leaves margins beside it for callouts to sit in rather
-  // than covering its controls.
-  viewport: { width: 1600, height: 1000, scale: 2 },
+  // than covering its controls, and tall enough for the launcher's longer
+  // forms and the YOLO question to show whole with callouts below them, as
+  // the old browser shots that raised their own height did.
+  viewport: { width: 1600, height: 1500, scale: 2 },
 
-  // `shown_ssh` is the destination the UI is shown in place of `ssh`. The real
-  // destinations are self-ssh spellings on the capturing machine, and one of
-  // them names its account.
+  // The remote hosts' destinations are invented host names, which the run's
+  // private ssh configuration sends to its own sshd on this machine
+  // (scripts/gui-agent.py, "The private sshd"), so host settings and details
+  // show them as they are. They carry no user part: the private sshd logs in
+  // only the capturing account, which ssh uses when none is given, and whose
+  // name must not appear in a picture. Each differs from its alias, so a shot
+  // of host details shows what an alias stands for.
   hosts: [
     { key: "local", alias: "this machine", kind: "local" },
-    { key: "build-box", alias: "build-box", kind: "remote", ssh: "localhost", shown_ssh: "dev@build-box" },
-    { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "$USER@localhost", shown_ssh: "dev@gpu-1" },
+    { key: "build-box", alias: "build-box", kind: "remote", ssh: "build-box.lan" },
+    { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "gpu-1.lan" },
   ],
 
   sessions: [
@@ -117,7 +123,7 @@
   // the agent, or applying the template is refused. Two of them are meant to
   // be applied one after the other: one picks the agent, the other the place.
   templates: [
-    { name: "codex-deep", fields: { kind: "agent", agent: "codex", model: "gpt-6.1-sol", effort: "high" } },
+    { name: "codex-deep", fields: { kind: "agent", agent: "codex", model: "gpt-6.2-sol", effort: "high" } },
     { name: "api-repo", fields: { host: "build-box", destination: { folder: "~/src/api" } } },
     { name: "quick-claude", fields: { kind: "agent", agent: "claude", effort: "low" } },
   ],

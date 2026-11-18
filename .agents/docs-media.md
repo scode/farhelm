@@ -64,9 +64,9 @@ completed full refresh moves that marker; a single-page fix or a screenshot refr
 ## Docs screenshots
 
 `scripts/docs-screenshots.sh --local` runs the GPUI page modules under `scripts/docs-shots/` against one staged fleet.
-The run's private Mutter renders the 1600x1000-point viewport at 2x. `docs/docs-shots/SPEC.md` governs the capture. Read
-it before changing the modules or anything under `docs/docs-shots/`. Launch templates has two unannotated crops. Declare
-new release shots in `scripts/docs-shots/release-notes.py` and list them under their release version
+The run's private Mutter renders the scenario's viewport at 2x, and the engine draws each shot's callouts onto it.
+`docs/docs-shots/SPEC.md` governs the capture. Read it before changing the modules or anything under `docs/docs-shots/`.
+Declare new release shots in `scripts/docs-shots/release-notes.py` and list them under their release version
 (`website/.agents/release-notes.md`, "Release notes").
 
 The command keeps its bulk capture record and local preview output. Use `--only <page>` for drafting. A full capture

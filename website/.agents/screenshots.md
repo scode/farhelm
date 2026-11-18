@@ -14,8 +14,10 @@ staged or rewritten. In short:
 A page's shots are declared in `scripts/docs-shots/<page>.py`; see `docs/docs-shots/SPEC.md` for the page module
 contract. On Linux, `scripts/docs-screenshots.sh --local --only <page>` runs them at 2x through the GPUI test harness.
 
-For a full capture, run `scripts/docs-screenshots.sh --local`. Annotations and publishing for docs pages belong to the
-first page that shows shots again, which the maintainer decides. Release shots follow the release procedure.
+A shot's annotations (red callouts with arrows, and highlight rings) are declared with it and drawn onto the picture by
+the engine; see `docs/docs-shots/SPEC.md`, "Adding or changing a shot". For a full capture, run
+`scripts/docs-screenshots.sh --local`; a docs refresh publishes it with `scripts/publish-docs-shots.sh`. Release shots
+follow the release procedure.
 
 Published release shots stay frozen. Only `scripts/publish-docs-shots.sh` may push `refs/docs-assets/keep`; never push
 the ref by hand.

@@ -277,8 +277,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 def read_rgba(path: Path) -> tuple[int, int, bytearray]:
     """A PNG's width, height and pixels (four bytes each, row after row).
 
-    Only 8-bit RGBA without interlacing, which is what the bridge's screenshot writes; anything else is a ValueError
-    rather than a guess, because a misread picture would be cropped in the wrong place without a word.
+    Only 8-bit RGBA or RGB without interlacing: RGBA is what the bridge's screenshot writes, and RGB is what librsvg
+    writes for an opaque picture, such as a docs shot with its annotations drawn on (`scripts/docs_callouts.py`); RGB
+    comes back with an opaque alpha byte added. Anything else is a ValueError rather than a guess, because a misread
+    picture would be cropped in the wrong place without a word.
     """
     data = path.read_bytes()
     if data[:8] != PNG_SIGNATURE:
@@ -296,11 +298,12 @@ def read_rgba(path: Path) -> tuple[int, int, bytearray]:
             idat.append(body)
         elif kind == b"IEND":
             break
-    if header is None or header[2:4] != (8, 6) or header[6] != 0:
-        raise ValueError(f"{path} is not an 8-bit RGBA PNG without interlacing")
+    if header is None or header[2:4] not in ((8, 6), (8, 2)) or header[6] != 0:
+        raise ValueError(f"{path} is not an 8-bit RGBA or RGB PNG without interlacing")
     width, height = header[0], header[1]
+    bpp = 4 if header[3] == 6 else 3
     raw = zlib.decompress(b"".join(idat))
-    stride = width * 4
+    stride = width * bpp
     # A header that claims more rows than the data holds would otherwise surface as an IndexError, which `crop_frame`
     # does not expect, and abort the whole batch before its results are written.
     if len(raw) != height * (stride + 1):
@@ -315,18 +318,18 @@ def read_rgba(path: Path) -> tuple[int, int, bytearray]:
         start = y * (stride + 1)
         kind, line = raw[start], bytearray(raw[start + 1:start + 1 + stride])
         if kind == 1:
-            for i in range(4, stride):
-                line[i] = (line[i] + line[i - 4]) & 0xFF
+            for i in range(bpp, stride):
+                line[i] = (line[i] + line[i - bpp]) & 0xFF
         elif kind == 2:
             line = bytearray((a + b) & 0xFF for a, b in zip(line, prev))
         elif kind == 3:
             for i in range(stride):
-                left = line[i - 4] if i >= 4 else 0
+                left = line[i - bpp] if i >= bpp else 0
                 line[i] = (line[i] + ((left + prev[i]) >> 1)) & 0xFF
         elif kind == 4:
             for i in range(stride):
-                a = line[i - 4] if i >= 4 else 0
-                b, c = prev[i], prev[i - 4] if i >= 4 else 0
+                a = line[i - bpp] if i >= bpp else 0
+                b, c = prev[i], prev[i - bpp] if i >= bpp else 0
                 p = a + b - c
                 pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
                 line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 0xFF
@@ -334,6 +337,11 @@ def read_rgba(path: Path) -> tuple[int, int, bytearray]:
             raise ValueError(f"{path}: unknown PNG filter type {kind}")
         pixels[y * stride:(y + 1) * stride] = line
         prev = line
+    if bpp == 3:
+        rgba = bytearray(width * height * 4)
+        rgba[0::4], rgba[1::4], rgba[2::4] = pixels[0::3], pixels[1::3], pixels[2::3]
+        rgba[3::4] = b"\xff" * (width * height)
+        pixels = rgba
     return width, height, pixels
 
 

@@ -770,25 +770,29 @@ systemd or SSH substrate ran.
   and a failed capture, start or stop are shown, each golden labelled with its platform, a reference scene missing from
   the committed scene list (`docs/gpui/screenshot-scenes.json`) is flagged, the list's validation (and the committed
   list passing it against the golden manifest), and the output being outside the checkout and new. Reading PNGs is
-  checked against every row filter, and cropping a Linux capture's window frame against a framed picture and pictures
-  without that frame (left uncropped and reported), and a region crop preserving the selected pixels and the source. The
-  capture step runs against a fake `gui-agent.py`: one app run per variant with its theme, size (on Linux, larger by the
-  frame, cropped back to the variant's size) and lock, `stop` after every `start` that made a run directory (also a
-  failed or interrupted one), a failed start (also with no app scenes), a failed or timed-out step, a failed `stop`, a
-  golden the manifest names for no platform or a named picture the fetched directory lacks failing the batch, every
-  platform's goldens copied wherever the batch runs, and run directories removed when clean and kept when not, and
-  scenes with their own `start` options getting an app run of their own while the rest share the list's `app_start`, and
-  a scene whose `sizes` limits it run only at those sizes, with the page giving its `sizes_why` for the others. Seconds;
-  needs neither the app nor the reference set. The batch itself is a tool, not a gate. Run the tests when the script or
-  the scene list changes, or the golden manifest gains or loses a scene.
+  checked against every row filter and for an opaque RGB picture (librsvg's output) read back as RGBA, and cropping a
+  Linux capture's window frame against a framed picture and pictures without that frame (left uncropped and reported),
+  and a region crop preserving the selected pixels and the source. The capture step runs against a fake `gui-agent.py`:
+  one app run per variant with its theme, size (on Linux, larger by the frame, cropped back to the variant's size) and
+  lock, `stop` after every `start` that made a run directory (also a failed or interrupted one), a failed start (also
+  with no app scenes), a failed or timed-out step, a failed `stop`, a golden the manifest names for no platform or a
+  named picture the fetched directory lacks failing the batch, every platform's goldens copied wherever the batch runs,
+  and run directories removed when clean and kept when not, and scenes with their own `start` options getting an app run
+  of their own while the rest share the list's `app_start`, and a scene whose `sizes` limits it run only at those sizes,
+  with the page giving its `sizes_why` for the others. Seconds; needs neither the app nor the reference set. The batch
+  itself is a tool, not a gate. Run the tests when the script or the scene list changes, or the golden manifest gains or
+  loses a scene.
 - `python3 -B scripts/test-docs-shots.py` — the docs screenshot engine (`scripts/docs_shots.py`): page modules refused
   without SHOTS, with bad or duplicate shot names, or with empty or non-id regions or a non-id park target; crop unions
   padded, clamped to the content after the Linux frame crop, and scaled; a release declaration matched to its version's
   listing, a published release shot skipped unless requested, and against a stand-in harness, failed captures leaving no
-  output while later shots run and layer reset failing after six Escape presses. Seconds, no app or network. Run it when
-  the engine or its page modules change. The shell checks listed with the README hero also cover its capture command.
-  Run `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and the complete capture record.
-  Inspect the images it prints. Use `--only <page>` for a focused live run.
+  output while later shots run and layer reset failing after six Escape presses; malformed annotations and crop limits
+  refused, callout text wrapped and boxes placed as the old browser overlay did, `{session:}` and `{host:}` targets
+  resolved from the run, and a drawn callout kept whole inside the crop with the uncovered pixels left as captured (with
+  `rsvg-convert`; without it that test prints `SKIPPED`, which is missing coverage). Seconds, no app or network. Run it
+  when the engine, `scripts/docs_callouts.py` or its page modules change. The shell checks listed with the README hero
+  also cover its capture command. Run `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and
+  the complete capture record. Inspect the images it prints. Use `--only <page>` for a focused live run.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run
