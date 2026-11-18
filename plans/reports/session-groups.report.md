@@ -70,3 +70,118 @@ compare equal across Unicode case variants, group data growing past the list's m
 behind when a complete refresh proves a session disappeared. The desktop review found two marked-menu issues, a pin drop
 target that could disappear while the list held its order, and a duplicated separator rule. The corrections reuse the
 existing menu dispatch, naming dialog, separator, pin drag and focus recovery. The desktop reviewer verified closure.
+
+### Landing
+
+#### What landed with it
+
+Since the stack was based, main gained only the plans queue's own bookkeeping. Nothing else landed in this round, so
+nothing interacted with this plan.
+
+This landing was reviewed with extra skepticism at your request, both by me and by an independent reviewer, and I ran
+the app to look at every part of the feature. The stack is large, but most of its size is what the plan asked for: one
+user-set ordering, one drag handle, one pause on automatic reordering and one naming dialog, each extended from the pin
+code rather than copied. Neither review found a second implementation of any of them. Two parts go beyond the plan:
+
+- **The helm caps how much space group names take in every session list reply** (about 4 MB, far more groups than anyone
+  would make). The plan did not ask for this; it came from the executor's helm review, which found that group data could
+  outgrow the list's message budget. A cap on the number of groups would do the same job more simply. It is small and
+  harmless, so I left it.
+- **A complete refresh from a host drops the group membership of sessions it no longer lists.** The reviewer suggested
+  removing this. I kept it. Without it, a session deleted outside this app (from the command line, or by another
+  installation's helm) would stay a hidden member forever: its group would keep counting it and would never disappear.
+  Pins of such sessions stay, as before, because a pin with no session does nothing visible.
+
+#### Fixes made while landing
+
+I ran the app, made two groups, pinned a session inside one and another globally, collapsed a group, filtered by status
+and opened every menu, before and after these fixes:
+
+- **A helm test fixture missed the new tables.** The test that rebuilds a very old helm database from today's schema
+  must drop every newer table. It did not drop the two group tables, so two checkout configuration tests failed on the
+  remote test machines. The executor's test selection did not include them. This is the same kind of miss as when
+  session muting landed: new tables were not added to this fixture. The fixture now drops them.
+- **Group headers always showed their drag grip and actions button.** Session rows show both only while the pointer is
+  over the row or focus is inside it; every header drew them all the time, which cluttered the list with controls that
+  do nothing until reached for. Headers now reveal them the way rows do.
+- **Wording.**
+  - The row menu's Move to group now has a description line ("Keep related sessions together") like every other item.
+    The two row menu reference screenshots (light and dark) are republished for it.
+  - The group header menu's Rename now has one too ("Give this group a new name").
+  - The naming dialog spoke of a session's title when naming a group. It now says "name" for a group, and for a new
+    group its button says Create and the hover help on Cancel and Close says no group is made.
+  - Each Move to group destination's hover help used to repeat its label. It now says what choosing it does; Global pins
+    says the session leaves the group and stays pinned above all groups.
+
+#### Things you should know that the report does not say
+
+- **Group members are not indented.** A long group's members look exactly like ungrouped rows; only the header above
+  them and the heavier separator after the last group mark where the group ends. Worth a follow-up if long groups turn
+  out hard to read.
+- **When the open session belongs to a collapsed group, nothing in the sidebar shows which session it is** until the
+  group is expanded. The header's status dot shows only the most urgent member. Worth a follow-up: marking the header
+  that holds the open session would fix it.
+- **Automatic reordering now also waits while the marked-sessions menu is open**, as it does for a row menu. SPEC.md's
+  rule for when reordering waits does not mention that menu; the behavior is right, and a one-line SPEC.md follow-up
+  would record it.
+- **The row menu grew again.** With Move to group added, it scrolls further at the app's smallest window size. Fine as
+  is unless the menu gets more items.
+- **Every Move to group entry uses the same folder icon**, New group… and Remove from group included. Fine as is.
+
+#### Checks
+
+The stack changes the helm's database, routes and ordering, the shared protocol, and the desktop app's session list,
+menus, naming dialog and drag. The landing therefore ran:
+
+- the lints;
+- the whole test suites of the GUI crates, the helm, its client and the protocol;
+- the app's end-to-end smoke;
+- the reference screenshots (goldens);
+- a hands-on run of the app for screenshots.
+
+The builds ran locally. The test suites and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the stack as delivered (main had gained only plans bookkeeping since its base):
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 -B scripts/check-crate-layering.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `python3 -B scripts/check-gui-lints.py`: passed.
+- `scripts/check-foundation-paths.py` (from the base revision), for each of the five PRs against the one below it:
+  passed.
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`1dfd051c-0e4a-4cd9-8b99-f50387e217d3`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py --no-build`), on a boat: 48 of its 49 steps passed and the
+  clipboard paste step was skipped, as always on Linux (`2dbed5b9-c3cf-40a0-bb6c-55f31fded607`).
+- `cargo nextest run` with `-p` for `farhelm-gui`, `farhelm-grid-model`, `farhelm-input-mapping`, `farhelm-helm`,
+  `farhelm-helm-client` and `farhelm-proto`, from a locally built archive, split in three across boats:
+  - 1791 passed;
+  - 1748 passed and 2 failed;
+  - 1720 passed.
+  - Runs: `53ce8717-ac95-45e0-97c7-ea2c8a784a5a`, `b3a05ffb-8cb4-40bf-a651-428cebe12cfd`,
+    `a3cb166c-0879-4bb9-ab10-8e29902d12e0`.
+- **The failures:** the two helm checkout configuration tests on the old-database fixture described above. Fixed.
+- **Runtime skips:** three helm tests skipped at runtime because the archive does not carry a full `farhelm` binary.
+  They are provisioning over SSH and over the local transport, and the uninstall stop. None touches groups; that
+  coverage is missing from this run.
+
+On the fixed tree:
+
+- `cargo fmt --all -- --check`, `dprint check`,
+  `cargo clippy -p farhelm-gui -p farhelm-helm --all-targets -- -D warnings` and
+  `python3 -B scripts/check-gui-lints.py`: passed.
+- `cargo nextest run -p farhelm-gui -p farhelm-helm --lib` for the whole session list and the helm's checkout
+  configuration tests, locally: 530 passed (`5d68ee50-0b28-4d89-be89-f212d2cf5c57`).
+- The end-to-end smoke, on a boat: 48 steps passed and the paste step was skipped
+  (`e5b9caef-fe26-443b-a95f-c4059452eb3b`).
+- `python3 scripts/check-gui-goldens.py` against the republished references, locally: passed
+  (`29946afb-bd83-4bc4-b8a2-c3807188a156`).
+
+The boat suites were reused for the fixed tree: after them only the old-database fixture, the header's hover, wording
+and the row menu test's expected descriptions changed, and the affected modules ran again above.
+
+Skipped:
+
+- The rest of the Rust workspace and the desktop process's tests: the change stays in the helm, the protocol and the GUI
+  crates.
+- The Linux app lifecycle: startup and quit are untouched.
+- The Mac-only checks.
