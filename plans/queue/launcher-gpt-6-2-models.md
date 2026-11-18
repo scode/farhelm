@@ -283,27 +283,50 @@ TODO.md entry. Open, not merged. If a `## Decisions` section exists, its latest 
 the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue
 script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-18 (claim edfd1f).
+### 2026-11-18: answer to a blocked question
 
-### Saved templates that omit the agent type
+The question, as the executor put it:
 
-The launcher update replaces the suggested Sol and Astra model IDs with their GPT-6.2 versions, including the two
-OpenCode Zen suggestions. The plan calls for saved choices to keep their original model IDs as custom models. The draft
-implements the new suggestions and Codex effort choices in #4099.
+> Blocked on 2026-11-18 (claim edfd1f).
+>
+> ### Saved templates that omit the agent type
+>
+> The launcher update replaces the suggested Sol and Astra model IDs with their GPT-6.2 versions, including the two
+> OpenCode Zen suggestions. The plan calls for saved choices to keep their original model IDs as custom models. The
+> draft implements the new suggestions and Codex effort choices in #4099.
+>
+> A saved template can name a model without naming an agent. When you apply such a template from an empty launcher,
+> Farhelm currently infers Codex from a bare old Sol or Astra ID and OpenCode from either old Zen ID. The draft removes
+> those suggestions, so the same template can now refuse with “needs an agent type, and none is chosen.” This affects
+> desktop template application and CLI launches from a template. Templates that name their agent keep the saved model ID
+> and still apply.
+>
+> Should Farhelm preserve agent inference for saved templates with these four IDs? I recommend preserving it when the
+> template omits the agent type and the launcher has no agent selected. That keeps the saved ID and the template's old
+> behavior and leaves manual entry of custom models as specified for the new launcher. It requires an explicit exception
+> to the rule that templates apply the same way as hand edits. The catalog-only change would require affected users to
+> add the agent type to their templates before starting from an empty launcher.
+>
+> The Rust checks are also pending. The configured remote build workers could not be reached, so the selected launch
+> tests and Clippy never started.
 
-A saved template can name a model without naming an agent. When you apply such a template from an empty launcher,
-Farhelm currently infers Codex from a bare old Sol or Astra ID and OpenCode from either old Zen ID. The draft removes
-those suggestions, so the same template can now refuse with “needs an agent type, and none is chosen.” This affects
-desktop template application and CLI launches from a template. Templates that name their agent keep the saved model ID
-and still apply.
+The maintainer's answer:
 
-Should Farhelm preserve agent inference for saved templates with these four IDs? I recommend preserving it when the
-template omits the agent type and the launcher has no agent selected. That keeps the saved ID and the template's old
-behavior and leaves manual entry of custom models as specified for the new launcher. It requires an explicit exception
-to the rule that templates apply the same way as hand edits. The catalog-only change would require affected users to add
-the agent type to their templates before starting from an empty launcher.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks". A later change of mind is a follow-up, not a reason to stop the plan.
 
-The Rust checks are also pending. The configured remote build workers could not be reached, so the selected launch tests
-and Clippy never started.
+- **Saved templates that name an old model without an agent keep applying.** When a template sets one of the four
+  retired model IDs (the old Sol and Astra IDs, bare, and the two old OpenCode Zen IDs) but no agent type, and the
+  launcher has no agent selected, applying it picks the same agent it picked before this change (Codex for the bare IDs,
+  OpenCode for the Zen ones) and keeps the saved model ID as a custom model. This holds for applying templates in the
+  desktop app and for CLI launches from a template. The old IDs stay out of every suggestion list; they are used only to
+  recover the agent for such templates. This is the Blocked question's recommendation, and it is what criterion 5 ("a
+  template saved with an old id keeps working") asks for. The alternative, making affected users add an agent type to
+  their templates by hand, was rejected because nothing tells them their template broke until it refuses.
+- SPEC.md's template paragraph says templates apply exactly as the same hand edits would. Record this as a named, narrow
+  exception there, in the same PR, so the spec stays true. Add a test that applies such a template from an empty
+  launcher for one bare ID and one Zen ID, and one that a template naming its agent still keeps its saved ID.
+- The Rust checks the plan's Validation section expects must run before delivery. If the remote build workers are still
+  unreachable, run them locally through the recorder.
