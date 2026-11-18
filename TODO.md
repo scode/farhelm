@@ -26,6 +26,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit letting saved templates with a retired Sol, Astra or Zen model ID still pick their agent.** Decided on the
+  maintainer's behalf on 2026-11-18 when launcher-gpt-6-2-models blocked: once the launcher stops suggesting the old Sol
+  and Astra IDs (bare, and the two OpenCode Zen ones), a saved template that names one of them but no agent type would
+  be refused from an empty launcher, because the agent was inferred from the suggestion list. The plan was told to keep
+  inferring Codex or OpenCode for those four IDs in that case only, keeping the saved ID as a custom model, and to
+  record this in SPEC.md as a narrow exception to templates applying exactly like hand edits. The alternative was making
+  affected users add an agent type to such templates themselves.
 - **Revisit raising sandbox-suspend-overlap's size gate to about 1,000 lines.** Decided on the maintainer's behalf on
   2026-11-12 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
   changed lines against a gate of about 400 for the whole plan, because the estimate was low rather than the scope
