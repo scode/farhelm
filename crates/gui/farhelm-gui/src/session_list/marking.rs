@@ -288,12 +288,6 @@ impl MetadataAction {
         }
     }
 
-    /// The action's place in [`MetadataAction::ALL`] (the declaration order, which `ALL` follows), which indexes the
-    /// marked menu's focus handles.
-    fn index(self) -> usize {
-        self as usize
-    }
-
     /// The item's element id in the marked menu.
     fn item_id(self) -> &'static str {
         match self {
@@ -739,16 +733,18 @@ impl SessionList {
             return;
         };
         let offers = self.marking.offers();
-        let start = match start {
-            MenuStart::First => offers.first(),
-            MenuStart::Last => offers.last(),
-        };
-        let Some(start) = start.map(|offer| offer.action) else {
+        let items: Vec<_> = offers
+            .iter()
+            .map(|offer| (offer.action, cx.focus_handle().tab_stop(true)))
+            .collect();
+        let Some((_, start)) = (match start {
+            MenuStart::First => items.first(),
+            MenuStart::Last => items.last(),
+        }) else {
             return;
         };
+        let start = start.clone();
         let mark = Mark::take(cx);
-        let items: [FocusHandle; 4] = std::array::from_fn(|_| cx.focus_handle().tab_stop(true));
-        let start = items[start.index()].clone();
         let list = cx.weak_entity();
         let view = cx.new(|_| MarkedMenu { list, items });
         let opened = layers::open_popover(
@@ -806,9 +802,9 @@ impl SessionList {
 /// actions on offer change ([`SessionList::marks_projected`]).
 pub(super) struct MarkedMenu {
     list: WeakEntity<SessionList>,
-    /// One focus handle per action, in [`MetadataAction::ALL`]'s order, whether or not the action is drawn: the menu
-    /// opens on the first or last one drawn, and Home and End move there.
-    items: [FocusHandle; 4],
+    /// Focus follows the offered item for this opening. The list closes the
+    /// menu when the choices change, and new openings can have any item count.
+    items: Vec<(MetadataAction, FocusHandle)>,
 }
 
 impl Render for MarkedMenu {
@@ -828,24 +824,27 @@ impl Render for MarkedMenu {
         let mut drawn: Vec<FocusHandle> = Vec::new();
         let items: Vec<MenuItem> = offers
             .into_iter()
-            .map(|Offer { action, targets }| {
-                let focus = &self.items[action.index()];
+            .filter_map(|Offer { action, targets }| {
+                let (_, focus) = self.items.iter().find(|(item, _)| *item == action)?;
                 drawn.push(focus.clone());
                 let list = self.list.clone();
-                MenuItem::new(
-                    action.item_id(),
-                    action.icon(),
-                    action.label(),
-                    // The old item's tooltip was its description itself.
-                    HoverHelp::tooltip(action.description()),
-                    Role::MenuItem,
+                Some(
+                    MenuItem::new(
+                        action.item_id(),
+                        action.icon(),
+                        action.label(),
+                        // The old item's tooltip was its description itself.
+                        HoverHelp::tooltip(action.description()),
+                        Role::MenuItem,
+                    )
+                    .description(action.description())
+                    .focus(focus)
+                    // `targets` are the drawn ones, with the activity each row shows for Mark read.
+                    .on_click(move |_, window, cx| {
+                        let _ =
+                            list.update(cx, |list, cx| list.apply_metadata(&targets, window, cx));
+                    }),
                 )
-                .description(action.description())
-                .focus(focus)
-                // `targets` are the drawn ones, with the activity each row shows for Mark read.
-                .on_click(move |_, window, cx| {
-                    let _ = list.update(cx, |list, cx| list.apply_metadata(&targets, window, cx));
-                })
             })
             .collect();
         // Home and End, as the row menu's: the layer manager's menu context binds only Up and Down.
