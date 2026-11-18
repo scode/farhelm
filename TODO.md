@@ -116,13 +116,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   press on its own. `docs/gpui/parity/templates-and-quick-launch.md` states the behavior, but no test covers it, so a
   later change to the shared picker could break it unnoticed.
 
-- **Run the GPUI screenshot goldens in the release process.** The goal is that a release runs
-  `scripts/check-gui-goldens.py`, the pixel comparison of every GUI component and dialog against its reference picture.
-  Today it runs only during development and landings, because its reference pictures live outside this repository, in
-  the private storage repository `scripts/gui-goldens.py` fetches from (moved there on 2026-11-16 to keep main's history
-  small), and the release runners cannot read it. Pick where the pictures should live so a release can reach them: a
-  token for the release runners to read the private store, making the store public, some other home, or back in the
-  repository. Then add the goldens to the release workflow next to the end-to-end GUI smoke.
+- **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
+  the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
+  a reference picture. Today it runs only during development and landings: its reference pictures live outside this
+  repository, in the private storage repository `scripts/gui-goldens.py` fetches from (moved there on 2026-11-16 to keep
+  main's history small), and the release runners cannot read it. Decide first whether exact pixel equality belongs in a
+  release at all. The pictures come from a software rasterizer, so a GPUI or GPUI Kit bump that touches rendering shifts
+  all of them at once, and a runner with a different Mesa or font version can too. So far they have mostly confirmed
+  intended changes; their one clear catch was two changes that broke the Trash dialog together (#3662). The options
+  include exact comparison, a tolerance-based comparison, or keeping them a development-only check. Only then pick where
+  the pictures live so a release can reach them (a read token for the release runners, a public store, another home, or
+  back in the repository), and add them to the release workflow next to the end-to-end GUI smoke.
 
 - **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
