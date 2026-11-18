@@ -621,8 +621,9 @@ Tests: 6. Covers: templates button.
 
 docs media: rebuilt on the GPUI tooling at cutover (M4)
 
-- On the test Mac (2026-11-17) both Launch templates shots reached the size check: the window fitted to 1600×972 points
-  at 2×, yielding 3200×1944 pixels against the required 3200×2000, and the runner refused both shots.
+- The docs shots are captured on Linux at 2× (#4088), and their Mac route was removed. Its refusal of both Launch
+  templates shots on the test Mac (2026-11-17, a 1600×972-point window against the required 1600×1000) came from the
+  Dock (`docs/gui-agent.md`, "On a Mac").
 
 ### `docs-shots/manage-hosts.spec.ts`
 

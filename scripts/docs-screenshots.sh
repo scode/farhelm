@@ -5,7 +5,6 @@
 # be told without it inventing a procedure. Runs the GPUI test harness through
 # scripts/docs_shots.py for every page module (or one page), and prints each
 # PNG's path. Linux renders at the scenario's scale on a private Mutter.
-# --mac ships the capture through the README hero's Mac transport.
 # The PNGs land in the docs website's gitignored
 # website/public/docs-shots-local/, where the local preview shows them at
 # once. It never publishes.
@@ -24,11 +23,10 @@
 # Published release shots are frozen (docs/docs-shots/SPEC.md, "Release
 # shots are frozen"). The engine skips them unless explicitly recaptured.
 #
-# Usage: scripts/docs-screenshots.sh (--local | --mac DEST) [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
-#   --local      capture on this machine through the GPUI test harness
-#   --mac DEST   capture on a Mac over ssh, with the FARHELM_MEDIA_* transport
-#                settings documented in scripts/readme-screenshot.sh, except
-#                FARHELM_MEDIA_MAC: this command always needs --mac DEST
+# Usage: scripts/docs-screenshots.sh --local [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
+#   --local      capture on this machine through the GPUI test harness;
+#                required, although it is the only route, so that the
+#                command every procedure documents keeps working
 #   --only PAGE  capture only that page's shots (scripts/docs-shots/PAGE.py)
 #   --no-build   reuse the harness's existing binaries (the
 #                shots can then be previewed but not published)
@@ -48,16 +46,10 @@ output="$repo/website/public/docs-shots-local"
 only=""
 build=true
 local_mode=false
-mac=""
 recapture=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --local) local_mode=true ;;
-    --mac)
-      shift
-      test -n "${1:-}" || { echo "--mac needs an ssh destination" >&2; exit 2; }
-      mac="$1"
-      ;;
     --only)
       shift
       test -n "${1:-}" || { echo "--only needs a page name" >&2; exit 2; }
@@ -79,8 +71,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-if { [ "$local_mode" != true ] && [ -z "$mac" ]; } || { [ "$local_mode" = true ] && [ -n "$mac" ]; }; then
-  echo "pass either --local or --mac DEST" >&2
+if [ "$local_mode" != true ]; then
+  echo "pass --local" >&2
   exit 2
 fi
 
@@ -96,8 +88,7 @@ selection=()
 for shot in "${recapture[@]}"; do
   selection+=(--recapture-release-shot "$shot")
 done
-# Reject a mistyped correction before clearing the last capture. SSH joins argv into shell words, so any
-# shot name sent to the Mac must first match a validated kebab-case declaration in its release's listing.
+# Reject a mistyped correction before clearing the last capture.
 if [ "${#recapture[@]}" -gt 0 ]; then
   "${engine[@]}" --check-selection "${selection[@]}" || exit 2
 fi
@@ -141,43 +132,10 @@ else
 fi
 mkdir -p "$output" || exit 1
 
-# Ship only the capture. The source checkout owns Git provenance and writes
-# capture.json after fetching the checked PNGs.
-mac_capture_script() {
-  cat <<'EOF'
-src=$1 lock=$2 out=$3 log=$4 build=$5
-shift 5
-export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export USER="${USER:-$(/usr/bin/id -un)}"
-export CARGO_BUILD_JOBS=6
-cd "$HOME/$src" || exit 1
-mkdir -p "$HOME/$out" || exit 1
-set -- --out "$HOME/$out" --lock "$HOME/$lock" "$@"
-[ "$build" = true ] || set -- "$@" --no-build
-python3 -B scripts/docs_shots.py "$@" </dev/null >"$HOME/$log" 2>&1
-status=$?
-cat "$HOME/$log"
-test "$status" -eq 0
-EOF
-}
-
-fetch_from_mac() {
-  local out="$1"
-  # rsync verifies the transfer even when ssh loses the remote exit status.
-  rsync -a --include='*/' --include='*.png' --exclude='*' -e "${ssh_cmd[*]}" "$mac:$out/" "$output/" || return 1
-  remote "/bin/rm -rf $out" || echo "could not remove the fetched pictures from the Mac" >&2
-}
-
 capture() {
-  if [ -n "$mac" ]; then
-    # shellcheck source=scripts/media-mac.sh
-    source "$repo/scripts/media-mac.sh" || return 1
-    capture_on_mac "$repo" "$mac" "$build" docs "${selection[@]}"
-  else
-    local flags=()
-    [ "$build" = true ] || flags+=(--no-build)
-    "${engine[@]}" --out "$output" "${selection[@]}" "${flags[@]}"
-  fi
+  local flags=()
+  [ "$build" = true ] || flags+=(--no-build)
+  "${engine[@]}" --out "$output" "${selection[@]}" "${flags[@]}"
 }
 capture
 status=$?
