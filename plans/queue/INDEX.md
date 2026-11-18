@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 8e15a2] `submenus-open-on-hover.md` — Submenus open on hover, keeping their parent item highlighted
 - [in-flight d298d9] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
 - [complete] `shared-placement-picker.md` — Shared placement picker drops its no-op press and moves to a shared module, with the template editor test
-- [pending] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
+- [in-flight 4e6717] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
 - [pending] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
 - [pending] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
 - [pending] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
