@@ -85,6 +85,8 @@ pub(crate) struct Fixture {
     no_launch_repository: bool,
     /// The session's shared pin position when it is pinned; `None` for an unpinned row.
     pin: Option<i64>,
+    /// The shared mute served by the helm, including an indefinite mute.
+    mute: Option<farhelm_proto::SessionMute>,
     /// The agent kind the supervisor recorded, in the helm's wire form (`generic` for a command it knows nothing
     /// about), when the test names one; else the helm fixture's, `codex`.
     agent_kind: Option<&'static str>,
@@ -113,6 +115,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         working_copy: None,
         no_launch_repository: false,
         pin: None,
+        mute: None,
         agent_kind: None,
     }
 }
@@ -216,6 +219,11 @@ impl Fixture {
         self.pin = Some(position);
         self
     }
+    /// The helm reports this session as muted, with a Unix-millisecond deadline if timed.
+    pub(super) fn muted(mut self, until: Option<i64>) -> Self {
+        self.mute = Some(farhelm_proto::SessionMute { until });
+        self
+    }
     /// The session recorded as an agent of `kind` (`"generic"` for a plain command, which the menu header then names by
     /// its program).
     pub(crate) fn agent_kind(mut self, kind: &'static str) -> Self {
@@ -266,6 +274,7 @@ impl Fixture {
         }
         value["pinned"] = json!(self.pin.is_some());
         value["pin_position"] = json!(self.pin);
+        value["mute"] = json!(self.mute);
         if self.no_launch_repository {
             value["github_repo"] = Value::Null;
         }

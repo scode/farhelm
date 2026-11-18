@@ -163,6 +163,7 @@ pub(crate) mod hold;
 pub(crate) mod host_rail;
 pub(crate) mod marking;
 pub(crate) mod menu;
+mod mute;
 pub(crate) mod order;
 pub(crate) mod outcome;
 pub(crate) mod pin_drag;
@@ -846,7 +847,11 @@ impl Render for SessionList {
                     .map(|session| session.key.to_owned())
                     .collect::<Vec<String>>()
             });
-            let any_pulse = listed.iter().any(|session| status::pulses(session.row));
+            // The sidebar bell takes the place of the running dot, so a
+            // muted row alone needs no tick for the running animation.
+            let any_pulse = listed
+                .iter()
+                .any(|session| !status::muted(session.row) && status::pulses(session.row));
             let any_spinner = listed.iter().any(|session| {
                 delete::in_flight(session.key, cx).is_some()
                     || stop::in_flight(session.key, cx)

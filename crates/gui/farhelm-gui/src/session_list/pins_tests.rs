@@ -487,7 +487,12 @@ fn a_menu_closing_over_the_rows_keeps_the_hold(cx: &mut TestAppContext) {
                 test_support::bounds(cx, "session-menu"),
                 test_support::bounds(cx, "session-rows"),
             );
-            let on_menu = Point::new(menu.left() + px(4.), menu.top() + px(40.));
+            // The menu's height can move its top above the list. Pick a
+            // point in the intersection so the pointer still holds the rows.
+            let on_menu = Point::new(
+                menu.left().max(rows.left()) + px(4.),
+                menu.top().max(rows.top()) + px(4.),
+            );
             assert!(
                 menu.contains(&on_menu) && rows.contains(&on_menu),
                 "the premise: the menu covers the rows at {on_menu:?}: {menu:?} over {rows:?}"

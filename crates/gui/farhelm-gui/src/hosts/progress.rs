@@ -370,6 +370,7 @@ pub(crate) fn status(
         | Work::TabOpen
         | Work::TabClose
         | Work::Pin
+        | Work::Mute
         | Work::MovePin
         | Work::StopAndSuspend
         | Work::EnvironmentDelete => None,

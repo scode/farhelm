@@ -26,9 +26,10 @@
 //!   in place of the order's title, the count, Trash, Templates and New. The cut listing's warning and the failure line
 //!   stay under it. Trash's view and any dialog it opened stay alive; only its button is not drawn. New's shortcut
 //!   still opens the launcher.
-//! - **The metadata actions** ([`MetadataAction`]): Pin for marked rows that are not pinned, Unpin for those that are,
-//!   Mark read and Mark unread for the rows whose own menu offers it, none of them for a retired containerized session,
-//!   which supports Delete only (`super::retired`). Each sends the row's ordinary request, so its refusal shows on the
+//! - **The metadata actions** ([`MetadataAction`]) follow the row menus. Pin and Unpin split marked rows by pin state,
+//!   Mute and Unmute by mute state, and Mark read and Mark unread by the row's seen toggle. The Mute child menu
+//!   supplies one deadline for the eligible rows it opened with. Retired containerized sessions support Delete only
+//!   (`super::retired`). Each action sends the row's ordinary request, so its refusal shows on the
 //!   row as the row menu's would. A row whose own commands are refused at that moment (`menu::refused`: a request in
 //!   flight or held for a bulk Stop or Delete, its YOLO question or its interrupted card's Replace question open) is
 //!   skipped and shows its work's "not started" line ([`super::bulk`]). The marks are cleared once the writes are sent,
@@ -56,19 +57,20 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use farhelm_proto::SessionMuteRequest;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, Modifiers, ParentElement, Render, Role, StatefulInteractiveElement as _, Styled,
-    WeakEntity, Window, div, px,
+    IntoElement, Modifiers, ParentElement, Render, Role, ScrollHandle,
+    StatefulInteractiveElement as _, Styled, WeakEntity, Window, div, px,
 };
 
 use super::seen::{self, Toggle};
 use super::selection::Listed;
-use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, pins, retired};
+use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, mute, pins, retired, status};
 use crate::assets::Icon;
 use crate::components::{
-    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Tier, home_end_keys,
+    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Tier, home_end_keys, submenu,
     toggle_arrow_keys,
 };
 use crate::focus::{self, Mark};
@@ -205,6 +207,10 @@ pub(super) struct Target {
 pub(super) enum Write {
     /// Pin to top (`true`) or Unpin.
     Pin(bool),
+    /// The target is eligible for the duration the user chooses from the submenu.
+    Mute,
+    /// End an existing mute and mark its current work seen in the helm.
+    Unmute,
     /// Mark read or Mark unread, as the row's own menu would send it: Mark read carries the activity stamp the drawn
     /// row showed, so that output arriving after the draw stays unseen.
     Seen(Toggle),
@@ -230,21 +236,26 @@ pub(super) fn admitted(
 pub(super) enum MetadataAction {
     Pin,
     Unpin,
+    Mute,
+    Unmute,
     Read,
     Unread,
 }
 
 impl MetadataAction {
     /// Every action, in the menu's order.
-    pub(super) const ALL: [MetadataAction; 4] = [
+    pub(super) const ALL: [MetadataAction; 6] = [
         MetadataAction::Pin,
         MetadataAction::Unpin,
+        MetadataAction::Mute,
+        MetadataAction::Unmute,
         MetadataAction::Read,
         MetadataAction::Unread,
     ];
 
     /// The target `row` (under `key`) gives this action, or `None` when the action does not apply to it: Pin to a row
-    /// not pinned, Unpin to a pinned one, and Mark read or Mark unread to a row whose own menu offers that toggle. A
+    /// not pinned, Unpin to a pinned one, Mute or Unmute by its current mute, and Mark read or Mark unread to a row
+    /// whose own menu offers that toggle. A
     /// retired containerized session is no target of any of them, since it supports Delete only
     /// ([`super::retired`]); answering here keeps the bar's offers, its ⋯ and the targets in agreement, as the old
     /// `applies` did by refusing such a row first.
@@ -255,6 +266,8 @@ impl MetadataAction {
         let write = match self {
             MetadataAction::Pin => (!row.pinned).then_some(Write::Pin(true)),
             MetadataAction::Unpin => row.pinned.then_some(Write::Pin(false)),
+            MetadataAction::Mute => (!status::muted(row)).then_some(Write::Mute),
+            MetadataAction::Unmute => status::muted(row).then_some(Write::Unmute),
             MetadataAction::Read => seen::offered(row)
                 .filter(|toggle| matches!(toggle, Toggle::Read(_)))
                 .map(Write::Seen),
@@ -273,6 +286,8 @@ impl MetadataAction {
         match self {
             MetadataAction::Pin => "Pin",
             MetadataAction::Unpin => "Unpin",
+            MetadataAction::Mute => "Mute",
+            MetadataAction::Unmute => "Unmute",
             MetadataAction::Read => "Mark read",
             MetadataAction::Unread => "Mark unread",
         }
@@ -283,6 +298,8 @@ impl MetadataAction {
         match self {
             MetadataAction::Pin => "Pin the marked sessions that are not pinned",
             MetadataAction::Unpin => "Unpin the marked sessions that are pinned",
+            MetadataAction::Mute => "Mute the marked sessions that are not muted",
+            MetadataAction::Unmute => "Unmute the marked sessions that are muted",
             MetadataAction::Read => "Treat unseen output in eligible marked sessions as seen",
             MetadataAction::Unread => "Show new output again in eligible marked sessions",
         }
@@ -293,6 +310,8 @@ impl MetadataAction {
         match self {
             MetadataAction::Pin => "session-marked-menu-pin",
             MetadataAction::Unpin => "session-marked-menu-unpin",
+            MetadataAction::Mute => "session-marked-menu-mute",
+            MetadataAction::Unmute => "session-marked-menu-unmute",
             MetadataAction::Read => "session-marked-menu-read",
             MetadataAction::Unread => "session-marked-menu-unread",
         }
@@ -302,6 +321,7 @@ impl MetadataAction {
     pub(super) fn icon(self) -> Icon {
         match self {
             MetadataAction::Pin | MetadataAction::Unpin => Icon::Pin,
+            MetadataAction::Mute | MetadataAction::Unmute => Icon::BellOff,
             MetadataAction::Read | MetadataAction::Unread => Icon::MarkSeen,
         }
     }
@@ -746,10 +766,14 @@ impl SessionList {
         let start = start.clone();
         let mark = Mark::take(cx);
         let list = cx.weak_entity();
-        let view = cx.new(|_| MarkedMenu { list, items });
+        let view = cx.new(|_| MarkedMenu {
+            list,
+            items,
+            scroll: ScrollHandle::new(),
+        });
         let opened = layers::open_popover(
             // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
-            Popover::menu(view, cx.focus_handle(), anchor, start)
+            Popover::menu(view, cx.focus_handle(), anchor, start.clone())
                 .returns_to(focus::ReturnTo::Control(self.marking.menu_focus.clone())),
             &mark,
             window,
@@ -760,6 +784,11 @@ impl SessionList {
             current.marks.touch();
         }
         current.marked_menu = opened;
+        if opened.is_some() {
+            // The first place the layer focuses can be clipped until its
+            // scroll region draws, particularly the last item on Up.
+            focus::focus_in_layer(&start, &mark, window, cx);
+        }
         cx.notify();
     }
 
@@ -767,19 +796,40 @@ impl SessionList {
     /// target's own request ([`admitted`]: still shown and still marked, with the values drawn), give a row whose
     /// commands are refused now its not-started line instead, clear the marks, and hand focus to the order's title,
     /// since the toggle the menu returns focus to goes with the bar. Replies are not waited for: a refusal shows on its
-    /// row as the row menu's would.
-    fn apply_metadata(&mut self, drawn: &[Target], window: &mut Window, cx: &mut Context<Self>) {
+    /// row as the row menu's would. The duration choice supplies one
+    /// absolute mute deadline for the whole batch.
+    fn apply_metadata(
+        &mut self,
+        drawn: &[Target],
+        duration: Option<SessionMuteRequest>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mark = Mark::take(cx);
         if let Some(menu) = self.marked_menu_open(window, cx) {
             layers::close(menu, window, cx);
         }
         let shown = self.marking.shown();
-        let targets = admitted(drawn, &shown, &self.current.current(cx).marks);
+        let mut targets = admitted(drawn, &shown, &self.current.current(cx).marks);
+        // A child menu can stay open while the helm changes individual
+        // mutes. Drop rows that no longer qualify without gaining rows.
+        targets.retain(|target| {
+            let action = match target.write {
+                Write::Mute => MetadataAction::Mute,
+                Write::Unmute => MetadataAction::Unmute,
+                Write::Pin(_) | Write::Seen(_) => return true,
+            };
+            self.marking.offers().iter().any(|offer| {
+                offer.action == action && offer.targets.iter().any(|row| row.key == target.key)
+            })
+        });
         for target in targets {
             // The row menu draws these items unavailable then (`menu::refused`); the bulk action says so on the row.
             if menu::refused(&target.key, cx) {
                 let (work, label) = match target.write {
                     Write::Pin(_) => (Work::Pin, "Pin"),
+                    Write::Mute => (Work::Mute, "Mute"),
+                    Write::Unmute => (Work::Mute, "Unmute"),
                     Write::Seen(_) => (Work::Seen, "Seen"),
                 };
                 bulk::not_started(&target.key, work, label, cx);
@@ -787,6 +837,12 @@ impl SessionList {
             }
             match target.write {
                 Write::Pin(pinned) => pins::send_pin(&target.key, pinned, cx),
+                Write::Mute => {
+                    if let Some(request) = duration {
+                        mute::send(&target.key, request, cx);
+                    }
+                }
+                Write::Unmute => mute::send(&target.key, SessionMuteRequest::Unmute, cx),
                 Write::Seen(toggle) => seen::send(&target.key, toggle, cx),
             }
         }
@@ -805,16 +861,20 @@ pub(super) struct MarkedMenu {
     /// Focus follows the offered item for this opening. The list closes the
     /// menu when the choices change, and new openings can have any item count.
     items: Vec<(MetadataAction, FocusHandle)>,
+    /// The metadata actions stay reachable if the window is short.
+    scroll: ScrollHandle,
 }
 
 impl Render for MarkedMenu {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut panel = layers::panel(cx)
             .id(MENU_ID)
             .debug_selector(|| MENU_ID.into())
-            .w(px(PANEL_WIDTH));
+            .w(px(PANEL_WIDTH))
+            .max_h(crate::notices_bell::window_cap(window))
+            .overflow_y_scroll();
         let Some(list) = self.list.upgrade() else {
-            return panel;
+            return focus::scroll_region(panel, &self.scroll);
         };
         let (count, offers) = {
             let kept = &list.read(cx).marking;
@@ -822,36 +882,54 @@ impl Render for MarkedMenu {
         };
         // The drawn items' focus handles, in order, for Home and End.
         let mut drawn: Vec<FocusHandle> = Vec::new();
-        let items: Vec<MenuItem> = offers
+        let items: Vec<_> = offers
             .into_iter()
             .filter_map(|Offer { action, targets }| {
                 let (_, focus) = self.items.iter().find(|(item, _)| *item == action)?;
                 drawn.push(focus.clone());
                 let list = self.list.clone();
-                Some(
-                    MenuItem::new(
-                        action.item_id(),
-                        action.icon(),
-                        action.label(),
-                        // The old item's tooltip was its description itself.
-                        HoverHelp::tooltip(action.description()),
-                        Role::MenuItem,
-                    )
-                    .description(action.description())
-                    .focus(focus)
-                    // `targets` are the drawn ones, with the activity each row shows for Mark read.
-                    .on_click(move |_, window, cx| {
-                        let _ =
-                            list.update(cx, |list, cx| list.apply_metadata(&targets, window, cx));
-                    }),
+                let id = action.item_id();
+                let item = MenuItem::new(
+                    id,
+                    action.icon(),
+                    action.label(),
+                    HoverHelp::tooltip(action.description()),
+                    Role::MenuItem,
                 )
+                .description(action.description())
+                .focus(focus);
+                let apply = move |duration, window: &mut Window, cx: &mut App| {
+                    let _ = list.update(cx, |list, cx| {
+                        list.apply_metadata(&targets, duration, window, cx);
+                    });
+                };
+                Some(if action == MetadataAction::Mute {
+                    submenu(
+                        id.into(),
+                        item,
+                        focus,
+                        move |cx| {
+                            let apply = apply.clone();
+                            mute::durations(
+                                id,
+                                move |request, window, cx| apply(Some(request), window, cx),
+                                cx,
+                            )
+                        },
+                        window,
+                        cx,
+                    )
+                } else {
+                    item.on_click(move |_, window, cx| apply(None, window, cx))
+                        .into_any_element()
+                })
             })
             .collect();
         // Home and End, as the row menu's: the layer manager's menu context binds only Up and Down.
         if let (Some(first), Some(last)) = (drawn.first(), drawn.last()) {
             panel = panel.on_key_down(home_end_keys(first.clone(), last.clone()));
         }
-        panel
+        let panel = panel
             .child(MenuHeader::app(
                 format!("{count} marked"),
                 "Session metadata",
@@ -864,6 +942,7 @@ impl Render for MarkedMenu {
                     .flex()
                     .flex_col()
                     .children(items),
-            )
+            );
+        focus::scroll_region(panel, &self.scroll)
     }
 }

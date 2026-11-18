@@ -468,9 +468,13 @@ pub(crate) fn session_entry(key: &str) -> KeyedEntry {
         "../../../farhelm-helm/http-contract/session-list.json"
     ))
     .unwrap();
+    let mut value = fixture["sessions"][0].clone();
+    // The HTTP example pins the shape of a live mute. GUI fixtures start
+    // unmuted unless a test explicitly sets one.
+    value["mute"] = serde_json::Value::Null;
     KeyedEntry {
         key: key.into(),
-        value: fixture["sessions"][0].clone(),
+        value,
     }
 }
 

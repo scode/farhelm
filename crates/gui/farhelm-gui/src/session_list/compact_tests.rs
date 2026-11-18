@@ -346,6 +346,49 @@ fn a_compact_rows_help_says_what_its_hidden_lines_would(cx: &mut TestAppContext)
     );
 }
 
+/// Compact rows keep the waiting dot in its slot and the ended mark
+/// unchanged. A stale wait is last-known and instead puts its bell in the
+/// dot slot. All three still say what happened when read aloud.
+#[gpui::test]
+fn compact_mute_keeps_waiting_and_ended_status_visible(cx: &mut TestAppContext) {
+    let waiting = quiet("wait")
+        .status(json!({"state": "waiting"}))
+        .muted(None);
+    let stale = quiet("stale")
+        .host(3)
+        .stale()
+        .status(json!({"state": "waiting"}))
+        .muted(None);
+    let ended = quiet("ended").status(exited(json!(17))).muted(None);
+    let (_fake, cx) = open_rows(cx, &[quiet("live"), waiting, stale, ended], Some(true));
+    let dot = test_support::bounds(cx, "session-seen-live");
+    let waiting_bell = test_support::bounds(cx, "session-mute-bell-wait");
+    let stale_bell = test_support::bounds(cx, "session-mute-bell-stale");
+    let agent = test_support::bounds(cx, "session-row-wait-agent");
+    assert_eq!(
+        stale_bell.center().x,
+        dot.center().x,
+        "the stale wait's bell sits in the dot's column"
+    );
+    assert!(waiting_bell.left() > dot.right());
+    assert!(
+        agent.left() - waiting_bell.right() > gpui::px(20.),
+        "bell follows the short title"
+    );
+    assert!(row_help(cx, "wait").unwrap().starts_with("Waiting · Muted"));
+    assert!(
+        row_help(cx, "stale")
+            .unwrap()
+            .starts_with("Waiting · Muted")
+    );
+    assert!(
+        row_help(cx, "ended")
+            .unwrap()
+            .starts_with("Exited (code 17) · Muted")
+    );
+    assert!(!super::menu_tests::drawn(cx, "session-mute-bell-ended"));
+}
+
 /// The marks' inks are what tell an interruption from an error at a glance, and on the selected row's solid fill the
 /// ordinary ones lose their contrast (SPEC.md: inverse marks "keep the same shapes instead of their ordinary colors").
 /// The frame's record carries no colors, so the rule is pinned here and the `session-list-compact` goldens pin that the

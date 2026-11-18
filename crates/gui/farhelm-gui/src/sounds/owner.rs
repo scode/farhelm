@@ -129,11 +129,14 @@ impl StatusSounds {
             .unwrap_or(false);
         let quiet = active.then(|| local_state::selected(cx)).flatten();
         let collections = store.read(cx).collections();
-        let statuses = collections
-            .ordered::<SessionRow>()
-            .into_iter()
-            .map(|row| (row.info.id.clone(), Status::from(&row.info.status)))
-            .collect();
+        let mut statuses = std::collections::BTreeMap::new();
+        let mut muted = std::collections::HashSet::new();
+        for row in collections.ordered::<SessionRow>() {
+            statuses.insert(row.info.id.clone(), Status::from(&row.info.status));
+            if crate::session_list::status::muted(row) {
+                muted.insert(row.info.id.clone());
+            }
+        }
         let approvals = collections
             .ordered::<PendingApproval>()
             .into_iter()
@@ -154,6 +157,7 @@ impl StatusSounds {
             statuses,
             approvals,
             quiet,
+            muted,
             switches,
         });
         if let Some(sound) = sound {

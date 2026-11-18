@@ -246,7 +246,8 @@ fn an_action_keeps_its_drawn_targets_still_shown_and_marked_and_gains_none() {
 /// not, so some action always applies while any mark is shown, and the ⋯-omitted case of the old app (marks that only
 /// retired containers held) has no rows to reach it yet. Specified: of a (unpinned), b (pinned, unseen) and c (marked
 /// but not shown), with a and b shown, the frame shows a and b and offers Pin (a), Unpin (b), Mark read (b, at the
-/// activity its row shows) and Mark unread (a) in the menu's order, then only Pin and Mark unread when b is not marked.
+/// activity its row shows), Mute (both), and Mark unread (a). With a alone,
+/// only its Pin, Mute and Mark unread remain.
 /// (While marks do not count, with Hosts shown or a failed listing, the list projects nothing at all; the running tests
 /// cover that.)
 #[test]
@@ -289,12 +290,18 @@ fn a_frame_counts_and_offers_only_the_marks_it_shows() {
         [
             (MetadataAction::Pin, vec!["a"]),
             (MetadataAction::Unpin, vec!["b"]),
+            (MetadataAction::Mute, vec!["a", "b"]),
             (MetadataAction::Read, vec!["b"]),
             (MetadataAction::Unread, vec!["a"]),
         ]
     );
     assert_eq!(
-        all.offers[2].targets[0].write,
+        all.offers
+            .iter()
+            .find(|offer| offer.action == MetadataAction::Read)
+            .unwrap()
+            .targets[0]
+            .write,
         Write::Seen(Toggle::Read(200)),
         "Mark read carries the activity drawn"
     );
@@ -305,6 +312,7 @@ fn a_frame_counts_and_offers_only_the_marks_it_shows() {
         offered(&one),
         [
             (MetadataAction::Pin, vec!["a"]),
+            (MetadataAction::Mute, vec!["a"]),
             (MetadataAction::Unread, vec!["a"]),
         ]
     );
@@ -804,6 +812,7 @@ fn metadata_writes_go_once_per_eligible_row_and_clear_the_marks(cx: &mut TestApp
     let items = [
         "session-marked-menu-pin",
         "session-marked-menu-unpin",
+        "session-marked-menu-mute",
         "session-marked-menu-read",
         "session-marked-menu-unread",
     ];
@@ -938,6 +947,69 @@ fn the_marked_menu_closes_when_its_offers_change(cx: &mut TestAppContext) {
     test_support::settle(cx);
     assert!(!drawn(cx, MENU_ID));
     assert!(stored(&list, "a", cx));
+}
+
+/// Both choices use the row's mute request, partitioned by the mute the
+/// helm served. When eligibility changes while the child is open, it can
+/// drop a target but cannot gain one the menu did not offer at opening.
+#[gpui::test]
+fn the_marked_menu_mutes_and_unmutes_only_the_eligible_rows(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(
+        cx,
+        rows(vec![
+            session("a"),
+            session("b").muted(None),
+            session("c"),
+            session("d"),
+        ]),
+    );
+    requests(&mut fake);
+    let row_ids = [
+        "session-row-a",
+        "session-row-b",
+        "session-row-c",
+        "session-row-d",
+    ];
+    for row in row_ids {
+        click_with(cx, row, ctrl());
+    }
+    assert_eq!(markers(cx), ["a", "b", "c", "d"]);
+    test_support::click(cx, MENU_TOGGLE_ID);
+    assert!(drawn(cx, "session-marked-menu-mute"));
+    assert!(drawn(cx, "session-marked-menu-unmute"));
+    test_support::click(cx, "session-marked-menu-mute");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-marked-menu-mute-hour")
+    );
+    push(
+        &mut fake,
+        &["a", "b", "c", "d"],
+        &[(session("a").muted(None), 0), (session("b"), 0)],
+        cx,
+    );
+    assert!(
+        drawn(cx, "session-marked-menu-mute-indefinite"),
+        "both offers still hold"
+    );
+    test_support::click(cx, "session-marked-menu-mute-indefinite");
+    let wire = |key: &str, body| (Method::Put, format!("/api/sessions/{key}/mute"), body);
+    let indefinite = json!({"action": "mute", "until": null});
+    assert_eq!(
+        requests(&mut fake),
+        [wire("c", indefinite.clone()), wire("d", indefinite)]
+    );
+
+    for row in row_ids {
+        click_with(cx, row, ctrl());
+    }
+    assert_eq!(markers(cx), ["a", "b", "c", "d"]);
+    test_support::click(cx, MENU_TOGGLE_ID);
+    test_support::click(cx, "session-marked-menu-unmute");
+    assert_eq!(
+        requests(&mut fake),
+        [wire("a", json!({"action": "unmute"}))]
+    );
 }
 
 // ---- Escape ----------------------------------------------------------------------------------------------------------

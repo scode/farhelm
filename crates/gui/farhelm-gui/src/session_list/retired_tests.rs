@@ -305,7 +305,7 @@ fn the_marked_bar_leaves_a_retired_row_out_of_every_batch(cx: &mut TestAppContex
 /// Retirement is the stored launch's, never the host's: a new container session runs an ordinary launch on a host its
 /// environment owns, and the old spec's other half asserts it keeps every ordinary control. Telling them apart by the
 /// host would strand every new container session with Delete alone. Specified: an ordinary session on a session-owned
-/// container host is titled plainly and its menu holds Rename, Mark unread, Pin to top, the environment's Suspend and
+/// container host is titled plainly and its menu holds Rename, Mark unread, Pin to top, Mute, the environment's Suspend and
 /// Stop and suspend, Clone, Replace with…, Replace, Stop and Delete, in that order.
 #[gpui::test]
 fn an_ordinary_container_sessions_row_keeps_its_commands(cx: &mut TestAppContext) {
@@ -323,6 +323,7 @@ fn an_ordinary_container_sessions_row_keeps_its_commands(cx: &mut TestAppContext
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-mute",
             "session-menu-suspend",
             "session-menu-stop-and-suspend",
             "session-menu-clone",

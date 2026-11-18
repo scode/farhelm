@@ -335,7 +335,7 @@ fn a_suspended_row_has_its_badge_and_a_stopped_container_never_does(cx: &mut Tes
 
 /// The old menu put the environment's commands at the head of the Clone group, offered Stop and suspend only while the
 /// environment runs, and withheld the supervisor's lifecycle verbs while it was frozen. Specified: a connected sandbox
-/// session's menu reads Rename, Mark unread, Pin to top, Suspend, Stop and suspend, Clone, Replace with…, Replace,
+/// session's menu reads Rename, Mark unread, Pin to top, Mute, Suspend, Stop and suspend, Clone, Replace with…, Replace,
 /// Stop, Delete; once suspended it reads the same with Resume in Suspend's place and no Stop and suspend, and Replace
 /// with…, Replace and Stop ignore a click (the menu stays open), while Stop's description says the sandbox keeps
 /// billing.
@@ -351,6 +351,7 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-mute",
             "session-menu-suspend",
             "session-menu-stop-and-suspend",
             "session-menu-clone",
@@ -374,6 +375,7 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
             "session-menu-rename",
             "session-menu-seen",
             "session-menu-pin",
+            "session-menu-mute",
             "session-menu-resume",
             "session-menu-clone",
             "session-menu-replace-with",
@@ -930,7 +932,7 @@ fn a_row_being_deleted_shows_the_phase_in_place_of_its_cause(cx: &mut TestAppCon
 /// SPEC.md, "Sandbox sessions": a session whose environment is being deleted has its actions unavailable, Delete and
 /// Clone included. The helm is destroying the environment, so a Delete would be a doomed request and a Clone would copy
 /// a session on its way out; the old menu disabled every command and said why in Clone's and Delete's descriptions.
-/// Specified: with idle a on a sandbox being deleted, the menu lists Rename, Mark unread, Pin to top, Suspend, Stop and
+/// Specified: with idle a on a sandbox being deleted, the menu lists Rename, Mark unread, Pin to top, Mute, Suspend, Stop and
 /// suspend, Clone, Replace with…, Replace, Stop and Delete, and a click on each leaves the menu open and opens nothing
 /// (no question, no launcher); Clone's and Delete's descriptions both read "This session's sandbox is being deleted, so
 /// its actions are unavailable"; nothing at all is sent; once the host is connected, the menu's Delete asks again.
@@ -944,6 +946,7 @@ fn every_menu_command_is_refused_while_the_environment_is_being_deleted(cx: &mut
         "session-menu-rename",
         "session-menu-seen",
         "session-menu-pin",
+        "session-menu-mute",
         "session-menu-suspend",
         "session-menu-stop-and-suspend",
         "session-menu-clone",
@@ -965,6 +968,10 @@ fn every_menu_command_is_refused_while_the_environment_is_being_deleted(cx: &mut
         test_support::click(cx, item);
         assert!(drawn(cx, "session-menu"), "{item} does nothing");
         assert!(!drawn(cx, "prompt"), "{item} asks nothing");
+        assert!(
+            !drawn(cx, "session-menu-mute-hour"),
+            "the disabled Mute cannot open its child"
+        );
         assert!(
             !super::tests::launcher_drawn(cx),
             "{item} opens no launcher"

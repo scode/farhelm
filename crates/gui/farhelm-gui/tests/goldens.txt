@@ -164,8 +164,8 @@ linux/session-order-menu--dark.png e316f4f605989b1fdd8ab2f9e11c5b957f738811
 linux/session-order-menu--light.png 1e9124e404d643b69763daaab98e85e107211501
 linux/session-row-hover-beside--dark.png 5962e8c7e4c13d619ba174313384b4468b8c05a4
 linux/session-row-hover-beside--light.png 9d5efcfb5d4e4201fe49aa2f595d84a8acefff15
-linux/session-row-menu--dark.png d3da694e85365c639eb2cd141436c92d9a66bbdf
-linux/session-row-menu--light.png 4eda8649b426c36be28cad59899b2ab93789c69f
+linux/session-row-menu--dark.png 914bcad11a358432684a6cecfddb2909f601a679
+linux/session-row-menu--light.png 262e312c2b0e03eb436f3b07d7b21aa25147cda0
 linux/session-status-segments--dark.png b811d5ce774763c750a6d97e03d0fad1d6f410eb
 linux/session-status-segments--light.png 48815bee63a2287f104085a78df06e22bf205731
 linux/session-summary-card--dark.png db2752f79826dcf4879e567a5268938ebc8f3123
