@@ -3277,7 +3277,8 @@ mod tests {
             // 54's `registry_namespace`, schema 70's `tensorlake_account`,
             // schema 71's `tensorlake_recipes`, schema 75's `credentials`,
             // schema 84's provider-neutral launch history and host preference,
-            // and schema 86's `session_mutes`.
+            // schema 86's `session_mutes`, and schema 87's session groups
+            // (members first, since they reference the groups).
             // A new table that is missing here fails the DDL comparison
             // below, not a migration.
             // Every later preference column also goes, including nullable
@@ -3298,6 +3299,8 @@ mod tests {
                  DROP TABLE credentials;
                  DROP TABLE environment_launch_history;
                  DROP TABLE session_mutes;
+                 DROP TABLE session_group_members;
+                 DROP TABLE session_groups;
                  -- Schema 85 added the settings the old app kept per device.
                  ALTER TABLE preferences DROP COLUMN appearance;
                  ALTER TABLE preferences DROP COLUMN sidebar_width;

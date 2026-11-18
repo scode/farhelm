@@ -353,6 +353,11 @@ pub struct CollectionMeta {
     /// (the whole view, the filter's matches, whether a cap cut the list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counts: Option<ListCounts>,
+    /// The complete group roster on the Sessions collection, even when its
+    /// query hides all members of a group. Move menus use the roster while
+    /// the list draws headers only for groups with displayed members.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_groups: Vec<SessionGroup>,
     /// The key of the one entry the session list carries only because the
     /// channel's [`SessionQuery::selected`] names it: the session the GUI has
     /// open, which the query's filter or the listing cap left out. `None`
@@ -551,6 +556,10 @@ pub struct SessionRow {
     /// while Replace keeps both source and replacement; clients break ties
     /// by host number, then bare session ID. The served sort ignores it.
     pub pin_position: Option<i64>,
+    /// The helm-owned group this session belongs to. The listing's roster
+    /// carries the group's name, order and collapse state once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<i64>,
     /// Helm-owned active mute. Older helms omit the field and read as unmuted.
     #[serde(default)]
     pub mute: Option<crate::SessionMute>,
@@ -569,6 +578,16 @@ pub struct SessionRow {
     pub notifications_read_through: u64,
 }
 
+/// A helm-owned session group, shared across filtered lists and clients.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionGroup {
+    pub id: i64,
+    pub name: String,
+    pub position: i64,
+    pub collapsed: bool,
+    pub members: u64,
+}
+
 /// The whole merged list, in the JSON shape `GET /api/sessions` answers
 /// with: one array, its two counts, and whether a cap cut it.
 ///
@@ -580,6 +599,9 @@ pub struct SessionList {
     /// Every row of the view that satisfies the filter, in the requested
     /// order — cut at [`crate::LIST_SESSIONS_CAP`] only when `truncated` says so.
     pub sessions: Vec<SessionRow>,
+    /// Eligible move destinations, in manual order regardless of the filter.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<SessionGroup>,
     /// How many sessions the VIEW holds, filter or no filter — the
     /// denominator the UI's "N matching of M sessions" prints.
     ///
@@ -1195,6 +1217,7 @@ mod tests {
                 truncated: false,
             }),
             selected_outside_query: Some("carried".into()),
+            session_groups: Vec::new(),
             selected_cut: false,
         };
         let json = serde_json::json!({

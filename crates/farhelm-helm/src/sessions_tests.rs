@@ -2226,6 +2226,59 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
     );
 }
 
+/// Filters hide members without hiding their group as a move destination.
+/// Removing a group's final member must also remove it from the roster.
+#[farhelm_testtrace::test]
+async fn session_group_routes_keep_filtered_destinations_and_remove_empty_groups() {
+    let harness = rest_harness::helm_listing(vec![
+        rest_harness::session("alpha", 100),
+        rest_harness::session("bravo", 200),
+    ])
+    .await;
+    let mut groups = Vec::new();
+    for (id, name) in [("alpha", "Alpha"), ("bravo", "Bravo")] {
+        let session = harness.local_session_ref(id);
+        let (status, _, body) = post_json(
+            &harness,
+            "/api/session-groups",
+            serde_json::json!({ "name": name, "sessions": [session] }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        groups.push(body["id"].as_i64().expect("created group ID"));
+    }
+    let (status, listing) = get_json(&harness, "/api/sessions?title=alpha").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let shown = listing["sessions"].as_array().expect("matching rows");
+    assert_eq!(
+        shown.len(),
+        1,
+        "fixture premise: the filter hid Bravo's member"
+    );
+    assert_eq!(shown[0]["group"], groups[0]);
+    let roster = listing["groups"].as_array().expect("complete group roster");
+    assert_eq!(roster.len(), 2);
+    assert_eq!(roster[1]["id"], groups[1]);
+
+    let (status, body) = put_json(
+        &harness,
+        &harness.local_session_uri("/api/sessions/alpha/group"),
+        serde_json::json!({ "target": { "group": groups[1] } }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let (_, listing) = get_json(&harness, "/api/sessions?title=alpha").await;
+    assert_eq!(listing["sessions"][0]["group"], groups[1]);
+    let roster = listing["groups"].as_array().expect("complete group roster");
+    assert_eq!(roster.len(), 1);
+    assert_eq!(roster[0]["id"], groups[1]);
+    assert_eq!(
+        roster[0]["members"], 2,
+        "count includes the filtered member"
+    );
+}
+
 /// The move route publishes changed order through the same fleet revision as
 /// pinning, while leaving the helm's served creation order intact. Repeats
 /// and stale/malformed requests must neither change positions nor wake clients.
@@ -3430,6 +3483,8 @@ async fn a_replace_forwards_its_source_delete_precondition() {
 /// real handler and a scripted supervisor. The removed source's read/unread
 /// row goes too, as it does for a plain delete (SPEC_impl.md's
 /// `session_seen` paragraph): replace used to leave it behind.
+/// A move from another client must be refused once Replace has copied the
+/// original's group. Otherwise a successful move could vanish at cleanup.
 #[farhelm_testtrace::test]
 async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3442,6 +3497,8 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     )
     .await;
     let fleet = harness.fleet.clone();
+    let (delete_seen, deletion) = tokio::sync::oneshot::channel();
+    let (allow_delete, held_delete) = tokio::sync::oneshot::channel();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
         let mut reader = FrameReader::new(r);
@@ -3523,6 +3580,8 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             panic!("expected DeleteSession, got {request:?}");
         };
         assert_eq!(session_id, "sess-1");
+        delete_seen.send(()).unwrap();
+        held_delete.await.unwrap();
         // Same ordering rule as the create half, mirrored for the delete:
         // the fixture drops the source before the reply that tells the
         // client it is gone.
@@ -3592,13 +3651,57 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "fixture premise: source pin exists"
     );
-    let (status, body) = post_text(
-        &harness,
-        &harness.local_session_uri("/api/sessions/sess-1/replace"),
-        serde_json::json!({}),
-    )
-    .await;
+    let source = store::SessionKey::new(viewer_host, "sess-1");
+    let replacement = store::SessionKey::new(viewer_host, "sess-2");
+    let group = harness
+        .store
+        .create_session_group("Work".into(), vec![source.clone()])
+        .await
+        .unwrap();
+    let view = harness
+        .store
+        .session_group_projection(std::slice::from_ref(&source))
+        .await
+        .unwrap();
+    assert_eq!(view.roster[0].id, group);
+    assert_eq!(view.placements[&source].group, Some(group));
+    let replace_uri = harness.local_session_uri("/api/sessions/sess-1/replace");
+    let ((status, body), ()) = tokio::join!(
+        post_text(&harness, &replace_uri, serde_json::json!({})),
+        async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), deletion)
+                .await
+                .expect("fixture premise: Replace sent its source Delete")
+                .expect("fixture premise: supervisor peer is still running");
+            let move_uri = harness.local_session_uri("/api/sessions/sess-1/group");
+            let (status, body) = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                put_json(
+                    &harness,
+                    &move_uri,
+                    serde_json::json!({ "target": "ungrouped" }),
+                ),
+            )
+            .await
+            .expect("a viewer write must answer while the peer holds Delete");
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+            assert!(
+                body.as_str()
+                    .is_some_and(|words| words.contains("this session is being removed")),
+                "{body}"
+            );
+            allow_delete.send(()).unwrap();
+        }
+    );
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let view = harness
+        .store
+        .session_group_projection(&[source.clone(), replacement.clone()])
+        .await
+        .unwrap();
+    assert_eq!(view.roster[0].members, 1);
+    assert_eq!(view.placements[&source].group, None);
+    assert_eq!(view.placements[&replacement].group, Some(group));
     assert!(
         harness
             .store

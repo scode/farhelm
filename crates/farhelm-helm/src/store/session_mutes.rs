@@ -99,7 +99,7 @@ impl HelmStore {
             keys,
             "mute read task panicked",
             "SELECT host_id, session_id, until_ms, frozen_work_start, work_start_at_unmute \
-             FROM session_mutes",
+             FROM requested JOIN session_mutes USING (host_id, session_id)",
             |row| mute_entry(row, 2),
         )
         .await

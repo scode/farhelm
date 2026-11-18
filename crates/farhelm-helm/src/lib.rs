@@ -577,6 +577,22 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(sessions::move_pin),
         )
         .route(
+            "/api/sessions/{id}/group",
+            axum::routing::put(sessions::groups::set_group),
+        )
+        .route(
+            "/api/session-groups",
+            axum::routing::post(sessions::groups::create_group),
+        )
+        .route(
+            "/api/session-groups/{id}",
+            axum::routing::patch(sessions::groups::update_group).delete(sessions::groups::ungroup),
+        )
+        .route(
+            "/api/session-groups/{id}/order",
+            axum::routing::put(sessions::groups::move_group),
+        )
+        .route(
             "/api/sessions/{id}/notifications/read",
             axum::routing::put(sessions::mark_notifications_read),
         )
