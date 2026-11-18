@@ -107,6 +107,11 @@ PRE_SPLIT_CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 LAST_PRE_SPLIT_VERSION = (0, 25, 0)
 
+# v0.40.0 opens with the new editorial policy. Those bullets describe future notes and its Changed overview describes
+# a migration that spanned hundreds of PRs. Citations are optional for those specific entries.
+RELEASE_NOTES_POLICY_VERSION = "0.40.0"
+RELEASE_NOTES_POLICY: tuple[str, str] = ("Changes to release notes going forward", "")
+
 
 def categories_for(version: str) -> tuple[tuple[str, str], ...]:
     """The categories a release section of this version may use, in their required order.
@@ -117,6 +122,8 @@ def categories_for(version: str) -> tuple[tuple[str, str], ...]:
     categories = PRE_SPLIT_CATEGORIES if _version_tuple(version) <= LAST_PRE_SPLIT_VERSION else CATEGORIES
     if version in LEGACY_HIGHLIGHTS_VERSIONS:
         categories = (LEGACY_HIGHLIGHTS, *categories)
+    if version == RELEASE_NOTES_POLICY_VERSION:
+        categories = (RELEASE_NOTES_POLICY, *categories)
     return categories
 
 
@@ -256,7 +263,7 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
             problems.append("only the newest section may still be a draft; finalize this one before cutting another release")
         lines = lines[first + 1 :]
     allowed = categories_for(version)
-    headings = {f"### {emoji} {name}": name for name, emoji in allowed}
+    headings = {f"### {emoji} {name}" if emoji else f"### {name}": name for name, emoji in allowed}
     order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
     categories: list[tuple[str, list[str]]] = []
     stray: list[str] = []
@@ -294,12 +301,16 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
             problems.append(f"category `{name}` is empty; omit a category with no entries")
             continue
         if name == LEGACY_HIGHLIGHTS[0]:
-            checker = _check_highlights
+            category_problems = _check_highlights(body)
         elif name == "Misc fixes":
-            checker = _check_misc_fixes
+            category_problems = _check_misc_fixes(body)
+        elif name == RELEASE_NOTES_POLICY[0]:
+            category_problems = _check_bullets(body, uncited_leading_entries=None)
+        elif version == RELEASE_NOTES_POLICY_VERSION and name == "Changed":
+            category_problems = _check_bullets(body, uncited_leading_entries=1)
         else:
-            checker = _check_bullets
-        problems.extend(f"under `{name}`: {item}" for item in checker(body))
+            category_problems = _check_bullets(body)
+        problems.extend(f"under `{name}`: {item}" for item in category_problems)
     return problems
 
 
@@ -355,12 +366,13 @@ def _check_highlights(lines: list[str]) -> list[str]:
     return problems
 
 
-def _check_bullets(lines: list[str]) -> list[str]:
-    """Every entry is one list item, one paragraph, ending in `(#N)` or `(#N, #M)`; no headings, no free prose.
+def _check_bullets(lines: list[str], *, uncited_leading_entries: int | None = 0) -> list[str]:
+    """Validate paragraph-sized bullets, with PR references for entries about product changes.
 
     The file is stored one paragraph per line (GitHub renders a release body like a comment, newline as line break),
     but an item is still taken to be the `- ` line plus any indented lines after it, and the PR reference is checked
     on the joined text, so a hand-wrapped bullet is flagged for its reference, not misread as several entries.
+    Historical sections can exempt their opening entries or pass None to exempt a whole category.
     """
     problems: list[str] = []
     items: list[list[str]] = []
@@ -377,9 +389,11 @@ def _check_bullets(lines: list[str]) -> list[str]:
             problems.append(f"free text `{line[:60]}` is not allowed here; every entry is a `- ` bullet")
     if not items and not problems:
         problems.append("no bullet entries")
-    for item in items:
+    for index, item in enumerate(items):
         joined = " ".join(item)
-        if not PR_REFERENCE_RE.search(joined):
+        if not joined.strip():
+            problems.append("empty bullet entry")
+        elif uncited_leading_entries is not None and index >= uncited_leading_entries and not PR_REFERENCE_RE.search(joined):
             problems.append(f"entry `{joined[:60]}…` must end with its PR reference, `(#N)` or `(#N, #M)`")
     return problems
 
@@ -829,6 +843,25 @@ def self_test() -> int:
     }
     for what, text in split_variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    # The editorial policy note is historical. Product entries and future versions keep their usual PR citation rules.
+    policy = [f"### {RELEASE_NOTES_POLICY[0]}", "", "- Explain the editorial policy."]
+    expect(_check_release_body("0.40.0", policy) == [], "v0.40.0 accepts its policy section without a PR reference")
+    expect(_check_release_body("0.40.1", policy) != [], "later versions reject the historical policy section")
+    migration_overview = ["", "### 🔄 Changed", "", "- Overview of the migration."]
+    expect(
+        _check_release_body("0.40.0", policy + migration_overview) == [],
+        "v0.40.0 opens with the policy and can omit PR references on the migration overview",
+    )
+    expect(
+        _check_release_body("0.40.0", migration_overview + policy) != [],
+        "v0.40.0 requires the policy section before the product changes",
+    )
+    expect(
+        any("must end with its PR reference" in problem
+            for problem in _check_release_body("0.40.0", policy + migration_overview + ["- A product change."])),
+        "v0.40.0 still requires PR references for product entries after the migration overview",
+    )
 
     # The draft notice lets a stable tag go out before its wording is approved, so the format has to admit it, but only
     # in the one place the procedure puts it: the newest section's first line, verbatim.

@@ -63,3 +63,9 @@ with in place.
   v0.36.0 Tensorlake draft split snapshot building, suspend/resume, tunnels, orphan cleanup and caveats into separate
   entries; the maintainer replaced them with one experimental-support entry and a documentation link. (Stated by the
   maintainer during the v0.36.0 curation, 2026-11-07.)
+- Highlight changes likely to matter to a typical user and critical changes that affect a small group of users. Leave
+  routine fixes and niche changes in the fragments used for curation. The maintainer removed the long tail of fixes in
+  the v0.40.0 review on 2026-11-17.
+- Remote hosts need to match the desktop app's protocol as part of an ordinary upgrade. Report a protocol change to the
+  maintainer for release testing and omit the standard remote-hosts entry from public notes. (Stated by the maintainer
+  during the v0.40.0 curation, 2026-11-17.)

@@ -108,7 +108,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   (the dependency license and source policy in `deny.toml`)
 - `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` (the generated
   dependency license notices are current)
-- `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
+- `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` (release-note
+  format, including the v0.40.0 policy section, and fragment and announcement checks)
 - `python3 releasing/finalize-release-notes.py --self-test`
 - `python3 releasing/notes-review-page.py --self-test` (legacy standalone page; includes link attribute escaping and
   HTTP(S)/relative-only targets)

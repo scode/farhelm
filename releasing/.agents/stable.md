@@ -40,10 +40,10 @@ an RC or the request, and when there was no earlier RC; "no" is enough. This is 
 review that runs alongside the tag build. Wait for the announcement answer before step 1, and carry any additions or
 changes in step 4's changelog PR. Stable re-cuts carry over the settled list without asking again.
 
-1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Every required commit since the last stable
-   release is included unless the user explicitly excludes it, and `MISSING` ones get an entry written now from the
-   commit and PR. `kind: none` fragments are left out of the draft and `STALE` ones are not used (see
-   `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
+1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Review every required commit since the last
+   stable release. Read the commit and PR when a fragment is `MISSING`. Draft entries for changes that meet the criteria
+   in `releasing/EDITORIAL_GUIDANCE.md`. `kind: none` fragments are left out of the draft and `STALE` ones are not used
+   (see `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
    exclusions (the fragment author's judgment is not the user's decision), in the message that hands over the review
    page in step 2. Their answers arrive with the wording review and change the draft like any other edit; nothing in
    this step waits for them. This is the sweep the fragment rule exists to make cheap.
@@ -58,17 +58,15 @@ changes in step 4's changelog PR. Stable re-cuts carry over the settled list wit
    ```
 
    (`vPREV` is the last stable tag.) Neither the sweep nor the fragments can be trusted to surface this: a bump often
-   rides in a `refactor`, which needs no fragment, or inside a feature whose fragment is about something else. When the
-   version changed, the section carries the fixed remote-hosts entry described in `releasing/.agents/changelog.md`,
-   "Format", citing those commits' PRs; when it did not, it carries no such entry.
+   rides in a `refactor`, which needs no fragment, or inside a feature whose fragment is about something else. A
+   protocol change informs release testing. Updating remote hosts is part of an ordinary upgrade.
 
    Start the risk report (`releasing/.agents/risk-report.md`, "The release risk report") now too. It must reach the
    maintainer before the tag is pushed in step 7, but the tag does not wait for a reply to it.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
-   agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
-   by the criteria in `releasing/.agents/changelog.md`, "Format"; the split is the agent's first call and the
-   maintainer's to change. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch
-   directory, written exactly as it will go into `CHANGELOG.md`, and show it to the maintainer using the
+   agent agree on in conversation, following that guidance. Choose which fixes warrant coverage by the same criteria.
+   The maintainer reviews that selection with the wording. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a
+   Markdown file in your scratch directory, written exactly as it will go into `CHANGELOG.md`, and show it using the
    `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or anywhere
    else unless the maintainer asks.
 
@@ -256,13 +254,12 @@ A stable re-cut cannot reuse the old release branch: its notes have to cover wha
 and protocol check against the new base, then make another changelog PR as in step 4. Carry the settled announcement
 table over without asking again, retaining each entry's version and id even when the re-cut gets a new patch version; do
 not copy an earlier announcement into a new entry. The PR renames the `## vX.Y.Z` section when the version changed (a
-stable `announce` fails unless the newest section names the tag exactly), adds entries for the fix and for every
-required commit that landed since, and deletes the fragments. Entries the maintainer already approved stay word for
-word. The new ones are not held for the maintainer's approval: draft them from the fragments (or, for a `MISSING`
-commit, from the commit and its PR) following `releasing/EDITORIAL_GUIDANCE.md`, sort them into categories as step 2
-does, and add the fixed remote-hosts entry if the protocol version changed in the new commits. Leave out `kind: none`
-fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on 2026-10-11, over
-stopping for wording review and over cutting from the old base with only the fix cherry-picked.
+stable `announce` fails unless the newest section names the tag exactly), considers the fix and all required commits
+that landed since, and deletes the fragments. Entries the maintainer already approved stay word for word. Draft new
+entries from the fragments (or, for a `MISSING` commit, from the commit and its PR) following
+`releasing/EDITORIAL_GUIDANCE.md`, and sort them into categories as step 2 does. Leave out `kind: none` fragments and
+`STALE` ones rather than stopping to ask about them. The maintainer chose this on 2026-10-11, over stopping for wording
+review and over cutting from the old base with only the fix cherry-picked.
 
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
 with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
