@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`repo-cache-stale-git-locks`](reports/repo-cache-stale-git-locks.report.md) landed 2026-11-10 in #3296: A Git lock left in a host's repository cache by a killed background job no longer breaks every later checkout of that repository; Farhelm clears leftover locks while holding its own cache lock
-- [`nonblocking-session-actions`](reports/nonblocking-session-actions.report.md) landed 2026-11-11 in #3276, #3278: Pending Stop, Restart, Replace, Delete and launches no longer block switching sessions or acting on other ones; the acted-on session shows "Stopping…" and keeps its result after a switch
 - [`host-progress-card-fixes`](reports/host-progress-card-fixes.report.md) landed 2026-11-11 in #3309, #3310: The sidebar's host progress card opens from anywhere on a working row, bar included, and a too-long error shows whole lines from its end
 - [`tensorlake-key-order`](reports/tensorlake-key-order.report.md) landed 2026-11-11 in #3312: Tensorlake connections accept only ed25519 keys and load no hardware-token provider, so Farhelm's key is always offered first; the documented exceptions go
 - [`bell-trash-reads`](reports/bell-trash-reads.report.md) landed 2026-11-11 in #3315: Windows re-read a host's Trash only when the helm saw a Trash change there, not on every session status change or fallback poll
