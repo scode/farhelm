@@ -4,9 +4,9 @@
 # One command, so that "refresh the docs screenshots" is a thing an agent can
 # be told without it inventing a procedure. Runs the GPUI test harness through
 # scripts/docs_shots.py for every page module (or one page), and prints each
-# PNG's path. --mac ships the capture through the README hero's Mac transport.
-# On Linux every shot stops at the size check because it renders at
-# scale 1. The PNGs land in the docs website's gitignored
+# PNG's path. Linux renders at the scenario's scale on a private Mutter.
+# --mac ships the capture through the README hero's Mac transport.
+# The PNGs land in the docs website's gitignored
 # website/public/docs-shots-local/, where the local preview shows them at
 # once. It never publishes.
 #
@@ -22,8 +22,7 @@
 # published; that is decided before the slow part, and said up front.
 #
 # Published release shots are frozen (docs/docs-shots/SPEC.md, "Release
-# shots are frozen"). Release-shot argument validation is retained, but no
-# page module captures release shots yet, so recapture is refused.
+# shots are frozen"). The engine skips them unless explicitly recaptured.
 #
 # Usage: scripts/docs-screenshots.sh (--local | --mac DEST) [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
 #   --local      capture on this machine through the GPUI test harness
@@ -36,7 +35,7 @@
 #   --recapture-release-shot NAME
 #                also capture the published release shot NAME
 #                (release-notes/v<X-Y-Z>-<what>) from the current UI, to correct it;
-#                repeatable; currently refused because no page module captures one
+#                declare its capture steps in release-notes.py first; repeatable
 #
 # Prerequisites: the GPUI harness's build and runtime tools (docs/gui-agent.md).
 # The harness builds the agent app and stages its own fleet and private sshd.
@@ -91,30 +90,16 @@ if [ -n "$only" ]; then
   esac
 fi
 
-# A recapture must name a shot that is frozen now: a published release shot,
-# by the definition the publish script shares. Keep the validation before
-# refusing the unsupported capture, so a typo still explains what is wrong.
+engine=(python3 -B "$repo/scripts/docs_shots.py")
+selection=()
+[ -z "$only" ] || selection+=(--only "$only")
+for shot in "${recapture[@]}"; do
+  selection+=(--recapture-release-shot "$shot")
+done
+# Reject a mistyped correction before clearing the last capture. SSH joins argv into shell words, so any
+# shot name sent to the Mac must first match a validated kebab-case declaration in its release's listing.
 if [ "${#recapture[@]}" -gt 0 ]; then
-  if [ -n "$only" ] && [ "$only" != release-notes ]; then
-    echo "--recapture-release-shot works only on a full run or with --only release-notes" >&2
-    exit 2
-  fi
-  python3 - "$repo/website/src/data/docs-shots.json" "$repo/website/src/release-notes" "${recapture[@]}" <<'EOF' || exit 2
-import json, pathlib, sys
-manifest, releases, *names = (pathlib.Path(arg) for arg in sys.argv[1:])
-published = set(json.loads(manifest.read_text(encoding="utf-8")).get("shots", {})) if manifest.is_file() else set()
-listed = set()
-for listing in sorted(releases.glob("*.json")) if releases.is_dir() else []:
-    listed.update(shot.get("name") for shot in json.loads(listing.read_text(encoding="utf-8")).get("screenshots", []))
-for name in map(str, names):
-    if name not in listed or name not in published:
-        raise SystemExit(
-            f"--recapture-release-shot {name}: not a published release shot "
-            "(one that a website/src/release-notes/*.json lists and website/src/data/docs-shots.json holds)"
-        )
-EOF
-  echo "no page module captures release shots yet" >&2
-  exit 2
+  "${engine[@]}" --check-selection "${selection[@]}" || exit 2
 fi
 
 if [ -n "$only" ]; then
@@ -160,14 +145,14 @@ mkdir -p "$output" || exit 1
 # capture.json after fetching the checked PNGs.
 mac_capture_script() {
   cat <<'EOF'
-src=$1 lock=$2 out=$3 log=$4 build=$5 only=${6:-}
+src=$1 lock=$2 out=$3 log=$4 build=$5
+shift 5
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export USER="${USER:-$(/usr/bin/id -un)}"
 export CARGO_BUILD_JOBS=6
 cd "$HOME/$src" || exit 1
 mkdir -p "$HOME/$out" || exit 1
-set -- --out "$HOME/$out" --lock "$HOME/$lock"
-[ -z "$only" ] || set -- "$@" --only "$only"
+set -- --out "$HOME/$out" --lock "$HOME/$lock" "$@"
 [ "$build" = true ] || set -- "$@" --no-build
 python3 -B scripts/docs_shots.py "$@" </dev/null >"$HOME/$log" 2>&1
 status=$?
@@ -187,27 +172,29 @@ capture() {
   if [ -n "$mac" ]; then
     # shellcheck source=scripts/media-mac.sh
     source "$repo/scripts/media-mac.sh" || return 1
-    capture_on_mac "$repo" "$mac" "$build" docs "$only"
+    capture_on_mac "$repo" "$mac" "$build" docs "${selection[@]}"
   else
-    local engine=(python3 -B "$repo/scripts/docs_shots.py" --out "$output")
-    [ -z "$only" ] || engine+=(--only "$only")
-    [ "$build" = true ] || engine+=(--no-build)
-    "${engine[@]}"
+    local flags=()
+    [ "$build" = true ] || flags+=(--no-build)
+    "${engine[@]}" --out "$output" "${selection[@]}" "${flags[@]}"
   fi
 }
-capture || {
+capture
+status=$?
+if [ "$status" -eq 2 ]; then
+  exit 2
+elif [ "$status" -ne 0 ]; then
   echo "the capture did not complete; see the run directory printed above" >&2
   exit 1
-}
+fi
 if [ -n "$only" ]; then
   found=$(find "$output/$only" -name '*.png' 2>/dev/null | sort)
 else
   found=$(find "$output" -name '*.png' 2>/dev/null | sort)
 fi
 if [ -z "$found" ] && [ "$only" = release-notes ]; then
-  # Every shot on that page is a published release shot, skipped as frozen;
-  # an empty result is then the expected one rather than a broken run.
-  echo "no Release notes shot to capture: published release shots are frozen (see --recapture-release-shot)" >&2
+  # An empty page is normal between releases, or when only frozen declarations remain.
+  echo "no Release notes shot to capture" >&2
   exit 0
 fi
 test -n "$found" || { echo "the capture reported success but wrote no PNGs under $output" >&2; exit 1; }

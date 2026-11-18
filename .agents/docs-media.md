@@ -12,8 +12,8 @@ reading list in `website/AGENTS.md`.
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
 > NOTE: The demo video cannot be refreshed until its removed browser capture is rebuilt on the GPUI tooling. Its
-> procedure below is kept for that rebuild. The docs screenshot runner uses the GPUI harness locally or on a Mac. No
-> page is published yet. The README screenshot has been rebuilt on the GPUI tooling.
+> procedure below is kept for that rebuild. The docs screenshot runner uses the GPUI harness on Linux. The README
+> screenshot has been rebuilt on the GPUI tooling.
 
 ## Brand marks: the icon and the wordmark
 
@@ -68,22 +68,14 @@ completed full refresh moves that marker; a single-page fix or a screenshot refr
 
 ## Docs screenshots
 
-`scripts/docs-screenshots.sh --local` runs page modules under `scripts/docs-shots/` through `scripts/docs_shots.py` and
-the GPUI test harness, against one staged fleet. `docs/docs-shots/SPEC.md` governs it; read it before changing those
-modules or anything under `docs/docs-shots/`. Only Launch templates has been ported, with two unannotated crops. No page
-is published yet. Run `scripts/docs-screenshots.sh --mac <destination>` for a capture at 2x. It shares the README hero's
-SSH transport, preflight and Mac-wide lock. On Linux each shot is expected to stop at the size check since headless
-Mutter renders at scale 1.
+`scripts/docs-screenshots.sh --local` runs the GPUI page modules under `scripts/docs-shots/` against one staged fleet.
+The run's private Mutter renders the 1600x1000-point viewport at 2x. `docs/docs-shots/SPEC.md` governs the capture. Read
+it before changing the modules or anything under `docs/docs-shots/`. Launch templates has two unannotated crops. Declare
+new release shots in `scripts/docs-shots/release-notes.py` and list them under their release version
+(`website/.agents/release-notes.md`, "Release notes").
 
-> NOTE: The docs scenario's 1600x1000-point window needs more of the Mac's screen than the README hero's. On the test
-> Mac it fits only with the Dock set to hide itself (`docs/gui-agent.md`, "On a Mac"). When the window does not fit, say
-> so, and do not work around it with window resizing, rescaling or a GPUI patch. No Mac docs capture has completed yet:
-> on 2026-11-17, with the window fitting, two runs returned the Launch templates page's full shots and then failed its
-> later steps, once on a click into the launcher's search box that focused no field and once on a search box not found
-> on screen. Until that is fixed, expect a Mac docs capture to stop there.
-
-The command keeps its bulk capture record and local preview output, and `--only <page>` remains for drafting. Publishing
-belongs to a docs refresh. Published release material stays frozen, and no page module captures release shots yet. The
-existing publisher carries published release shots over unchanged (`website/.agents/release-notes.md`, "Release notes").
-`scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it by hand or commit a
-screenshot on main. Changing that script means running its `--self-test`, which needs no network.
+The command keeps its bulk capture record and local preview output. Use `--only <page>` for drafting. A full capture
+skips published release shots so the publisher can carry them over unchanged. Publishing belongs to a docs refresh or
+the release screenshot procedure. The Mac transport is still available and uses the README hero's SSH settings,
+preflight and lock. `scripts/publish-docs-shots.sh` is the only thing that pushes `refs/docs-assets/keep`; never push it
+by hand or commit a screenshot on main. Changing that script means running its `--self-test`, which needs no network.

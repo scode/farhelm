@@ -1677,8 +1677,8 @@ class CaptureTest(unittest.TestCase):
     def test_a_picture_of_the_wrong_size_is_refused_quoting_the_window(self):
         """The publish script checks the size again, but a wrong-size picture must not get that far looking like the
         hero. Specified for the hero (1280x800 at scale 2): 2560x1600 passes; anything else, and an unreadable shot, is
-        refused with the size found, the size declared, and the window's points and scale, which tell a small display
-        from a Linux run."""
+        refused with the size found, the size declared, and the window's points and scale, which distinguish a small
+        display from an output scale that does not match the scenario."""
         plan = gui_agent.load_scenario(HERO, "someone")
         self.assertEqual(gui_agent.expected_capture_size(plan), (2560, 1600))
         mac = {"width": 1280.0, "height": 800.0, "scale": 2.0}
@@ -1689,6 +1689,7 @@ class CaptureTest(unittest.TestCase):
             self.assertIn(part, shrunk)
         linux = gui_agent.size_problem((1280, 800), plan, {"width": 1322.0, "height": 876.0, "scale": 1.0})
         self.assertIn("at scale 1.0", linux)
+        self.assertIn("the scenario's --scale", linux)
         self.assertIn("no readable PNG", gui_agent.size_problem(None, plan, mac))
 
     def stand_in_bridge(self, shot_size: tuple[int, int], window: dict, drawn: str = "gpu-1"):
@@ -1913,10 +1914,12 @@ class ProcessTreeTest(unittest.TestCase):
         leaf_file = self.dir / "leaf"
         command = [sys.executable, "-c", TREE_PARENT, str(leaf_file)]
         with self.assertRaises(RuntimeError):
-            gui_agent.start_mutter(self.dir, self.dir, "wayland-never", command, dict(os.environ), socket_wait=3)
+            gui_agent.start_mutter(self.dir, self.dir, "wayland-never", command, dict(os.environ), socket_wait=3, scale=2)
         leaf = int(wait_for_file(leaf_file))
         self.owned.append(leaf)
         self.assertIsNone(gui_agent.proc_start(leaf), "the compositor's child must be stopped")
+        settings = self.dir / "mutter-config/glib-2.0/settings/keyfile"
+        self.assertEqual(settings.read_text(), "[org/gnome/desktop/interface]\nscaling-factor=2\n")
 
     def test_the_supervisor_is_claimed_only_while_it_names_the_state_directory(self):
         """The app's record of its supervisor counts only while that pid's command line names the run's state dir.

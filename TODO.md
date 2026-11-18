@@ -109,13 +109,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
   real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
 
-- **Make the docs screenshot capture finish on the Mac.** `scripts/docs-screenshots.sh --mac` now fits its window on the
-  test Mac (with the Dock set to hide itself) and brings back the Launch templates page's full-window shots at 2x, but
-  no run has finished. Two runs on 2026-11-17 each then failed at a later step of that page, a different one each time:
-  once a click into the launcher's search box focused no field, and once the search box was not found on screen. It
-  looks like a timing problem in the page's capture steps. Until it is fixed, the docs screenshots cannot be refreshed
-  (`.agents/docs-media.md`, "Docs screenshots").
-
 - **Test that the template editor ignores New sandbox or New container with nothing left to place it on.** The launcher
   and the template editor share one placement picker (#4068). The editor ignores a press on the already chosen New
   sandbox or New container segment once nothing is left to place it on (the last container host removed while the editor

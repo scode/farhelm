@@ -91,6 +91,55 @@ class DocsShots(unittest.TestCase):
         self.assertEqual(engine.crop_rect([boxes[1]], {"width": 200, "height": 200, "scale": 2}),
                          (88, 128, 223, 230))
 
+    def test_crop_uses_content_origin_after_linux_frame_is_removed(self):
+        """A framed window's boxes still count the removed title bar and frame. The crop must not shift past the shot."""
+        window = {"width": 142, "height": 176, "scale": 2}
+        boxes = [{"x": 25, "y": 85, "w": 10, "h": 20}, {"x": 111, "y": 145, "w": 10, "h": 10}]
+        self.assertEqual(engine.crop_rect(boxes, window, frame=21, title_bar=34), (0, 28, 200, 200))
+
+    def release_listings(self, version, *names):
+        """Write the same names the website generator reads and the publisher writes to its manifest."""
+        releases, data = self.root / "release-notes", self.root / "data"
+        releases.mkdir(exist_ok=True)
+        data.mkdir(exist_ok=True)
+        (releases / f"{version}.json").write_text(json.dumps({"screenshots": [{"name": name} for name in names]}))
+        return data / "docs-shots.json"
+
+    def test_release_notes_module_is_discovered(self):
+        """The full run discovers the release page, even when there are no declarations to drive."""
+        pages = dict(engine.load_pages(engine.HERE / "docs-shots", None))
+        self.assertIn("release-notes", pages)
+        self.assertIsInstance(pages["release-notes"], list)
+
+    def test_only_listed_and_published_release_shots_are_frozen(self):
+        """A first capture reaches the publisher's path, while a published image needs an explicit recapture request."""
+        frozen, fresh = "release-notes/v1-2-3-old", "release-notes/v1-2-3-new"
+        manifest = self.release_listings("v1.2.3", frozen, fresh)
+        manifest.write_text(json.dumps({"shots": {frozen: {}, "page/ordinary": {}}}))
+        old, new, ordinary = (engine.Shot(name, lambda b: None, ["id:one"])
+                              for name in ("v1-2-3-old", "v1-2-3-new", "ordinary"))
+        pages = [("release-notes", [old, new]), ("page", [ordinary])]
+        selected = engine.select_shots(pages, self.root, [])
+        self.assertEqual(selected, [("release-notes", [new]), ("page", [ordinary])])
+        run, out = self.root / "run", self.root / "out"
+        run.mkdir()
+        (run / "run.json").write_text("{}")
+        self.assertEqual(engine.capture_pages(Harness(), batch, run, selected, out), {})
+        self.assertEqual(list((out / "release-notes").iterdir()), [out / f"{fresh}.png"])
+        self.assertEqual(engine.select_shots(pages, self.root, [frozen]), pages)
+        with self.assertRaisesRegex(ValueError, "not a published release shot"):
+            engine.select_shots(pages, self.root, [fresh])
+        with self.assertRaisesRegex(ValueError, "add its shot"):
+            engine.select_shots([], self.root, [frozen])
+
+    def test_release_declarations_must_match_the_version_listing(self):
+        """A version typo must fail before capture, since the site finds a listing by its release tag."""
+        name = "v1-2-3-control"
+        self.release_listings("v1.2.4", f"release-notes/{name}")
+        shot = engine.Shot(name, lambda b: None, ["id:one"])
+        with self.assertRaisesRegex(ValueError, r"v1\.2\.3\.json"):
+            engine.select_shots([("release-notes", [shot])], self.root, [])
+
     def test_park_is_optional_but_must_name_an_id_target(self):
         """A declared park spot bypasses the automatic search, so a malformed target must fail before app startup."""
         for target in ("", "text:Title", "@e1", "id:", 3):

@@ -184,7 +184,8 @@ manifest_commit() {
 # The published release shots, one per line, sorted: every shot a release's
 # screenshot list names that the checkout's manifest lists under `shots`,
 # meaning the snapshot it pins holds it. Nothing before the first publish.
-# The same definition scripts/docs-screenshots.sh applies to
+# The same definition the capture applies (select_shots in
+# scripts/docs_shots.py) when it skips frozen shots and validates
 # --recapture-release-shot.
 published_release_shots() {
   python3 - "$1/$MANIFEST" "$1/$RELEASE_NOTES_DIR" <<'EOF' || die "cannot read which release shots are published"

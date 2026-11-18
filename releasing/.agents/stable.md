@@ -161,11 +161,11 @@ changes in step 4's changelog PR. Stable re-cuts carry over the settled list wit
    - Read the approved scratch section supplied by the release agent, or the `## vX.Y.Z` section of `CHANGELOG.md` once
      it has landed, and decide which entries change something a reader would see: a new dialog or control, or a
      redesign. Most entries do not, and a release with none gets no PR; say so and stop.
-   - For each that does, add a shot to `e2e/docs-shots/release-notes.spec.ts` and an item to
-     `website/src/release-notes/vX.Y.Z.json`, run the full capture (`scripts/docs-screenshots.sh`, no `--only`), look at
-     every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm the website builds.
-     After the approved changelog section lands, verify that the generated release page includes every new shot under
-     its intended entry; a build can omit a listing whose release section has not landed yet.
+   - For each that does, add a shot to `scripts/docs-shots/release-notes.py` and an item to
+     `website/src/release-notes/vX.Y.Z.json`. Run the full capture on Linux (`scripts/docs-screenshots.sh --local`, no
+     `--only`), look at every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm
+     the website builds. After the approved changelog section lands, verify that the generated release page includes
+     every new shot under its intended entry; a build can omit a listing whose release section has not landed yet.
    - Open the result as a draft PR per the `jjstack` skill, with its commit message cold-read per the
      `scode-commit-msg-reviewer` skill, and do not merge it. It starts no preview server, being unattended.
 

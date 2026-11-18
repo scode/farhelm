@@ -5,9 +5,8 @@ The docs screenshot runner captures regions of the real GPUI desktop app against
 `scripts/docs-screenshots.sh` and `scripts/publish-docs-shots.sh`. Pages show a shot with the `Screenshot` component in
 `website/src/components/`.
 
-NOTE: Only Launch templates has been ported, with two unannotated crops. No page is published yet. Linux runs exercise
-staging and capture checks, then stop at the size check because headless Mutter renders at scale 1 and the scenario
-requires scale 2. This is not a visual regression fixture: nothing in CI captures or compares the images.
+NOTE: Launch templates has two unannotated crops. Use the release-notes module for new release shots. CI leaves capture
+and image review to the docs and release procedures.
 
 ## Why screenshots, and who owns them
 
@@ -30,10 +29,11 @@ Other scenario declarations for pages not yet ported are not staged by this engi
 Before each shot the engine presses Escape until no layer remains, giving up after six presses. The page's steps then
 reach the state to photograph. Every shot uses the scenario's viewport and dark appearance, in one shared app run. The
 harness's `capture --keep-focus` parks the pointer, waits for idle, checks for machine details before and after the
-screenshot, crops the Linux window frame and checks the full picture's size. It leaves the shot's focus alone. Only a
-passing capture is cropped to the union of the page's region boxes, padded by 16 logical pixels, clamped to the window
-and scaled to image pixels. A failed shot writes no output and the engine continues to the next; `stop` runs at the end
-even after a failure.
+screenshot, crops the Linux window frame and checks the full picture's size. The Linux engine asks its private Mutter
+for the scenario's scale so GPUI renders the 1600x1000-point viewport as 3200x2000 pixels. Capture leaves focus alone.
+Only a passing capture is cropped to the union of the page's region boxes, padded by 16 logical pixels, clamped to the
+window and scaled to image pixels. A failed shot writes no output and the engine continues to the next; `stop` runs at
+the end even after a failure.
 
 ## Where the images live
 
@@ -65,34 +65,41 @@ capture. This preserves one identifiable UI version across the published set.
 
 ## Release shots are frozen
 
-A release shot is one listed by `website/src/release-notes/*.json` and recorded as published in the manifest. It stays
-byte-identical in later publishes, copied from the pinned snapshot; recapturing from today's UI would misrepresent the
-release. A missing pinned image makes the publisher refuse rather than drop it.
+A release shot is frozen when `website/src/release-notes/*.json` lists it and `website/src/data/docs-shots.json` records
+it. The capture skips it even if its steps are still declared. The publisher carries its bytes over from the pinned
+snapshot and refuses a publish if the image is missing. Today's UI may no longer match the old release.
 
-The command retains validation of `--recapture-release-shot <name>` but refuses the capture: no page module captures
-release shots yet. Deliberate corrections and first captures for new releases need that support before they can run.
+For a deliberate correction, make sure the shot has steps in `scripts/docs-shots/release-notes.py`, then run
+`scripts/docs-screenshots.sh --local --recapture-release-shot release-notes/v<X-Y-Z>-<what>`. The full run records the
+exception in `capture.json`. Add `--only release-notes` to preview a correction before the full run.
 
 ## Adding or changing a shot
 
 Create `scripts/docs-shots/<page>.py`, import `Shot` with `from docs_shots import Shot`, and define `SHOTS`, a list of
 `Shot(name, steps, regions, park=None)` values. `name` is lowercase kebab case and unique within the page. `steps` is a
-function taking the engine's bridge facade (`click`, `fill`, `press`, `wait`, `wait_text`); `regions` is a non-empty
-list of stable `id:` targets. The engine refuses missing SHOTS, bad or duplicate names, and empty or non-id regions
-before starting the app. Use the element IDs in the GPUI source, and wait for the state the shot needs rather than
-adding delays. Steps never launch a session or change a setting. The optional `park` is an `id:` target for a static
-spot that has no hover or tooltip reaction and stays clear of overlays; capture hovers it directly instead of searching.
+function taking the engine's bridge facade (`click`, `fill`, `type_into_focused`, `press`, `wait`, `wait_text`);
+`regions` is a non-empty list of stable `id:` targets. The engine refuses missing SHOTS, bad or duplicate names, and
+empty or non-id regions before starting the app. Use the element IDs in the GPUI source (`.id(...)`; a `debug_selector`
+name is not a target the bridge can see), and wait for the state the shot needs rather than adding delays. Steps never
+launch a session or change a setting. The optional `park` is an `id:` target for a static spot that has no hover or
+tooltip reaction and stays clear of overlays; capture hovers it directly instead of searching.
 
 Run `scripts/docs-screenshots.sh --local --only <page>` to develop that page. The engine resets layers before its steps,
 then captures and crops each shot. Inspect every successful image for the intended controls and machine details. A
 one-page capture cannot be published. Pages reference a shot with `<Screenshot name="<page>/<shot>" alt="…" />` in MDX;
 the alt text explains what the image shows.
 
+For release notes, add a `Shot` named `v<X-Y-Z>-<what>` to `scripts/docs-shots/release-notes.py`. List its full name,
+`release-notes/v<X-Y-Z>-<what>`, in `website/src/release-notes/vX.Y.Z.json`. For example, `v1-2-3-new-control` goes in
+`v1.2.3.json`. The listing also supplies the entry's PR number and alt text. Draft with `--only release-notes`, then run
+the full capture for publication. Add invented hosts, sessions or templates to `docs/docs-shots/scenario.json5` as
+needed, preserving the existing shots. For state the engine cannot stage yet, add the scenario fields and seed them
+before the shot steps run. Follow `stage_templates` in `scripts/docs_shots.py`, which calls the private helm's API.
+
 ## Refreshing
 
-Run `scripts/docs-screenshots.sh --mac <destination>` to capture at 2x, on a Mac whose display fits the scenario's
-window (the test Mac's fits only with the Dock hidden; `docs/gui-agent.md`, "On a Mac"). The command shares the README
-hero's SSH settings, preflight and Mac-wide lock. It checks Git provenance in the originating checkout and records the
-fetched images there. Use `--only <page>` to work on one page.
+Run `scripts/docs-screenshots.sh --local` on Linux for the full 2x capture and its `capture.json`. Use `--only <page>`
+to work on one page.
 
 For a bulk refresh, read UI changes since the manifest's `captured_from`, update the affected modules and page wording,
 capture every page, inspect the pictures, then publish and commit the manifest with the page changes. Published release

@@ -757,11 +757,12 @@ systemd or SSH substrate ran.
   without a body read as none, that a recorded pid whose start time no longer matches is never signalled (from /proc on
   Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by
   `stop` while part of the run may still be running, given up by a holder whose `start` was killed while it waited, and
-  a lock path that cannot be opened failing at once. Seconds; builds nothing and starts no app (the sshd tests start a
-  private sshd on 127.0.0.1); runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run
-  (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI
-  session of the same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the
-  bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
+  a lock path that cannot be opened failing at once), and on Linux the private scaling keyfile and cleanup of a
+  compositor that fails to start. Seconds; builds nothing and starts no app (the sshd tests start a private sshd on
+  127.0.0.1); runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then
+  `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the
+  same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the bridge's wiring
+  in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
@@ -782,12 +783,12 @@ systemd or SSH substrate ran.
   the scene list changes, or the golden manifest gains or loses a scene.
 - `python3 -B scripts/test-docs-shots.py` — the docs screenshot engine (`scripts/docs_shots.py`): page modules refused
   without SHOTS, with bad or duplicate shot names, or with empty or non-id regions or a non-id park target; crop unions
-  padded, clamped and scaled; and against a stand-in harness, failed captures leaving no output while later shots run,
-  and layer reset failing after six Escape presses. Seconds, no app or network. Run it when the engine or its page
-  modules change. The shell checks listed with the README hero also cover its capture command. A live
-  `scripts/docs-screenshots.sh --mac <destination> --only launch-templates` drives the staged GPUI app and fetches the
-  shots when the Mac's display fits the scenario's window (the test Mac's did not on 2026-11-17). On Linux `--local`
-  stops at the size check (scale 1); the run's retained messages and clean stop are the evidence.
+  padded, clamped to the content after the Linux frame crop, and scaled; a release declaration matched to its version's
+  listing, a published release shot skipped unless requested, and against a stand-in harness, failed captures leaving no
+  output while later shots run and layer reset failing after six Escape presses. Seconds, no app or network. Run it when
+  the engine or its page modules change. The shell checks listed with the README hero also cover its capture command.
+  Run `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and the complete capture record.
+  Inspect the images it prints. Use `--only <page>` for a focused live run.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run

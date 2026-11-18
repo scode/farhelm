@@ -12,8 +12,10 @@ release has a stable anchor named after its version, such as `/docs/release-note
 An entry can show screenshots of what it changed, behind a closed **show screenshot** link under the entry's text.
 `website/src/release-notes/<version>.json` (for example `website/src/release-notes/v0.25.0.json`) lists them, naming
 each entry by a pull request number the entry cites; the generator places them, and fails the build when no entry of
-that release cites the number. `CHANGELOG.md` and the GitHub release stay text only. The screenshots are ordinary docs
-shots: tests in `e2e/docs-shots/release-notes.spec.ts` named `release-notes/v<X-Y-Z>-<what>`, captured and published
-with every other shot until their first publish, after which they are frozen (`website/AGENTS.md`, "Published release
-notes are frozen"). Give a screenshot only to an entry whose change is visible: a new dialog or control, or a redesign,
-not a fix or behaviour a picture cannot show. Most entries get none, and a release with no visible change gets no file.
+that release cites the number. `CHANGELOG.md` and the GitHub release stay text only. Add a `Shot` named
+`v<X-Y-Z>-<what>` in `scripts/docs-shots/release-notes.py` and put its full name, `release-notes/v<X-Y-Z>-<what>`, in
+the listing for `vX.Y.Z`. On Linux, run `scripts/docs-screenshots.sh --local --only release-notes` while drafting, then
+`scripts/docs-screenshots.sh --local` for the full 2x capture that publication needs. The first publication freezes the
+shot (`website/AGENTS.md`, "Published release notes are frozen"). See `docs/docs-shots/SPEC.md`, "Adding or changing a
+shot", for staging more of the fleet. Give a screenshot only to an entry whose change is visible, such as a new dialog
+or control or a redesign. Most entries get none, and a release with no visible change gets no file.

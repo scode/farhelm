@@ -58,6 +58,9 @@ works and New container shows; such a run shares your systemd user manager and P
 It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
 whatever `start` had already taken, the lock included.
 
+On Linux, `--size` is in logical points. `--scale 1|2` selects the private compositor's output scale (default 1). A Mac
+run uses the real screen's scale.
+
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
 committed end-to-end smoke test built on them, and `scripts/gui-lifecycle.py` checks the Linux app's quit, relaunch,
@@ -220,13 +223,13 @@ once their connection is gone. The machine needs OpenSSH's `sshd`, `ssh` and `ss
 
 ## Scenario runs
 
-NOTE: Not everything a scenario says is staged yet. The viewport's `scale` is not applied, and the list's order is the
-app's own, not the file's (see "Pinned ages and folders" below). Sessions are created at the helm's default terminal
-size and resized when the window first attaches them; the old staging created them at the pane's measured size instead,
-because that first resize, landing while the replay was drawn, doubled the spinner line and lost a transcript line in
-its first captures. That probe is not ported, since the hero's transcripts fit 80x24 and its live runs replayed cleanly;
-if a capture shows a doubled spinner line or a missing transcript line, port it (pass the pane's `cols` and `rows` on
-each create, which the helm's create still takes).
+NOTE: On Linux a scenario sets the window's logical size, and the caller selects the output scale. The docs runner
+passes the scenario's scale to `start --scale`. The list follows the app's own order (see "Pinned ages and folders"
+below). Sessions are created at the helm's default terminal size and resized when the window first attaches them; the
+old staging created them at the pane's measured size instead, because that first resize, landing while the replay was
+drawn, doubled the spinner line and lost a transcript line in its first captures. That probe is not ported, since the
+hero's transcripts fit 80x24 and its live runs replayed cleanly; if a capture shows a doubled spinner line or a missing
+transcript line, port it (pass the pane's `cols` and `rows` on each create, which the helm's create still takes).
 
 `start --scenario FILE` stages the fleet a docs-media `scenario.json5` describes (`docs/readme-hero/SPEC.md` has what is
 staged and why, and the file's own comments say what each field does). It is how the README hero, the demo video and the
@@ -303,9 +306,9 @@ always uses this option. Without it the README hero's terminal settling stays as
 `--park id:TARGET` hovers the named spot instead of searching, fails if it is covered, and keeps the idle wait.
 
 Any failure stops with the step and the reason, writes nothing to OUT, and leaves the shot in the run directory to look
-at. A size failure quotes the window's points and scale: a window smaller than the viewport means the screen's usable
-area is too small for it (see "On a Mac"), and scale 1 means a Linux run, which renders on headless Mutter and so is for
-developing the staging and checking the picture's content, never for the picture.
+at. A size failure quotes the window's points and scale. A window smaller than requested means the screen's usable area
+is too small. On Linux, pass a `--size` that fits the window and the scenario's `--scale`. On a Mac the actual screen
+must fit (see "On a Mac").
 
 ## User-session runs
 
@@ -362,7 +365,8 @@ your session bus for, such as a desktop portal.
 Everything lives under the run directory: on Linux the compositor's runtime directory and Wayland socket, the bridge's
 state and socket (in a 0700 directory, because the socket is unauthenticated), the app's state directory, logs (`logs/`
 for Mutter, `agent/app/app.log` for the app) and `run.json`, which records what `stop` needs. The Wayland display name
-is random per run, so runs in different directories never meet.
+is random per run, so runs in different directories never meet. Only Mutter gets the private `mutter-config/` directory
+and its GSettings keyfile, which sets the output scale without touching desktop settings.
 
 The app is `farhelm-desktop` built with the `agent` cargo feature, which compiles the bridge in. It starts its helm and
 supervisor exactly as an installed app does, except that its state directory and its `farhelm` program are the run's
