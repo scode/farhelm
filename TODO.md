@@ -514,14 +514,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`crates/farhelm-helm/src/release_announcements.json`, where it is the only entry). Recorded by the maintainer on
   2026-11-18 from the plan's review. Plan: `plans/queue/retire-old-terminal-announcement.md`.
 
-- **Remove the leftover `.ci-tmux/` entry.** Until tmux-drop-from-tooling (#3377 to #3379), the test tooling built its
-  own pinned tmux into a `.ci-tmux/` directory in each checkout. That build is gone, but the plan kept `.ci-tmux/` in
-  `.gitignore` on purpose: existing checkouts still hold the old build there, and jj tracks new files on its own, so
-  without the entry a checkout's next snapshot could sweep a built tmux into a commit. `plans/.agents/close-reset.md`
-  also still lists `.ci-tmux/` among the build caches a reset keeps (that file changes only through a planning or
-  maintainer change). Delete the directory from the long-lived checkouts, then remove the `.gitignore` entry and the
-  close-reset mention. Recorded by the maintainer on 2026-11-18 from the plan's review.
-
 - **Open submenus on hover, as a general rule.** The shared submenu component
   (`crates/gui/farhelm-gui/src/components/submenu.rs`, first used by mute-sessions and reused by session-groups for Mute
   and Move to group) opens a submenu only on click, Enter or Right; while it is open its parent item loses its

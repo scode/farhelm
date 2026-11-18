@@ -29,12 +29,6 @@ e2e/readme-video/.stack-info.json
 e2e/docs-shots/.stack-info.json
 e2e/docs-shots/.fleet.json
 
-# Leftover of the removed pinned test tmux build, which existing checkouts may
-# still hold (a built tmux and its build tree). Nothing creates it any more and it
-# is safe to delete; it stays ignored so that jj, which tracks new files on its
-# own, never sweeps one into a commit.
-.ci-tmux/
-
 # Verified local tool binaries; release and CI jobs install into their temporary directory.
 .ci-nextest/
 .ci-cargo-deny/
