@@ -51,3 +51,17 @@ consequence unverified after investigation. No security or user-work-loss route 
 Provenance: trailing-review run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`; `g146/f1`. These are original reviewer
 identities for this concern, not additional bugs. Full revisions, withdrawals and independent verdicts remain in the
 private review evidence. No fix or triage decision was executed.
+
+### GPUI avatar corroboration
+
+The GUI migration's final whole-tree review at `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d` found the same grouping gap on
+the GPUI path. The avatar joins the identity with the current state in a SharedString, then uses the result as both
+tooltip and accessible button name. The expanded names and destinations use the host-text element separately. The rail
+tooltip itself has no equivalent direction isolation.
+
+Opus listed this as a minor observation. Source confidence is confirmed for the joined label; rendering with a
+right-to-left name is still unverified. No separate verification or bucket was supplied. Keep the item at other. Use
+separate direction isolates while preserving the full words and punctuation. Compare the tooltip with the expanded
+labels using an accepted RTL name and mixed-direction destination.
+
+Source references: `crates/gui/farhelm-gui/src/session_list/host_rail.rs:301, 672–676, 688–705`.

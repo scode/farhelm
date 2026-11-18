@@ -95,3 +95,21 @@ investigation.
 Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g068/l2`; supporting records
 `g070/l1`. The retained private log preserves earlier wording and its corrections. This record does not claim runtime
 reproduction.
+
+### Recipe snapshot-create route in the GUI migration review
+
+At `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d` the final whole-tree review identified a related recipe path: lose a
+snapshot-create reply while the provider continues work for a recipe builder or preparer. Recipe cleanup accepts
+termination and lists once, then clears the source sandbox ID. If the snapshot first becomes visible after that
+successful listing, it can remain untracked and possibly billable. Host Delete explicitly waits for termination before
+listing to include a snapshot still being written. That policy corroborates the ordering concern without establishing
+provider visibility.
+
+Sol rated this possible and noncritical. There is no independent provider verdict, so keep other. The
+lost-snapshot-create variant adds a route to the existing idle-suspend discussion. It still needs proof that the
+provider can publish a snapshot after both the terminate response and the successful list. Share the bounded wait and
+retain the source ID on an unconfirmed cleanup. Use a delayed-listing fake to verify Farhelm's behavior separately from
+the provider premise.
+
+Source references: `crates/farhelm-helm/src/tensorlake/build.rs:1620, 1693, 1707, 1731`,
+`crates/farhelm-helm/src/tensorlake/hosts.rs:614`.

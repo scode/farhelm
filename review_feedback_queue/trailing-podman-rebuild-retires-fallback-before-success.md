@@ -168,3 +168,20 @@ implicit user-base pruning route g061/l8/g058/c2.
 
 Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
 [g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l1`.
+
+### GUI migration review corroboration
+
+The GUI migration's final whole-tree review at `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d` traced the failed replacement
+from a recipe that previously launched successfully. After deleting its containers, edit the recipe to a missing base or
+unusable package and choose Rebuild. The job takes both current image records into retirement before starting. If
+replacement fails, its failure path tries retirement and never restores them. Even if Podman refuses physical removal
+(for instance because an owned child remains), fresh_image requires the two current records and does not select retired
+images, so the previous pair remains unusable.
+
+Sol rated this source-confirmed and noncritical. There was no further verification for this finding. High reflects loss
+of recipe launch availability. Preserve the known-good pair until a replacement is publishable, then retire its
+predecessors; verify that a failed Rebuild leaves the previous images usable. SPEC.md “Container sessions” and
+SPEC_impl.md's Podman build rules put retirement after successful replacement. The existing item already covers the
+failed-Rebuild route; this adds the distinction between losing a usable record and deleting the image itself.
+
+Source references: `crates/farhelm-helm/src/environment/podman/build.rs:248, 263, 275, 509`.

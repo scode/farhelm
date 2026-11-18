@@ -111,3 +111,22 @@ window. Other transport-failure routes need actual remote outcome knowledge and 
 
 Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
 [g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l4`.
+
+### GUI migration review corroboration
+
+At `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d`, Sol confirmed by source inspection that an interrupted image capture can
+prevent recipe deletion indefinitely. The pending image tag is durable before sending commit. Retirement accepts a
+missing immutable image ID but refuses to clear an absent tag, and the tag record supplies no completion evidence. The
+established case is interruption before dispatch. A lost SSH connection is another candidate only when it prevents the
+command from reaching Podman, or when its outcome can later be proved. If the remote commit might still finish, absence
+alone is insufficient.
+
+Sol rated this noncritical, with no separate verification verdict. Keep high for permanent recipe deletion failure and
+the existing place-administration consequence. Add trustworthy settlement for a definitely never-sent or finished
+commit, preserving durable ownership of unanswered commands. This remains distinct from cleanup trying an existing
+parent image before its owned child.
+
+Source references: `crates/farhelm-helm/src/environment/podman.rs:505–525` at the reviewed commit (main
+`crates/farhelm-helm/src/environment/podman.rs:532–552`),
+`crates/farhelm-helm/src/environment/podman/build.rs:694, 752, 783` at the reviewed commit (main
+`crates/farhelm-helm/src/environment/podman/build.rs:694, 760, 791`).

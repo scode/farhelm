@@ -38,3 +38,19 @@ source.
 Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g041/l3`; supporting records
 `g073/f5`, `g074/f4`, `g040/g041:l3`, `g049/iface_g073_f5`. The retained private log preserves earlier wording and its
 corrections. This record does not claim runtime reproduction.
+
+### GPUI response handling in the GUI migration review
+
+The final whole-tree review at `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d` confirmed the same missing-rows route in GPUI.
+After listing several leftovers, start cleanup on one and let the next discovery read fail while a cleanup row is still
+retained. The helm returns Ok(unfinished) with its reason attached to those rows. The new GUI's answered handler
+replaces its prior discovery list with that partial result at line 223, the corrected location. Other previously seen
+leftovers disappear until the next successful discovery.
+
+Sol rated this source-confirmed and noncritical; there was no additional verification verdict. Keep the existing high
+bucket for hiding outstanding resources and the earlier finding's repeated-read behavior. This addition confirms the row
+replacement in the new GUI and makes no new claim about repeated requests. SPEC.md lines 548–550 requires a failed read
+to keep the earlier rows. Report discovery status separately from the unfinished cleanup overlay so both can be shown.
+
+Source references: `crates/farhelm-helm/src/tensorlake/orphans.rs:116–134`,
+`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs:219–231`.

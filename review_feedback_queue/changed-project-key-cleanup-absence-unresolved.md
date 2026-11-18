@@ -132,3 +132,21 @@ attributed as a new builder root issue.
 Review provenance: trailing review run `dc410e54-098d-481c-be02-f2f9b4826f83`, canonical `g068/l4`; supporting records
 `g032/g032-l6`, `g032/g068:l4`, `g032/g073:f4`, `g073/f4`, `g065/r7`. The retained private log preserves earlier wording
 and its corrections. This record does not claim runtime reproduction.
+
+### Host deletion route in the GUI migration review
+
+The final whole-tree review at `1a5b4a1ff6b1deb4551cfaf064176cbb6e174b9d` rechecked the host-deletion variant. Save a
+valid key for a different Tensorlake project then choose Delete on an existing host. Deletion uses the latest key. If
+both terminate and its verification GET answer 404 for the foreign ID and the new project's snapshot list succeeds,
+deletion can return proof to remove the old host row and cached sessions. The original sandbox and snapshots would
+remain, potentially still billing. A 401 or 403 preserves the record.
+
+Sol's correction rates this possible and noncritical. It establishes key substitution and the absence branches by
+source, with no provider response verdict. Keep other pending the exact cross-project status and impact. This is the
+host counterpart of the recipe and orphan cleanup already described above. Bind ownership to project identity or retain
+the row unless absence is confirmed in the original scope, keeping rotation within a project supported. The spec permits
+key replacement and requires keeping the row until cleanup is confirmed. It does not establish the provider's foreign-ID
+response.
+
+Source references: `crates/farhelm-helm/src/tensorlake/config.rs:57`,
+`crates/farhelm-helm/src/tensorlake/hosts.rs:555, 610, 664`, `crates/farhelm-helm/src/hosts.rs:1389`.
