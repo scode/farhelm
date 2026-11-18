@@ -39,6 +39,7 @@
 //! The stillness deadline is the ticker's ([`ticker::after`]), replaced on every activity: dropping the previous one
 //! cancels it, so the one left is always 5 seconds from the last activity, with no clock read here.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -323,19 +324,27 @@ pub(super) fn display<'a>(held: &Held, served: &[Listed<'a>]) -> Vec<Listed<'a>>
         )
         .collect();
     if pins::manual_order(served) {
-        let original =
-            |session: &Listed| session.row.pinned && held.original_pins.contains(session.key);
-        let mut moved =
-            pins::pinned_first(shown.iter().copied().filter(original).collect()).into_iter();
-        for slot in shown.iter_mut() {
-            if original(slot)
-                && let Some(next) = moved.next()
-            {
-                *slot = next;
-            }
-        }
+        reorder_slots(
+            &mut shown,
+            |session| session.row.pinned && held.original_pins.contains(session.key),
+            pins::by_position,
+        );
     }
     shown
+}
+
+/// Let manual order through in the slots already held by surviving,
+/// manually ordered items. Every other item stays in its displayed slot.
+fn reorder_slots<T: Copy>(
+    shown: &mut [T],
+    movable: impl Fn(&T) -> bool,
+    order: impl Fn(&T, &T) -> Ordering,
+) {
+    let mut ordered: Vec<_> = shown.iter().filter(|item| movable(item)).copied().collect();
+    ordered.sort_by(order);
+    for (slot, item) in shown.iter_mut().filter(|item| movable(item)).zip(ordered) {
+        *slot = item;
+    }
 }
 
 #[cfg(test)]
