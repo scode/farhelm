@@ -348,6 +348,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Settings search.** support search in settings dialog.
 
+- **Drag sessions into groups.** Drag and drop any session, pinned or not, into a session group, out of one, or between
+  groups in the session list. The session groups plan adds groups with a row-menu "Move to group" action and lets only
+  pinned sessions cross between pin areas by dragging; this extends dragging to every row. Recorded by the maintainer on
+  2026-11-17 while planning session groups.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
@@ -377,13 +382,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Launcher models.** replace gpt-6.1-sol with gpt-6.2-sol as the models in the launcher, same with astra (6 to 6.2)
+- **Launcher models.** replace gpt-6.1-sol with gpt-6.2-sol as the models in the launcher, same with astra (6 to 6.2).
+  Plan: `plans/queue/launcher-gpt-6-2-models.md`.
 
 - **Session groups.** Let users group related sessions in the session list and collapse each group. Keep sessions
-  together as activity changes and show when a collapsed group contains a session that needs attention.
+  together as activity changes and show when a collapsed group contains a session that needs attention. Plan:
+  `plans/queue/session-groups.md`.
 
 - **Mute a session.** the ability to "mute" a session so it doesnt turn blue and doesn't promote as recent for a while
-  or permanently
+  or permanently. Plan: `plans/queue/mute-sessions.md`.
 
 ## Mid term
 
