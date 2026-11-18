@@ -1308,6 +1308,21 @@ fn a_popover_beside_a_row_under_the_title_bar_stays_below_the_bar() {
     );
 }
 
+/// A child menu may open on the left. Clamping it from the right would
+/// cover the parent and make its other controls hard to reach.
+#[test]
+fn a_submenu_near_the_right_edge_opens_to_the_left_of_its_trigger() {
+    assert_eq!(
+        layers::popover_origin(
+            Some(rect(1500., 300., 100., 24.)),
+            &layers::Placement::Submenu,
+            gpui::size(px(360.), px(200.)),
+            linux_content_area()
+        ),
+        point(px(1130.), px(296.)),
+    );
+}
+
 // ---- Layers: a popover as wide as its anchor, and one that never takes focus -----------------------------------------
 
 /// A floating list's content: a surface with a height but no width of its own, so it is as wide as its layer makes it,

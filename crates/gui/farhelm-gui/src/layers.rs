@@ -316,6 +316,9 @@ enum Kind {
     Popover {
         /// Where the anchor was last drawn.
         anchor: AnchorBounds,
+        /// Where the popover itself was drawn. An ancestor's outside
+        /// press must leave a click inside this surface to the child.
+        surface: AnchorBounds,
         placement: Placement,
         /// Whether it is exactly as wide as its anchor ([`Anchor::matching_width`]).
         matches_width: bool,
@@ -339,8 +342,8 @@ impl Kind {
     }
 }
 
-/// Where a popover sits against its anchor. Each but [`Placement::By`] is the old app's placement for the overlays that
-/// used it, and each is kept inside the window's content area by the same clamp ([`popover_origin`]).
+/// Where a popover sits against its anchor. Every placement uses the same
+/// content-area clamp ([`popover_origin`]).
 #[derive(Clone)]
 pub enum Placement {
     /// Below the anchor, left edges aligned, or above it when it would run off the content area's bottom and fits
@@ -360,6 +363,9 @@ pub enum Placement {
     /// content area instead and scrolls inside it (`session_list/menu.rs`, through `notices_bell::window_cap`), so a long
     /// refusal in it stays in reach.
     Beside,
+    /// Prefer the right of the parent item, with the left side available
+    /// when it has more room and the right would cover part of the menu.
+    Submenu,
     /// Wherever the anchor's owner says ([`Anchor::placed_by`]), asked as each frame is laid out ([`PlaceBy`] has the
     /// rule's inputs and what it may do). For an overlay whose rule needs its own measured size and facts only its
     /// owner knows. Its one caller is the terminal's drag-copy notice, which sits three terminal rows above or below
@@ -532,6 +538,14 @@ impl Anchor {
     pub fn beside(self) -> Anchor {
         Anchor {
             placement: Placement::Beside,
+            ..self
+        }
+    }
+
+    /// A child menu should stay beside its parent at a narrow window.
+    pub(crate) fn submenu(self) -> Anchor {
+        Anchor {
+            placement: Placement::Submenu,
             ..self
         }
     }
@@ -921,6 +935,7 @@ impl Anchor {
     fn kind(&self, passes_pointer: bool) -> Kind {
         Kind::Popover {
             anchor: self.bounds.clone(),
+            surface: Rc::new(Cell::new(None)),
             placement: self.placement.clone(),
             matches_width: self.matches_width,
             passes_pointer,
@@ -1271,15 +1286,7 @@ enum CloseCause {
 /// returns no focus swallows nothing, which is always so for `Left`.
 fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
     close_taking(why, window, cx, |layers| {
-        let index = layers.iter().position(|layer| layer.id == id)?;
-        // A parent always sits below the layers opened from it, so one pass up from `id` finds every descendant: each
-        // layer whose parent is already closing.
-        let mut closing = vec![id];
-        for layer in &layers[index + 1..] {
-            if layer.parent.is_some_and(|parent| closing.contains(&parent)) {
-                closing.push(layer.id);
-            }
-        }
+        let closing = layer_branch(layers, id)?;
         // `extract_if` keeps stack order on both sides: the layers left keep theirs, and the closed ones come out bottom
         // to top, as `close_taking` reads them.
         Some(
@@ -1288,6 +1295,38 @@ fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
                 .collect(),
         )
     });
+}
+
+/// The layer and its descendants in stack order. A parent always sits
+/// below the layers it opened, so one pass finds the whole branch.
+fn layer_branch(layers: &[Layer], id: LayerId) -> Option<Vec<LayerId>> {
+    let index = layers.iter().position(|layer| layer.id == id)?;
+    let mut branch = vec![id];
+    for layer in &layers[index + 1..] {
+        if layer.parent.is_some_and(|parent| branch.contains(&parent)) {
+            branch.push(layer.id);
+        }
+    }
+    Some(branch)
+}
+
+/// GPUI sends outside-press capture to a parent even for a press on a
+/// submenu beside it. Only a drawn descendant that takes the pointer
+/// makes that position part of the parent's interactive menu tree.
+fn on_descendant_popover(id: LayerId, position: Point<Pixels>, window: &Window, cx: &App) -> bool {
+    let Some(stack) = stack(window, cx) else {
+        return false;
+    };
+    let layers = &stack.read(cx).layers;
+    let Some(branch) = layer_branch(layers, id) else {
+        return false;
+    };
+    layers.iter().any(|layer| {
+        layer.id != id
+            && branch.contains(&layer.id)
+            && matches!(&layer.kind, Kind::Popover { surface, passes_pointer: false, .. }
+                if surface.get().is_some_and(|bounds| bounds.contains(&position)))
+    })
 }
 
 /// Take the layers `take` picks out of `window`'s stack, then return focus as the lowest of them that took it says, or
@@ -2104,6 +2143,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             }
             Kind::Popover {
                 anchor,
+                surface,
                 placement,
                 matches_width,
                 ..
@@ -2134,13 +2174,15 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                             let on_anchor = pressed
                                 .get()
                                 .is_some_and(|bounds| bounds.contains(&event.position));
-                            if !on_anchor {
+                            if !on_anchor && !on_descendant_popover(id, event.position, window, cx)
+                            {
                                 close_as(id, why, window, cx);
                             }
                         })
                 });
                 PlacedPopover {
                     anchor: anchor.clone(),
+                    surface: surface.clone(),
                     placement: placement.clone(),
                     matches_width: *matches_width,
                     child: content.into_any_element(),
@@ -2232,6 +2274,7 @@ pub(crate) fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
 /// other frame followed).
 struct PlacedPopover {
     anchor: AnchorBounds,
+    surface: AnchorBounds,
     placement: Placement,
     matches_width: bool,
     child: AnyElement,
@@ -2272,6 +2315,18 @@ pub(crate) fn popover_origin(
     let mut origin = match (anchor, placement) {
         (Some(anchor), Placement::Beside) => {
             point(anchor.right() + BESIDE_GAP, anchor.top() - BESIDE_RISE)
+        }
+        (Some(anchor), Placement::Submenu) => {
+            let right = anchor.right() + BESIDE_GAP;
+            let left = anchor.left() - BESIDE_GAP;
+            let right_room = area.right() - right;
+            let left_room = left - area.left();
+            let x = if right_room < size.width && left_room > right_room {
+                left - size.width
+            } else {
+                right
+            };
+            point(x, anchor.top() - BESIDE_RISE)
         }
         (Some(anchor), Placement::Below) => {
             let below = anchor.bottom() + POPOVER_GAP;
@@ -2364,13 +2419,17 @@ impl Element for PlacedPopover {
         if child.is_some() {
             // Laid out at this element's own place: move it by the difference.
             let offset = origin - bounds.origin;
-            window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
-                self.child.prepaint(window, cx)
-            });
+            let offset = point(offset.x.round(), offset.y.round());
+            self.surface.set(Some(Bounds {
+                origin: bounds.origin + offset,
+                size,
+            }));
+            window.with_element_offset(offset, |window| self.child.prepaint(window, cx));
         } else {
             // Laid out as a root of its own, at no place: put it at its window position.
-            self.child
-                .prepaint_at(point(origin.x.round(), origin.y.round()), window, cx);
+            let origin = point(origin.x.round(), origin.y.round());
+            self.surface.set(Some(Bounds { origin, size }));
+            self.child.prepaint_at(origin, window, cx);
         }
     }
 

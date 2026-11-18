@@ -41,8 +41,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
-    prelude::FluentBuilder as _, px, svg,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled, Transformation,
+    Window, div, prelude::FluentBuilder as _, px, radians, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -61,7 +61,7 @@ const LINE_HEIGHT: f32 = 16.8;
 const DESCRIPTION_SIZE: f32 = 11.;
 
 /// One command in a menu. See the module docs.
-#[derive(IntoElement)]
+#[derive(Clone, IntoElement)]
 pub struct MenuItem {
     id: SharedString,
     /// `None` for a choice that is not the chosen one: an empty slot as wide as an icon, so labels line up.
@@ -77,6 +77,8 @@ pub struct MenuItem {
     /// Whether this command is one of a set of choices in force ([`MenuItem::checked`]), and then whether it is the
     /// one in force.
     checked: Option<bool>,
+    /// A submenu trigger has the usual menu activation plus Right.
+    submenu_expanded: Option<bool>,
     help: HoverHelp,
     role: Role,
     danger: bool,
@@ -105,6 +107,7 @@ impl MenuItem {
             suffix: None,
             chosen: None,
             checked: None,
+            submenu_expanded: None,
             help,
             role,
             danger: false,
@@ -198,6 +201,13 @@ impl MenuItem {
         self.focus = Some(handle.clone());
         self
     }
+
+    /// Show the disclosure chevron and expose whether the child menu is open.
+    /// The same callback handles pointer and keyboard activation.
+    pub(super) fn submenu_trigger(mut self, expanded: bool) -> Self {
+        self.submenu_expanded = Some(expanded);
+        self
+    }
 }
 
 impl RenderOnce for MenuItem {
@@ -224,6 +234,7 @@ impl RenderOnce for MenuItem {
         };
         let handler = self.on_click.clone().filter(|_| enabled);
         let key_handler = handler.clone();
+        let submenu_handler = handler.clone().filter(|_| self.submenu_expanded.is_some());
         let highlight = focus.clone();
 
         // A choice keeps its label (and any suffix) to one line, cut with an ellipsis: the list is as wide as its
@@ -294,6 +305,19 @@ impl RenderOnce for MenuItem {
                 )
             })
             .child(copy)
+            .when_some(self.submenu_expanded, |item, expanded| {
+                item.aria_expanded(expanded).child(div().flex_1()).child(
+                    svg()
+                        .path(Icon::ChevronDown.path())
+                        .size(px(12.))
+                        .flex_none()
+                        .mt(px(2.))
+                        .text_color(theme::color(icon_ink))
+                        .with_transformation(Transformation::rotate(radians(
+                            -std::f32::consts::FRAC_PI_2,
+                        ))),
+                )
+            })
             .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))
             .when_some(self.checked, |item, checked| {
                 item.aria_toggled(if checked {
@@ -339,6 +363,16 @@ impl RenderOnce for MenuItem {
         // one hover listener per element and the item's own is its tooltip's.
         div()
             .id(ElementId::Name(format!("{}-highlight", self.id).into()))
+            .on_key_down(move |event, window, cx| {
+                if event.keystroke.key == "right"
+                    && !event.keystroke.modifiers.modified()
+                    && !event.is_held
+                    && let Some(open) = &submenu_handler
+                {
+                    cx.stop_propagation();
+                    open(&ClickEvent::default(), window, cx);
+                }
+            })
             .on_hover(move |hovered, window, cx| {
                 if *hovered {
                     focus::highlight(&highlight, window, cx);
