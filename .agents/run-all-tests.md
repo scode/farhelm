@@ -234,9 +234,11 @@ passes, land it without waiting for unrelated work.
 The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
 prepares rootless Podman, starts the runner's systemd user manager, exports its bus environment and verifies a transient
 user scope before caching the exact Ubuntu digest. Loopback SSH, the distribution's tmux, musl build tools and the GPUI
-app's build packages are also ready before the workspace selection, and the desktop app's tests run after it. The
-focused nextest setup builds the same-source installer payload before cargo-dist has produced a release artifact. The
-real recipe's network bootstrap is part of the gate.
+app's build packages are also ready before the workspace selection, and the desktop app's tests run after it. The GPUI
+end-to-end smoke follows the desktop tests on x86_64 Linux. It builds the app with the automation bridge and runs under
+headless Mutter with software rendering, recording evidence alongside the other release tests. The focused nextest setup
+builds the same-source installer payload before cargo-dist has produced a release artifact. The real recipe's network
+bootstrap is part of the gate.
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):

@@ -241,9 +241,8 @@
   # xkbcommon through pkg-config in their build scripts. `libglib2.0-dev` is
   # here for the desktop app's step further down, which compiles GIO (the app
   # opens saved downloads through it), whose -sys crates resolve GLib the same
-  # way. Wayland and Vulkan are loaded at run time and need nothing here, and
-  # the GUI's tests run on GPUI's test platform with bundled fonts, never a
-  # display.
+  # way. The in-process tests use GPUI's test platform with bundled fonts.
+  # The smoke opens a real Wayland window and has its own runtime packages.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: sudo apt-get install -y pkg-config libfontconfig-dev libxkbcommon-dev libglib2.0-dev
 
@@ -262,17 +261,15 @@
   # (`.agents/validation.md`): its tests are a selection of their own there,
   # and here in "Test the desktop app" below.
   #
-  # ONE BUILD FOR EVERY RUST STEP. Every later Rust test in
-  # this job (the doctests here, the CentOS leg)
-  # uses this same `--workspace --exclude farhelm-desktop` selection and picks
-  # its tests with a filter too. Cargo resolves features once per command from
-  # the packages that command selects, so a narrower `-p` or `--exclude` turns
+  # ONE BUILD FOR THE WORKSPACE RUST TESTS. The doctests use the same
+  # `--workspace --exclude farhelm-desktop` selection. Cargo unifies features
+  # across the selected packages, so a narrower `-p` or `--exclude` can turn
   # off features in shared crates (syn, serde, tracing and their like) and
   # everything above them is compiled again: the old split into per-package
   # commands spent about six minutes of every tag build recompiling crates
   # this step had just built. Keep the selection identical when adding a
-  # step; narrow with `-E` instead. The one exception is "Test the desktop
-  # app", whose crate this selection leaves out: its `-p farhelm-desktop`
+  # workspace test step and narrow with `-E`. "Test the desktop app" covers
+  # the crate this selection leaves out: its `-p farhelm-desktop`
   # recompiles 57 crates on top of this build (measured 2026-11-16).
   # The Podman module's scoped setup additionally builds a native musl CLI
   # payload for the ordinary installer inside its Ubuntu container. That
@@ -305,6 +302,32 @@
       --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
       --output-root "$RUNNER_TEMP/test-run-evidence" \
       -- cargo test --locked --doc -p farhelm-desktop -- --show-output --test-threads=4
+
+- name: Install the GPUI smoke's runtime packages
+  # Mutter provides the headless Wayland display. The harness starts it with
+  # dbus-run-session (from dbus-daemon) to give the app and supervisor a bus
+  # separate from the runner's Podman setup. The harness checks for both of
+  # Mesa's driver manifests before launching the app. The build packages
+  # above already supply fontconfig and its system font dependencies. The
+  # smoke builds the debug desktop app with its automation bridge, which links
+  # GPUI's X11 backend too, so it also needs the xcb and xkbcommon-x11
+  # development libraries (the gate's first rehearsal failed to link without
+  # them).
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: sudo apt-get install -y mutter dbus-daemon mesa-vulkan-drivers libegl-mesa0 libxcb1-dev libxkbcommon-x11-dev
+
+- name: Run the GPUI app end-to-end smoke
+  # The smoke needs an agent-enabled desktop executable and a gpui-agent CLI
+  # in addition to the binaries built by the workspace tests. Let the harness
+  # build in the same Cargo target directory so it can reuse matching outputs.
+  # The smoke's second app launch reuses the binaries from its first launch.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    python3 scripts/record-test-run.py \
+      --kind release --selection 'GPUI app end-to-end smoke' \
+      --concurrency 'one app run, steps in order; one step starts and stops a second run' \
+      --termination-grace 30 --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- python3 -B scripts/gui-e2e-smoke.py
 
 - name: Run the OMP reporter asset scenarios
   # The injected OMP asset's own execution proof — dispatch ordering, stale-id
