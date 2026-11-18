@@ -728,6 +728,65 @@ async fn incomplete_session_rows_are_listed_and_refuse_rowless_cleanup() {
     );
 }
 
+/// Two SSH entries can reach the same Podman storage. The second route must
+/// neither offer a recorded container as an orphan nor send `rm` for it, even
+/// if the container now has a different name than the one reserved at create.
+#[farhelm_testtrace::test]
+async fn a_second_ssh_route_cannot_list_or_delete_a_recorded_container_as_an_orphan() {
+    let (_directory, provider, commands, place) = fixture().await;
+    let store = &provider.0.store;
+    let second = store
+        .add_ssh_host("second.example", None, None)
+        .await
+        .unwrap();
+    provider.0.places.fresh(store, second).await.unwrap();
+    let host = store
+        .register_session_container(crate::store::NewPodmanHost {
+            name: "farhelm-sess-original".into(),
+            recipe: "dev".into(),
+            place_host: place,
+            user: "ubuntu".into(),
+            home: "/home/ubuntu".into(),
+            uid: 1000,
+        })
+        .await
+        .unwrap();
+    assert!(store.set_podman_container_id(host, ID).await.unwrap());
+    commands.model.lock().unwrap().exists = true;
+    for route in [place, second] {
+        let owned = provider.list_owned(Place::PodmanHost(route)).await.unwrap();
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].id, ID);
+        assert_eq!(owned[0].name, "farhelm-sess-test");
+    }
+
+    let listed = provider.leftovers().await.unwrap();
+    // The first route still offers it once, as the host's own (row-backed) leftover, so hiding it from the twin does
+    // not hide it everywhere.
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].place, Place::PodmanHost(place));
+    assert_eq!(listed[0].host, Some(host));
+    let deletion = provider.delete_leftover(second, ID).await;
+    let sent_rm = commands
+        .model
+        .lock()
+        .unwrap()
+        .commands
+        .iter()
+        .any(|argv| is_podman(argv, "rm"));
+    assert!(
+        !listed
+            .iter()
+            .any(|row| row.place == Place::PodmanHost(second)),
+        "the second SSH place listed the container, delete returned {deletion:?}, rm sent: {sent_rm}"
+    );
+    assert!(!sent_rm, "orphan deletion must leave the container intact");
+    assert_eq!(
+        deletion.unwrap_err().to_string(),
+        "this container belongs to a host or recipe on this helm; delete it there"
+    );
+}
+
 /// Catalog deletion closes the same registry used by lazy preparation and
 /// Rebuild. Cancellation waits for an admitted command boundary instead of
 /// aborting a task while its provider mutation may still be running.
