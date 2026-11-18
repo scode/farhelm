@@ -1,82 +1,10 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-13T14:11:23Z",
-  "captured_from": "00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db",
-  "commit": "e690cadea24e3b5a94ca647c476919396e657821",
+  "captured_at": "2026-11-18T14:22:04Z",
+  "captured_from": "f5b1f7da3e4e6c0c014be0828fa51c123a19f364",
+  "commit": "3500239241dc0e2a53656f5a3ee9db2272aef825",
   "shots": {
-    "add-a-remote-host/add-button": {
-      "height": 596,
-      "width": 746
-    },
-    "add-a-remote-host/add-dialog": {
-      "height": 1380,
-      "width": 1754
-    },
-    "add-a-remote-host/connected-host": {
-      "height": 310,
-      "width": 1364
-    },
-    "add-a-remote-host/setup-plan": {
-      "height": 2328,
-      "width": 1772
-    },
-    "first-session/running-session": {
-      "height": 602,
-      "width": 1702
-    },
-    "first-session/statuses": {
-      "height": 608,
-      "width": 1364
-    },
-    "first-session/this-machine": {
-      "height": 484,
-      "width": 746
-    },
-    "launch-templates/applied": {
-      "height": 428,
-      "width": 1802
-    },
-    "launch-templates/apply": {
-      "height": 560,
-      "width": 1800
-    },
-    "launch-templates/edit-form": {
-      "height": 1350,
-      "width": 1796
-    },
-    "launch-templates/panel": {
-      "height": 1170,
-      "width": 1844
-    },
-    "launch-templates/save-as-template": {
-      "height": 926,
-      "width": 1860
-    },
-    "launch-templates/templates-button": {
-      "height": 488,
-      "width": 604
-    },
-    "manage-hosts/app-settings": {
-      "height": 1812,
-      "width": 1802
-    },
-    "manage-hosts/details": {
-      "height": 688,
-      "width": 1424
-    },
-    "manage-hosts/host-menu": {
-      "height": 770,
-      "width": 1860
-    },
-    "manage-hosts/host-settings": {
-      "height": 2838,
-      "width": 1594
-    },
-    "manage-hosts/remove-dialog": {
-      "height": 1044,
-      "width": 1024
-    },
     "release-notes/v0-25-0-feedback-contact": {
       "height": 774,
       "width": 1520
@@ -357,97 +285,13 @@
       "height": 452,
       "width": 1728
     },
-    "session-list/controls": {
-      "height": 1160,
-      "width": 1652
+    "release-notes/v0-41-0-session-groups": {
+      "height": 529,
+      "width": 1024
     },
-    "session-list/row": {
-      "height": 744,
-      "width": 1486
-    },
-    "session-list/row-menu": {
-      "height": 1072,
-      "width": 1860
-    },
-    "session-list/statuses": {
-      "height": 646,
-      "width": 1364
-    },
-    "session-list/trash-button": {
-      "height": 282,
-      "width": 1080
-    },
-    "session-list/trash-dialog": {
-      "height": 1616,
-      "width": 1424
-    },
-    "start-a-session/checkout-setup": {
-      "height": 1020,
-      "width": 1860
-    },
-    "start-a-session/destination": {
-      "height": 1376,
-      "width": 2272
-    },
-    "start-a-session/effort-and-permissions": {
-      "height": 982,
-      "width": 2542
-    },
-    "start-a-session/harness-and-model": {
-      "height": 640,
-      "width": 2542
-    },
-    "start-a-session/host-menu": {
-      "height": 740,
-      "width": 1862
-    },
-    "start-a-session/host-yolo-setting": {
-      "height": 1024,
-      "width": 1544
-    },
-    "start-a-session/launch-button": {
-      "height": 566,
-      "width": 1832
-    },
-    "start-a-session/new-button": {
-      "height": 370,
-      "width": 1348
-    },
-    "start-a-session/recent-setups": {
-      "height": 720,
-      "width": 1800
-    },
-    "start-a-session/search": {
-      "height": 722,
-      "width": 1800
-    },
-    "start-a-session/search-name": {
-      "height": 352,
-      "width": 1800
-    },
-    "start-a-session/yolo-confirmation": {
-      "height": 778,
-      "width": 1860
-    },
-    "stop-restart-resume/header-actions": {
-      "height": 1020,
-      "width": 1536
-    },
-    "stop-restart-resume/row-menu": {
-      "height": 1142,
-      "width": 1860
-    },
-    "work-in-a-session/download-hover": {
-      "height": 432,
-      "width": 1530
-    },
-    "work-in-a-session/header": {
-      "height": 382,
-      "width": 1322
-    },
-    "work-in-a-session/tabs": {
-      "height": 384,
-      "width": 614
+    "release-notes/v0-41-0-session-mute": {
+      "height": 366,
+      "width": 924
     }
   }
 }
