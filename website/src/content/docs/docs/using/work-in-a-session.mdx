@@ -10,8 +10,11 @@ terminal yourself, and everything it prints shows up here. Farhelm does not sit 
 
 ## Session details and actions
 
-The slim bar under the terminal shows the session's name and host, followed by its age, directory, and command. The host
-has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are working.
+The slim bar under the terminal shows the session's status, name and host, followed by its age, directory, and command.
+The host has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are
+working. A session in a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) also has a branch
+mark after its age, naming its repository; hover it to see where the checkout is and what happens when you delete the
+last session using it.
 The **Sessions** section in Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to
 match its host.
 Click the directory or command to copy it; your home directory appears as `~`.
@@ -40,7 +43,10 @@ shortcuts.
 
 Selecting text copies it. Some agents take over the mouse for their own interface, and then a plain drag does not select
 anything; hold Option while you drag (Shift on Linux) to select anyway. When a drag copies nothing, Farhelm shows a
-hint a few rows above where you let go, or below when there is no room above.
+hint a few rows above where you let go, or below when there is no room above. A quick Option-click on a Mac (Alt-click
+on Linux) moves the program's cursor to where you clicked, in programs such as shells that let you edit the line you are
+typing. Paste with Cmd+V on a Mac, or Ctrl+Shift+V or Shift+Insert on Linux;
+[Keyboard shortcuts](/docs/using/keyboard-shortcuts/#terminal) has the terminal's other keys.
 Farhelm removes escape characters from pasted text so a paste cannot end early and type the rest as keystrokes; other
 control characters, such as Ctrl-C, still reach the program.
 
@@ -76,7 +82,8 @@ the next line near the terminal's right edge works from either half. Programs ca
 under their own text. Directories and files over 100 MB cannot be downloaded. Check the host and path before clicking:
 an agent's path can name any file its account can read on that host.
 
-The terminal keeps at least the last 10,000 lines for scrolling back. How much of that history survives a restart is in
+The terminal keeps at least the last 10,000 lines for scrolling back with the wheel, the scrollbar, or Shift+PageUp and
+Shift+PageDown; typing returns it to the live screen. How much of that history survives a restart is in
 [What survives what](/docs/how-it-works/what-survives-what/). A few things still work differently from other terminals,
 such as typing with an input method;
 [New terminals](/docs/using/new-terminals/#what-is-different-from-old-terminals) lists them.
@@ -113,6 +120,10 @@ with details below. The view reattaches by itself when the connection is back. T
 away when the connection from your window dropped; when the host itself is unavailable, the card instead shows any
 steps needed to reach it again. What keeps running during an outage is covered in
 [What survives what](/docs/how-it-works/what-survives-what/).
+
+A terminal that stops and will not come back by itself, because your window fell too far behind its output or the
+connection was refused, keeps its last screen under a red line that says why, with a **Reconnect** button that attaches
+it again.
 
 ## Next
 

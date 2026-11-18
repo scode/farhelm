@@ -16,7 +16,8 @@ window instead.
 
 If the host takes more than about two seconds to answer, a small status at the bottom of the window shows the host's
 name and how many seconds you have been waiting. You can keep working in other sessions meanwhile. If the launch fails
-or needs an answer from you, the launcher comes back with your choices.
+or needs an answer from you, the launcher comes back with your choices. If you have moved on by then, a banner across
+the top of the window says so instead, and its **Open launcher** brings the launcher back.
 
 ## The launcher at a glance
 
@@ -77,7 +78,8 @@ before the command it builds for that agent; [Agent wrappers](/docs/agents/agent
 must pass through and when to use a custom command instead.
 
 NOTE: The launcher remembers the permissions of your last launch from its **Agent** tab and the last wrapper prefix
-used with each agent. After one YOLO launch, the next launcher opens on **YOLO** too;
+used with each agent. After you launch with **YOLO** chosen for an agent whose default is not YOLO, the next launcher
+opens on **YOLO** too;
 **Custom** flags are never remembered this way. Launches
 your agents start, custom commands, and plain **Replace** do not change what it remembers.
 
@@ -190,10 +192,10 @@ You can also [combine templates from the keyboard](/docs/using/launch-templates/
 Cmd+X on a Mac, or Ctrl+Shift+X on Linux, then their number keys and Enter. Later templates override earlier
 choices, so a project setup can be combined with a different agent.
 
-While New, Clone, Replace with or Restart with is open, those same shortcuts apply templates to the current draft instead of starting
-a session. You can stack several presses, then review the choices before pressing **Launch**. The sequence prefix works
-in the launcher's text fields when no text is selected; with text selected, the keys keep their usual meaning, such as
-Cut on a Mac.
+While New, Clone, Replace with or Restart with is open, the **⚡**, number and sequence shortcuts apply templates to the
+current draft instead of starting a session; the template list's shortcut does nothing there. You can stack several
+presses, then review the choices before pressing **Launch**. The sequence prefix works in the launcher's text fields
+when no text is selected; with text selected, the keys keep their usual meaning, such as Cut on a Mac.
 
 ## Start from a managed checkout
 

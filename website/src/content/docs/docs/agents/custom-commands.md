@@ -35,10 +35,10 @@ too. A missing command prints Bash's error in the session's terminal and leaves 
   answer, and asks you to [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask.
   An agent cannot give this answer for you, so an agent cannot start a command at all on a host that asks before YOLO
   launches ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
-- **Agent type**, optional: the agent the command ends up running. Leave it empty for anything that is not one of the
-  agents Farhelm knows.
-- **Resume**, and the **Resume command** it reveals: how to start the command again on the same conversation, so the
-  session can be restarted.
+- **Agent type**, optional: the agent the command ends up running. Leave it at **None** for anything that is not one of
+  the agents Farhelm knows.
+- **Resume**, which appears once you declare an agent type, and the **Resume command** it reveals: how to start the
+  command again on the same conversation, so the session can be restarted.
 
 ## Declaring the agent
 
@@ -81,7 +81,7 @@ Each agent's own page notes anything its custom commands need beyond this, such 
 ## Opening links
 
 Commands in remote sessions can open links in your browser when they open them through the `BROWSER` environment
-variable, as most programs do. Your own browser setting wins; see
+variable, as most programs do. A `BROWSER` you set yourself wins; see
 [Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) for approvals
 and the limitations of remote login callbacks. A command can ask explicitly with `farhelm agent open-url -- <url>`.
 

@@ -180,7 +180,7 @@ const pillars = (p) => [
   {
     title: "Sessions outlive everything",
     lines: [
-      "Quit Farhelm. Restart the control plane.",
+      "Quit Farhelm. Restart a host's supervisor.",
       "Reboot the box the agent runs on.",
       "It comes back where it left off.",
     ],
@@ -190,7 +190,7 @@ const pillars = (p) => [
   },
   {
     title: "Every host, one screen",
-    lines: ["Your Mac plus any number of Linux boxes,", "all in one list, in one window."],
+    lines: ["Your Mac plus any number of Linux boxes", "and Macs, all in one list, in one window."],
     icon: `<rect x="3" y="6" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <rect x="23" y="6" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <rect x="13" y="26" width="14" height="10" rx="2" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
@@ -430,7 +430,7 @@ function howItWorksSvg(p) {
   ${remoteBox(p, boxX, box2Y, fleet[1])}
   <text x="${lapX + 200}" y="${lapY + 300}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">your laptop: the helm, its UI, and a local supervisor</text>
   <text x="${lapX + 200}" y="${lapY + 320}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">every host's sessions in one list, one real terminal</text>
-  <text x="${boxX + 125}" y="${H - 28}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">any Linux box you can ssh to:</text>
+  <text x="${boxX + 125}" y="${H - 28}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">any Linux box or Mac you can ssh to:</text>
   <text x="${boxX + 125}" y="${H - 10}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">a supervisor that owns its sessions' terminals</text>
 </svg>
 `;

@@ -10,9 +10,11 @@ sidebar:
 If you use Tensorlake, decide what to keep before quitting Farhelm or uninstalling. To remove its cloud resources,
 [delete your sandbox hosts](/docs/using/tensorlake-sandboxes/#delete-a-sandbox), then
 [delete their recipes](/docs/using/tensorlake-sandboxes/#build-or-rebuild-a-snapshot) in Settings → **Recipes** to
-delete the recipes' prepared snapshots too. Check **Sandboxes not on this helm** for resources left outside your host
-list. You can knowingly keep resources instead, but running sandboxes and stored snapshots continue to bill; suspending
-a sandbox still leaves snapshot storage charges. Keep Farhelm's local state if you keep cloud resources.
+delete the recipes' prepared snapshots too. Check
+[**Sandboxes not on this helm**](/docs/using/tensorlake-sandboxes/#sandboxes-not-on-this-helm) in Settings →
+**Tensorlake** for resources left outside your host list. You can knowingly keep resources instead, but running
+sandboxes and stored snapshots continue to bill; suspending a sandbox still leaves snapshot storage charges. Keep
+Farhelm's local state if you keep cloud resources.
 
 First stop your sessions on your Mac, which also closes their terminal tabs, then quit Farhelm. Uninstalling does not
 stop sessions or check for them, and a session left running afterwards loses the `farhelm` command and its connection to
@@ -69,3 +71,22 @@ Use **Delete container** to remove [container environments](/docs/agents/contain
 Tensorlake hosts have **Delete sandbox** instead. That permanently deletes the whole sandbox, including its files,
 sessions and snapshots, even if sessions are running. Deletion needs the Tensorlake API, not a connection to the host;
 see [Delete a sandbox](/docs/using/tensorlake-sandboxes/#delete-a-sandbox).
+
+## Services from an earlier Linux setup
+
+Earlier releases had a `farhelm helm setup` command that set up services running Farhelm on a Linux machine. That
+command is gone, and uninstalling does not stop or remove the services it set up: they keep running the `farhelm` they
+were set up with. The helm service fails to start once that `farhelm` is updated or removed, and the supervisor service
+once it is removed. While its helm service runs, the Farhelm app on that machine refuses to open, saying Farhelm appears
+to be already open, so remove the services first.
+
+They are `farhelm-helm.service` and usually `farhelm-supervisor.service`, in `~/.config/systemd/user`, and each file
+starts with the line `# managed-by: farhelm helm setup`. To remove one, run this shell command with its name, then
+delete its file:
+
+```sh
+systemctl --user disable --now farhelm-helm.service
+```
+
+On a Linux host you added to your list of hosts, the supervisor service belongs to Farhelm's host list instead, and
+[updating the host](/docs/using/manage-hosts/#update-a-host) replaces it.

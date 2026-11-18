@@ -1,6 +1,6 @@
 ---
 title: Read the session list
-description: What each session status means, and how to find the session you want.
+description: What each session status means, how to find the session you want, and how to pin, group and mute sessions.
 sidebar:
   order: 3
 ---
@@ -19,10 +19,10 @@ Farhelm saw the agent switch modes.
 Hover over the session's name or the open area of its row to see its full title, host, directory, start time and last
 activity in one summary; the marks keep their own explanations.
 
-A branch mark means the session uses a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
-a clone Farhelm made for a session. Its repository appears where other rows show a directory. With **Compact** ticked,
-the branch mark follows the session's name instead. Hover it to see the full directory and what happens when you delete
-the last session using it. The same mark appears beside the directory in the bar under an open session's terminal.
+For a session that uses a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), a clone
+Farhelm made for a session, the summary also names its repository and checkout. Once the session is open, a branch mark
+in [the bar under its terminal](/docs/using/work-in-a-session/#session-details-and-actions) says the same; hover it to
+see the full directory and what happens when you delete the last session using it.
 
 ## Ntfy alerts
 
@@ -160,8 +160,8 @@ tint; the session you have open keeps its blue highlight.
 
 The bar at the top counts the marked sessions currently shown. **Stop** and **Delete** act on those sessions; see
 [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete) for what each keeps and when Stop or Delete asks you to confirm.
-Its ⋯ menu lets you [pin or unpin](/docs/using/session-list/#pin-a-session-to-the-top), or mark sessions read or unread
-together. A host or status filter leaves hidden sessions out of the count and actions. Click ✕ to clear the marks,
+Its ⋯ menu lets you [pin or unpin](/docs/using/session-list/#pin-a-session-to-the-top), mute or unmute, move sessions
+to a group, or mark them read or unread together. A host or status filter leaves hidden sessions out of the count and actions. Click ✕ to clear the marks,
 press Escape while focus is in the list, or click a row normally to open it and clear them. Escape in the terminal
 still goes to the agent.
 
@@ -171,8 +171,10 @@ For the full list, including the differences between the Mac and Linux apps, see
 [Keyboard shortcuts](/docs/using/keyboard-shortcuts/). **? → Keyboard shortcuts** shows the keys for your window.
 
 Press Cmd+K on a Mac, or Ctrl+Shift+K on Linux, to open the quick switcher, even while typing in a terminal. Type a few
-letters from a session's name, host or directory. Matches in the name come first; within each group, the most recently
-active sessions come first. The search covers every host and status, whatever the sidebar shows.
+letters from a session's name, host or directory. Matches in the name come first, then matches in the host or directory.
+Within each, your letters at the start of a word rank above the same letters elsewhere, which rank above letters
+scattered through the text; among equally good matches, the most recently active session comes first. The search covers
+every host and status, whatever the sidebar shows.
 
 Use ↑ and ↓ to choose, then Enter to open the session. With nothing typed, Enter opens the most recently active one.
 If the sidebar's host or status choice hid it, Farhelm sets both back to **All**. Escape or a click outside closes the switcher and returns
@@ -196,34 +198,72 @@ without opening the quick switcher; one that only changes some choices opens the
 
 To combine templates, start a [launch sequence](/docs/using/launch-templates/#combine-templates-from-the-keyboard) with
 Cmd+X on a Mac, or Ctrl+Shift+X on Linux, then their number keys and Enter.
-With New, Clone or Replace with open, the marked-template chord, number keys and completed sequence apply their
+With New, Clone, Replace with or Restart with open, the marked-template chord, number keys and completed sequence apply their
 templates to the current draft instead; you decide when to press **Launch**.
 
 ## Rename it, or mark it read
 
 The `⋯` at the end of a row opens the session's menu. It starts with **Rename**, then **Mark read** or **Mark unread**.
-Clicking the blue dot does the same as **Mark read**. The rest of the menu pins, clones, replaces, stops, or
-deletes the session; pinning is covered [below](#pin-a-session-to-the-top) and the rest in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
+Clicking the blue dot does the same as **Mark read**. The rest of the menu pins the session, moves it to a group,
+mutes it, or clones, replaces, stops, or deletes it; [pinning](#pin-a-session-to-the-top), [groups](#group-sessions) and [muting](#mute-a-session) are covered below, and
+cloning, replacing, stopping and deleting in [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
 **Cmd+L** on a Mac, or **Ctrl+Shift+L** on Linux, opens Rename for the open session, even if a filter hides its
 row. Saving or cancelling returns you to its terminal.
 
 ## Pin a session to the top
 
-The same menu offers **Pin to top** / **Unpin**. Pinned sessions show a pin before their name and stay above the rest in
-the order you choose; new pins go at the bottom. Hover a pinned row and drag its grip within that group, or choose
-**Move up** / **Move down** after **Unpin**. Escape or releasing outside the pinned group cancels a drag. Your sort
-choice applies to unpinned rows; host and status choices still apply to both.
+The same menu offers **Pin to top** / **Unpin**. Pinned sessions show a pin before their name and stay in the order you
+choose: above every group when the session is in none, or at the top of its own group when it is in one. New pins go at
+the bottom of those pins. Hover a pinned row and drag its grip to move it among them, or into the pins above every group
+or those of an expanded group; or choose **Move up** / **Move down** after **Unpin**. Escape or releasing anywhere else
+cancels a drag. Your sort choice applies to unpinned rows; host and status choices still apply to both.
 
 Rows normally wait to move until you leave the list or keep the pointer still for five seconds with the menu closed.
-Pins already in the group can be rearranged during that wait. A newly pinned row becomes movable when the wait ends.
+Pins already in place can be rearranged during that wait. A newly pinned row becomes movable when the wait ends.
 
 Pins and their order are kept by the [helm](/docs/how-it-works/the-pieces/), so pins work on unreachable hosts. [Replacing](/docs/using/stop-restart-resume/) a session
 carries its pin and position over. The [quick switcher](#jump-with-the-keyboard) keeps its usual order.
 
+## Group sessions
+
+To keep related sessions together, choose **Move to group** in a session's menu, or in the ⋯ menu of the bar above
+[marked sessions](#mark-several-sessions). **New group…** asks for a name and puts the sessions in a new group at the end
+of your groups; the other choices move them into an existing group, or out of one with **Remove from group**. For a
+pinned session in a group that choice is called **Global pins**: the session leaves the group and stays pinned above
+every group. A session is in at most one group, and a group can hold sessions from several hosts.
+
+The list shows pinned sessions that are in no group first, then your groups in the order you choose, then everything
+else. A group's header shows its name and how many sessions it holds, or `2 of 5` when a host or status choice hides
+some. Click the header's toggle to collapse or expand the group. A collapsed group shows the dot of its most urgent
+session, waiting first, then finished since you last looked, then running; hover the dot to see which session it is.
+Drag a header by its grip, or use **Move up** and **Move down** in its ⋯ menu, to reorder groups. The same menu has
+**Rename** and **Ungroup**, which removes the group but keeps its sessions, and their pins, in the list. A group goes
+away when its last session leaves it or is deleted.
+
+The [helm](/docs/how-it-works/the-pieces/) keeps your groups, their order and which ones are collapsed. Restart keeps a
+session in its group, [Replace and Replace with](/docs/using/stop-restart-resume/) carry the new session into it, and
+Delete takes it out. The [quick switcher](#jump-with-the-keyboard) ignores groups.
+
+## Mute a session
+
+To stop a session asking for your attention while its agent does routine work, choose **Mute** in its menu, or in the
+⋯ menu above marked sessions, then **For 1 hour**, **Until tomorrow morning** (6:00 your time) or **Until I unmute**.
+A muted session reads as seen, and Farhelm plays no sound when its agent finishes a turn. A slashed bell takes the place
+of its status dot; hover it to see the real status and when the mute ends, or click it to unmute.
+
+Muting does not hide a session that needs you. When a muted session waits for you on a host Farhelm can reach, it keeps
+its red waiting dot, with a small bell after its title, and the
+[waiting and approval sounds](#sounds-when-an-agent-needs-you) and [ntfy alerts](#ntfy-alerts) work as usual.
+
+A muted session's menu has **Unmute** in place of **Mute**, and no **Mark read** or **Mark unread**. When a mute ends,
+early or on time, the session counts as seen up to that moment. Restart keeps a mute, Replace and Replace with carry it
+over, and Delete removes it.
+
 ## When a row shows a bell
 
-A bell appears on a row, just left of its age, when Farhelm has noticed something about that session that you can act
+The slashed bell in place of a status dot, and the small bell after a waiting session's title, mean the session is
+[muted](#mute-a-session). The bell this section is about is different: a bell appears on a row, just left of its age, when Farhelm has noticed something about that session that you can act
 on. Most are about following the agent's conversation, which is what lets **Restart** pick that conversation up again
 later. For example, the agent has been working for a while and never told Farhelm which conversation it is in, so
 **Restart** cannot pick it up. Each notification says what happened and what you can do about it, such as starting the

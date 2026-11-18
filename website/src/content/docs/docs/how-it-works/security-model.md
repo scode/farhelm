@@ -21,8 +21,8 @@ sends; and no Farhelm relay or account. Adding an ordinary SSH host needs no roo
 Tensorlake account. Also how much the helm is trusted with on each host, since it can run commands there, and what an
 agent on one host can do to sessions on others through Farhelm, with your approval or a host's **Run farhelm commands
 without asking**. The narrower **Manage sessions on this host without asking** covers session actions only on that same
-host, including a copy's source; it grants no authority over other hosts or templates. Both choices still need the helm,
-the program that shows your hosts' sessions and serves the UI, to be reachable
+host, including a copy's source; it grants no authority over other hosts or templates. Both choices still need Farhelm
+to be open, because the helm, the program that shows your hosts' sessions and serves the UI, runs inside the app
 ([The pieces](/docs/how-it-works/the-pieces/)). Host changes (adding, editing or removing a host) always need your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:

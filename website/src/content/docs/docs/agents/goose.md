@@ -10,8 +10,8 @@ specific to Goose.
 
 ## Gotchas and quirks
 
-- Goose runs without approval prompts unless you have set it to ask, so a Goose launch with no permission choice counts
-  as YOLO, and Farhelm asks you to confirm it on hosts that ask before YOLO launches.
+- A Goose launch with no permission choice counts as YOLO: Farhelm starts it without approval prompts whatever your own
+  Goose setting says, and asks you to confirm it on hosts that ask before YOLO launches.
 - If Goose runs subagents, or another Goose is started inside the session, its conversation can replace yours as the one
   restart resumes.
 - Reopening a Goose conversation directly in Goose, outside Farhelm, needs the `farhelm` command on your `PATH`. Goose
