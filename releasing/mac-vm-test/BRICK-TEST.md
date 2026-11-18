@@ -107,13 +107,18 @@ bonus coverage; P0's verdict remains independent. The full `verdict` includes P1
 attempt P1.
 
 The coordinator reports `p0.verdict` and the seven named `p0.checks` separately from the full `verdict`. **Did P0 checks
-succeed?** means all seven ran and passed with retained evidence. **Stop after P0 checks** means record that scope with
-`init vX.Y.Z --stop-after-p0`, complete P0, export its evidence, clean up its successful fixtures, and end the session
-before P1 or bonus work; no feedback is sent. If requested during a run, persist the scope with
-`brick_test.py stop-after-p0 "$test_run"`, finish only the remaining P0 work and cleanup, and retain the request in the
-private working log. If bonus work already began, stop that work and preserve its partial evidence; the scope command
-fences future fixtures but does not itself cancel GUI actions or shut down guests. A P0 pass does not claim that bonus
-checks or every historical upgrade ran.
+succeed?** means all seven ran and passed with retained evidence. For an RC on the manual path, say upfront that in-app
+update discovery was skipped as expected because the updater only discovers stable releases. Use the explanation in
+`p0.unavailable_checks` and include the installer upgrade and Restart to update outcome. When `p0.summary` says all
+runnable checks passed, lead with that. Otherwise name any checks that stopped and why. Give P1 and bonus blockers their
+own plain-language causes.
+
+**Stop after P0 checks** means record that scope with `init vX.Y.Z --stop-after-p0`, complete P0, export its evidence,
+clean up its successful fixtures, and end the session before P1 or bonus work; no feedback is sent. If requested during
+a run, persist the scope with `brick_test.py stop-after-p0 "$test_run"`, finish only the remaining P0 work and cleanup,
+and retain the request in the private working log. If bonus work already began, stop that work and preserve its partial
+evidence; the scope command fences future fixtures but does not itself cancel GUI actions or shut down guests. A P0 pass
+does not claim that bonus checks or every historical upgrade ran.
 
 If P1 was already dispatched when scope narrowed, the send cannot be recalled. Retain its actual result, marked
 `dispatched_before_scope_stop`, and report that outcome separately. The stop request prevents another send; it never
