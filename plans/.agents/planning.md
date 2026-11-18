@@ -34,7 +34,8 @@ sentence summary.
   entry also selects it, as the old picker's comment box did; a question or request for elaboration is answered on the
   page before treating it as a planning request. The submission is the request, so do not ask for confirmation. Carry
   its instructions into planning and finish the picker using the skill's completion procedure before opening the
-  planning questions page.
+  planning questions page. The picker asks nothing about release notes; that question is on the planning questions page,
+  one per plan.
 
 ## Planning: "plan to implement <TODO items>"
 
@@ -81,6 +82,14 @@ with these overrides on top of the skill's own rules:
   earlier run built.
 - The plan never edits `plans/`: its state moves only through the script, as `plans/.agents/executing.md`, "Executing
   one plan", describes.
+- The goal file has a `## Release note` section holding the maintainer's answer to the plan's release note question
+  (`plans/.agents/planning.md`, "Asking the up-front questions on a local page"), in exactly the form
+  `releasing/.agents/changelog.md`, "Plans' release notes", gives: the entry, word for word as the maintainer settled
+  it, or one of the two fixed answers, and nothing else: the release tooling reads the whole section body as the answer.
+  There is exactly one such section: a revision replaces it rather than adding another. Place it after the goal's own
+  sections. It is for the release that ships the work, not an instruction to the executor (`plans/.agents/executing.md`,
+  "Executing one plan", step 8, says what the executor does with it). A request to revise the plan may revise this
+  section too.
 - A TODO plan's last code PR removes the TODO entries it covers.
 - The done criterion: every PR exists and has passed its review gate, and the latest `## Decisions` entry, if any, is
   satisfied. Delivering the report is the executor's closing step, not part of the goal.
@@ -112,11 +121,12 @@ the later work idles until the earlier work lands.
 
 When every plan in the request is written, land them as one commit and one PR per the `jjstack` skill, on top of the
 latest `main@origin`: the plan files, their `INDEX.md` lines, and the TODO.md references, all together. Validate with
-`dprint check` on the changed files, `queue check`, and `queue check --base main` after the final rebase. A `--base`
-violation on a line or report the PR did not touch means main moved under the check (another executor claimed or
-delivered): fetch, rebase, and run it again. Ask the maintainer to approve, and merge per `jjstack` once they do. If the
-merge is refused because main moved, rebase, check again, and retry. A plan that only lives in a working copy does not
-exist as far as an executor is concerned, because executors only read plans from main.
+`dprint check` on the changed files, `python3 releasing/check-changelog.py plan-note` on every plan file the PR adds or
+revises (after `dprint fmt`, since it reads the section as dprint left it), `queue check`, and `queue check --base main`
+after the final rebase. A `--base` violation on a line or report the PR did not touch means main moved under the check
+(another executor claimed or delivered): fetch, rebase, and run it again. Ask the maintainer to approve, and merge per
+`jjstack` once they do. If the merge is refused because main moved, rebase, check again, and retry. A plan that only
+lives in a working copy does not exist as far as an executor is concerned, because executors only read plans from main.
 
 ## Asking the up-front questions on a local page
 
@@ -131,6 +141,18 @@ answers. Here's what it needs:
   wait mechanism to collect answers.
 - Facts that are not questions (the delegation mode, where the plan files go) are stated on the page or in chat, not
   asked.
+- Every plan's box carries a release note question, even when the plan has nothing else to ask; it is the maintainer's
+  one chance to write the plan's changelog entry before the release (`releasing/.agents/changelog.md`, "Plans' release
+  notes"). Show your proposed entry as page text, written for someone running Farhelm per
+  `releasing/.agents/changelog.md`, "Format", and `releasing/EDITORIAL_GUIDANCE.md`, so the maintainer can comment on it
+  or suggest edits. Below it goes a picker with three choices: use the entry as shown, "No release note needed", and "No
+  release note now (ask during the release)". Mark "use the entry" recommended for work a user would notice, and "No
+  release note needed" for work with no user-facing effect. Text in the picker's free-text field is the maintainer's own
+  entry and replaces yours, unless it reads as a comment or a question, which you answer on the page. A suggested edit
+  on your entry changes exactly what it suggests; apply it to the page and keep the question open until a pick or the
+  maintainer's own text settles it. Write the settled answer into the goal file without polishing it: the maintainer's
+  wording is reproduced exactly, here and at the release. A merged plan gets one question and one entry for all of its
+  work.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
@@ -163,7 +185,7 @@ Plan them as in the TODO flow (`plans/.agents/planning.md`, "Planning: "plan to 
 `scode-build-goal` overrides, except:
 
 - The decisions are already recorded in `TRIAGE_OUTCOMES.md`, so the up-front questions cover only what the ledger
-  leaves open for unattended execution, not the outcomes themselves.
+  leaves open for unattended execution, not the outcomes themselves, plus the release note question every plan gets.
 - There are no TODO entries to remove; the outcome's own PR records its execution in the ledger, as
   `review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes", requires.
 - The planning PR carries the plan files, their `INDEX.md` lines, and the `` planned in `plans/queue/<slug>.md` ``

@@ -164,9 +164,98 @@ curation. Err toward including caveats, except that the release cannot be downgr
 the format). It is not reviewed at PR time and it is not the final text; curation rewrites it. When the draft rests on a
 guess (a PR with no description, say), say so in the body so the curator verifies it.
 
+## Plans' release notes
+
+Work built through the planning system (`plans/AGENTS.md`) gets its release note settled while it is planned, before
+anyone has written a line of code. The planner offers an entry on the plan's questions page, and the maintainer accepts
+it, edits it, writes their own, or opts out in one of two fixed ways (`plans/.agents/planning.md`, "Asking the up-front
+questions on a local page"). The answer goes into the plan file as one `## Release note` section, whose body is exactly
+one of:
+
+- the entry: its first paragraph is the entry text, and any further paragraphs are context for the release agent, as in
+  a fragment. It is the maintainer's wording, whether they wrote it or accepted the planner's proposal.
+- `No release note needed.`
+- `No release note now; ask during the release.`
+
+The two fixed answers are spelled exactly so, because `releasing/check-changelog.py plans` tells them from an entry by
+their text. A plan file written before this rule has no section; curate its work from the fragments as before. A
+`## Decisions` entry that changes the release note wins over the section, like any Decision over the plan body.
+
+The plan file is usually gone by the time of the release, since approving a landed plan deletes it.
+`python3 releasing/check-changelog.py plans` reads every plan whose landing was recorded since the last stable release
+from the commit that recorded it, where the file still exists. For each plan it prints the PRs that landed it, split by
+whether they merged in this release's range or before it, its release note, whether it has Decisions, whether an earlier
+round landed before the last stable release, and a `git show` line for the plan file as it stood at that landing. Read
+the Decisions of every plan that has them before acting on its note, whatever the note says: a block answer or a
+follow-up can replace an opt-out with wording, or wording with an opt-out.
+
+Which release a plan's work belongs to is decided by where its PRs merged, not by when its landing was recorded. The
+landing monitor merges a plan's PRs and records the landing afterwards, and a plan that blocks partway through its
+landing has PRs on main and no record at all. So:
+
+- A plan whose every PR merged before this range shipped in an earlier release: its note is not this release's, and it
+  gets no entry here.
+- A plan still listed in `plans/queue/INDEX.md` can already have PRs on main (a landing in progress, or one that blocked
+  partway). The `plans` mode does not list it. Curate those PRs from their fragments, and say in the handover message
+  which plan they belong to, so the maintainer knows its note was not used.
+
+At curation, each plan's answer works like this:
+
+- An entry is the default entry for the work it describes, used word for word: the maintainer supplied that wording, and
+  `releasing/.agents/stable.md`, "Cutting a stable release", step 2, applies to it. The only changes allowed without
+  asking are the format's: one `-` bullet on one physical line (dprint wraps plan files, so the paragraph arrives
+  hard-wrapped), and its PR references. It cites the plan's PRs that merged in this range and that do what the entry
+  describes, which by default is every one of them that carries a required type or a fragment. The plan's entry takes
+  the place of those PRs' fragments that describe the same work, and of any entry step 1 would write for one of them
+  that is `MISSING`. A fragment from one of the plan's PRs that describes something else (a pre-existing bug fixed along
+  the way, say) is curated as usual. The agent sorts the entry into a category by the rules in
+  `releasing/.agents/changelog.md`, "Format".
+- `No release note needed.` leaves the plan's work out of the draft: the fragments that describe it, and any entry step
+  1 would write for a `MISSING` commit of the plan's. This is the maintainer's decision, not a proposed exclusion, but
+  it is listed with the proposed exclusions in step 2's handover message so the maintainer sees what it removed.
+- `No release note now; ask during the release.` means the maintainer wants to write this one at release time. Draft an
+  entry from the fragments (or from the PRs, when they left only `kind: none` fragments or none) as for any other work,
+  and mark it on the review page as the plan the maintainer deferred, asking them to supply their own text or approve
+  the draft.
+- A malformed note (the `plans` mode says so: an empty section, or more than one) is treated as no note: curate the work
+  from the fragments, and call it out so the maintainer can supply the entry.
+
+Two rules in this file fix what an entry must or must not say, and they win over a plan's wording, because a reader
+relies on them holding in every release: the rule in `releasing/.agents/changelog.md`, "What gets an entry", that a fix
+to unreleased work folds into that work's entry rather than standing as a fix, and the rule in
+`releasing/.agents/changelog.md`, "Format", that no entry mentions downgrades. Where one applies, the draft follows the
+rule (folding the fix, cutting the caveat), and the page shows the plan's wording exactly as it was, beside the callout
+that says which rule changed it. Nothing else changes the maintainer's wording.
+
+Before handing over the review page, check every plan entry, and every "no release note needed", against what actually
+landed, and call out the obvious inaccuracies you can detect. The entry was written against a plan, and plans drift: a
+block answer or a follow-up changes the scope, an executor takes a different fork than the plan expected, a name in the
+UI comes out differently, a part never lands. The evidence is the plan file and its Decisions at the landing, the plan's
+report (`git show` it at the same commit, under `plans/reports/`), the PRs' diffs and descriptions, and their fragments,
+which say where the built work departs from the plan's entry (`plans/.agents/executing.md`, "Executing one plan", step
+8). The checks, at least:
+
+- the entry describes behavior, a name, a control, a flag or a limitation that differs from what landed;
+- it describes something that did not land in this release, or that an earlier round already shipped in a stable release
+  (the `plans` mode flags a plan with an earlier round, and PRs that merged before the range);
+- it would be a fix entry for a bug that never reached a stable release;
+- it breaks a rule in `releasing/.agents/changelog.md`, "Format", or `releasing/EDITORIAL_GUIDANCE.md` (internal names,
+  a missing action for a Breaking entry), including the rules above that win over its wording;
+- it says the same thing as another entry in the draft;
+- "no release note needed" on work whose PRs made a user-facing change.
+
+A callout is a highlight on the review page, never an edit to the maintainer's text except where a rule above wins: say
+what looks wrong and the evidence (a PR, a Decision, a line of the report), and offer replacement wording when it is
+obvious, for the maintainer to accept as a suggestion. The scratch Markdown file keeps the maintainer's entry as it was
+until they change it. A plan with no bullet in the draft (one whose note said no release note was needed, a deferred one
+with nothing to draft from, a malformed one) still gets a row on the page with its PR links, so a callout on it has a
+place to sit and the maintainer can still add an entry there. Name every plan with a callout in the message that hands
+over the page, too. "Obvious" sets the bar on purpose: this is a check for mistakes a careful reader of the PRs would
+catch, not a license to second-guess the maintainer's choice of words.
+
 ## The checker
 
-`releasing/check-changelog.py` has three modes and a `--self-test`; none of them writes anything.
+`releasing/check-changelog.py` has five modes and a `--self-test`; none of them writes anything.
 
 - `format` lints `CHANGELOG.md` and every fragment against the current rules plus the historical section formats the
   checker still supports, including the draft notice on the newest section. It checks structure and references; it does
@@ -179,6 +268,14 @@ guess (a PR with no description, say), say so in the body so the curator verifie
   forgot to consume it, or its PR merged between the changelog PR and the release branch cut (which step 5 of
   `releasing/.agents/stable.md`, "Cutting a stable release", exists to prevent). Bring it to the user; it is not
   automatically material for the next release. It needs the tags fetched.
+- `plans` lists the plans whose landing was recorded since that same merge base, with each one's release note as its
+  plan file held it at the landing and its PRs split by whether they merged in the range
+  (`releasing/.agents/changelog.md`, "Plans' release notes"). It exits non-zero for a malformed `## Release note`
+  (empty, or more than one) or a landing record that does not match what the queue script writes. It needs the tags
+  fetched.
+- `plan-note FILE...` checks that each plan file carries exactly one non-empty `## Release note` section. The planning
+  flow runs it on every plan file a planning PR adds or revises (`plans/.agents/planning.md`, "Planning: "plan to
+  implement <TODO items>"").
 - `announce --tag vX.Y.Z` compares what dist computes for the tag (`announcement_title` and `announcement_changelog` in
   its manifest, obtained by running `dist plan` locally or read from `--manifest`/`--manifest-env` in the gate) with the
   checker's own reading of the file. A stable tag must land on the newest section exactly; a prerelease must land on

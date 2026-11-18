@@ -100,7 +100,11 @@ its open PRs. Record the pick and its reasoning in the executor log.
 8. Run the plan file as the goal. For a single plan, set the harness's goal to it if the harness lets the model set its
    own goal; otherwise, and always within a drain, behave exactly as if it were the harness-provided goal under the
    outer request. A drain does not register each plan as a harness goal, because a plan that blocks could not be cleared
-   to make room for the next one.
+   to make room for the next one. A plan's `## Release note` section is the maintainer's entry for the release, not part
+   of the goal: each PR still leaves the changelog fragment `AGENTS.md`, "Changelog fragments", asks for, describing
+   what that PR built. Where what got built departs from the plan's entry (a renamed control, a part left out, a
+   limitation the entry does not mention), the fragment's context paragraphs say how, so the release agent can flag the
+   entry (`releasing/.agents/changelog.md`, "Plans' release notes"). Never edit the section itself.
 9. Before every push of a plan bookmark, run `queue status` and confirm the line still carries your claim id. If it does
    not, stop pushing and treat the claim as released (step 1). After each push, record the pushed commits in the working
    log.

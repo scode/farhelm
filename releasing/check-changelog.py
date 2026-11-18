@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""The changelog's three mechanical checks: file format, fragment coverage, and what dist will publish.
+"""The changelog's mechanical checks (file format, fragment coverage, what dist will publish) and plans' release notes.
 
 `releasing/.agents/changelog.md` describes the changelog process; this script is the part of it that a machine can
 hold. It exists because the curated `CHANGELOG.md` is read by cargo-dist at tag time and copied into the GitHub release,
 and a file that looks right to a human can still be one dist parses into nothing or into the wrong section. Nothing here
 writes to the repository; every mode reports and exits non-zero on a problem.
 
-## The three modes
+## The modes
 
 `format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layouts the process has used:
 one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; recognized category headings in their prescribed
@@ -20,6 +20,12 @@ the commits since the merge base with the last stable tag, picks out the Convent
 must have an entry (`feat`, `fix`, `perf`, `style`, `revert`, and any type marked `!`), and reports which of them
 added or edited a fragment, which are claimed by a fragment's `pr:` line, and which are missing. It is the release-time
 sweep's input, not a gate: the maintainer decides what a missing entry means.
+
+`plans` lists every plan (`plans/AGENTS.md`) whose landing was recorded on main since that same merge base, with the PRs
+that landed it and the `## Release note` section its plan file held when it landed: an entry, one of the two fixed
+answers that are not one, or nothing (a plan written before plans carried the section). It reads history rather than
+the working tree because approving a landed plan deletes its file, usually long before the release. Like `fragments`,
+it is curation input, not a gate.
 
 `announce` compares what cargo-dist computed for a tag (its manifest's `announcement_title` and
 `announcement_changelog`) with what this file's own reading of `CHANGELOG.md` says the tag should get. A stable tag must
@@ -36,6 +42,8 @@ raw material for it. It does not know about RC or dev releases beyond letting th
 Usage:
   check-changelog.py format [--repo PATH]
   check-changelog.py fragments [--repo PATH] [--since TAG]
+  check-changelog.py plans [--repo PATH] [--since TAG]
+  check-changelog.py plan-note FILE...
   check-changelog.py announce --tag TAG [--repo PATH] [--manifest PATH | --manifest-env NAME]
   check-changelog.py --self-test
 """
@@ -611,6 +619,231 @@ def report_sweep(tag: str, commits: list[CommitCoverage], stale: list[str], prob
 
 
 # ---------------------------------------------------------------------------
+# Plans' release notes, recovered from history
+# ---------------------------------------------------------------------------
+#
+# A plan (`plans/AGENTS.md`) carries the maintainer's release note for its work in a `## Release note` section, settled
+# while the plan was planned. The release curation uses it as the default entry for that work
+# (`releasing/.agents/changelog.md`, "Plans' release notes"). The plan file itself is gone by then more often than not:
+# approving a landed plan's report deletes the file, and that usually happens long before the next stable release. What
+# survives is history. The queue script records every landing as its own commit on main, and at that commit the plan
+# file is still there and `REPORTS.md` names the PRs that landed it. So this mode reads the plan as it stood when it
+# landed, which is also the version the release should be checked against: its Decisions are complete for that round.
+
+PLANS_QUEUE_DIR = Path("plans") / "queue"
+PLANS_REPORTS = Path("plans") / "REPORTS.md"
+
+# The subject `scripts/plans-queue.py` gives the commit that moves a plan from INDEX.md to REPORTS.md. That script is the
+# only writer of these commits; if it ever rewords the subject, this pattern has to follow.
+LANDING_SUBJECT_RE = re.compile(r"^chore\(plans\): record the landing of (?P<slug>[A-Za-z0-9][A-Za-z0-9-]*)$")
+
+# A landed plan's line in REPORTS.md, a copy of `REPORT_LINE_RE` in `scripts/plans-queue.py`, which owns the grammar.
+REPORT_LINE_RE = re.compile(
+    r"^- \[`(?P<slug>[^`]+)`\]\(reports/(?P<link>[^)]+)\.report\.md\) landed (?P<date>\d{4}-\d{2}-\d{2}) "
+    r"in (?P<prs>#\d+(?:, #\d+)*): (?P<summary>.+)$"
+)
+
+RELEASE_NOTE_HEADING = "Release note"
+
+# The two answers that are not an entry. Their wording is fixed by the rule this mode serves,
+# `releasing/.agents/changelog.md`, "Plans' release notes", so that this mode can tell them from a short entry.
+RELEASE_NOTE_NONE = "No release note needed."
+RELEASE_NOTE_DEFERRED = "No release note now; ask during the release."
+
+_PLAN_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def plan_release_notes(text: str) -> list[str]:
+    """The body of every `## Release note` section in a plan file, each stripped, in file order.
+
+    A well-formed plan has exactly one. More than one happens when a revision appends a new answer below an old one
+    instead of replacing it, and reading only the first would silently keep the stale answer, so callers treat any count
+    other than one as malformed. Headings inside fenced code are not headings: plan files quote Markdown and shell, and a
+    quoted `## Release note` in an example must not be read as the plan's own. The fence rule is the queue script's
+    (`_scan_fences` in `scripts/plans-queue.py`): a fence closes only on a bare run of its own character at least as long
+    as the opening, so a ```` ``` ```` quoted inside a four-backtick fence does not end it. A section ends at the next
+    level-two heading (the queue script appends `## Decisions` and `## Blocked` at the end of the file) or at the end of
+    the file.
+    """
+    bodies: list[list[str]] = []
+    current: list[str] | None = None
+    fence: str | None = None
+    for line in text.splitlines():
+        match = _PLAN_FENCE_RE.match(line)
+        if fence is None and match and not (match[1][0] == "`" and "`" in match[2]):
+            fence = match[1]
+        elif fence is not None and match and match[1][0] == fence[0] and len(match[1]) >= len(fence) and not match[2].strip():
+            fence = None
+        elif fence is None and line.startswith("## "):
+            current = None
+            if line[3:].strip() == RELEASE_NOTE_HEADING:
+                current = []
+                bodies.append(current)
+            continue
+        if current is not None:
+            current.append(line)
+    return ["\n".join(body).strip() for body in bodies]
+
+
+def check_plan_note(text: str) -> list[str]:
+    """What is wrong with a plan file's `## Release note`, for a planning PR to check before it lands.
+
+    The planning flow writes every new or revised plan with exactly one non-empty section; a plan written before that
+    rule has none, which is fine for history but not for a plan being written now, so a missing section is a problem
+    here even though the `plans` mode accepts it.
+    """
+    notes = plan_release_notes(text)
+    if not notes:
+        return [f"no ## {RELEASE_NOTE_HEADING} section"]
+    if len(notes) > 1:
+        return [f"{len(notes)} ## {RELEASE_NOTE_HEADING} sections; a plan has exactly one"]
+    if not notes[0]:
+        return [f"the ## {RELEASE_NOTE_HEADING} section is empty"]
+    return []
+
+
+@dataclass
+class PlanNote:
+    """One plan whose landing was recorded since the last stable release, with its note as of its latest landing.
+
+    A plan can land more than once in a release cycle: a follow-up puts it back on the queue and its next round lands
+    again. `record` and `notes` come from the latest round, whose plan file carries every Decision the earlier ones did,
+    and the PRs of every round in range are split by where they actually merged. That split is what decides which
+    release the work belongs to, not the landing record: the monitor merges a plan's PRs first and records the landing
+    afterwards, so a stable release cut in between ships PRs whose record falls in the next cycle (`prs_earlier` then
+    holds every one of them). `earlier_round` says a round's record predates the range, so part of the work may already
+    have shipped and the note may describe it again.
+    """
+
+    slug: str
+    record: str
+    dates: list[str]
+    prs_in_range: list[int]
+    prs_earlier: list[int]
+    notes: list[str]
+    decisions: bool
+    earlier_round: bool
+
+    @property
+    def note(self) -> str | None:
+        return self.notes[0] if len(self.notes) == 1 else None
+
+    @property
+    def status(self) -> str:
+        if not self.notes:
+            return "not recorded"
+        if len(self.notes) > 1:
+            return f"malformed ({len(self.notes)} sections)"
+        if self.notes[0] == "":
+            return "malformed (empty)"
+        if self.notes[0] == RELEASE_NOTE_NONE:
+            return "none needed"
+        if self.notes[0] == RELEASE_NOTE_DEFERRED:
+            return "ask during the release"
+        return "entry"
+
+
+def plan_notes(repo: Path, since: str | None = None) -> tuple[str, list[PlanNote], list[str]]:
+    """Find every plan whose landing was recorded since the merge base with the last stable tag, and its release note.
+
+    The range is the same as the fragment sweep's, for the same reason: a stable tag lives on a release branch that never
+    merges. A PR counts as merged in range when a commit in range carries its `(#N)` subject suffix, which is how every
+    squash merge on main is titled.
+
+    What this does NOT find: a plan still listed in INDEX.md whose PRs are already on main (a landing in progress, or one
+    that blocked partway through). It has no landing record yet, so its merged PRs are curated from their fragments; when
+    it lands in a later cycle, this mode reports those PRs as merged before that cycle's range.
+
+    Returns the tag used, the plans in order of their first landing in range, and problems: a landing record whose
+    commit lacks the plan file, or does not add a REPORTS.md line for that plan linking its own report. Either means the
+    history is not what the queue script writes.
+    """
+    tag = since or last_stable_tag(repo)
+    try:
+        base = _git(repo, "merge-base", tag, "HEAD").strip()
+    except subprocess.CalledProcessError as failure:
+        raise Problem(f"cannot find the merge base of {tag} and HEAD: {failure.stderr.strip()}") from failure
+
+    def records(revisions: str) -> list[tuple[str, str]]:
+        # Not limited to REPORTS.md's path: a landing commit that failed to touch REPORTS.md must still be seen, so that
+        # it can be reported rather than silently skipped.
+        log = _git(repo, "log", "--reverse", "--format=%H%x00%s", revisions)
+        found = []
+        for row in filter(None, log.split("\n")):
+            sha, subject = row.split("\x00", 1)
+            match = LANDING_SUBJECT_RE.match(subject)
+            if match:
+                found.append((sha, match.group("slug")))
+        return found
+
+    in_range_prs = {
+        int(match.group(1))
+        for subject in _git(repo, "log", "--format=%s", f"{base}..HEAD").split("\n")
+        if (match := SUBJECT_PR_RE.search(subject))
+    }
+    earlier = {slug for _sha, slug in records(base)}
+
+    def report_line(sha: str, slug: str) -> re.Match[str] | None:
+        try:
+            text = _git(repo, "show", f"{sha}:{PLANS_REPORTS}")
+        except subprocess.CalledProcessError:
+            return None
+        return next((m for m in map(REPORT_LINE_RE.match, text.splitlines()) if m and m.group("slug") == slug), None)
+
+    plans: dict[str, PlanNote] = {}
+    problems: list[str] = []
+    for sha, slug in records(f"{base}..HEAD"):
+        line = report_line(sha, slug)
+        before = report_line(f"{sha}^", slug)
+        if line is None or line.group("link") != slug or (before is not None and before.group(0) == line.group(0)):
+            problems.append(f"{sha[:9]} records the landing of {slug}, but does not add a REPORTS.md line linking its report")
+            continue
+        try:
+            plan_text = _git(repo, "show", f"{sha}:{PLANS_QUEUE_DIR / (slug + '.md')}")
+        except subprocess.CalledProcessError:
+            problems.append(f"{sha[:9]} records the landing of {slug}, but the plan file is missing there")
+            continue
+        prs = [int(pr) for pr in re.findall(r"#(\d+)", line.group("prs"))]
+        notes = plan_release_notes(plan_text)
+        decisions = bool(re.search(r"^## Decisions\s*$", plan_text, re.MULTILINE))
+        plan = plans.setdefault(slug, PlanNote(slug, sha, [], [], [], notes, decisions, slug in earlier))
+        plan.record, plan.notes, plan.decisions = sha, notes, decisions
+        plan.dates.append(line.group("date"))
+        for pr in prs:
+            bucket = plan.prs_in_range if pr in in_range_prs else plan.prs_earlier
+            if pr not in plan.prs_in_range and pr not in plan.prs_earlier:
+                bucket.append(pr)
+    return tag, list(plans.values()), problems
+
+
+def report_plan_notes(tag: str, plans: list[PlanNote], problems: list[str]) -> int:
+    """Print each landed plan's note for the curating agent. Exit 1 for malformed history or a malformed note."""
+    print(f"plans whose landing was recorded since the merge base with {tag}: {len(plans)}")
+    malformed = 0
+    for plan in plans:
+        listed = ", ".join(f"#{pr}" for pr in plan.prs_in_range) or "no PR in this range"
+        print(f"  plan {plan.slug} landed {', '.join(plan.dates)}: merged in this range {listed}")
+        if plan.prs_earlier:
+            print(f"    merged before this range: {', '.join(f'#{pr}' for pr in plan.prs_earlier)}")
+        if not plan.prs_in_range:
+            print("    every PR merged before this range: the work shipped earlier, and this note is not this release's")
+        print(f"    plan file: git show {plan.record[:12]}:{PLANS_QUEUE_DIR}/{plan.slug}.md")
+        print(f"    release note: {plan.status}")
+        if plan.status == "entry":
+            for row in (plan.note or "").splitlines():
+                print(f"      {row}".rstrip())
+        if plan.status.startswith("malformed"):
+            malformed += 1
+        if plan.decisions:
+            print("    has Decisions: read them before acting on the note; one may change the note or the work")
+        if plan.earlier_round:
+            print(f"    an earlier round landed before {tag}: part of this work may already have shipped")
+    for problem in problems:
+        print(f"  MALFORMED {problem}")
+    return 1 if problems or malformed else 0
+
+
+# ---------------------------------------------------------------------------
 # The dist announcement
 # ---------------------------------------------------------------------------
 
@@ -763,7 +996,7 @@ def _commit(repo: Path, subject: str, files: dict[str, str | None]) -> None:
 
 
 def self_test() -> int:
-    """Exercise all three modes on fixtures: the format rules, a synthetic history, and synthetic dist manifests.
+    """Exercise every mode on fixtures: the format rules, synthetic histories, and synthetic dist manifests.
 
     Why a self-test rather than a test file: the release gate calls this script on a fresh runner, and the other
     release scripts (`scripts/check-release-archive.py` and friends) already follow the `--self-test` convention, so
@@ -967,6 +1200,109 @@ def self_test() -> int:
         expect(by_pr[25].covered, "a move into a top-level Markdown fragment supplies coverage")
         expect(not by_pr[26].covered, "a move to nested Markdown cannot supply coverage")
 
+    # Plans' release notes come from history, not the working tree: the fixture approves (deletes) a plan after it
+    # lands, as the review flow does, and the note must still be found. Every PR is a real squash commit, so the fixture
+    # also covers PRs merged on the other side of the stable boundary from their landing record: one plan's PRs merged
+    # before the tag and its record after, and one plan that landed a round before the tag and another after it.
+    with tempfile.TemporaryDirectory() as work:
+        repo = Path(work)
+        _run_git(repo, "init", "-q", "-b", "main")
+        queue, reports = str(PLANS_QUEUE_DIR), str(PLANS_REPORTS)
+        landed_lines: dict[str, str] = {}
+
+        def plan_file(*notes: str, extra: str = "") -> str:
+            sections = "".join(f"## {RELEASE_NOTE_HEADING}\n\n{note}\n\n" for note in notes)
+            return f"# A plan\n\n## The goal\n\n```markdown\n## {RELEASE_NOTE_HEADING}\n\nQuoted, not the note.\n```\n\n{sections}## Done criterion\n\nDone.\n{extra}"
+
+        def merge(*prs: int) -> None:
+            for pr in prs:
+                _commit(repo, f"feat: plan work (#{pr})", {f"work-{pr}.txt": str(pr)})
+
+        def land(slug: str, prs: list[int], text: str, link: str | None = None) -> None:
+            listed = ", ".join(f"#{pr}" for pr in prs)
+            landed_lines[slug] = f"- [`{slug}`](reports/{link or slug}.report.md) landed 2026-03-01 in {listed}: {slug}"
+            _commit(repo, f"chore(plans): record the landing of {slug}", {
+                f"{queue}/{slug}.md": text,
+                reports: "# Plan reports to review\n\n" + "\n".join(landed_lines.values()) + "\n",
+            })
+
+        def approve(slug: str) -> None:
+            del landed_lines[slug]
+            _commit(repo, f"chore(plans): approve {slug}", {
+                f"{queue}/{slug}.md": None,
+                reports: "# Plan reports to review\n\n" + "\n".join(landed_lines.values()) + "\n",
+            })
+
+        _commit(repo, "chore: baseline", {"baseline": "b"})
+        merge(1)
+        land("shipped-before", [1], plan_file("The first round's note."))
+        merge(2)
+        _run_git(repo, "tag", "v0.1.0")
+        land("recorded-late", [2], plan_file("Shipped before its record."))
+        merge(10, 11)
+        land("with-entry", [10, 11], plan_file("Sessions can be renamed.\n\nContext for the curator."))
+        approve("with-entry")
+        merge(12)
+        land("none-needed", [12], plan_file(RELEASE_NOTE_NONE))
+        merge(13)
+        land("deferred", [13], plan_file(RELEASE_NOTE_DEFERRED, extra="\n## Blocked\n\nA question.\n"))
+        merge(14)
+        land("old-plan", [14], plan_file())
+        merge(15)
+        land("followed-up", [15], plan_file("The note as planned."))
+        merge(16)
+        land("followed-up", [15, 16], plan_file("The note as planned.", extra="\n## Decisions\n\nA follow-up.\n"))
+        merge(17)
+        land("shipped-before", [17], plan_file("The second round's note."))
+        _commit(repo, "chore(plans): approve something that never landed", {"other": "o"})
+        tag, plans, plan_problems = plan_notes(repo)
+        by_slug = {plan.slug: plan for plan in plans}
+        expect(tag == "v0.1.0" and plan_problems == [], "the plan notes read a well-formed history without problems")
+        expect(list(by_slug) == ["recorded-late", "with-entry", "none-needed", "deferred", "old-plan", "followed-up",
+                                 "shipped-before"],
+               "every plan whose landing was recorded since the merge base is listed once, in landing order")
+        expect(by_slug["with-entry"].note == "Sessions can be renamed.\n\nContext for the curator."
+               and by_slug["with-entry"].prs_in_range == [10, 11],
+               "an approved plan's note and PRs are read from its landing commit, past a quoted heading in a fence")
+        expect([by_slug[s].status for s in ("none-needed", "deferred", "old-plan")]
+               == ["none needed", "ask during the release", "not recorded"],
+               "the two fixed answers, one followed by a Blocked section, and a plan without the section are told apart")
+        expect(by_slug["followed-up"].prs_in_range == [15, 16] and by_slug["followed-up"].decisions
+               and by_slug["followed-up"].note == "The note as planned.",
+               "a plan landed twice collects both rounds' PRs once and reads its latest plan file up to its Decisions")
+        expect(by_slug["recorded-late"].prs_in_range == [] and by_slug["recorded-late"].prs_earlier == [2],
+               "a plan whose PRs merged before the tag but was recorded after it shows every PR as merged earlier")
+        expect(by_slug["shipped-before"].earlier_round and by_slug["shipped-before"].prs_in_range == [17]
+               and not by_slug["with-entry"].earlier_round,
+               "a plan with a round before the stable tag is flagged, and only this cycle's PRs are listed")
+
+        merge(18)
+        land("two-notes", [18], plan_file(RELEASE_NOTE_NONE, "A newer entry appended below."))
+        merge(19)
+        land("empty-note", [19], plan_file(""))
+        _tag, plans, _problems = plan_notes(repo)
+        statuses = {plan.slug: plan.status for plan in plans}
+        expect(statuses["two-notes"].startswith("malformed") and statuses["empty-note"].startswith("malformed"),
+               "a plan with two Release note sections, or an empty one, is malformed rather than read as its first")
+        expect(report_plan_notes(_tag, plans, _problems) == 1, "a malformed note fails the plans mode")
+
+        merge(20)
+        land("bad-link", [20], plan_file("A note."), link="someone-else")
+        _commit(repo, "chore(plans): record the landing of no-report-line", {"stray": "s"})
+        _tag, _plans, plan_problems = plan_notes(repo)
+        expect(len(plan_problems) == 2 and "bad-link" in plan_problems[0] and "no-report-line" in plan_problems[1],
+               "a landing record linking another plan's report, or adding no REPORTS.md line, is reported")
+        try:
+            plan_notes(repo, "v9.9.9")
+            expect(False, "an unknown --since tag is reported as a problem")
+        except Problem:
+            expect(True, "an unknown --since tag is reported as a problem")
+
+    expect(check_plan_note(plan_file("An entry.")) == [], "a plan with one non-empty Release note passes plan-note")
+    expect(check_plan_note(plan_file()) != [] and check_plan_note(plan_file("")) != []
+           and check_plan_note(plan_file("One.", "Two.")) != [],
+           "plan-note rejects a missing, empty or repeated Release note section")
+
     stable_manifest = {
         "announcement_is_prerelease": False,
         "announcement_title": "v0.2.0 - 2026-02-01",
@@ -1006,7 +1342,11 @@ def main() -> int:
     sub.add_parser("format", help="lint CHANGELOG.md and the fragments")
     fragments = sub.add_parser("fragments", help="report fragment coverage since the last stable release")
     fragments.add_argument("--since", help="stable tag to sweep from (default: the highest vX.Y.Z tag)")
-    announce = sub.add_parser("announce", help="compare dist's announcement for a tag with CHANGELOG.md")
+    plans = sub.add_parser("plans", help="list plans landed since the last stable release, with their release notes")
+    plans.add_argument("--since", help="stable tag to look from (default: the highest vX.Y.Z tag)")
+    plan_note = sub.add_parser("plan-note", help="check that plan files carry exactly one non-empty Release note")
+    plan_note.add_argument("files", nargs="+", help="plan files to check")
+    announce =sub.add_parser("announce", help="compare dist's announcement for a tag with CHANGELOG.md")
     announce.add_argument("--tag", required=True)
     announce.add_argument("--manifest", help="a dist manifest JSON file")
     announce.add_argument("--manifest-env", help="environment variable holding the manifest JSON")
@@ -1015,7 +1355,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
     if not args.mode:
-        parser.error("choose a mode: format, fragments, announce, or --self-test")
+        parser.error("choose a mode: format, fragments, plans, plan-note, announce, or --self-test")
     repo = Path(args.repo).resolve()
     try:
         if args.mode == "format":
@@ -1032,6 +1372,19 @@ def main() -> int:
             _fragments, fragment_problems = load_fragments(repo)
             tag, commits, stale = sweep(repo, args.since)
             return report_sweep(tag, commits, stale, fragment_problems)
+        if args.mode == "plan-note":
+            bad = 0
+            for name in args.files:
+                for problem in check_plan_note(Path(name).read_text(encoding="utf-8")):
+                    bad += 1
+                    print(f"plan-note: {name}: {problem}", file=sys.stderr)
+            if bad:
+                return 1
+            print(f"ok: {len(args.files)} plan file(s) carry one release note each")
+            return 0
+        if args.mode == "plans":
+            tag, plans, plan_problems = plan_notes(repo, args.since)
+            return report_plan_notes(tag, plans, plan_problems)
         manifest = load_manifest(args, repo)
         problems = check_announce(args.tag, manifest, (repo / CHANGELOG_NAME).read_text(encoding="utf-8"))
         for problem in problems:

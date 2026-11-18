@@ -185,6 +185,8 @@ Before the clean-main boundary's starting check, read these in full:
 - `plans/.agents/queue.md`
 - `plans/.agents/outside-files.md`
 - `plans/.agents/executing.md` (the goal file must match how an executor sets up, blocks and closes)
+- `releasing/.agents/changelog.md`, "Format" and "Plans' release notes", and `releasing/EDITORIAL_GUIDANCE.md` (every
+  plan's release note question)
 - `AGENTS.md`, "Talking to the user", "Agent scratch space", "TODO.md and FLAKES.md" and "Tests and validation" (root)
 - the `scode-build-goal`, `jjstack` and `interactive-artifact` skills, as `plans/.agents/planning.md` uses them
 
