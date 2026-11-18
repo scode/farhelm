@@ -31,9 +31,7 @@ pub(crate) struct CatalogModel {
 /// Farhelm's deliberately compact Codex offering.
 ///
 /// Codex advertises broader effort choices for some models, but this release
-/// presents a stable three-level subset for its ordinary released models.
-/// Astra is the explicit exception: Farhelm curates it as high-only. These
-/// are product choices, not assertions about a vendor rejecting omissions.
+/// presents a stable three-level subset for both suggested and custom models.
 const CODEX_EFFORTS: &[LaunchEffort] =
     &[LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High];
 const CLAUDE_EFFORTS: &[LaunchEffort] = &[
@@ -88,6 +86,13 @@ const OMP_EFFORTS: &[LaunchEffort] = &[
 /// translation to a provider-specific variant.
 const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
 
+/// The released models the launcher suggests, in the order it shows them.
+///
+/// Replacing a model here also retires its id: a saved template that names
+/// only the old id no longer finds its agent through this list. The shared
+/// template fold (`farhelm_proto::launcher::apply_template`) keeps a short
+/// table of retired ids and their former agents for that case; add the
+/// replaced ids there when swapping a model.
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         id: "auto",
@@ -110,14 +115,14 @@ const CATALOG: &[CatalogModel] = &[
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
-        id: "gpt-6.1-sol",
+        id: "gpt-6.2-sol",
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
-        id: "gpt-6-astra",
+        id: "gpt-6.2-astra",
         harness: LaunchHarness::Codex,
-        efforts: &[LaunchEffort::High],
+        efforts: CODEX_EFFORTS,
     },
     CatalogModel {
         id: "claude-fable-5",
@@ -160,12 +165,12 @@ const CATALOG: &[CatalogModel] = &[
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6.1-sol",
+        id: "openai/gpt-6.2-sol",
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-astra",
+        id: "openai/gpt-6.2-astra",
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
@@ -200,12 +205,12 @@ const CATALOG: &[CatalogModel] = &[
         efforts: PI_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6.1-sol",
+        id: "openai/gpt-6.2-sol",
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-astra",
+        id: "openai/gpt-6.2-astra",
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
@@ -240,12 +245,12 @@ const CATALOG: &[CatalogModel] = &[
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6.1-sol",
+        id: "openai/gpt-6.2-sol",
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
-        id: "openai/gpt-6-astra",
+        id: "openai/gpt-6.2-astra",
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
@@ -280,12 +285,12 @@ const CATALOG: &[CatalogModel] = &[
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
-        id: "opencode/gpt-6.1-sol",
+        id: "opencode/gpt-6.2-sol",
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
-        id: "opencode/gpt-6-astra",
+        id: "opencode/gpt-6.2-astra",
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },

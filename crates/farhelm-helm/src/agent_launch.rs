@@ -249,6 +249,8 @@ fn resolve_with(
                 invalid(refusal.to_string())
             }
         })?;
+    // Unnamed on purpose: the shared fold recovers a retired model's agent
+    // only for saved templates, which always have a name, never for flags.
     let mut flags = LaunchTemplate {
         name: String::new(),
         fields: edits.clone(),

@@ -408,6 +408,32 @@ fn a_model_picks_its_only_agent_and_a_custom_id_keeps_its_owner() {
     assert_eq!(draft.agent.model_owner, Some(LaunchHarness::Claude));
 }
 
+/// A saved model-only template for a retired ID must set both choices in the visible draft. The shared fold can
+/// infer the agent while replay still owns the edit that sets it, including ownership of the custom model.
+#[test]
+fn a_retired_model_template_applies_its_inferred_agent_to_the_draft() {
+    let fixture = Fixture::new();
+    for (id, harness) in [
+        ("gpt-6-astra", LaunchHarness::Codex),
+        ("opencode/gpt-6.1-sol", LaunchHarness::OpenCode),
+    ] {
+        let mut draft = new_draft();
+        assert_eq!(draft.agent.harness, None);
+        assert!(fixture.catalog.iter().all(|model| model.id != id));
+        let saved = template(
+            "retired-model",
+            TemplateFields {
+                model: Some(Some(id.into())),
+                ..TemplateFields::default()
+            },
+        );
+        fixture.apply(&mut draft, &[saved]).unwrap();
+        assert_eq!(draft.agent.harness, Some(harness), "{id}");
+        assert_eq!(draft.agent.model.as_deref(), Some(id));
+        assert_eq!(draft.agent.model_owner, Some(harness));
+    }
+}
+
 /// A template that switches to an agent that cannot take an initial prompt clears the dormant prompt, as the shared
 /// fold says, while one that sets its own prompt replaces it. This is the one place the replay writes the fold's
 /// result directly, so both directions are pinned.

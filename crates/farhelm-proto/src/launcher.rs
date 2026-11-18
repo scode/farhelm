@@ -651,6 +651,8 @@ fn harness_word(harness: LaunchHarness) -> String {
 /// result is a launcher state, not a launch: a field the launch needs and no
 /// template set is still the user's (or the CLI flags') to fill. Historical
 /// workspace-trust values decode but have no effect: trust comes from Settings.
+/// A saved template can still infer the former owner of a retired Sol or
+/// Astra ID when neither the template nor the launcher supplies an agent.
 /// A session name carries its template kind into the result; resolving a base
 /// against occupied checkout folders belongs to the caller's preview path.
 pub fn apply_template(
@@ -776,9 +778,27 @@ pub fn apply_template(
                 .filter(|entry| entry.id == model.as_str())
                 .map(|entry| entry.harness)
                 .collect();
-            if let [owner] = owners.as_slice() {
-                next.harness = Some(*owner);
-            }
+            next.harness = match owners.as_slice() {
+                [owner] => Some(*owner),
+                // Older catalogs supplied these owners for model-only
+                // templates. Recover just the agent so that the saved model
+                // can use the normal custom-model path. CLI flag edits use
+                // an unnamed template and still require a chosen agent;
+                // saved templates never have an empty name
+                // (`check_template_shape`). When the helm's catalog
+                // (`launches.rs`, `CATALOG`) replaces a model, add the
+                // replaced ids here.
+                [] if !template.name.is_empty() && !context.catalog.is_empty() => {
+                    match model.as_str() {
+                        "gpt-6.1-sol" | "gpt-6-astra" => Some(LaunchHarness::Codex),
+                        "opencode/gpt-6.1-sol" | "opencode/gpt-6-astra" => {
+                            Some(LaunchHarness::OpenCode)
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
         }
         let Some(harness) = next.harness else {
             return Err(refuse(
@@ -2082,6 +2102,52 @@ mod tests {
         let applied = apply_template(&chosen_opencode, &bare, &ctx).unwrap();
         assert_eq!(applied.harness, Some(LaunchHarness::OpenCode));
         assert_eq!(applied.model.as_deref(), Some("gpt-6-luna"));
+    }
+
+    /// A model-only template that used to pick its agent from the catalog
+    /// still applies after the model leaves the suggestions. The inferred
+    /// agent restores the old behavior and the model ID stays literal.
+    #[test]
+    fn retired_models_still_pick_an_agent_for_saved_templates() {
+        let catalog = catalog();
+        let ctx = context(&catalog, &[], false);
+        let state = LauncherState::default();
+        for (id, harness) in [
+            ("gpt-6.1-sol", LaunchHarness::Codex),
+            ("gpt-6-astra", LaunchHarness::Codex),
+            ("opencode/gpt-6.1-sol", LaunchHarness::OpenCode),
+            ("opencode/gpt-6-astra", LaunchHarness::OpenCode),
+        ] {
+            let fields = TemplateFields {
+                model: Some(Some(id.into())),
+                ..TemplateFields::default()
+            };
+            let applied = apply_template(&state, &template("saved", fields.clone()), &ctx).unwrap();
+            assert_eq!(applied.harness, Some(harness), "{id}");
+            assert_eq!(applied.model.as_deref(), Some(id));
+            let refusal = apply_template(&state, &template("", fields), &ctx).unwrap_err();
+            assert_eq!(refusal.field, "model", "unnamed CLI edits using {id}");
+        }
+    }
+
+    /// An explicit agent outranks historical inference. OpenCode still
+    /// interprets the saved bare ID as a Zen model and keeps it as typed.
+    #[test]
+    fn a_saved_template_keeps_its_explicit_agent_and_retired_model() {
+        let catalog = catalog();
+        let fields = TemplateFields {
+            agent: Some(LaunchHarness::OpenCode),
+            model: Some(Some("gpt-6-astra".into())),
+            ..TemplateFields::default()
+        };
+        let applied = apply_template(
+            &LauncherState::default(),
+            &template("saved", fields),
+            &context(&catalog, &[], false),
+        )
+        .unwrap();
+        assert_eq!(applied.harness, Some(LaunchHarness::OpenCode));
+        assert_eq!(applied.model.as_deref(), Some("gpt-6-astra"));
     }
 
     /// Spec: a template's stored JSON distinguishes a field left out from a

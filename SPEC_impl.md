@@ -8504,6 +8504,12 @@ assignments refuse in template order. An equal agent must never reach reconcilia
 permissions or clear model and effort. Prompt and command-resume removal remain refused; search results and recents
 retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host flag.
 
+The shared template fold also implements SPEC.md's saved-template model compatibility rule. When a loaded catalog has no
+exact match and no agent type is chosen, a named template can recover the former owner of an exact retired ID. Its model
+stays custom. The CLI applies its flag edits as an unnamed template, and every save path refuses an empty name
+(`check_template_shape`), so only saved templates reach this recovery. The retired IDs are listed in the fold itself,
+because the desktop app receives the catalog over the wire; retiring another catalog model needs an entry there.
+
 The launcher's "Save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
 remembered defaults and Clone's inherited placement. The marks are the launcher draft's own, set by its hand-edit

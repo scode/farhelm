@@ -15444,7 +15444,7 @@ mod tests {
         put_recipe(&h, "dev").await;
         let mut selection = farhelm_proto::LaunchSelection {
             harness: farhelm_proto::LaunchHarness::Codex,
-            model: Some("gpt-6-astra".into()),
+            model: Some("gpt-6.2-astra".into()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: None,
             permission_flags: None,
@@ -15453,9 +15453,11 @@ mod tests {
             workspace_trust: None,
         };
         let mut historical = crate::launches::compile(selection.clone()).unwrap();
-        // The same commands, recorded when the model still offered medium
-        // effort: structurally valid, but not what today's catalog composes.
-        selection.effort = Some(farhelm_proto::LaunchEffort::Medium);
+        // The same commands, stored with an effort today's catalog does not
+        // offer Codex at all: structurally valid, but not what today's
+        // catalog composes. (This used to be medium on a high-only astra;
+        // no catalog model is narrower than its harness any more.)
+        selection.effort = Some(farhelm_proto::LaunchEffort::Xhigh);
         if let farhelm_proto::SessionLaunch::Agent {
             selection: stored, ..
         } = &mut historical

@@ -380,9 +380,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Launcher models.** replace gpt-6.1-sol with gpt-6.2-sol as the models in the launcher, same with astra (6 to 6.2).
-  Plan: `plans/queue/launcher-gpt-6-2-models.md`.
-
 - **Session groups.** Let users group related sessions in the session list and collapse each group. Keep sessions
   together as activity changes and show when a collapsed group contains a session that needs attention. Plan:
   `plans/queue/session-groups.md`.
