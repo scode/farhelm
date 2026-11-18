@@ -374,6 +374,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Launcher models.** replace gpt-6.1-sol with gpt-6.2-sol as the models in the launcher, same with astra (6 to 6.2)
 
+- **Session groups.** Let users group related sessions in the session list and collapse each group. Keep sessions
+  together as activity changes and show when a collapsed group contains a session that needs attention.
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
