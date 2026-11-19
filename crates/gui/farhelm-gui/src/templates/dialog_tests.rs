@@ -33,6 +33,20 @@ use crate::session_list::host_rail::tests::texts_within;
 use crate::test_support::{self, any_open, click, frame, keys, meta, settle, started};
 use crate::{assets, bootstrap, root};
 
+/// A selected row keeps both its summary and its shortcut readable on the accent fill in either appearance.
+#[test]
+fn template_details_use_inverse_ink_when_selected() {
+    use super::dialog::row_detail_ink;
+    use crate::theme::{DARK, LIGHT};
+
+    for palette in [&DARK, &LIGHT] {
+        for idle in [palette.fg_1, palette.fg_2] {
+            assert_eq!(row_detail_ink(palette, true, idle), palette.on_accent_dim);
+            assert_eq!(row_detail_ink(palette, false, idle), idle);
+        }
+    }
+}
+
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
 /// The root view the tests open Templates from: the Templates button the list header will draw, and a second button

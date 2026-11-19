@@ -95,6 +95,19 @@ const ROW_GAP: f32 = 6.;
 const ROW_LINE_GAP: f32 = 4.;
 /// `.templates-hint` and `.templates-row-summary`: 12-pixel text at a 1.5 line height.
 const SMALL_LINE_HEIGHT: f32 = 18.;
+
+/// A selected template uses inverse ink for all its detail lines because they sit on the same accent fill.
+pub(super) fn row_detail_ink(
+    palette: &theme::Palette,
+    selected: bool,
+    idle: theme::Token,
+) -> theme::Token {
+    if selected {
+        palette.on_accent_dim
+    } else {
+        idle
+    }
+}
 /// The header tile's glyph: the Templates action glyph at its own 14-pixel size, as the old tile drew it (Settings'
 /// gear is drawn larger in its tile; the old dialogs differed).
 const TILE_GLYPH: f32 = 14.;
@@ -877,8 +890,8 @@ impl TemplatesDialog {
             });
         });
 
-        // The row the editor holds is drawn pressed, its summary in the accent family's quieter ink (the name takes
-        // the button's own ink, which pressing turns inverse).
+        // The row the editor holds is drawn pressed. Its summary and shortcut use the quieter inverse ink, and its
+        // name takes the button's own inverse ink.
         let open = self
             .editor
             .as_ref()
@@ -906,11 +919,7 @@ impl TemplatesDialog {
                     .whitespace_nowrap()
                     .text_size(metrics::TEXT_SM)
                     .line_height(px(SMALL_LINE_HEIGHT))
-                    .text_color(theme::color(if open {
-                        palette.on_accent_dim
-                    } else {
-                        palette.fg_1
-                    }))
+                    .text_color(theme::color(row_detail_ink(palette, open, palette.fg_1)))
                     .child(summary::line(&summary::parts(&template.fields))),
             );
         if marked {
@@ -918,7 +927,7 @@ impl TemplatesDialog {
                 div()
                     .text_size(px(summary::CHORD_TEXT))
                     .font_family(crate::assets::TERMINAL_FONT)
-                    .text_color(theme::color(palette.fg_2))
+                    .text_color(theme::color(row_detail_ink(palette, open, palette.fg_2)))
                     .child(super::QUICK_LAUNCH_SHORTCUT_NAME),
             );
         }
