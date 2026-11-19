@@ -1512,6 +1512,9 @@ fn detach_naturally(
             .expect("the identity-checked attachment remains under the lock");
         old.request_forwarder_shutdown();
         join_forwarder(&key, old.forwarder).await;
+        // Cancel input still queued with the old viewer before a replacement
+        // can acquire the lock and start sending its own input.
+        drop(old.input);
         drop(attachments);
         notify_detached(&tx, channel, reason, DetachCode::Other);
     });
