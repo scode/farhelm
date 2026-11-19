@@ -350,8 +350,8 @@ fn info(socket: &Path) -> terminal_host::protocol::Info {
 /// a spawn that returned early would race its own host, and a first stage
 /// left unreaped is a zombie per terminal for the supervisor's lifetime.
 /// Spec: the socket lies in `<state>/hosts/`, exists and is a socket; the
-/// listener's parent is not this test process (the first stage that forked
-/// it has exited); no child of this test process is a zombie; and the
+/// process table shows that the listener's parent is neither this test nor a child of this test;
+/// no child of this test process is a zombie; and the
 /// host's `Info` carries the encoded tag, which decodes back to the tag,
 /// with its child running.
 #[farhelm_testtrace::test]
@@ -374,6 +374,13 @@ async fn a_spawned_host_is_listening_and_its_first_stage_is_reaped() {
         .map(|(_, ppid, ..)| *ppid)
         .expect("the host is in the process table");
     assert_ne!(parent, me, "the host is still this process's child");
+    // A live first stage would still be both the host's parent and our child.
+    assert!(
+        !table
+            .iter()
+            .any(|(pid, ppid, ..)| *pid == parent && *ppid == me),
+        "the host still has first stage {parent} as its parent"
+    );
     let zombies: Vec<_> = table
         .iter()
         .filter(|(_, ppid, stat, _)| *ppid == me && stat.starts_with('Z'))

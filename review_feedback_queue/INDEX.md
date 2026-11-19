@@ -1077,9 +1077,6 @@ consequences.
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
 
-- [`readiness-test-does-not-establish-first-stage-exit.md`](readiness-test-does-not-establish-first-stage-exit.md) — The
-  regression can pass while a terminal-start helper remains alive, leaving its claimed lifecycle guarantee untested.
-
 - [`input-test-comments-overstate-termination-coverage.md`](input-test-comments-overstate-termination-coverage.md) — The
   test comments claim stronger coverage and transport guarantees than the tests establish.
 
