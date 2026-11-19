@@ -5584,13 +5584,16 @@ installation it is on, so it follows an open session the sidebar's filter hides
 
   Move up and Move down reuse the same menu actions, focus return and relative placement for pins and group headers
   (`crates/gui/farhelm-gui/src/session_list/pins.rs`). Missing or mixed pin positions keep the stable partition and
-  withhold pin moves. One grip gesture keeps the pointer capture, focus and Escape rules for either kind of item
-  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs`). It samples insertion bands against the last drawn bounds and
-  clips them to the viewport. An expanded group without visible pins takes its first pin at the header's bottom edge.
-  With no visible global pins, the first group header's top edge serves as their insertion line. The helm pushes order
-  and membership before replying. A successful cross-area drop moves the held slot in the initiating window on that
-  reply. Other membership changes keep their held slots. Interrupted capture, a hidden or unavailable list, or a source
-  that ceases to be movable cancels the gesture without a write.
+  withhold pin moves. Group headers, pins and unpinned sessions share the grip's pointer capture, focus and Escape rules
+  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs`). The frame projects both insertion bands and membership
+  targets from the held layout, and each drawn target contributes bounds clipped to the viewport. An expanded group
+  without visible pins takes its first pin at the header's bottom edge. With no visible global pins, the first group
+  header's top edge serves as their insertion line. A single pin uses these positional targets before it can append to a
+  group by landing on an unpinned member. Whole-group drops use the membership request. The helm pushes order and
+  membership before replying. A successful cross-area drop moves the held slot in the initiating window on that reply.
+  An unpinned arrival goes after the leading pins and a pin append goes after the last pinned slot, even across a held
+  gap left by an unpin. Other membership changes keep their held slots. Interrupted capture, a hidden or unavailable
+  list, or a source that ceases to be movable cancels the gesture without a write.
 
   Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
   failure leaves the source intact. If deletion fails, both survivors can be pinned at the same position. Positions have

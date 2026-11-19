@@ -130,12 +130,13 @@ fn three_pins() -> Vec<farhelm_proto::ui_channel::CollectionState> {
 
 // ---- The grip ------------------------------------------------------------------------------------------------------
 
-/// SPEC.md, "Session list": "Hovering an eligible pinned row reveals a grip beside its name", and "A newly pinned row
+/// SPEC.md, "Session list": "Hovering or focusing an eligible row reveals a grip on its left edge", and "A newly pinned row
 /// waiting for the order hold to end has neither a grip nor Move actions"; the old grip was a button named "Drag pinned
 /// session" over the row's leading gutter, on movable pins only, shown on hover. Its help is checked beside the sidebar
 /// with the other row marks' (`summary_tests.rs`, `every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring`).
 /// Specified: with a and b pinned and u unpinned, a's and b's grips are drawn, named "Drag pinned session", at the top
-/// left of their rows, 12 by 28 pixels, hidden until the pointer is over the row, and u has none; c pinned by the helm
+/// left of their rows, 12 by 28 pixels, hidden until the pointer is over the row. The unpinned grip offers a group move.
+/// A pin made by the helm
 /// while the pointer is over the rows (held third) has no grip until the pointer leaves, when it leads and has one.
 #[gpui::test]
 fn movable_pins_have_a_named_grip_revealed_by_the_pointer(cx: &mut TestAppContext) {
@@ -166,7 +167,11 @@ fn movable_pins_have_a_named_grip_revealed_by_the_pointer(cx: &mut TestAppContex
         assert_eq!(grip.size, gpui::size(px(12.), px(28.)));
     }
     assert!(drawn(cx, "session-pin-grip-a:hidden") && drawn(cx, "session-pin-grip-b:hidden"));
-    assert!(!drawn(cx, "session-pin-grip-u:hidden") && !drawn(cx, "session-pin-grip-u:shown"));
+    assert_eq!(
+        label_of(cx, "session-pin-grip-u").as_deref(),
+        Some("Drag session")
+    );
+    assert!(drawn(cx, "session-pin-grip-u:hidden"));
 
     let over_b = item(cx, "b").center();
     cx.simulate_mouse_move(over_b, None, Modifiers::none());
@@ -350,6 +355,163 @@ fn an_empty_group_accepts_its_first_pin_and_moves_the_held_slot(cx: &mut TestApp
     assert!(
         header(cx).bottom() <= item(cx, "global").top(),
         "the completed drop moves the pin into its group"
+    );
+}
+
+/// A membership drop outlines its whole destination. Before the reply the row stays in its held slot; on success it
+/// appears just under the destination's pins, ahead of its other unpinned members.
+#[gpui::test]
+fn an_unpinned_drop_joins_the_group_after_its_pins_while_held(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let raised = session("loose");
+    let roster = vec![group(10, "Work", 2, false)];
+    let state = grouped_snapshot(
+        &[
+            session("pin").pinned(1).grouped(10),
+            session("member").grouped(10),
+            raised.clone(),
+        ],
+        roster,
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    away(cx);
+    sent(&mut fake);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["pin", "member", "loose"],
+        "the premise"
+    );
+    press_grip(cx, "loose");
+    let target = bounds_of(cx, "session-group-10-pin-separator").center();
+    drag_to(cx, target);
+    for member in [
+        "session-membership-drop-group/10",
+        "session-membership-drop-pin",
+        "session-membership-drop-member",
+    ] {
+        assert!(drawn(cx, member), "{member} shares the destination outline");
+    }
+    assert!(!drawn(cx, "session-pin-drop-pin:after"));
+    release(cx, target);
+    let [command] = &fake.commands()[..] else {
+        panic!("one membership write");
+    };
+    assert_eq!(command.path, "/api/sessions/loose/group");
+    assert_eq!(command.body, Some(json!({"target": {"group": 10}})));
+
+    let mut meta = listing_meta(&["pin", "member", "loose"], 3, false);
+    meta.session_groups = vec![group(10, "Work", 3, false)];
+    fake.push(change(meta, &[raised.grouped(10)], &[]));
+    test_support::settle(cx);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["pin", "member", "loose"],
+        "push alone preserves the hold"
+    );
+    fake.reply(command.id, 200, None);
+    test_support::settle(cx);
+    assert_eq!(row_order(&frame(cx)), ["pin", "loose", "member"]);
+}
+
+/// An unpinned member can leave a group even with no loose rows on screen. A global pin is never that destination.
+#[gpui::test]
+fn an_unpinned_drag_draws_an_ungroup_strip_with_no_loose_rows(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let state = grouped_snapshot(
+        &[session("global").pinned(1), session("member").grouped(10)],
+        vec![group(10, "Work", 1, false)],
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    away(cx);
+    sent(&mut fake);
+    assert!(!drawn(cx, "session-ungroup-drop"));
+    press_grip(cx, "member");
+    let global = item(cx, "global").center();
+    drag_to(cx, global);
+    assert!(!drawn(cx, "session-membership-drop-global"));
+    assert!(!drawn(cx, "session-pin-drop-global:before"));
+    let strip = bounds_of(cx, "session-ungroup-drop").center();
+    drag_to(cx, strip);
+    release(cx, strip);
+    assert_eq!(
+        sent(&mut fake),
+        vec![(
+            Method::Put,
+            "/api/sessions/member/group".into(),
+            json!({"target": "ungrouped"})
+        )]
+    );
+    assert!(
+        !drawn(cx, "session-ungroup-drop"),
+        "the strip belongs to the gesture"
+    );
+}
+
+/// A collapsed group's header is a complete destination. Landing on it sends only the membership write and keeps
+/// the destination's member rows hidden throughout the gesture.
+#[gpui::test]
+fn an_unpinned_drop_accepts_a_collapsed_header(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let rows = [session("hidden").grouped(10), session("loose")];
+    let roster = vec![group(10, "Work", 1, true)];
+    let (mut fake, cx) = open_main(cx, grouped_snapshot(&rows, roster));
+    away(cx);
+    sent(&mut fake);
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["loose"],
+        "the collapsed group hides its member"
+    );
+    press_grip(cx, "loose");
+    let target = bounds_of(cx, "session-group-10").center();
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-membership-drop-group/10"));
+    assert_eq!(
+        row_order(&frame(cx)),
+        ["loose"],
+        "hover leaves the group collapsed"
+    );
+    release(cx, target);
+    assert_eq!(
+        sent(&mut fake),
+        vec![(
+            Method::Put,
+            "/api/sessions/loose/group".into(),
+            json!({"target": {"group": 10}})
+        )]
+    );
+}
+
+/// A pin over an unpinned member uses the append request, scoped to its source area. The pin's existing insertion
+/// band is still covered by the positional drag tests.
+#[gpui::test]
+fn a_pin_dropped_on_an_unpinned_member_appends_in_its_group(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let state = grouped_snapshot(
+        &[
+            session("global").pinned(1),
+            session("pin").pinned(2).grouped(10),
+            session("member").grouped(10),
+        ],
+        vec![group(10, "Work", 2, false)],
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    away(cx);
+    sent(&mut fake);
+    assert_eq!(row_order(&frame(cx)), ["global", "pin", "member"]);
+    press_grip(cx, "global");
+    let target = item(cx, "member").center();
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-membership-drop-group/10"));
+    assert!(!drawn(cx, "session-pin-drop-pin:after"));
+    release(cx, target);
+    assert_eq!(
+        sent(&mut fake),
+        vec![(
+            Method::Put,
+            "/api/sessions/global/group".into(),
+            json!({"target": {"group": 10}, "pin_source": "ungrouped"})
+        )]
     );
 }
 

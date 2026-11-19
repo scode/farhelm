@@ -23,7 +23,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::{Handler, HoverHelp};
@@ -39,6 +40,7 @@ pub struct ListRow {
     role: Role,
     selected: bool,
     content_indent: Pixels,
+    paint_hover_fill: bool,
     lines: Vec<AnyElement>,
     on_click: Option<Handler>,
 }
@@ -60,6 +62,7 @@ impl ListRow {
             role,
             selected: false,
             content_indent: px(0.),
+            paint_hover_fill: true,
             lines: Vec::new(),
             on_click: None,
         }
@@ -75,6 +78,12 @@ impl ListRow {
     /// Inset the lines while keeping the open control's hit area and focus ring on the whole row.
     pub fn content_indent(mut self, indent: Pixels) -> Self {
         self.content_indent = indent;
+        self
+    }
+
+    /// Let the surrounding item's fill show through hover and keyboard focus while keeping the focus ring.
+    pub fn paint_hover_fill(mut self, paint: bool) -> Self {
+        self.paint_hover_fill = paint;
         self
     }
 
@@ -128,19 +137,25 @@ impl RenderOnce for ListRow {
             .pb(pad_y)
             .pl(pad_left + self.content_indent)
             .cursor_pointer()
-            .hover(move |style| style.bg(theme::color(hover_fill)))
+            .when(self.paint_hover_fill, |row| {
+                row.hover(move |style| style.bg(theme::color(hover_fill)))
+            })
             .children(self.lines);
         if ring {
-            row = row.bg(theme::color(hover_fill)).child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .border_2()
-                    .border_color(theme::color(ring_color)),
-            );
+            row = row
+                .when(self.paint_hover_fill, |row| {
+                    row.bg(theme::color(hover_fill))
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .border_2()
+                        .border_color(theme::color(ring_color)),
+                );
         }
         let row = super::with_hover_help(row, &self.id, &self.help, true, Some(&focus), window, cx);
         super::activate_on_click(

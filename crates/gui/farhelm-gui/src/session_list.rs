@@ -863,15 +863,7 @@ impl Render for SessionList {
                     .group_collapse
                     .retain(|id, _| roster.iter().any(|group| group.id == *id));
             }
-            let groups::Frame {
-                keys,
-                headers,
-                member_groups,
-                separators,
-                moves,
-                rows: listed,
-                drag,
-            } = groups::Frame::new(
+            let mut frame = groups::Frame::new(
                 layout,
                 roster,
                 current.hold.original_pins(),
@@ -880,12 +872,28 @@ impl Render for SessionList {
                 open,
                 cx,
             );
+            if exposed && current.pin_drag.borrow().wants_ungroup_strip() {
+                frame.offer_ungroup_strip();
+            }
+            let groups::Frame {
+                keys,
+                headers,
+                member_groups,
+                separators,
+                moves,
+                rows: listed,
+                drag,
+            } = frame;
             let projection = exposed.then(|| marking::project(&listed, &current.marks));
             self.moves = if exposed { moves } else { HashMap::new() };
             // The rows a drag may land beside, and whose grips may drag them: the movable pins, in the order drawn, and
             // none while the rows are not shown or the listing is unavailable (`pin_drag`'s "The list cancels too"). A
             // retired session's pin is one of them as a target; `pin_drag` refuses only its own drag.
-            let drag_bands = if exposed { drag } else { Vec::new() };
+            let drag_bands = if exposed {
+                drag
+            } else {
+                pin_drag::Targets::default()
+            };
             let unchanged = keys.len() == self.entries.len()
                 && keys
                     .iter()
@@ -1088,7 +1096,9 @@ impl Render for SessionList {
                         let Some((key, focus)) = entries.get(ix) else {
                             return div().into_any_element();
                         };
-                        let row = if let Some(header) = headers.get(key) {
+                        let row = if key == pin_drag::UNGROUP_STRIP {
+                            pin_drag::ungroup_strip(&pin_drag, theme::palette(cx))
+                        } else if let Some(header) = headers.get(key) {
                             groups::draw_header(
                                 header,
                                 focus,
@@ -1118,9 +1128,11 @@ impl Render for SessionList {
                         };
                         if let Some(separator) = separators.get(key) {
                             // After the row's item, so the item's own border stays its bottom edge.
+                            let highlighted = matches!(separator, pins::Separator::GroupPins(id)
+                                if pin_drag.borrow().highlights_group(*id));
                             div()
                                 .child(row)
-                                .child(pins::separator(*separator, theme::palette(cx)))
+                                .child(pins::separator(*separator, highlighted, theme::palette(cx)))
                                 .into_any_element()
                         } else {
                             row

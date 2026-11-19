@@ -2502,10 +2502,16 @@ group disappears when its last member moves out or is deleted, including when it
 removed host entry. Groups can hold sessions from several hosts. Membership belongs to the session on its host entry.
 Restart keeps it, Replace and Replace with carry it and the pin's position, and Delete removes it.
 
-Hovering an eligible pinned row reveals a grip beside its name. Dragging the grip lifts the row and shows a drop line. A
-pin can move within its area or into the global pins or an expanded group's pin area. It lands before or after the pin
-at the drop line, or as the first pin in an empty area. Dragging preserves pin status and the order of unpinned rows.
-The group header reuses the pin grip drag to move the group among groups. A pin move is refused if the moved pin or its
+Hovering or focusing an eligible row reveals a grip on its left edge. Dragging the grip lifts the row. An unpinned row
+can land on a group's header or members to join it. The whole destination is outlined and tinted, and the list's sort
+determines the member's place. A collapsed group accepts the drop through its header and stays collapsed. Dropping on an
+ungrouped row removes membership. When no ungrouped rows are shown, dragging an unpinned member reveals a **Drop here to
+remove from group** strip below the groups. Its own group and the global pins do not accept an unpinned row.
+
+A single pin moves within its area or into the global pins or an expanded group's pin area. It lands before or after the
+pin at the drop line, or as the first pin in an empty area. Over another group's unpinned rows it can also land as that
+group's last pin. An insertion line takes precedence over this whole-group target. Dragging preserves pin status. The
+group header uses the same grip gesture to move the group among groups. A pin move is refused if the moved pin or its
 neighbor has left the expected area. Escape, interrupted pointer capture or release outside a valid drop area cancels.
 The row and header menus retain the keyboard actions for these moves. A newly pinned row waiting for the order hold to
 end has neither a grip nor Move actions until it joins a movable area.
@@ -2540,11 +2546,11 @@ session appears at the bottom of the list, moving no row above it, until the hol
 the list's host, filter, or order is asking for a different list, so the hold does not apply to it. An open row or group
 menu or its naming dialog keeps the hold even if the pointer leaves the list or stays still. Movement over the list
 starts the 5 seconds of stillness over. Original groups and original pins still pinned in their held area follow the
-shared manual order in their existing slots. When this window completes a cross-area drag, the pin moves into its new
-area in the hold at once. Other membership changes and pin or unpin changes update rows in place until the hold ends,
-when the rows take their proper places. Group headers follow the held rows. Collapsing or expanding a group applies at
-once. Newly pinned rows offer no grip or Move actions until the hold ends, and original pins cannot use them as Move
-neighbors.
+shared manual order in their existing slots. When this window completes a cross-area drag, the moved row enters its new
+area in the hold at once, with an unpinned row going after the destination's pins. Other membership changes and pin or
+unpin changes update rows in place until the hold ends, when the rows take their proper places. Group headers follow the
+held rows. Collapsing or expanding a group applies at once. Newly pinned rows offer no grip or Move actions until the
+hold ends, and original pins cannot use them as Move neighbors.
 
 A muted pin glyph immediately before the title names a pinned row in its tooltip and accessible text. The heavier
 separator with a small gap follows the displayed leading contiguous run of global pins when anything follows. The

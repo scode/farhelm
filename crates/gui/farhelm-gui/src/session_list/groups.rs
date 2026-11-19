@@ -300,7 +300,11 @@ pub(super) fn draw_header(
         .pl(px(12.))
         .min_h(px(30.))
         .text_size(metrics::TEXT_SM)
-        .bg(theme::color(palette.bg_2))
+        .bg(theme::color(if drag.membership_outline.is_some() {
+            palette.marked_bg
+        } else {
+            palette.bg_2
+        }))
         .on_hover(move |hovered, _, cx| hover.set(*hovered, cx))
         .child(div().min_w_0().child(toggle))
         .children(header.count.clone().map(|count| {
@@ -318,6 +322,7 @@ pub(super) fn draw_header(
             super::row::leading_marker(palette.accent_fill)
                 .debug_selector(|| format!("session-group-{id}-open"))
         }))
+        .children(drag.membership_outline)
         .children(drag.drop_line);
     if drag.lifted {
         head = head
@@ -593,7 +598,7 @@ pub(super) struct Frame<'a> {
     pub(super) member_groups: HashMap<String, i64>,
     pub(super) separators: HashMap<String, pins::Separator>,
     pub(super) moves: HashMap<String, pins::Neighbors>,
-    pub(super) drag: Vec<pin_drag::Band>,
+    pub(super) drag: pin_drag::Targets,
 }
 
 impl<'a> Frame<'a> {
@@ -628,7 +633,7 @@ impl<'a> Frame<'a> {
             member_groups: HashMap::new(),
             separators: HashMap::new(),
             moves: HashMap::new(),
-            drag: Vec::new(),
+            drag: pin_drag::Targets::default(),
         };
         let has_groups = !layout.groups.is_empty();
         frame.add_rows(
@@ -669,6 +674,7 @@ impl<'a> Frame<'a> {
             if live {
                 headers.push(key.clone());
             }
+            let header_index = frame.keys.len();
             frame.keys.push(key.clone());
             if !collapsed {
                 let edge = live.then_some(pin_drag::Target {
@@ -676,6 +682,17 @@ impl<'a> Frame<'a> {
                     placement: pins::Placement::After,
                 });
                 frame.add_rows(&rows, Band::Group(group.id), original_pins, false, edge);
+            }
+            if live {
+                frame.drag.membership.push(pin_drag::MembershipBand {
+                    target: SessionGroupTarget::Group(group.id),
+                    items: frame.keys[header_index..].to_vec(),
+                    append_pin: rows
+                        .iter()
+                        .filter(|row| !collapsed && !row.row.pinned)
+                        .map(|row| row.key.to_owned())
+                        .collect(),
+                });
             }
         }
         if let Some(key) =
@@ -688,7 +705,7 @@ impl<'a> Frame<'a> {
         frame.moves.extend(pins::ordered_neighbors(
             &headers.iter().map(String::as_str).collect::<Vec<_>>(),
         ));
-        if let (Some(first), Some(global)) = (headers.first(), frame.drag.first_mut())
+        if let (Some(first), Some(global)) = (headers.first(), frame.drag.bands.first_mut())
             && !has_visible_pins(&layout.global, Band::GlobalPins)
         {
             global.empty = Some(pin_drag::Target {
@@ -696,12 +713,25 @@ impl<'a> Frame<'a> {
                 placement: pins::Placement::Before,
             });
         }
-        frame.drag.push(pin_drag::Band {
+        frame.drag.bands.push(pin_drag::Band {
             area: pin_drag::Area::Groups,
             items: headers,
             empty: None,
         });
         frame.add_rows(&layout.tail, Band::Tail, original_pins, false, None);
+        let ungrouped: Vec<_> = layout
+            .tail
+            .iter()
+            .filter(|row| !row.row.pinned)
+            .map(|row| row.key.to_owned())
+            .collect();
+        if !ungrouped.is_empty() {
+            frame.drag.membership.push(pin_drag::MembershipBand {
+                target: SessionGroupTarget::Ungrouped,
+                items: ungrouped,
+                append_pin: Vec::new(),
+            });
+        }
         // With no headers between them, the global band and tail are one
         // contiguous run for the divider. A newly pinned row can touch the
         // run without becoming a movable pin during the hold.
@@ -713,6 +743,23 @@ impl<'a> Frame<'a> {
                 .insert(row.key.to_owned(), pins::Separator::GlobalPins);
         }
         frame
+    }
+
+    /// A drag of an unpinned group member still needs an ungrouping target if the list ends at a group.
+    pub(super) fn offer_ungroup_strip(&mut self) {
+        if !self
+            .drag
+            .membership
+            .iter()
+            .any(|band| band.target == SessionGroupTarget::Ungrouped)
+        {
+            self.keys.push(pin_drag::UNGROUP_STRIP.to_owned());
+            self.drag.membership.push(pin_drag::MembershipBand {
+                target: SessionGroupTarget::Ungrouped,
+                items: vec![pin_drag::UNGROUP_STRIP.to_owned()],
+                append_pin: Vec::new(),
+            });
+        }
     }
 
     /// A pin's keyboard neighbors come only from the band's leading
@@ -727,6 +774,11 @@ impl<'a> Frame<'a> {
     ) {
         self.rows.extend_from_slice(rows);
         self.keys.extend(rows.iter().map(|row| row.key.to_owned()));
+        self.drag.unpinned.extend(
+            rows.iter()
+                .filter(|row| !row.row.pinned && Band::served(row) == band)
+                .map(|row| (row.key.to_owned(), row.row.group.into())),
+        );
         let (separator, area) = match band {
             Band::GlobalPins => (pins::Separator::GlobalPins, SessionGroupTarget::Ungrouped),
             Band::Group(id) => {
@@ -754,7 +806,7 @@ impl<'a> Frame<'a> {
             empty_edge
         };
         self.moves.extend(moves);
-        self.drag.push(pin_drag::Band {
+        self.drag.bands.push(pin_drag::Band {
             area: pin_drag::Area::Pins(area),
             items: movable,
             empty,
