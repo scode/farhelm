@@ -1856,20 +1856,6 @@
   change.
 - Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
-## checkpoint-rejection-test-asserts-before-processing.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Rejected-checkpoint
-  check runs before the rejection is read. The "no checkpoint" assertion can run before the supervisor processes the
-  rejection. Confirmed. Bucket: other.
-- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
-  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
-  otherwise discard.
-- Completion criteria: fix: move the assertion after the status frame (~3 lines). At execution, fix the test only if the
-  fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
-  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
-
 ## tab-reap-deadline-excludes-listing-request.md
 
 - Outcome: `fix code`.

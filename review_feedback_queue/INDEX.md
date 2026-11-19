@@ -1171,9 +1171,6 @@ consequences.
   a resize write interrupts replay and reconnects, Farhelm can keep refusing prompts as still restoring even after the
   terminal has caught up. More output or replacement of that runtime can clear it.
 
-- [`checkpoint-rejection-test-asserts-before-processing.md`](checkpoint-rejection-test-asserts-before-processing.md) —
-  The checkpoint regression can pass if the supervisor wrongly records a rejected checkpoint as accepted.
-
 - [`paste-receipt-test-checks-before-ack-processing.md`](paste-receipt-test-checks-before-ack-processing.md) — The
   regression does not prove that a long paste stays unconfirmed until all its pieces are acknowledged. It can miss a
   receipt completing after the first piece. No current production receipt defect is established.
