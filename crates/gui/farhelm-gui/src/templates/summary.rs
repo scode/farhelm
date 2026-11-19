@@ -8,7 +8,7 @@
 //! command is named, never shown, because it can be long; a model, a session name, custom permission words and a
 //! wrapper prefix are shown, since they are short and are what tells two templates apart. Those values are written by
 //! whoever saved the template, an agent included, so they are host-supplied text: the summary hands them back as
-//! [`Part::Host`] or [`Part::Mono`], for the list to draw through the host-text element, never as plain words.
+//! [`Part::Host`] or [`Part::Mono`], so the line can escape them and isolate their direction from the app's words.
 //!
 //! SPEC.md says the list summary "mentions" an initial prompt. The old app's word for it was "Initial prompt", which is
 //! what this keeps.
@@ -20,9 +20,9 @@ use farhelm_proto::LaunchHarness;
 use farhelm_proto::LaunchPermission;
 use farhelm_proto::launcher::{LauncherKind, TemplateFields};
 
-use gpui::{AnyElement, Div, IntoElement as _, ParentElement as _, Styled as _, div};
+use gpui::{Div, ElementId, ParentElement as _, Styled as _, div};
 
-use crate::host_text::{self, HostText};
+use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::harness_label;
 use crate::permission::words::{effort_label, guarded_mode_name, permission_display};
 
@@ -45,31 +45,18 @@ const SEPARATOR: &str = " · ";
 /// list's marked row, the quick switcher's Quick launch row), smaller than the 12-pixel summary.
 pub(crate) const CHORD_TEXT: f32 = 11.;
 
-/// A summary's `parts` on one line (`.templates-row-summary`: `white-space: nowrap`), as every list that shows a
-/// template draws it: the app's words as text, the template's values through the host-text element, a wrapper prefix's
-/// and custom permission words in the monospace face. The parts never wrap; a summary longer than the row is cut at the
-/// row's edge, without the old ellipsis, since an ellipsis can only end one text element and a summary is several
-/// (recorded in the parity file). The caller sets the text size and ink, and whether the line may shrink below its
-/// content.
-pub(crate) fn line(parts: &[Part]) -> Div {
-    div()
-        .flex()
-        .flex_row()
-        .flex_nowrap()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .children(parts.iter().map(|part| -> AnyElement {
-            match part {
-                Part::Words(words) => div().flex_none().child(words.clone()).into_any_element(),
-                Part::Host(value) => host_text::element(&HostText::from_host(value.as_str()))
-                    .flex_none()
-                    .into_any_element(),
-                Part::Mono(value) => host_text::element(&HostText::from_host(value.as_str()))
-                    .flex_none()
-                    .font_family(crate::assets::TERMINAL_FONT)
-                    .into_any_element(),
-            }
-        }))
+/// Draw the summary as one line so an ellipsis can fall in any run, including a monospace value.
+/// The caller supplies a row-specific id. Assistive technology reads the whole escaped summary at that id even
+/// when the row only has room for its start. The caller still sets the text size and ink.
+pub(crate) fn line(id: impl Into<ElementId>, parts: &[Part]) -> Div {
+    let sentence = parts
+        .iter()
+        .fold(HostSentence::new(id), |sentence, part| match part {
+            Part::Words(words) => sentence.text(words.clone()),
+            Part::Host(value) => sentence.host(&HostText::from_host(value.as_str())),
+            Part::Mono(value) => sentence.mono(&HostText::from_host(value.as_str())),
+        });
+    div().min_w_0().truncate().child(sentence)
 }
 
 /// The summary of `fields`, in the old app's order: initial prompt, launch kind, agent type, model, effort,

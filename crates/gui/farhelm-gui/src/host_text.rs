@@ -924,6 +924,45 @@ pub(crate) mod tests {
         (cx, window, nodes)
     }
 
+    /// Give the mixed line enough room to show part of the host value, with enough text to force a cut in that part.
+    struct EllipsisView;
+
+    impl gpui::Render for EllipsisView {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let cases = [("latin", "i".repeat(100)), ("rtl", "שלום".repeat(4))];
+            div()
+                .font_family(assets::UI_FONT)
+                .text_size(gpui::px(FLOW_SIZE))
+                .children(cases.map(|(id, value)| {
+                    let value = HostText::from_host(value);
+                    div().w(gpui::px(160.)).truncate().child(
+                        HostSentence::new(id)
+                            .text("Flags ")
+                            .mono(&value)
+                            .text(" · Name launch"),
+                    )
+                }))
+        }
+    }
+
+    /// The ellipsis must fit inside the painted line with the actual fonts. Inter and the terminal face give Latin
+    /// i different advances, and visual glyph order in a right-to-left value must not discard a prefix that fits.
+    #[test]
+    fn mixed_font_ellipsis_fits_and_keeps_host_text() {
+        let (_, _, nodes) = draw_real(linux_text_system(), || EllipsisView);
+        for (id, fragment) in [("latin", "iiii"), ("rtl", "שלום")] {
+            let (index, texts) = painted(&nodes, id);
+            assert_eq!(texts.len(), 1);
+            let line = &texts[0];
+            assert!(line.text.contains(fragment), "{id}: {line:?}");
+            assert!(line.text.ends_with('…'), "{id}: {line:?}");
+            assert!(
+                line.bounds.right() <= nodes[index].visible_bounds.right() + gpui::px(1.),
+                "{id}: the ellipsis was clipped: {line:?}"
+            );
+        }
+    }
+
     /// `text` shaped in `window` in the interface face, as a sentence with no monospace part is, wrapped at `width`
     /// when given; the byte index each wrapped line after the first starts at.
     fn wrap_breaks(

@@ -300,16 +300,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-- **Three small desktop-app fixes the docs screenshots showed.** Found restoring the docs pages' annotated screenshots
-  (2026-11-18). (1) Settings → Hosts still says **Update remote hosts automatically** works "even with no window open"
-  (hover help and help line, `crates/gui/farhelm-gui/src/settings/choices.rs`); SPEC.md says it works while Farhelm is
-  open, since the helm runs inside the app. The Settings Hosts goldens draw the help line, so they change too, and the
-  Manage hosts `app-settings` docs shot shows the old words until recaptured. (2) The Templates list clips each
-  template's summary mid-word ("Destinatic", "Agent launch · C") with no ellipsis; the browser app showed "Destina…".
-  (3) A session row's host-and-directory line has no element id, so the Read the session list `row` shot's callout
-  points at the row's bottom edge instead of the line; `session-row-<key>-place` on the row's meta line
-  (`session_list/row.rs`) would let it point there. Plan: `plans/queue/docs-shot-desktop-fixes.md`.
-
 - **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
   launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
   0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least

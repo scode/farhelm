@@ -1267,9 +1267,8 @@ const HINT_GAP: Pixels = px(4.);
 
 /// One template's row in the templates section (the old `.quick-switcher-template`, one column): its name at weight
 /// 600 over its summary in the quiet 12-pixel ink, both host text where the template's author wrote them. The summary
-/// is drawn as the Templates list draws it ([`summary::line`]) and may shrink to the row, so a long one is cut at its
-/// edge. On the selected row the summary takes the dimmer inverse ink, as the old sheet's selected rule had it. The
-/// name names the row for assistive technology and its id, which tests find it by.
+/// uses the same one-line ellipsis as the Templates list ([`summary::line`]). On the selected row it takes the dimmer
+/// inverse ink. The name supplies the row's accessible label and stable id.
 ///
 /// In the template list ([`Mode::Templates`]) the row's help says a pick starts the template, and a third line holds
 /// its shortcuts as key chips (the old `.quick-switcher-template-keys`): the ⚡ chord when it holds ⚡, then its number
@@ -1278,6 +1277,7 @@ const HINT_GAP: Pixels = px(4.);
 fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette) -> OptionRow {
     let name = HostText::from_host(row.name.as_str());
     let id: SharedString = format!("{TEMPLATE_ROW_ID}{}", row.name).into();
+    let summary_id = format!("quick-switcher-summary-{}", row.name);
     let label = HostSentence::new(id.clone()).host(&name).accessible_name();
     let quiet = if selected {
         palette.on_accent_dim
@@ -1305,8 +1305,7 @@ fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette
                 .child(host_text::element(&name)),
         )
         .child(
-            summary::line(&row.summary)
-                .min_w_0()
+            summary::line(summary_id, &row.summary)
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(quiet)),
         );

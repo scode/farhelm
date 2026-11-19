@@ -666,10 +666,6 @@ orchestrator.
 - **The dialog's header stays on screen.** The old Templates dialog scrolled as one piece, its header included. The GPUI
   dialog frame keeps the header (title and Close) pinned and scrolls the body, as every other dialog of the app does; at
   a window too short even for the header the whole card scrolls.
-- **A long summary is cut without an ellipsis.** A row's summary stays on one line, as the old one did, but one that is
-  longer than the row is cut at the row's edge rather than ending in "…": the summary is several text elements (the
-  template's values are host text, each drawn on its own), and an ellipsis can only end one. The launcher's footer
-  summary has the same cut.
 - **The ⚡ and key buttons show a hover fill.** The old buttons showed only an edge under the pointer; the GPUI button
   component draws the ghost tier's hover fill, the nearest look it has.
 

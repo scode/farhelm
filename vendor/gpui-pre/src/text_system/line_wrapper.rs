@@ -1,3 +1,4 @@
+// Modified for Farhelm: mixed-font end truncation reuses the ordinary end-cut rules.
 use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
 use collections::HashMap;
 use std::{borrow::Cow, iter, sync::Arc};
@@ -383,11 +384,10 @@ impl LineWrapper {
                     "{truncation_affix}{}",
                     &line[line.ceil_char_boundary(truncate_ix + 1)..]
                 )),
-                TruncateFrom::End => SharedString::from(format!(
-                    "{}{truncation_affix}",
-                    line[..truncate_ix]
-                        .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
-                )),
+                TruncateFrom::End => {
+                    let (text, runs) = line_end_candidate(&line, truncate_ix, truncation_affix, runs);
+                    return (text, Cow::Owned(runs));
+                }
                 TruncateFrom::Middle => unreachable!("Middle truncation is handled above"),
             };
             let mut runs = runs.to_vec();
@@ -582,6 +582,20 @@ fn width_for_char(
         char_widths.other.insert(c, width);
         width
     }
+}
+
+/// Apply the end ellipsis policy to a cut at a character boundary, keeping the text-run lengths in sync.
+pub(crate) fn line_end_candidate(
+    text: &str,
+    end: usize,
+    affix: &str,
+    runs: &[TextRun],
+) -> (SharedString, Vec<TextRun>) {
+    let prefix = text[..end].trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+    let result = SharedString::from(format!("{prefix}{affix}"));
+    let mut runs = runs.to_vec();
+    update_runs_after_truncation(&result, affix, &mut runs, TruncateFrom::End);
+    (result, runs)
 }
 
 fn update_runs_after_truncation(
