@@ -3,13 +3,13 @@
 NOTE: THROWAWAY SAMPLE. Nothing below is the intended demo video, and none of it was chosen for what it says about
 Farhelm. It exists only to show that the recording machinery works end to end (title cards, callouts, a highlight with a
 spotlight, a caption, pointer clicks, answering a question and typing into a live terminal, and a cut). When the real
-video is designed, this file, `scenario.json5`, the transcripts, and the beats in `e2e/readme-video/capture.spec.ts` are
-replaced wholesale; do not polish or extend them.
+video is designed, this file, `scenario.json5`, the transcripts, and the beats in `scripts/readme_video.py` are replaced
+wholesale; do not polish or extend them.
 
 This file is the script of the demo video, in the sense a film has a script: what happens, in what order, and what the
-annotations say. It is written for a person and for the agent that turns it into `e2e/readme-video/capture.spec.ts`, and
-it changes only when the maintainer wants a different video. It deliberately says nothing about selectors, coordinates,
-or timings in milliseconds; those are the capture spec's business and change whenever the UI does. `SPEC.md` in this
+annotations say. It is written for a person and for the agent that turns it into `scripts/readme_video.py`, and it
+changes only when the maintainer wants a different video. It deliberately says nothing about selectors, coordinates, or
+timings in milliseconds; those are the capture spec's business and change whenever the UI does. `SPEC.md` in this
 directory says how the two relate.
 
 Quoted text is the exact wording of an on-screen annotation. Everything else describes intent, and the capture spec may
@@ -30,7 +30,7 @@ one.
 3. Highlight the waiting session ("migrate auth tokens") with the rest of the screen dimmed, and a callout at its row:
    "This one is waiting on you."
 4. Click that session. Its terminal fills the main pane with the agent's question visible. Callout pointing at the
-   question: "The agent's real terminal, right in the browser."
+   question: "The agent's real terminal, right in the app."
 5. Click into the terminal and answer the question by pressing 1. The question disappears and the agent goes back to
    work.
 6. Cut away the wait while the status catches up, then point at the session's status with a callout: "Status follows the

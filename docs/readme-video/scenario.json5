@@ -14,8 +14,7 @@
 // Every name here is invented. Nothing may name a real host, user, or project
 // from the machine that takes the capture.
 {
-  // Screencast frames arrive at the viewport's CSS-pixel size whatever the
-  // scale factor, so the viewport IS the video's resolution; keep scale 1.
+  // The video crops the native window to this viewport at scale 1.
   viewport: { width: 1920, height: 1080, scale: 1 },
 
   hosts: [
