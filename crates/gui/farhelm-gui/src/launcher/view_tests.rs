@@ -1844,6 +1844,48 @@ fn show_all_lists_every_agents_models_and_picking_one_switches_the_agent(cx: &mu
     assert_eq!(draft(cx).agent.model.as_deref(), Some("sonnet"));
 }
 
+/// Section labels sit between the current and older rows without adding a keyboard stop. Model-first selection
+/// must be able to reach a retained ID past the heading and still pick the agent that offers it.
+#[gpui::test]
+fn the_model_list_heading_keeps_older_rows_keyboard_selectable(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([
+            {"id":"classic", "family":"runner", "latest":false, "harness":"codex", "efforts":["low"]},
+            {"id":"current", "family":"runner", "latest":true, "harness":"codex", "efforts":["high"]},
+        ])),
+    );
+    assert_eq!(draft(cx).agent.harness, None);
+    test_support::click(cx, "launcher-model-row");
+    assert!(has_node(cx, "launcher-model-list"));
+    assert!(read(cx, |launcher, window, cx| launcher
+        .model_input
+        .focus_handle(cx)
+        .is_focused(window)));
+    assert_eq!(
+        name_of(cx, "launcher-model-older").as_deref(),
+        Some("Older models")
+    );
+    let top = |cx: &mut VisualTestContext, id| test_support::bounds(cx, id).origin.y;
+    let heading = top(cx, "launcher-model-older");
+    assert!(top(cx, "launcher-model-option-Codex-current") < heading);
+    assert!(heading < top(cx, "launcher-model-option-Codex-classic"));
+
+    keys(cx, "c l a s s");
+    assert_eq!(
+        name_of(cx, "launcher-model-older").as_deref(),
+        Some("Older models")
+    );
+    assert!(!has_node(cx, "launcher-model-option-Codex-current"));
+    assert!(has_node(cx, "launcher-model-option-Codex-classic"));
+    keys(cx, "backspace backspace backspace backspace backspace");
+    keys(cx, "down down down enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("classic"));
+}
+
 /// A model picked before an agent chooses its owner, so model-first composition remains reviewable and needs no
 /// separate agent press (sidebar.spec's arbitrary model-first case).
 #[gpui::test]

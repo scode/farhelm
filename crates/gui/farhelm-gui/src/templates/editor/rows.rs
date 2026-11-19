@@ -40,6 +40,7 @@ use serde::Serialize;
 use super::{Editor, FIELD_GAP, NAME_KIND_HELP, SMALL_LINE_HEIGHT, Text, with_editor};
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, TextInput, Tier,
+    option_heading,
 };
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
@@ -47,7 +48,7 @@ use crate::launcher::destination_rows::{
     PlacementEdit, PlacementMode, build_placement_rows, destination_choice,
 };
 use crate::launcher::draft::{DestinationKind, harness_label};
-use crate::launcher::model::{ModelOption, model_options};
+use crate::launcher::model::{ModelOption, OLDER_MODELS, model_options};
 use crate::templates::apply::install_identity;
 use crate::templates::dialog::TemplatesDialog;
 use crate::templates::fields::{Field, effort_options, permission_options};
@@ -418,17 +419,36 @@ impl Rows<'_> {
 
     /// The model: any text, with the catalog's models for the template's agent type as suggestions under it, each of
     /// which sets the model when clicked, replacing an escaped read-only value too. The suggestions are the agent's
-    /// whole list, not filtered by the text, as the old editor showed them.
+    /// whole list, with earlier members of each family under Older models. Typing in the field does not filter it.
     fn model(&self) -> Vec<AnyElement> {
         let fields = &self.editor.draft.fields;
         let mut controls = vec![self.labelled_input(Text::Field(Field::Model))];
-        let suggestions = model_suggestions(fields.agent, self.catalog);
-        if !suggestions.is_empty() {
+        let (current, older) = model_suggestions(fields.agent, self.catalog);
+        for (group_id, label, heading, suggestions) in [
+            (
+                "templates-model-suggestions",
+                "Model suggestions",
+                None,
+                current,
+            ),
+            (
+                "templates-older-model-suggestions",
+                OLDER_MODELS,
+                Some("templates-older-models"),
+                older,
+            ),
+        ] {
+            if suggestions.is_empty() {
+                continue;
+            }
+            if let Some(heading) = heading {
+                controls.push(option_heading(heading, label, self.palette));
+            }
             controls.push(
                 div()
-                    .id("templates-model-suggestions")
+                    .id(group_id)
                     .role(Role::Group)
-                    .aria_label("Model suggestions")
+                    .aria_label(label)
                     .flex()
                     .flex_wrap()
                     .gap(px(SUGGESTION_GAP))
@@ -717,23 +737,29 @@ pub(super) fn hint(
         .child(text)
 }
 
-/// The model suggestions for `agent`: the catalog models the launcher's model list offers for that agent type, in its
-/// order, as the old editor took them from the composer's `model_options` with nothing typed. None without an agent
-/// type, for an agent type that offers no model choice, or before the catalog is read.
+/// The selected agent's current and older model suggestions, in the same order as the launcher.
+/// Default and Show all belong to the launcher field, so neither becomes a template suggestion button.
 fn model_suggestions(
     agent: Option<LaunchHarness>,
     catalog: Option<&[LaunchCatalogModel]>,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<String>) {
     let (Some(agent), Some(catalog)) = (agent, catalog) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    model_options(catalog, Some(agent), "", false)
-        .into_iter()
-        .filter_map(|option| match option {
-            ModelOption::Model { id, .. } => Some(id),
-            ModelOption::HarnessDefault | ModelOption::ShowAll => None,
-        })
-        .collect()
+    let mut current = Vec::new();
+    let mut older = Vec::new();
+    for option in model_options(catalog, Some(agent), "", false) {
+        match option {
+            ModelOption::Model {
+                id, latest: true, ..
+            } => current.push(id),
+            ModelOption::Model {
+                id, latest: false, ..
+            } => older.push(id),
+            ModelOption::HarnessDefault | ModelOption::ShowAll => {}
+        }
+    }
+    (current, older)
 }
 
 /// A stored choice's own word ("xhigh", "smart_approve"), for the "(not offered)" entry that keeps it visible, as the

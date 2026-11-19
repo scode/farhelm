@@ -8571,6 +8571,11 @@ harness uses its own row when it has one. A foreign latest model reserves its sp
 allows the same explicit custom spelling the harness accepted before it was recognized. The GUI and helm compiler apply
 that rule to typed models and launches as well.
 
+The model field orders its selectable rows by generation, then by agent order and the catalog's row order. The same
+filter supplies the template editor's model buttons. The composer search puts older catalog matches under its own
+heading and still offers matches from past launches. Headings use the existing suggestion-list label and stay outside
+the keyboard's option indices.
+
 The launcher's "Save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
 remembered defaults and Clone's inherited placement. The marks are the launcher draft's own, set by its hand-edit

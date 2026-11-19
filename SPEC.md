@@ -1057,6 +1057,9 @@ agent choice is independent of that destination:
   purpose. With no harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna` picks
   Codex). A custom model or an ID offered by several harnesses needs an explicit harness.
 
+  The launcher and template editor offer the current models first and put earlier members of each family under **Older
+  models**. Launcher search uses the same heading and still offers past-launch matches for older IDs.
+
   Replacing a harness clears incompatible choices and a permission equal to the previous harness's default. When an
   agent switch automatically makes the shown permission more dangerous, a red banner slides down across the top of the
   launcher, naming both modes and explaining that the new agent does not support the previous mode. Undo restores the

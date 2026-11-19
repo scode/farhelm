@@ -20,17 +20,30 @@ use super::words::HARNESS_SEARCH_ORDER;
 /// What Enter on a typed id says when no agent type is chosen to own it (the old launcher's words).
 pub(crate) const NEEDS_HARNESS: &str = "Choose a harness before a custom model id";
 
-/// One row of the model list, in its keyboard order. Rows of other agent types carry a " (Harness)" suffix rather
-/// than sitting under headings, so this flat order is what the arrows walk.
+/// The heading shared by model pickers and the composer's model search.
+pub(crate) const OLDER_MODELS: &str = "Older models";
+
+/// One selectable row of the model list. The arrows walk this order without visiting section headings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ModelOption {
     /// The agent type's own configured model.
     HarnessDefault,
     /// A catalog model, with the agent type that offers it.
-    Model { id: String, harness: LaunchHarness },
+    Model {
+        id: String,
+        harness: LaunchHarness,
+        latest: bool,
+    },
     /// Switch between the chosen agent type's models and every agent type's. Offered only while an agent type is
     /// chosen: with none, every model is already listed and the toggle would change nothing.
     ShowAll,
+}
+
+impl ModelOption {
+    /// The first such option starts the older-model section. Default and Show all stay outside it.
+    pub(crate) fn is_older(&self) -> bool {
+        matches!(self, Self::Model { latest: false, .. })
+    }
 }
 
 /// What Enter in the model field applies.
@@ -52,9 +65,9 @@ pub(crate) enum ModelEnterTarget {
 }
 
 /// The list's rows for `query` (case-insensitive, matched within model ids): the default first, then the chosen agent
-/// type's catalog models (every agent type's with `show_all`, or with none chosen) in the search order and the
-/// catalog's own order within each, then the show-all toggle while an agent type is chosen. Nothing for an agent type
-/// that offers no model choice, whose field is not drawn.
+/// type's catalog models (every agent type's with `show_all`, or with none chosen), with current models before older
+/// ones. Each section keeps the agent search order and the catalog order within each agent. The show-all toggle
+/// comes last when an agent type is chosen. An agent type that offers no model choice has no rows.
 pub(crate) fn model_options(
     catalog: &[LaunchCatalogModel],
     harness: Option<LaunchHarness>,
@@ -77,16 +90,16 @@ pub(crate) fn model_options(
             catalog
                 .iter()
                 .filter(|model| {
-                    model.latest
-                        && model.harness == owner
-                        && model.id.to_ascii_lowercase().contains(&folded)
+                    model.harness == owner && model.id.to_ascii_lowercase().contains(&folded)
                 })
                 .map(|model| ModelOption::Model {
                     id: model.id.clone(),
                     harness: model.harness,
+                    latest: model.latest,
                 }),
         );
     }
+    options[1..].sort_by_key(ModelOption::is_older);
     if harness.is_some() {
         options.push(ModelOption::ShowAll);
     }
@@ -141,6 +154,7 @@ pub(crate) fn model_enter_target(
             Some(known) => ModelEnterTarget::Option(ModelOption::Model {
                 id: known.id.clone(),
                 harness: current,
+                latest: known.latest,
             }),
             None if owners.iter().any(|model| model.latest) => ModelEnterTarget::OwnedElsewhere {
                 id: draft.to_owned(),
@@ -164,6 +178,7 @@ pub(crate) fn model_enter_target(
         return ModelEnterTarget::Option(ModelOption::Model {
             id: owner.id.clone(),
             harness: owner.harness,
+            latest: owner.latest,
         });
     }
     ModelEnterTarget::NeedsHarness(draft.to_owned())

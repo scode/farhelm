@@ -1606,6 +1606,44 @@ fn escaped_folder_and_prompt_save_raw_and_a_hidden_suggestion_is_escaped(cx: &mu
     assert_eq!(saved[0].1["prompt"], json!("hidden\u{202E}text"));
 }
 
+/// The editor groups the selected agent's older models separately. Its buttons must keep applying the exact ID
+/// from that group, so a user can edit an older template without switching it to the current model.
+#[gpui::test]
+fn the_editor_groups_older_models_for_the_selected_agent(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1300.)));
+    settle(cx);
+    click(cx, "templates-button");
+    click(cx, "template-open-codex-deep");
+    settle(cx);
+    let (catalog_read, _) = one(&mut helm, Method::Get, "/api/launch-catalog");
+    helm.reply(catalog_read, 200, Some(json!([
+        {"id":"classic", "family":"runner", "latest":false, "harness":"codex", "efforts":["high"]},
+        {"id":"current", "family":"runner", "latest":true, "harness":"codex", "efforts":["high"]},
+        {"id":"another-classic", "family":"runner", "latest":false, "harness":"claude", "efforts":["high"]},
+    ])));
+    settle(cx);
+    assert_eq!(draft(cx).fields.agent, Some(LaunchHarness::Codex));
+    assert!(!drawn(cx, "templates-suggestion-another-classic"));
+    assert!(painted(cx).contains("Older models"));
+    let heading = test_support::bounds(cx, "templates-older-models").origin.y;
+    assert!(
+        test_support::bounds(cx, "templates-suggestion-current")
+            .origin
+            .y
+            < heading
+    );
+    assert!(
+        heading
+            < test_support::bounds(cx, "templates-suggestion-classic")
+                .origin
+                .y
+    );
+
+    click(cx, "templates-suggestion-classic");
+    assert_eq!(draft(cx).fields.model, Some(Some("classic".into())));
+}
+
 /// The editor's quick-launch line tells the user what ⚡ does for the template in front of them, judging the mark on the
 /// stored name and eligibility on the draft, as the old editor did (the old "the template mark moves …" case read it).
 /// A wrong line would send the user to mark a template that is marked, or one that cannot launch. Specified: with ⚡ on
