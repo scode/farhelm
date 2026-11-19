@@ -218,6 +218,10 @@ fn sections(platform: Platform, bindings: &Bindings) -> Vec<Section> {
             "In a sequence: add a numbered template (no word in progress)",
             "1–9, 0",
         ),
+        words(
+            "In a sequence: add a numbered template after any unfinished word",
+            app("0–9"),
+        ),
         words("In a sequence: add the ⚡ template", app("P")),
         typed("In a sequence: launch", "Enter"),
         typed("In a sequence: cancel", "Escape"),

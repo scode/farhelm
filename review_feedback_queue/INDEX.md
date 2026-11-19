@@ -912,10 +912,6 @@ consequences.
   An explicitly chosen local alias equal to this machine is rewritten on full-name surfaces even though its short label
   preserves it.
 
-- [`keyboard-overview-omits-in-sequence-number-action.md`](keyboard-overview-omits-in-sequence-number-action.md) — The
-  keyboard overview calls number chords Launch without explaining that, in a typed sequence, they commit the unfinished
-  word and queue the binding.
-
 - [`digit-leading-template-limit-overstated.md`](digit-leading-template-limit-overstated.md) — The stated inability to
   type digit-leading template names is false on shifted-digit keyboard layouts.
 

@@ -102,8 +102,8 @@ linux/hosts-shown-with-a-host-chosen--dark.png 8be3b952f1a40678d22f644977bb2eb15
 linux/hosts-shown-with-a-host-chosen--light.png f16d15fef043952bc0864780119d84caf41b5972
 linux/inline-prompt--dark.png 8250e424c4f5da2573166f4e375ead472ce66c56
 linux/inline-prompt--light.png ba01554c80aabc7ec6293f52d47d6f34a60fce58
-linux/keyboard-shortcuts-dialog--dark.png 441a3663ab5f5c8b29647973c4df12c0127df643
-linux/keyboard-shortcuts-dialog--light.png beb1ec493758dbbadd68c8671311af9835e7f29d
+linux/keyboard-shortcuts-dialog--dark.png bef6d89f6614d8f0a9ecd15d3ddf658d42eceb5a
+linux/keyboard-shortcuts-dialog--light.png 67b6ed0b4dfdaa9d4526024e5a29d59489678387
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
 linux/notice-banner--dark.png d296fc1a9d4afa4ddad8ceb978bd5220dcb043e3
