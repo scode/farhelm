@@ -2522,6 +2522,9 @@ including the strip when there are no ungrouped rows. Pinned sessions remain pin
 pins, including global pins when leaving a group. The drop skips sessions already in the destination and reports busy
 sessions in their rows, as the marked-rows menu does. The drop keeps the marks.
 
+Holding a lifted drag near the top or bottom of the list scrolls it in that direction so a group outside the viewport
+can be reached. Moving away from the edge or ending the drag stops the scroll.
+
 Among unpinned sessions, the option labelled most recent activity sorts connected running and waiting sessions first,
 then every other session — idle, unclassified, ended, and anything on an unreachable host. Within each of these two sort
 buckets the order is the most recent observed START of a work burst: a session promotes when it moves from known idle or

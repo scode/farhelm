@@ -64,10 +64,13 @@
 //!   The source area comes from the press. For a cross-area drop the initiating window moves the held slot on success.
 //!   A release outside a valid band, on the original slot or before the lift sends nothing.
 //! - **The list cancels too.** The drag ends with nothing sent when its row stops being movable (deleted, unpinned, a
-//!   request of its session in flight), when its row is scrolled so far away that it is no longer drawn, when the
-//!   listing becomes unavailable, or when the Hosts panel takes the rows' place: the old list root that a failed
+//!   request of its session in flight), when the listing becomes unavailable, or when the Hosts panel takes the
+//!   rows' place: the old list root that a failed
 //!   listing or a hidden list took away took its gesture with it. A grip drawn again afterwards drags as before. A drag
 //!   that began in an active window also ends when the window is no longer active (above).
+//! - **Edge scrolling.** After the lift, bringing the pointer near a list edge can scroll while the button stays
+//!   held and the pointer stays still. The virtualized source can scroll out of view as its captured grip stays
+//!   active. Each tick judges its destination against the current bounds, and the drop samples them again.
 //!
 //! The drag belongs to the UI session ([`super::Current`]), so a reset of the connection forgets it with the rest of the
 //! list's state.
@@ -79,6 +82,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupMembership, SessionGroupTarget};
 use farhelm_proto::ui_channel::SessionRow;
@@ -99,6 +103,7 @@ use crate::focus::{self, Mark};
 use crate::layers;
 use crate::operations::{OpKey, Outcome, Settled};
 use crate::theme::{self, Palette, Token};
+use crate::ticker;
 
 /// The id prefix of a row's grip; the rest is the session's key. Not `session-row-`, which the
 /// row's open control and its marks share and the list's tests read rows by.
@@ -131,6 +136,11 @@ const DOTS: [(f32, f32); 6] = [
 
 /// The drop line's thickness (`box-shadow: inset 0 2px var(--accent)`).
 const DROP_LINE: f32 = 2.;
+
+/// The scroll strip stays inside the list. A stationary pointer advances a small step on each deadline.
+const EDGE_SCROLL_ZONE: Pixels = px(32.);
+const EDGE_SCROLL_STEP: Pixels = px(18.);
+const EDGE_SCROLL_TICK: Duration = Duration::from_millis(32);
 
 // ---- State -------------------------------------------------------------------------------------------------------------
 
@@ -190,7 +200,6 @@ enum Drop {
 }
 
 /// A drag in progress, from the press on a grip to its release or cancellation.
-#[derive(Debug)]
 struct Drag {
     /// The dragged row's session key.
     source: String,
@@ -201,6 +210,10 @@ struct Drag {
     area: Area,
     /// Where the press was, in window coordinates.
     origin: Point<Pixels>,
+    /// Last captured position in window coordinates. A stationary pointer can keep scrolling.
+    at: Point<Pixels>,
+    /// At most one pending tick, canceled along with this drag or when the pointer leaves the edge zone.
+    edge_scroll: Option<ticker::Deadline>,
     /// Whether the pointer has moved [`LIFT_DISTANCE`] from `origin` since the press: the row shows lifted, and only
     /// then can a drop land.
     lifted: bool,
@@ -378,7 +391,8 @@ impl PinDrag {
                     .filter_map(|key| self.bounds.get(key).map(|bounds| (key.as_str(), *bounds)))
                     .collect();
                 let source = (drag.area == band.area).then_some(drag.source.as_str());
-                let line = drop_in_band(&rows, source, clip, at)?;
+                let order = band.items.iter().map(String::as_str);
+                let line = drop_in_band(&rows, source, order, clip, at)?;
                 Some(PositionalDrop {
                     area: band.area,
                     line,
@@ -421,11 +435,7 @@ impl PinDrag {
 /// it, the target is the first other pin whose middle lies below `at`, with the dragged pin going before it, or failing
 /// that the last other pin, with it going after. A target that would leave the pin where it is (before the pin right
 /// below it, after the one right above it) is no drop. `None` for all of those, and when `source` was not drawn or has
-/// no other pin to go by.
-///
-/// Rows the list did not draw (far from the view) are not in `rows`. That cannot change the answer for a point inside
-/// the view: the list draws a margin of rows beyond each edge, so the rows on either side of any such point are drawn,
-/// and "before this one" or "after that one" names the same place either way.
+/// no other pin to go by. This test helper uses one list for both the measured bounds and the band order.
 #[cfg(test)]
 pub(super) fn drop_target(
     rows: &[(&str, Bounds<Pixels>)],
@@ -433,14 +443,24 @@ pub(super) fn drop_target(
     clip: Bounds<Pixels>,
     at: Point<Pixels>,
 ) -> Option<Target> {
-    drop_in_band(rows, Some(source), clip, at)
+    if !rows.iter().any(|(key, _)| *key == source) {
+        return None;
+    }
+    drop_in_band(
+        rows,
+        Some(source),
+        rows.iter().map(|(key, _)| *key),
+        clip,
+        at,
+    )
 }
 
-/// Resolve the insertion line in one ordered band. The source's index is
-/// only meaningful when the source occupies a slot in this band.
-fn drop_in_band(
+/// Resolve the insertion line using measured rows. Compare it to the source's slot in the full band order so a
+/// source clipped just past the viewport can still be adjacent to a visible neighbor.
+fn drop_in_band<'a>(
     rows: &[(&str, Bounds<Pixels>)],
     source: Option<&str>,
+    order: impl Iterator<Item = &'a str>,
     clip: Bounds<Pixels>,
     at: Point<Pixels>,
 ) -> Option<Target> {
@@ -448,25 +468,22 @@ fn drop_in_band(
     if !inside_band(clip, at, first.1.top(), last.1.bottom()) {
         return None;
     }
-    let source_ix = match source {
-        Some(source) => Some(rows.iter().position(|(key, _)| *key == source)?),
-        None => None,
-    };
-    let others = || {
-        rows.iter()
-            .enumerate()
-            .filter(|(ix, _)| Some(*ix) != source_ix)
-    };
-    let (ix, placement) = match others().find(|(_, (_, bounds))| at.y < bounds.center().y) {
-        Some((ix, _)) => (ix, Placement::Before),
+    let others = || rows.iter().filter(|(key, _)| Some(*key) != source);
+    let (neighbor, placement) = match others().find(|(_, bounds)| at.y < bounds.center().y) {
+        Some((key, _)) => (*key, Placement::Before),
         None => (others().next_back()?.0, Placement::After),
     };
-    let stays = source_ix.is_some_and(|source| match placement {
-        Placement::Before => ix == source + 1,
-        Placement::After => ix + 1 == source,
+    let stays = source.is_some_and(|source| {
+        let (first, second) = match placement {
+            Placement::Before => (source, neighbor),
+            Placement::After => (neighbor, source),
+        };
+        let mut neighbors = order.skip_while(|key| *key != first);
+        neighbors.next();
+        neighbors.next() == Some(second)
     });
     (!stays).then(|| Target {
-        neighbor: rows[ix].0.to_owned(),
+        neighbor: neighbor.to_owned(),
         placement,
     })
 }
@@ -583,8 +600,12 @@ pub(super) fn paint(
 fn record_bounds(shared: &Shared, key: &str) -> impl IntoElement + use<> {
     let (shared, key) = (shared.clone(), key.to_owned());
     canvas(
-        move |bounds, _, _| {
-            shared.borrow_mut().bounds.insert(key, bounds);
+        move |bounds, window, _| {
+            // GPUI lays out an offscreen focused item below the visible rows to keep its keys alive. That
+            // synthetic rectangle cannot describe the first or last edge of a target band.
+            if bounds.intersects(&window.content_mask().bounds) {
+                shared.borrow_mut().bounds.insert(key, bounds);
+            }
         },
         |_, (), _, _| {},
     )
@@ -915,6 +936,8 @@ impl SessionList {
             marked,
             area,
             origin: at,
+            at,
+            edge_scroll: None,
             lifted: false,
             target: None,
             began_active: active,
@@ -929,11 +952,82 @@ impl SessionList {
         if self.resample_pin_drag(at, cx) {
             cx.notify();
         }
+        self.arm_edge_scroll(cx);
+    }
+
+    /// A lift can add the ungroup strip in the next frame, so identify the edge without using the old scroll limit.
+    fn edge_scroll_delta(&self, at: Point<Pixels>) -> Pixels {
+        let clip = self.rows.viewport_bounds();
+        if !clip.contains(&at) {
+            return px(0.);
+        }
+        let zone = EDGE_SCROLL_ZONE.min(clip.size.height / 2.);
+        if at.y < clip.top() + zone {
+            -EDGE_SCROLL_STEP
+        } else if at.y > clip.bottom() - zone {
+            EDGE_SCROLL_STEP
+        } else {
+            px(0.)
+        }
+    }
+
+    /// Use the list's measured scroll bounds at tick time. Stop at the limit even while the pointer stays in the zone.
+    fn edge_scroll_step(&self, at: Point<Pixels>) -> Pixels {
+        let delta = self.edge_scroll_delta(at);
+        let offset = -self.rows.scroll_px_offset_for_scrollbar().y;
+        let end = self.rows.max_offset_for_scrollbar().y;
+        delta.clamp(-offset.max(px(0.)), (end - offset).max(px(0.)))
+    }
+
+    /// A captured move or tick can arm one deadline. Dropping it on cancellation keeps stale callbacks from moving
+    /// the viewport for a later gesture.
+    fn arm_edge_scroll(&mut self, cx: &mut Context<Self>) {
+        let shared = self.pin_drag(cx);
+        let mut state = shared.borrow_mut();
+        let Some(drag) = state.drag.as_mut() else {
+            return;
+        };
+        if !drag.lifted || self.edge_scroll_delta(drag.at) == px(0.) {
+            drag.edge_scroll = None;
+        } else if drag.edge_scroll.is_none() {
+            let list = cx.weak_entity();
+            drag.edge_scroll = Some(ticker::after(EDGE_SCROLL_TICK, cx, move |cx| {
+                let _ = list.update(cx, Self::edge_scroll_tick);
+            }));
+        }
+    }
+
+    /// Resample the previous step's frame, then move the list and request new measured bounds. A tick counts as
+    /// pointer activity for the order hold, just as a wheel event does.
+    fn edge_scroll_tick(&mut self, cx: &mut Context<Self>) {
+        let shared = self.pin_drag(cx);
+        let at = {
+            let mut state = shared.borrow_mut();
+            let Some(drag) = state.drag.as_mut() else {
+                return;
+            };
+            drag.edge_scroll = None;
+            drag.at
+        };
+        if self.resample_pin_drag(at, cx) {
+            cx.notify();
+        }
+        if shared.borrow().drag.is_none() {
+            return;
+        }
+        let step = self.edge_scroll_step(at);
+        if step != px(0.) {
+            self.pointer_activity(cx);
+            // Arm before the scroll so its final step still gets a fresh target sample at the limit.
+            self.arm_edge_scroll(cx);
+            self.rows.scroll_by(step);
+            cx.notify();
+        }
     }
 
     /// The primary button came up at `at` during a drag: the drag ends, and a drop on a drop line sends its one move.
     pub(super) fn pin_drag_released(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        // A resample that ends the drag (its row no longer drawn, a request in flight) leaves nothing to take below,
+        // A resample that ends the drag (its row no longer eligible, a request in flight) leaves nothing to take below,
         // and the row it lifted must still be redrawn.
         if self.resample_pin_drag(at, cx) {
             cx.notify();
@@ -1080,8 +1174,8 @@ impl SessionList {
     }
 
     /// Judge the drag on at `at` against the movable rows as last drawn, as the old gesture's `sample` did before every
-    /// paint and before the drop: the drag ends when its row is no longer movable or drawn, or its session has a
-    /// request in flight; otherwise it lifts once the pointer is [`LIFT_DISTANCE`] from the press, and once lifted its
+    /// paint and before the drop: losing its grip before lift or ceasing to be movable ends the drag. Otherwise it
+    /// lifts once the pointer is [`LIFT_DISTANCE`] from the press, and once lifted its
     /// target is where a drop at `at` lands ([`drop_target`]). Returns whether what the rows show changed.
     fn resample_pin_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         let clip = self.rows.viewport_bounds();
@@ -1092,7 +1186,7 @@ impl SessionList {
         };
         let source = drag.source.clone();
         if state.area_of(&source) != Some(drag.area)
-            || !state.bounds.contains_key(&source)
+            || (!drag.lifted && !state.bounds.contains_key(&source))
             || refused(&source, cx)
             || !source_matches(&source, drag.area, cx)
         {
@@ -1117,6 +1211,7 @@ impl SessionList {
         let changed = (drag.lifted, &drag.target) != (lifted, &target);
         drag.lifted = lifted;
         drag.target = target;
+        drag.at = at;
         changed
     }
 }
