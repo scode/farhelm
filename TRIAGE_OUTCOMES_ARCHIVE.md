@@ -23941,3 +23941,16 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `uzxuwxrkuunuzxtmlxmvrxktmozzyslo`, bookmark
   `plan/gui-ux-desktop-fixes/07-rail-tooltip-merges-direction`,
   [PR #4248](https://github.com/scode/farhelm/pull/4248/changes).
+
+## template-collision-refusal-mixes-unisolated-name.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Name already taken"
+  embeds the name as plain debug-quoted text. Template names are shown as host text elsewhere. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: build the refusal as a host sentence (~5-15). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
+  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `wzyntpsvknoxmnuxxvkzywynpxvlrlrl`, bookmark
+  `plan/gui-ux-desktop-fixes/08-template-collision-refusal-mixes`,
+  [PR #4249](https://github.com/scode/farhelm/pull/4249/changes).

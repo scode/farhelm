@@ -142,11 +142,12 @@ impl SavePanel {
     /// Why the template cannot be saved, in the old panel's order: the new-name rules (Save as template always checks
     /// them, SPEC_impl.md), the helm's shape check, the checked fields by the editor's rules, then a name the store
     /// already holds.
-    fn refusal(&self, template: &LaunchTemplate, cx: &App) -> Option<String> {
+    fn refusal(&self, template: &LaunchTemplate, cx: &App) -> Option<HostSentence> {
+        let plain = |reason: String| HostSentence::new("save-template-error-text").text(reason);
         if let Err(reason) =
             check_new_template_name(&template.name).and_then(|()| check_template_shape(template))
         {
-            return Some(capitalized(reason));
+            return Some(plain(capitalized(reason)));
         }
         let draft = fields::Draft {
             name: template.name.clone(),
@@ -154,7 +155,7 @@ impl SavePanel {
             wrapper_input: None,
         };
         if let Some(reason) = draft.refusal(self.catalog.as_deref()) {
-            return Some(reason);
+            return Some(plain(reason));
         }
         let names = stored_names(cx);
         let names: Option<Vec<&str>> = names
@@ -171,13 +172,15 @@ impl SavePanel {
         let template = self.template(cx);
         let command = match self.refusal(&template, cx) {
             Some(reason) => Err(reason),
-            None => save_command(&template)
-                .ok_or_else(|| "This template cannot be sent to Farhelm as it stands".to_owned()),
+            None => save_command(&template).ok_or_else(|| {
+                HostSentence::new("save-template-error-text")
+                    .text("This template cannot be sent to Farhelm as it stands")
+            }),
         };
         let command = match command {
             Ok(command) => command,
             Err(reason) => {
-                self.error = Some(HostSentence::new("save-template-error-text").text(reason));
+                self.error = Some(reason);
                 cx.notify();
                 return;
             }
