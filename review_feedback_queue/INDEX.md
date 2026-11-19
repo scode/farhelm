@@ -1780,10 +1780,6 @@ consequences.
   retained terminal history repeats full-row decoding for its characters. Added work is confirmed; material pointer or
   UI latency remains unverified after investigation.
 
-- [`approval-scrollports-lack-keyboard-entry.md`](approval-scrollports-lack-keyboard-entry.md) — Keyboard users lack a
-  named focus target for horizontally clipped approval facts and text-only scrolling approval bodies. The layout test
-  currently requires that omission.
-
 - [`approval-copy-test-assumes-clipboard-object.md`](approval-copy-test-assumes-clipboard-object.md) — The Copy ID test
   can fail before its assertion if the engine provides no clipboard object. Whether the supported browser configuration
   omits it remains unverified after investigation.

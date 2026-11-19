@@ -484,7 +484,7 @@ pub(crate) fn on_enter_choice<E: InteractiveElement>(
 /// The scroll handle kept under `key` for as long as its owner (a frame, a scroll box) is drawn in consecutive frames,
 /// so a scrolled body stays where it was. `key` must differ from the scrolling element's own id, because GPUI keys
 /// element state by path and type.
-fn scroll_handle(key: String, window: &mut Window, cx: &mut App) -> ScrollHandle {
+pub(crate) fn scroll_handle(key: String, window: &mut Window, cx: &mut App) -> ScrollHandle {
     window
         .use_keyed_state(ElementId::Name(key.into()), cx, |_, _| ScrollHandle::new())
         .read(cx)
@@ -502,6 +502,7 @@ const PAGE_SHARE: f32 = 0.875;
 /// at its sides and `inset_y` at its top and bottom (negative to cover a border, or to reach past the stop), with
 /// corners of `radius`. The two differ only for a dialog's notices, whose ring reaches out to the card's sides as the
 /// old full-width region's did ([`DialogFrame::notices_stop`]).
+#[derive(Default)]
 pub(crate) struct Ring {
     pub(crate) inset_x: Pixels,
     pub(crate) inset_y: Pixels,
