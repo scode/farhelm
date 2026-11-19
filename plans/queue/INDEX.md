@@ -12,7 +12,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `update-survival-wording.md` — General survival statements stay general: SPEC.md records the principle and the old-terminal update note
 - [complete] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
 - [pending] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
-- [pending] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
+- [in-flight 7422e1] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
 - [pending] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
 - [pending] `concealed-link-target.md` — Hidden terminal text cannot change where a printed link goes
 - [pending] `triage-misc-nov18.md` — natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
