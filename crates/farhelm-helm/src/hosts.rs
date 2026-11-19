@@ -1234,7 +1234,7 @@ async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
     forget_host_locked(
         state,
         host,
-        provisioning,
+        &provisioning,
         crate::provisioning::RunTask::Abort,
     )
     .await
@@ -1270,7 +1270,7 @@ pub(crate) async fn remove_host_checked(
     forget_host_locked(
         state,
         host,
-        provisioning,
+        &provisioning,
         crate::provisioning::RunTask::Abort,
     )
     .await
@@ -1278,18 +1278,18 @@ pub(crate) async fn remove_host_checked(
 
 /// Destroy a sealed environment and forget its host: the one path for the
 /// user's Delete that sealed it and for the helm finishing a seal it found
-/// in a listing (after a lost reply, a failed destruction or a restart).
+/// in a listing or recovered from disk after a restart.
 ///
 /// Re-reads the row under `provisioning`, which the caller holds, and acts
 /// only on a host that is session-owned and whose removal deletes its
 /// machine: a seal is permanent and closes a supervisor to new sessions,
-/// so it is never the reason to destroy anything else. The caller records
-/// the outcome in the manager's seal record, which is what keeps a failure
-/// shown until Retry.
+/// so it is never the reason to destroy anything else. Remember the first
+/// attempt before touching the provider. The caller holds the lock until it
+/// records the outcome that keeps a failure shown until Retry.
 pub(crate) async fn finish_sealed_environment(
     state: &AppState,
     host: HostId,
-    provisioning: crate::manager::ProvisionLockGuard,
+    provisioning: &crate::manager::ProvisionLockGuard,
 ) -> anyhow::Result<()> {
     let row = registry_row(state, host).await?;
     if !row.is_session_owned() || !row.kind.removal_deletes_machine() {
@@ -1301,6 +1301,14 @@ pub(crate) async fn finish_sealed_environment(
             ),
         )));
     }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    state
+        .store
+        .remember_environment_seal(host, now)
+        .await
+        .context("remembering the seal before deleting the environment")?;
     forget_host_locked(
         state,
         host,
@@ -1336,8 +1344,8 @@ fn provision_lock_or_busy(
 
 /// The one removal, shared by the GUI's remove and an agent's approved one:
 /// delete the row and its cached sessions, purge the host's provisioning
-/// memory, and stop its actor, with the provisioning lock the caller took
-/// held throughout and released only once the actor is gone.
+/// memory, and stop its actor. The caller keeps the provisioning lock for the
+/// whole operation and any bookkeeping that depends on its result.
 ///
 /// A Tensorlake host's sandbox is deleted first (D6), in an order that
 /// keeps the host's own connection out of the way: the connection is held
@@ -1347,12 +1355,12 @@ fn provision_lock_or_busy(
 /// lasts until the actor is stopped with the row. A failure leaves the host
 /// listed, releases the hold with a fresh retry, and answers with
 /// Tensorlake's reason; removing again picks up where it stopped.
-/// Fresh-launch cleanup transfers its existing guard here and uses Detach:
+/// Fresh-launch cleanup lends its existing guard here and uses Detach:
 /// cancelling that provisioning task would abort its own cleanup midway.
 pub(crate) async fn forget_host_locked(
     state: &AppState,
     host: HostId,
-    provisioning: crate::manager::ProvisionLockGuard,
+    _provisioning: &crate::manager::ProvisionLockGuard,
     run_task: crate::provisioning::RunTask,
 ) -> anyhow::Result<()> {
     let row = registry_row(state, host).await?;
@@ -1419,7 +1427,6 @@ pub(crate) async fn forget_host_locked(
     }
     // Gone, so nothing is left to finish for a seal it reported.
     state.manager.sealed_outcome(host, None);
-    drop(provisioning);
     tracing::info!(
         host,
         stopped,

@@ -291,27 +291,22 @@ pub(super) async fn delete_environment_session(
 /// (their provisioning lock was busy), besides being woken by a new seal.
 pub(crate) const SEAL_FINISH_RETRY: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Destroy the sealed environment of `host`, recording how it went, for the
-/// finisher, Retry and the user's own Delete alike. `Ok(false)` when the
-/// host's provisioning lock is busy (nothing tried; try again later).
-///
-/// A failure releases the host's connection hold, so its actor reconnects to
-/// the sealed supervisor, but the failure is recorded in the manager's seal
-/// record, which keeps the host shown as being deleted with the reason and no
-/// client, and keeps the finisher from retrying it until the user's Retry. A
-/// host that is not a disposable environment is refused before anything is
-/// destroyed and is not retried either; this helm never sends such a host the
-/// request that seals.
-pub(crate) async fn finish_seal(state: &AppState, host: store::HostId) -> anyhow::Result<bool> {
+/// Finish a queued seal if it still awaits a provider attempt. A busy host stays queued, and a failure
+/// that appeared since the queue was read waits for the user's Retry.
+async fn finish_pending_seal(state: &AppState, host: store::HostId) -> anyhow::Result<bool> {
     let Some(provisioning) = state.manager.try_host_provision_lock(host) else {
         return Ok(false);
     };
+    if !state.manager.seal_is_pending(host) {
+        return Ok(false);
+    }
     finish_seal_locked(state, host, provisioning)
         .await
         .map(|()| true)
 }
 
-/// [`finish_seal`] with the provisioning lock already held.
+/// Share the seal attempt across the user's Delete, Retry and the finisher. Keeping the lock through recording
+/// the outcome prevents the finisher from taking over the seal between a failed provider call and its Retry state.
 async fn finish_seal_locked(
     state: &AppState,
     host: store::HostId,
@@ -320,7 +315,7 @@ async fn finish_seal_locked(
     // Recorded before the attempt: the record is what shows the host as being
     // deleted (and, afterwards, a failure's reason until Retry).
     state.manager.sealed_attempt(host);
-    let result = crate::hosts::finish_sealed_environment(state, host, provisioning).await;
+    let result = crate::hosts::finish_sealed_environment(state, host, &provisioning).await;
     state.manager.sealed_outcome(
         host,
         result.as_ref().err().map(|error| format!("{error:#}")),
@@ -371,16 +366,17 @@ pub(crate) async fn retry_environment_delete(
 /// record holds no failed deletion, or whose provisioning lock is busy, and
 /// otherwise destroy the sealed environment again.
 async fn retry_failed_seal(state: &AppState, host: store::HostId) -> anyhow::Result<()> {
+    let provisioning = state.manager.try_host_provision_lock(host);
     if !state.manager.sealed_failed(host) {
         return Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::Conflict,
             "this host is not an environment whose deletion failed; nothing was retried".into(),
         )));
     }
-    if !finish_seal(state, host).await? {
+    let Some(provisioning) = provisioning else {
         return Err(anyhow::Error::new(crate::environment::lifecycle::HostBusy));
-    }
-    Ok(())
+    };
+    finish_seal_locked(state, host, provisioning).await
 }
 
 /// The text of the 504 [`retry_environment_delete`] answers when its attempt
@@ -394,25 +390,23 @@ fn retry_delete_carries_on() -> String {
     )
 }
 
-/// Start the helm's finisher of sealed environments: whenever a listing
-/// reports a seal (`ConnectionManager::note_sealed`), destroy that
-/// environment, whether or not this helm sent the Delete that sealed it (a
-/// lost reply, a failed destruction retried, a restart of the helm). Runs for
-/// the helm's lifetime, one environment at a time.
+/// Start destroying remembered seals at once, including when the environment cannot reconnect. Later listings
+/// wake the same finisher, and a busy host gets another chance after the retry interval. A failed destruction
+/// waits for the user's Retry for the rest of this helm run. Runs one environment at a time.
 pub(crate) fn spawn_seal_finisher(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            tokio::select! {
-                () = state.manager.sealed_noted() => {}
-                () = tokio::time::sleep(SEAL_FINISH_RETRY) => {}
-            }
             for host in state.manager.sealed_pending() {
-                match finish_seal(&state, host).await {
+                match finish_pending_seal(&state, host).await {
                     Ok(true) => tracing::info!(host, "destroyed a sealed environment"),
                     Ok(false) => {}
                     Err(error) => tracing::warn!(host, error = %format!("{error:#}"),
                         "could not destroy a sealed environment; it waits for Retry"),
                 }
+            }
+            tokio::select! {
+                () = state.manager.sealed_noted() => {}
+                () = tokio::time::sleep(SEAL_FINISH_RETRY) => {}
             }
         }
     })

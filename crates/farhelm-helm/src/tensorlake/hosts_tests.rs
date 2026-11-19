@@ -1350,17 +1350,9 @@ async fn a_recipe_in_use_cannot_be_deleted() {
 // Removal through the REST route
 // ---------------------------------------------------------------------------
 
-/// A suspended disposable resource with two cached sessions and an explicitly
-/// incomplete listing. Delete must use whole-resource consent, never infer that
-/// the selected session is its last member or reconnect to find out.
-async fn suspended_session_sandbox(api: &FakeApi) -> (crate::rest_harness::Harness, HostId) {
-    let harness = crate::rest_harness::FleetBuilder::new()
-        .await
-        .tensorlake_api(Arc::new(api.clone()))
-        .start()
-        .await;
-    harness
-        .store
+/// Register the same session-owned fixture for whole-sandbox Delete and startup destruction tests.
+async fn register_owned_sandbox(store: &HelmStore) -> HostId {
+    store
         .save_tensorlake_config(SaveSettings {
             api_key: Some(KEY.into()),
             ..Default::default()
@@ -1368,8 +1360,7 @@ async fn suspended_session_sandbox(api: &FakeApi) -> (crate::rest_harness::Harne
         .await
         .ok()
         .unwrap();
-    let host = harness
-        .store
+    let host = store
         .register_session_sandbox(crate::store::NewTensorlakeHost {
             destination: super::test_support::destination("farhelm-sess-k7q2-owned-abcd"),
             entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
@@ -1383,11 +1374,23 @@ async fn suspended_session_sandbox(api: &FakeApi) -> (crate::rest_harness::Harne
         })
         .await
         .unwrap();
-    harness
-        .store
+    store
         .set_tensorlake_sandbox_id(host, "sbx-1")
         .await
         .unwrap();
+    host
+}
+
+/// A suspended disposable resource with two cached sessions and an explicitly
+/// incomplete listing. Delete must use whole-resource consent, never infer that
+/// the selected session is its last member or reconnect to find out.
+async fn suspended_session_sandbox(api: &FakeApi) -> (crate::rest_harness::Harness, HostId) {
+    let harness = crate::rest_harness::FleetBuilder::new()
+        .await
+        .tensorlake_api(Arc::new(api.clone()))
+        .start()
+        .await;
+    let host = register_owned_sandbox(&harness.store).await;
     let stored = row(&harness.store, host).await;
     harness
         .store
@@ -1536,6 +1539,138 @@ async fn failed_session_sandbox_cleanup_stays_visible_for_explicit_retry() {
     let (status, text) = delete_sandbox_session(&harness, host, "?delete_sandbox=true").await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
     assert!(api.snapshot_ids().is_empty());
+}
+
+/// Start over the saved facts from a previous helm's failed destruction. The provider reports a suspended
+/// sandbox to the actor, without a supervisor connection that could report a fresh seal.
+async fn start_with_remembered_sandbox_seal(
+    api: &FakeApi,
+) -> (crate::rest_harness::Harness, HostId) {
+    let builder = crate::rest_harness::FleetBuilder::new()
+        .await
+        .tensorlake_api(Arc::new(api.clone()))
+        .sandboxes(Arc::new(api.clone()));
+    let store = builder.store();
+    let host = register_owned_sandbox(store).await;
+    store
+        .admit_tensorlake_install(host, "/fixture/farhelm", "/fixture/state")
+        .await
+        .unwrap();
+    store.remember_environment_seal(host, 123).await.unwrap();
+    let harness = builder.start().await;
+    let initial = harness.manager.status(host).unwrap();
+    assert!(matches!(
+        initial.state,
+        HostState::Deleting { failure: None }
+    ));
+    assert!(initial.client.is_none());
+    harness
+        .await_state(host, |state| matches!(state, HostState::Suspended { .. }))
+        .await;
+    assert_eq!(harness.fleet.dials(host), 0);
+    (harness, host)
+}
+
+/// Wait for the status that Hosts reads. A seal outcome can change this status without moving the actor's connection.
+async fn wait_for_sealed_sandbox(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    mut ready: impl FnMut(Option<HostState>) -> bool,
+) {
+    let mut changes = harness.manager.events().subscribe();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ready(harness.manager.state(host)) {
+            changes
+                .changed()
+                .await
+                .expect("the harness owns the event feed");
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("seal did not settle: {:?}", harness.manager.state(host)));
+}
+
+/// A sandbox can be suspended by the time the helm restarts. The saved seal must send cleanup through the provider
+/// and forget the host even though the supervisor sends no listing.
+#[farhelm_testtrace::test]
+async fn startup_finishes_a_remembered_seal_on_a_suspended_sandbox() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-sess-k7q2-owned-abcd",
+            SandboxStatus::Suspended,
+        )
+        .with_snapshot("snapshot", "sbx-1");
+    let (harness, host) = start_with_remembered_sandbox_seal(&api).await;
+    let finisher = crate::sessions::spawn_seal_finisher(Arc::clone(&harness.state));
+    wait_for_sealed_sandbox(&harness, host, |state| {
+        state.is_none() && !harness.manager.is_sealed(host)
+    })
+    .await;
+    finisher.abort();
+    assert!(api.calls().contains(&"terminate sbx-1".to_owned()));
+    assert!(api.snapshot_ids().is_empty());
+    assert_eq!(harness.fleet.dials(host), 0);
+    assert!(
+        harness
+            .store
+            .remembered_environment_seals()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The startup attempt can still fail. Hosts must show that new reason and let the user finish through Retry,
+/// without another connection or spontaneous attempt.
+#[farhelm_testtrace::test]
+async fn a_remembered_seal_that_fails_at_startup_keeps_retry_available() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-sess-k7q2-owned-abcd",
+            SandboxStatus::Suspended,
+        )
+        .failing(
+            "terminate",
+            TensorlakeError::Transport("retry later".into()),
+        );
+    let (harness, host) = start_with_remembered_sandbox_seal(&api).await;
+    let finisher = crate::sessions::spawn_seal_finisher(Arc::clone(&harness.state));
+    wait_for_sealed_sandbox(&harness, host, |state| {
+        matches!(state, Some(HostState::Deleting { failure: Some(reason) }) if reason.contains("retry later"))
+    })
+    .await;
+    assert_eq!(
+        harness.store.remembered_environment_seals().await.unwrap(),
+        [host]
+    );
+    assert!(
+        harness.manager.sealed_pending().is_empty(),
+        "failure waits for Retry"
+    );
+    assert_eq!(
+        api.calls()
+            .iter()
+            .filter(|call| *call == "terminate sbx-1")
+            .count(),
+        1
+    );
+    assert!(harness.manager.status(host).unwrap().client.is_none());
+
+    let (status, text) = lifecycle_host(&harness, host, "retry-delete").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    assert!(harness.manager.state(host).is_none());
+    assert!(
+        harness
+            .store
+            .remembered_environment_seals()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(harness.fleet.dials(host), 0);
+    finisher.abort();
 }
 
 /// A helm over `api` with the key saved and one planted Tensorlake host,

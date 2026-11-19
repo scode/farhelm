@@ -6024,10 +6024,10 @@ session ("Environment Delete and the seal" below); the warned whole-environment 
 including unlisted sessions and files, without membership proof. Replace stays inside it and uses ordinary supervisor
 session deletion for its source, preserving the resource and existing files on every failed or ambiguous outcome. A
 failed normal initial launch may destroy only its new environment. Retain failed cleanup and interrupted resources for
-explicit deletion. The supervisor's seal and the one request that sets it are the only session-finality state and the
-only protocol change for these cases: add no helm-side record of which sessions an environment holds, no membership RPC,
-no Resume to count sessions, no connection handshake change, no transparent recovery of failed Replaces and no startup
-continuation protocol.
+explicit deletion. The supervisor's seal is authoritative for the environment's finality. The helm remembers that seal
+to finish deletion after a restart, with no record of which sessions an environment holds. The request that sets the
+seal is the only new protocol operation for these cases. There is no membership RPC, Resume to count sessions,
+connection handshake change, or transparent recovery of failed Replaces.
 
 ### Environment Delete and the seal
 
@@ -6083,9 +6083,19 @@ kept in an in-memory seal record, pending or with its last destruction's failure
 every host in that record as `HostState::Deleting` with that failure and no client, whatever its connection does
 meanwhile (held, released, reconnected, retired), so the failure and its Retry cannot be lost and nothing is routed to a
 supervisor that takes no new sessions. Retry runs the destruction again only for a host whose record holds a failure.
-Nothing about it is stored on the helm: after a restart the seal arrives with the next listing. While a host is
-`Deleting`, its sessions show as being deleted with their actions unavailable. Replace counts `NotFound` from its source
-removal as success and turns `ErrorKind::Sealed` on its create into "the environment is being deleted".
+Before the first destruction attempt, the helm saves the host's seal and the time of the attempt. This lets a restarted
+helm finish destroying a sealed environment even if the supervisor never connects again. A process inside a
+session-owned environment can cause its supervisor to report a seal. The helm accepts that seal as authority to destroy
+that environment, including after restart (maintainer decision, 2026-11-18).
+
+Helm schema 89 adds `hosts.environment_sealed_at`, the timestamp in Unix seconds. The host and timestamp are the only
+finality state the helm stores on disk. The timestamp is written under the host's provisioning lock after checking
+ownership and before the provider call. Retries preserve the first timestamp. The failure reason stays in memory, and
+removing the host clears the seal in the same transaction. At startup the manager loads recorded seals as pending before
+it publishes any host. The finisher makes one attempt at each as soon as it can take the host's provisioning lock (a
+busy lock is retried every 10 seconds) and leaves failures for Retry. While a host is `Deleting`, its sessions show as
+being deleted with their actions unavailable. Replace counts `NotFound` from its source removal as success and turns
+`ErrorKind::Sealed` on its create into "the environment is being deleted".
 
 Suspend closes the exec connection before Podman pause, and Resume unpauses a Suspended container or starts a Stopped
 one. Stopped auto-start is attempted once after observation with a connected place, then failures wait for explicit
@@ -6549,7 +6559,8 @@ Replace stays in the same sandbox and retains ordinary create-before-source-remo
 removal calls ordinary supervisor session deletion, which never seals and never destroys the sandbox. Failures preserve
 the resource and report known outcomes and its name; rare unresolved cases can require manual recovery. The warned
 whole-sandbox Delete may subsequently destroy any leftover session, listed or unlisted. This is accepted product
-behavior; the seal is the only finality state, and nothing else proves which session remains.
+behavior. The helm's saved seal lets it finish destruction after a restart. The supervisor still decides which session,
+if any, remains.
 
 Suspend and Resume reuse host lifecycle tasks. Stop and suspend completes ordinary Stop first, then applies the host
 Suspend rule to the whole resource; failure or incomplete Stop withholds Suspend. No path automatically resumes it. Bulk

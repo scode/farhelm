@@ -1163,6 +1163,11 @@ pub(crate) struct FleetBuilder {
 }
 
 impl FleetBuilder {
+    /// Seed state that an actor must see on its first read, such as a seal recorded by an earlier helm.
+    pub(crate) fn store(&self) -> &HelmStore {
+        &self.store
+    }
+
     /// Install the alert sender's client before host actors start, without
     /// changing process configuration or allowing unrelated tests outbound access.
     pub(crate) fn ntfy_client(mut self, client: reqwest::Client) -> Self {

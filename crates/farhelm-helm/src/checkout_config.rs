@@ -3530,6 +3530,9 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 -- Schema 89 added the remembered environment seal; newest first, so
+                 -- the older environment columns below come off in the same order.
+                 ALTER TABLE hosts DROP COLUMN environment_sealed_at;
                  -- Schema 83 added the container place index and coordinates.
                  -- Remove the index before its column, and the provider's
                  -- columns before the older environment ownership constraint.
