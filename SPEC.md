@@ -2698,6 +2698,10 @@ Session group headers, attention rows, host rows and the session list's Show all
 Help for the host rail's avatars and footer controls uses the rail's own right edge as it expands and collapses. A notch
 and a thin ring identify the target in both cases. An open panel keeps its space beside the rail.
 
+Controls in the top rows of the sidebar and session pane, main-pane banners, the version readout and the drawn title bar
+show help below the control first. Dialog footer buttons and question answers also prefer below, keeping the text above
+them readable. Help can appear above a control when the space below is too small or an open menu needs it.
+
 Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
 otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.
 These colors say which agent it is, never its activity or permission mode.

@@ -225,6 +225,13 @@ impl HoverHelp {
         self
     }
 
+    /// Prefer help below controls at the top of a surface or in a dialog footer. The ordinary clearance rules
+    /// still apply when the window has room only above.
+    pub(crate) fn below(mut self) -> Self {
+        self.placement = HelpPlacement::Below;
+        self
+    }
+
     /// Rail help uses the same ring cues as sidebar help, and gives an open popover room for its choices.
     pub(crate) fn beside_rail(mut self) -> Self {
         self.placement = HelpPlacement::Rail(*self.beside_cues());

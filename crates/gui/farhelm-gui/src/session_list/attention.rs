@@ -556,8 +556,9 @@ fn header(shown: &Shown, heading: String, list: &WeakEntity<SessionList>) -> Any
         .any(|row| row.kind == Kind::Update { required: false });
     // While a launch is in flight these keep their place, unavailable, and say why ([`Shown::launch_pending`]).
     let pending = shown.launch_pending;
-    let help =
-        |ready: &'static str| HoverHelp::tooltip(if pending { LAUNCH_PENDING } else { ready });
+    let help = |ready: &'static str| {
+        HoverHelp::tooltip(if pending { LAUNCH_PENDING } else { ready }).below()
+    };
     let update_all = (updates.len() > 1).then(|| {
         let hosts = updates.clone();
         Button::new(
@@ -606,7 +607,7 @@ fn header(shown: &Shown, heading: String, list: &WeakEntity<SessionList>) -> Any
             // the dismissal (the module docs' NOTE).
             HoverHelp::tooltip(
                 "Dismiss optional updates until another host has an update or the helm build changes",
-            ),
+            ).below(),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -664,7 +665,7 @@ fn failure(palette: &Palette) -> AnyElement {
                 "Try again",
                 HoverHelp::tooltip(
                     "Try saving automatic updates again without requesting these host updates again",
-                ),
+                ).below(),
                 Role::Button,
             )
             .tier(Tier::Neutral)

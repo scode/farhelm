@@ -602,7 +602,7 @@ impl TerminalSet {
                    focus: &FocusHandle| {
             let set = set.clone();
             let pressed = chosen == value;
-            Button::new(id, label, HoverHelp::tooltip(help), Role::Button)
+            Button::new(id, label, HoverHelp::tooltip(help).below(), Role::Button)
                 .tier(Tier::TerminalTab)
                 .pressed(pressed)
                 .disabled(inert)
@@ -637,7 +637,8 @@ impl TerminalSet {
                     "×",
                     HoverHelp::tooltip(format!(
                         "Close {label}, ending its shell and everything it started"
-                    )),
+                    ))
+                    .below(),
                     Role::Button,
                 )
                 .tier(Tier::TerminalTabClose)
@@ -693,7 +694,8 @@ impl TerminalSet {
                 ADD_ID,
                 Icon::Add,
                 "New terminal",
-                HoverHelp::tooltip("New terminal: open a shell tab in the session's folder"),
+                HoverHelp::tooltip("New terminal: open a shell tab in the session's folder")
+                    .below(),
                 Role::Button,
             )
             .tier(Tier::Neutral)

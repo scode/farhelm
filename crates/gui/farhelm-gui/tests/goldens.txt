@@ -24,6 +24,8 @@ linux/command-well--dark.png 7f45088fe81823251d7e5b4cb113e5fe9f6814b2
 linux/command-well--light.png a13250153ef9fc1cf6ef02aa4599ac528f018c53
 linux/dialog--dark.png 4545851f4112663fc3672b30f4559a68f8326b0d
 linux/dialog--light.png e9ce8ca905fc5731b7ee5ead0551457cc78120df
+linux/dialog-footer-tooltip--dark.png 34bed3c29d6ab7b70089d72090430e2a79b697ee
+linux/dialog-footer-tooltip--light.png 910508abafdd4029293a5d76d7f34dcf38adaef6
 linux/dialog-launcher-frame--dark.png 9cec830fd28d10d0e1354b01394f248cd0c695c3
 linux/dialog-launcher-frame--light.png b2dc9866d515f22e3ed86fa64b23dde10e6c8398
 linux/dialog-notices-stop--dark.png 3d96a1a657383461d64a04e7026ecf218b2bc920

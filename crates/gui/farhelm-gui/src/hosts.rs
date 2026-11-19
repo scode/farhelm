@@ -583,7 +583,8 @@ impl Render for HostsPanel {
         let update_all = Button::new(
             "hosts-update-all",
             "Update all",
-            HoverHelp::tooltip("Update all: update every remote host that has an update available"),
+            HoverHelp::tooltip("Update all: update every remote host that has an update available")
+                .below(),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -621,7 +622,7 @@ impl Render for HostsPanel {
                         "Details",
                         HoverHelp::tooltip(
                             "Details: show every host's version, identity, sessions and diagnostics",
-                        ),
+                        ).below(),
                         Role::Switch,
                     )
                     .switch()
@@ -1004,7 +1005,7 @@ fn add_button(focus: &FocusHandle) -> AnyElement {
         "hosts-add",
         Icon::Add,
         "Add host",
-        HoverHelp::tooltip(add::ADD_HOST_HELP),
+        HoverHelp::tooltip(add::ADD_HOST_HELP).below(),
         Role::Button,
     )
     .tier(Tier::Neutral)

@@ -1064,6 +1064,7 @@ impl Render for QuickSwitcher {
                     HoverHelp::tooltip("Close the quick switcher"),
                     Role::Button,
                 )
+                .help_below()
                 .on_click(move |_, window, cx| {
                     let _ = weak.update(cx, |switcher, cx| switcher.close(window, cx));
                 }),

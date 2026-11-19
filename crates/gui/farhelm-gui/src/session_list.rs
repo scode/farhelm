@@ -1285,7 +1285,7 @@ fn heading(
         "templates-button",
         Icon::Templates,
         "Templates",
-        templates::button_help(cx),
+        templates::button_help(cx).below(),
         Role::Button,
     )
     .tier(Tier::Neutral)
@@ -1307,7 +1307,7 @@ fn heading(
         NEW_ID,
         Icon::Add,
         "New session",
-        HoverHelp::tooltip(launcher::entry::NEW_SESSION_HELP),
+        HoverHelp::tooltip(launcher::entry::NEW_SESSION_HELP).below(),
         Role::Button,
     )
     .tier(Tier::Primary)
@@ -1335,7 +1335,7 @@ fn heading(
             StatusMark::new(
                 COUNT_ID,
                 name.clone(),
-                HoverHelp::tooltip(name),
+                HoverHelp::tooltip(name).below(),
                 Role::Label,
                 count,
             )
@@ -1493,7 +1493,7 @@ fn cut_band(warning: String, palette: &theme::Palette) -> impl IntoElement {
             StatusMark::new(
                 COUNT_ID,
                 name.clone(),
-                HoverHelp::tooltip(name),
+                HoverHelp::tooltip(name).below(),
                 Role::Label,
                 warning,
             )

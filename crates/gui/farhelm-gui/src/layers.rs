@@ -2422,25 +2422,38 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .by_focus
             .as_ref()
             .map(|by_focus| by_focus.focus.clone());
-        let placed = match (shown.placement, focus) {
-            (HelpPlacement::Ordinary, Some(focus)) => {
-                beside::PlacedBeside::around(shown, focus, card)
+        // Prepaint reads the bounds after the popovers have placed themselves for this frame.
+        let panels = || {
+            stack.layers.iter().filter_map(|layer| match &layer.kind {
+                Kind::Popover {
+                    anchor,
+                    surface,
+                    passes_pointer: false,
+                    ..
+                } => Some((anchor, surface)),
+                _ => None,
+            })
+        };
+        let vertical_panels = || {
+            if shown.placement == HelpPlacement::Below {
+                panels()
+                    .map(|(anchor, surface)| (anchor.clone(), surface.clone()))
+                    .collect()
+            } else {
+                Vec::new()
             }
-            (HelpPlacement::Ordinary, None) => beside::PlacedBeside::ordinary(shown, card),
+        };
+        let placed = match (shown.placement, focus) {
+            (HelpPlacement::Ordinary | HelpPlacement::Below, Some(focus)) => {
+                beside::PlacedBeside::around(shown, focus, card, vertical_panels())
+            }
+            (HelpPlacement::Ordinary | HelpPlacement::Below, None) => {
+                beside::PlacedBeside::ordinary(shown, card, vertical_panels())
+            }
             (placement, focus) => {
-                // Each surface is read when the tooltip is prepainted. At that point popovers have already set
-                // their bounds for this frame, including a submenu that just opened beside its trigger.
-                let panels = stack.layers.iter().filter_map(|layer| match &layer.kind {
-                    Kind::Popover {
-                        surface,
-                        passes_pointer: false,
-                        ..
-                    } => Some(surface.clone()),
-                    _ => None,
-                });
                 let edges = beside::HelpEdges {
                     inline: stack.help_edges.clone(),
-                    panels: panels.collect(),
+                    panels: panels().map(|(_, surface)| surface.clone()).collect(),
                 };
                 beside::PlacedBeside::new(shown, placement, edges, focus, card, palette)
             }

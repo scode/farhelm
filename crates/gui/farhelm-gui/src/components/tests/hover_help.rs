@@ -20,6 +20,49 @@ use crate::test_support::{advance, bounds, center, check, frame, keys, open, red
 
 use super::{tooltip, wait_hover_delay};
 
+/// A dialog answer shares its footer placement between pointer hover and keyboard focus. The specimen uses the
+/// real frame so the test covers the policy assigned by the footer as well as the overlay's focus dispatch.
+#[gpui::test]
+fn dialog_footer_help_appears_below_with_pointer_and_keyboard(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        crate::components::DialogFrame::new(
+            "footer-help",
+            "Confirm",
+            div().child("The dialog content remains visible"),
+            vec![Button::new(
+                "continue",
+                "Continue",
+                HoverHelp::tooltip("Keep going"),
+                Role::Button,
+            )],
+        )
+        .into_any_element()
+    });
+    let answer = bounds(cx, "continue");
+    let shown_below = |cx: &mut VisualTestContext| {
+        let shown = cx
+            .update(|window, cx| layers::shown_tooltip(window, cx))
+            .unwrap();
+        assert_eq!(shown.text.as_ref(), "Keep going");
+        assert_eq!(shown.side(), layers::TooltipSide::Below);
+        assert!(bounds(cx, "tooltip-card").top() > answer.bottom());
+    };
+    cx.simulate_mouse_move(answer.center(), None, Modifiers::none());
+    wait_hover_delay(cx);
+    shown_below(cx);
+
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    check(cx);
+    assert!(tooltip(cx).is_none(), "the pointer left the button");
+    keys(cx, "tab");
+    assert_eq!(
+        crate::test_support::focused_id(cx).as_deref(),
+        Some("continue")
+    );
+    wait_hover_delay(cx);
+    shown_below(cx);
+}
+
 /// Hovering a control shows its help through the layer manager once the pointer has rested for the old app's hover
 /// delay, and leaving it takes the help down. This is the old app's "every control has hover help" rule, now carried
 /// by the constructor instead of a page-walking test; the delay is what keeps a pointer crossing the window from

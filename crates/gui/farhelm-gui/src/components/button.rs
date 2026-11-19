@@ -502,18 +502,24 @@ impl Button {
 
     /// The session list heading band's padding for a button that shows words or other content (the order title,
     /// `.session-heading .sort-title`): 2 pixels above and below and none at its sides, so its words line up with the
-    /// band's edge. Only the padding changes: the tier still gives the colors. The band's icon buttons (the old
+    /// band's edge. Hover help prefers the space below this band. The tier still gives the colors. The band's icon buttons (the old
     /// Templates and New) are 24-pixel squares instead ([`Button::square`]).
     pub fn heading(mut self) -> Self {
         self.heading = true;
-        self
+        self.help_below()
     }
 
     /// The session list's marked bar geometry for a button with words (its Stop and Delete): 3 by 7 pixels of padding in
     /// a 26-pixel box, the old `.marked-bar .marked-stop` and `.marked-delete` rule, so the bar's words fit beside "N
-    /// marked" and its icon buttons in a narrow sidebar. Only the box changes: the tier still gives the colors.
+    /// marked" and its icon buttons in a narrow sidebar. Hover help prefers below. The tier still gives the colors.
     pub fn toolbar(mut self) -> Self {
         self.toolbar = true;
+        self.help_below()
+    }
+
+    /// Top-band controls and dialog answers show help below when the space is free.
+    pub(crate) fn help_below(mut self) -> Self {
+        self.help = self.help.below();
         self
     }
 

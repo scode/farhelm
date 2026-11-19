@@ -36,14 +36,14 @@ impl Banner {
     /// The band's one button, after the text rather than at the far edge, as in the old app. Whatever tier the button
     /// had, it is drawn in [`Tier::OnBanner`]: no other tier reads on the red fill.
     pub fn action(mut self, button: Button) -> Self {
-        self.action = Some(button.tier(Tier::OnBanner));
+        self.action = Some(button.tier(Tier::OnBanner).help_below());
         self
     }
 
     /// A button before the band's [`Banner::action`], for a band that offers something besides its one action: a
     /// notice whose Dismiss follows what it offers (Open launcher). Drawn in [`Tier::OnBanner`] for the same reason.
     pub fn lead_action(mut self, button: Button) -> Self {
-        self.lead = Some(button.tier(Tier::OnBanner));
+        self.lead = Some(button.tier(Tier::OnBanner).help_below());
         self
     }
 }

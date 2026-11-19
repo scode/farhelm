@@ -560,7 +560,7 @@ pub(crate) fn row(
         RadioGroup::new(
             "session-status",
             "Session status",
-            HoverHelp::tooltip("Session status: show only the sessions in one status"),
+            HoverHelp::tooltip("Session status: show only the sessions in one status").below(),
             Role::RadioGroup,
         )
         .small_segments()
@@ -575,7 +575,7 @@ pub(crate) fn row(
         |group, status| {
             group.option(RadioOption::new(
                 status.segment().label,
-                HoverHelp::tooltip(status.segment().help),
+                HoverHelp::tooltip(status.segment().help).below(),
                 *status,
             ))
         },
@@ -632,7 +632,7 @@ fn chip(
                 )
             }
         };
-    Button::new("host-filter-chip", label, help, Role::Button)
+    Button::new("host-filter-chip", label, help.below(), Role::Button)
         .tier(Tier::Chip)
         .content(
             div()

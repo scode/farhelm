@@ -454,7 +454,7 @@ impl RenderOnce for DialogFrame {
             .justify_end()
             .items_center()
             .gap(px(8.))
-            .children(self.answers);
+            .children(self.answers.into_iter().map(Button::help_below));
         // The answers' row. Every shape lets the answers wrap at the footer's width: a row item never shrinks below its
         // content unless told to (`min_w_0`), and answers that cannot wrap are cut at the frame's start edge, Cancel
         // first.

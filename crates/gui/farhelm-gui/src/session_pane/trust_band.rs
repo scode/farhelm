@@ -444,7 +444,7 @@ fn actions(
     let settings = Button::new(
         SETTINGS_ID,
         words.settings,
-        HoverHelp::tooltip(words.settings_help),
+        HoverHelp::tooltip(words.settings_help).below(),
         Role::Button,
     )
     .tier(Tier::Primary)
@@ -457,7 +457,7 @@ fn actions(
     let dismiss = Button::new(
         DISMISS_ID,
         "Don't show again",
-        HoverHelp::tooltip(words.dismiss_help),
+        HoverHelp::tooltip(words.dismiss_help).below(),
         Role::Button,
     )
     .tier(Tier::Neutral)
@@ -468,7 +468,7 @@ fn actions(
     let hide = Button::new(
         HIDE_ID,
         "×",
-        HoverHelp::tooltip("Hide this note for this question only"),
+        HoverHelp::tooltip("Hide this note for this question only").below(),
         Role::Button,
     )
     .accessible_name("Hide this trust hint for this occurrence")

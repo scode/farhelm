@@ -15,7 +15,7 @@ use gpui::{
     Window, div, point, px, size,
 };
 
-use super::beside::{Placed, at_pointer, place, place_menu};
+use super::beside::{Placed, around_target, at_pointer, place, place_menu};
 use crate::components::{Button, HoverHelp, Role};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, TooltipSide};
@@ -97,6 +97,27 @@ fn submenu_help_leaves_the_parent_menu_clear() {
     .expect("the left edge has room");
     assert_eq!(placed.side, TooltipSide::BesideLeft);
     assert!(placed.origin.x + card.width < submenu.left());
+}
+
+/// A dialog footer can have room on both sides. Below-first help stays out of the body and falls back above
+/// when the same footer is near the bottom of a short window.
+#[test]
+fn below_first_help_respects_the_footer_and_window_edges() {
+    let control = rect(220., 240., 80., 30.);
+    let card = size(px(120.), px(40.));
+    let tall = rect(0., 0., 680., 400.);
+    let below = around_target(control, card, tall, true);
+    assert_eq!(below.side, TooltipSide::Below);
+    assert_eq!(below.origin.y, control.bottom() + px(28.));
+    assert_eq!(
+        around_target(control, card, tall, false).side,
+        TooltipSide::Above
+    );
+
+    let short = rect(0., 0., 680., 310.);
+    let above = around_target(control, card, short, true);
+    assert_eq!(above.side, TooltipSide::Above);
+    assert_eq!(above.origin.y + card.height, control.top() - px(6.));
 }
 
 /// A window of `viewport` with no frame and no bar of its own, as the old app's page was and as macOS's and a
