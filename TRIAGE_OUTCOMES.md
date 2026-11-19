@@ -1756,7 +1756,7 @@
   diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: pending
+- Execution: planned in `plans/queue/drawn-frame-actions.md`
 
 ## trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md
 
@@ -1776,7 +1776,7 @@
   item, not this gate. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the
   queue removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
   feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/drawn-frame-actions.md`
 
 ## trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md
 
@@ -1795,7 +1795,7 @@
   does (about 5 lines, optional test). Size gate: about 100 lines of diff (code, tests and docs, not counting
   TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
   to the user. Remove the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-misc-nov18.md`
 
 ## trailing-update-survival-reassurance-omits-old-terminal-retirement.md
 
@@ -1821,7 +1821,7 @@
   survival statements are deliberately left unqualified for the update that ends old terminals. The survival wording in
   the installer, SPEC.md, SPEC_impl.md and the docs stays as it is. Remove this feedback file and the two below, with
   their index entries, in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/update-survival-wording.md`
 
 ## trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md
 
@@ -1830,7 +1830,7 @@
   through SPEC_impl.md's Restart to update text; confirmed the same way.
 - Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
 - Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
-- Execution: pending
+- Execution: planned in `plans/queue/update-survival-wording.md`
 
 ## trailing-old-terminal-migration-unconditional-session-survival-assurance.md
 
@@ -1840,7 +1840,7 @@
   install result, and the message has no old-terminal condition).
 - Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
 - Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
-- Execution: pending
+- Execution: planned in `plans/queue/update-survival-wording.md`
 
 ## retired-session-delete-removes-reused-container-name.md
 
@@ -1859,7 +1859,7 @@
   labels are specified, so reviews stop raising deliberate reuse of them. No code change. Remove this feedback file,
   `tensorlake-pending-create-adopts-replacement-sandbox.md` and `podman-container-clone-inherits-leftover-ownership.md`,
   with their index entries, in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/reserved-resource-names.md`
 
 ## tensorlake-pending-create-adopts-replacement-sandbox.md
 
@@ -1872,7 +1872,7 @@
 - Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
   highest-bucket triage page, Q2); see that entry for the principle.
 - Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
-- Execution: pending
+- Execution: planned in `plans/queue/reserved-resource-names.md`
 
 ## podman-container-clone-inherits-leftover-ownership.md
 
@@ -1885,7 +1885,7 @@
 - Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
   highest-bucket triage page, Q2); see that entry for the principle.
 - Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
-- Execution: pending
+- Execution: planned in `plans/queue/reserved-resource-names.md`
 
 ## header-actions-follow-unseen-session.md
 
@@ -1913,7 +1913,7 @@
   with too, so they are planned together rather than as separate ad hoc fixes. Tests show a stale-frame click acting on
   the drawn session or being refused. Expect this to exceed a single small PR; plan it as such. Remove the feedback file
   and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/drawn-frame-actions.md`
 
 ## wayland-file-drop-uses-entry-position.md
 
@@ -1933,7 +1933,7 @@
   (vendor/README.md), plus a unit test. Where the standard from `header-actions-follow-unseen-session.md` applies to
   drop delivery, follow it rather than inventing a separate rule. Remove the feedback file and its index entry in the
   same change.
-- Execution: pending
+- Execution: planned in `plans/queue/drawn-frame-actions.md`
 
 ## wayland-enter-overtakes-pending-text-paste.md
 
@@ -1949,7 +1949,7 @@
 - Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
   still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
   entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-misc-nov18.md`
 
 ## concealed-terminal-cells-change-link-target.md
 
@@ -1965,7 +1965,7 @@
 - Completion criteria: link detection stops at concealed cells, with a test; SPEC.md says concealed text is not part of
   a printed link and text drawn in the background color is out of scope. Remove the feedback file and its index entry in
   the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/concealed-link-target.md`
 
 ## terminal-selection-copies-concealed-text.md
 
@@ -1977,7 +1977,7 @@
 - Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
   Q4).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## websocket-trace-logs-desktop-credential.md
 
@@ -1991,7 +1991,7 @@
 - Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
 - Completion criteria: the library's handshake trace is always off whatever RUST_LOG says (about 5-10 lines), and the
   helm side is checked for the same header in its logs. Remove the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/secrets-logs-and-screen.md`
 
 ## codex-login-file-rendered-in-cleartext.md
 
@@ -2004,8 +2004,10 @@
 - Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
 - Completion criteria: after choosing a file the editor shows its name and whether it validated, not its contents; a
   pasted value is not displayed back in cleartext either. About 30-60 lines. Remove the feedback file and its index
-  entry in the same change.
-- Execution: pending
+  entry in the same change. Narrowed on 2026-11-18 (planning page, question C): the user picked "A chosen file is never
+  shown; a paste stays visible", so a pasted value may stay visible; "whether it validated" is shown only when the
+  editor can check it by the helm's own rule. This supersedes the earlier wording above.
+- Execution: planned in `plans/queue/secrets-logs-and-screen.md`
 
 ## masked-fields-expose-secrets-to-text-services.md
 
@@ -2017,7 +2019,7 @@
   patches to the UI kit and both platform layers. Bucket: other.
 - Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## stale-checkout-settings-overwrite-cli-edits.md
 
@@ -2039,7 +2041,7 @@
   it was based on, the helm refuses a mismatch, and the window re-reads, through one common representation that later
   settings reuse rather than per-field code; the post-clone command and host folder overrides use it, with tests. Remove
   the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/checkout-settings-stale-save.md`
 
 ## template-number-key-save-overwrites-committed-binding.md
 
@@ -2052,7 +2054,7 @@
 - Decision: the user picked "Refuse for what a launch runs; overwrite for bindings" (2026-11-18 highest-bucket triage
   page, Q6); the spec statement of that split is carried by `stale-checkout-settings-overwrite-cli-edits.md`.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## trailing-removed-tmux-stale-target-fallback.md
 
@@ -2062,7 +2064,7 @@
   the session (core/host_launch.rs, hosts/terminal.rs); no tmux target lookup remains. Bucket: other.
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## trailing-removed-lone-legacy-tab-lifecycle-oracles.md
 
@@ -2073,7 +2075,7 @@
   other.
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## trailing-osc52-classifier-removal-clipboard-read-disclosure.md
 
@@ -2084,7 +2086,7 @@
   The removed classifier belonged to the browser path, which no longer exists. Bucket: other.
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## trailing-restart-seed-history-promoted-into-launch-excerpt.md
 
@@ -2100,7 +2102,7 @@
 - Completion criteria: SPEC_impl.md and the launch_artifacts.rs doc comment say that after a Restart the quote may
   include lines of the same session's previous run when the terminal grew before the failure (about 10 lines). No
   behavior change. Remove the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-misc-nov18.md`
 
 ## trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md
 
@@ -2114,7 +2116,7 @@
 - Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
   group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
   lines in the test code). Remove the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-misc-nov18.md`
 
 ## trailing-agent-environment-target-history-admission-lacks-origin.md
 
@@ -2127,7 +2129,7 @@
   a duplicate.
 - Completion criteria: Remove the feedback file and its index entry; leave
   `trailing-environment-history-admits-agent-origin.md` queued.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## trailing-ui-host-retry-selects-delete-from-live-phase.md
 
@@ -2138,7 +2140,7 @@
   (sessions/sandbox.rs), a destruction the user already confirmed and that SPEC.md says is never lifted. Bucket: other.
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
 
 ## container-leftover-delete-races-first-session.md
 
@@ -2152,7 +2154,7 @@
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: containers whose first launch is still in progress are left out of the list (about 15-30 lines,
   with a test). Remove the feedback file and its index entry in the same change.
-- Execution: pending
+- Execution: planned in `plans/queue/triage-misc-nov18.md`
 
 ## trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md
 
@@ -2167,4 +2169,4 @@
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: Remove the feedback file and its index entry (the two other-bucket duplicates were not part of
   this decision).
-- Execution: pending
+- Execution: planned in `plans/queue/triage-discards-nov18.md`
