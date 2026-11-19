@@ -22818,6 +22818,22 @@ prior terminal output" (rebased revision)
   `plan/gui-ux-backend-test-gaps/03-checkpoint-rejection-test-asserts`,
   [PR #4214](https://github.com/scode/farhelm/pull/4214/changes).
 
+## tab-reap-deadline-excludes-listing-request.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Polling helper's 15
+  s limit doesn't cover a stuck check. A hung listing waits for nextest's 5 min kill instead of failing at 15 s.
+  Confirmed, never observed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: wrap each check in the deadline (~5-8). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: complete in jj change `sootspronpokusyyyyxmkqqktmxqmlmq`, bookmark
+  `plan/gui-ux-backend-test-gaps/04-tab-reap-deadline-excludes`,
+  [PR #4215](https://github.com/scode/farhelm/pull/4215/changes).
+
 ## held-start-test-lacks-prelaunch-fencing-witness.md
 
 - Outcome: `discard`.

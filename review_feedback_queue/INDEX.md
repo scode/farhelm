@@ -1294,9 +1294,6 @@ consequences.
   nonblocking terminal input can pass after its emulator lock has already expired, so it can miss a regression that
   would wait for that lock.
 
-- [`tab-reap-deadline-excludes-listing-request.md`](tab-reap-deadline-excludes-listing-request.md) — The tab-exit
-  regression's advertised 15-second failure boundary does not cover the listing it awaits.
-
 - [`tab-retry-test-measures-observation-time.md`](tab-retry-test-measures-observation-time.md) — The retry regression
   can accept cleanup observed after 900 ms without proving that the retry itself waited for the required delay.
 
