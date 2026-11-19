@@ -83,6 +83,7 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
         | LaunchHarness::Goose
         | LaunchHarness::Pi
         | LaunchHarness::Omp
+        | LaunchHarness::Antigravity
         | LaunchHarness::OpenCode => None,
     }
 }
@@ -106,6 +107,7 @@ pub(crate) fn workspace_trust_prompt(
             | LaunchHarness::Codex
             | LaunchHarness::Goose
             | LaunchHarness::Grok
+            | LaunchHarness::Antigravity
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Cursor
@@ -388,6 +390,7 @@ pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Generic => &GenericReader,
     }
 }
@@ -1223,6 +1226,7 @@ mod tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
+            AgentKind::Antigravity,
             AgentKind::Generic,
         ] {
             let reader = reader_for(kind);

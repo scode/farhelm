@@ -130,10 +130,10 @@
 //! - **Stateful per-kind behavior in the supervisor** (report admission,
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
-//!   exhaustive matches. Claude and Muse share `vendor/positional.rs` with
+//!   exhaustive matches. Claude, Muse and Antigravity share `vendor/positional.rs` with
 //!   explicit per-kind event and correction-notice policies.
 //! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor;
-//!   Claude and Muse share `procs/positional.rs` without executable recognition.
+//!   Claude, Muse and Antigravity share `procs/positional.rs` without executable recognition.
 //! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
 //!   materializes which extension a kind loads; the extensions themselves
 //!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
@@ -226,6 +226,7 @@ pub(crate) fn prompt_delivery(kind: AgentKind) -> Option<PromptDelivery> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Muse
         | AgentKind::Generic => None,
     }
@@ -830,6 +831,7 @@ fn hook_command(
         farhelm_proto::ReportVendor::Pi => "pi",
         farhelm_proto::ReportVendor::Omp => "omp",
         farhelm_proto::ReportVendor::Grok => "grok",
+        farhelm_proto::ReportVendor::Antigravity => "antigravity",
         farhelm_proto::ReportVendor::Muse => "muse",
     };
     // The `--vendor` flag is the report envelope's discriminator, sourced
@@ -861,6 +863,7 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Omp => Some(&OmpIntegration),
         AgentKind::Grok => Some(&GrokIntegration),
+        AgentKind::Antigravity => Some(&AntigravityIntegration),
         AgentKind::Muse => Some(&MuseIntegration),
         AgentKind::Generic => None,
     }
@@ -910,6 +913,9 @@ struct OmpIntegration;
 
 /// Grok is manually hooked and resumes only from an exact verified UUID.
 struct GrokIntegration;
+
+/// Antigravity reports from user-installed hooks, independent of launch flags.
+struct AntigravityIntegration;
 
 impl AgentIntegration for GooseIntegration {
     fn record_header_has_prelude(&self, _first_line: &str) -> bool {
@@ -986,6 +992,28 @@ impl AgentIntegration for GrokIntegration {
 
     fn inject_hooks(&self, argv: Vec<String>, policy: &HookPolicy<'_>) -> HookInjection {
         inject_hook_argv_tail(self, AgentKind::Grok, argv, policy, |_| None)
+    }
+
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
+    }
+}
+
+impl AgentIntegration for AntigravityIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
+    fn farhelm_args(&self, _phase: LaunchPhase, _policy: &HookPolicy<'_>) -> FarhelmArgs {
+        FarhelmArgs::none()
+    }
+
+    fn inject_hooks(&self, argv: Vec<String>, _policy: &HookPolicy<'_>) -> HookInjection {
+        HookInjection {
+            argv,
+            hooked: false,
+            log: HookLog::Silent,
+        }
     }
 
     fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
@@ -1930,9 +1958,11 @@ impl IntegrationSnapshot {
             }
             AgentKind::Pi => self.typed_locator_offer(LocatorVendor::Pi, captured),
             AgentKind::Omp => self.typed_locator_offer(LocatorVendor::Omp, captured),
-            AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => {
-                self.plain_id_offer(captured)
-            }
+            AgentKind::Claude
+            | AgentKind::Goose
+            | AgentKind::Muse
+            | AgentKind::Antigravity
+            | AgentKind::Generic => self.plain_id_offer(captured),
         }
     }
 
@@ -2011,7 +2041,11 @@ impl IntegrationSnapshot {
                 .ok()?
                 .resume_id()?
                 .to_string(),
-            AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => {
+            AgentKind::Claude
+            | AgentKind::Goose
+            | AgentKind::Muse
+            | AgentKind::Antigravity
+            | AgentKind::Generic => {
                 if is_reserved_locator_token(conversation)
                     || !is_plausible_conversation_id(conversation)
                 {
@@ -2068,7 +2102,9 @@ pub fn validate_named_conversation(value: &str) -> Result<(), String> {
 /// Codex, Grok, and OMP have complete proofs. Claude attributes by position
 /// and pins the admitted process, without a vendor record proof or versioned
 /// provenance. Muse shares that positional contract without a record check.
-/// It deliberately stays false: flipping it would withdraw every
+/// Antigravity uses the same positional contract and accepts that an unmarked
+/// child conversation from the pinned process can become the Restart target.
+/// Claude's policy deliberately stays false: flipping it would withdraw every
 /// existing Claude Restart offer. Goose and Pi retain their legacy behavior.
 ///
 /// This is the provenance/offer policy, not the report-dispatch policy. Each
@@ -2081,7 +2117,7 @@ pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
         AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
-        AgentKind::Muse | AgentKind::Generic => false,
+        AgentKind::Muse | AgentKind::Antigravity | AgentKind::Generic => false,
     }
 }
 
@@ -2101,6 +2137,7 @@ fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Muse
         | AgentKind::Generic => false,
     }
@@ -2118,6 +2155,7 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
         | AgentKind::Codex
         | AgentKind::Goose
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Muse
         | AgentKind::Generic => None,
     }
@@ -2129,7 +2167,11 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
 pub fn verifies_resume_target(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Generic => false,
+        AgentKind::Claude
+        | AgentKind::Goose
+        | AgentKind::Muse
+        | AgentKind::Antigravity
+        | AgentKind::Generic => false,
     }
 }
 
@@ -2151,6 +2193,7 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Muse
         | AgentKind::Generic => None,
     }
@@ -2175,7 +2218,8 @@ pub fn conversation_report_slot(
         | ReportVendor::Goose
         | ReportVendor::Pi
         | ReportVendor::Omp
-        | ReportVendor::Muse => Slot::Latest,
+        | ReportVendor::Muse
+        | ReportVendor::Antigravity => Slot::Latest,
     }
 }
 
@@ -2202,6 +2246,7 @@ pub fn foreground_source_refusal(
         | ReportVendor::Goose
         | ReportVendor::Pi
         | ReportVendor::Grok
+        | ReportVendor::Antigravity
         | ReportVendor::Muse => None,
     }
 }
@@ -2218,6 +2263,7 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
         farhelm_proto::ReportVendor::Pi => AgentKind::Pi,
         farhelm_proto::ReportVendor::Omp => AgentKind::Omp,
         farhelm_proto::ReportVendor::Grok => AgentKind::Grok,
+        farhelm_proto::ReportVendor::Antigravity => AgentKind::Antigravity,
         farhelm_proto::ReportVendor::Muse => AgentKind::Muse,
     }
 }
@@ -2230,7 +2276,7 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
         AgentKind::Grok => grok::GrokLocator::parse(value).is_ok(),
         AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse => {
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Antigravity => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
         AgentKind::Generic => false,
@@ -2474,9 +2520,8 @@ pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
 /// per-launch identity hook ([`AgentIntegration::hook_argv`]) appended to
 /// their argv at all.
 ///
-/// Grok is deliberately outside this switch because Farhelm does not install
-/// its callbacks per launch. The user controls those entries in Grok's own
-/// hook configuration.
+/// Grok and Antigravity sit outside this switch. Users own their hook
+/// configuration, independently of the flags Farhelm adds at launch.
 ///
 /// This is a SEAM value, not a live environment lookup.
 /// [`crate::service::SupervisorSeams::agent_hooks`] carries exactly one of
@@ -2502,7 +2547,7 @@ pub enum AgentHooks {
     All,
     /// No automatically installed reporter runs, so those integrations gain
     /// no new identity through automatic reporting.
-    /// Manually configured Grok callbacks are unaffected.
+    /// Manually configured Grok and Antigravity callbacks are unaffected.
     None,
     /// Exactly these automatically configured kinds get their reporter. A
     /// disabled kind gains no new identity through automatic reporting. An [`AgentKind::Generic`] entry would be inert rather
@@ -2533,7 +2578,7 @@ impl AgentHooks {
 
     /// Whether this opt-out leaves `kind` with no reporter, so a launch of it
     /// never names a new conversation (a named Restart with then clears the
-    /// old capture). Never Grok: its callbacks are the user's own, which this
+    /// old capture). Grok and Antigravity use user-owned callbacks that this
     /// switch cannot remove (see [`parse_agent_hooks`]).
     #[warn(clippy::wildcard_enum_match_arm)]
     pub fn silences(&self, kind: AgentKind) -> bool {
@@ -2544,7 +2589,7 @@ impl AgentHooks {
             | AgentKind::Pi
             | AgentKind::Omp
             | AgentKind::Muse => !self.allows(kind),
-            AgentKind::Grok | AgentKind::Generic => false,
+            AgentKind::Grok | AgentKind::Antigravity | AgentKind::Generic => false,
         }
     }
 }
@@ -2713,6 +2758,7 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
         AgentKind::Pi => Some("pi"),
         AgentKind::Omp => Some("omp"),
         AgentKind::Grok => Some("grok"),
+        AgentKind::Antigravity => Some("agy"),
         AgentKind::Muse | AgentKind::Generic => None,
     }
 }
@@ -2819,6 +2865,7 @@ mod tests {
             (AgentKind::Pi, "pi", true, false),
             (AgentKind::Omp, "omp", true, false),
             (AgentKind::Grok, "grok", false, false),
+            (AgentKind::Antigravity, "agy", false, false),
         ] {
             let (actual_hooked, log) = decide(kind, program);
             assert_eq!(actual_hooked, hooked, "{kind:?} hooked");
@@ -4363,6 +4410,7 @@ mod tests {
         assert!(!AgentHooks::All.silences(AgentKind::Claude));
         assert!(!AgentHooks::All.silences(AgentKind::Codex));
         assert!(!AgentHooks::None.silences(AgentKind::Grok));
+        assert!(!AgentHooks::None.silences(AgentKind::Antigravity));
 
         let only_claude = AgentHooks::Only(vec![AgentKind::Claude]);
         assert!(only_claude.allows(AgentKind::Claude));

@@ -1,14 +1,14 @@
 //! Plain-id report admission with positional attribution and durable authority.
 //!
-//! Claude and Muse cannot be recognized by executable name. Their shared corridor
-//! attributes the hook by position; the first admitted emitter is pinned, so
+//! The shared corridor attributes the hook by position across native and
+//! wrapper launches. The first admitted emitter is pinned, so
 //! accepting resident wrappers does not let a later shelled-out child replace
 //! the conversation.
 
 use super::super::*;
 
 /// Facts selected by per-kind dispatch, separate from the shared authority rules.
-/// Both vendors currently emit Stop; keeping the spelling here makes adopting
+/// All three vendors currently emit Stop. Keeping the spelling here makes adopting
 /// another vendor's end-of-turn policy an explicit decision.
 pub(in crate::service::core) struct PositionalReportPolicy {
     kind: AgentKind,
@@ -36,13 +36,23 @@ pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalRepo
     correction_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
 };
 
+/// Antigravity emits the same callbacks for the main conversation and children
+/// it runs in the same process. A process pin accepts either conversation.
+pub(in crate::service::core) const ANTIGRAVITY: PositionalReportPolicy = PositionalReportPolicy {
+    kind: AgentKind::Antigravity,
+    name: "Antigravity",
+    quiet_event: "Stop",
+    correction_kind: crate::service::notifications::NotificationKind::AntigravityPinCorrected,
+    correction_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
+};
+
 impl Supervisor {
     /// Admit a positional vendor's conversation without versioned record proof.
     /// The capture claim protects both the recorded process pin and the current
     /// binding. Ancestor correction and its once-per-launch notification commit
-    /// together; refusals and failed writes publish nothing. Neither vendor has
-    /// an established unmarked same-process child hazard, so this does not read
-    /// vendor files and deliberately writes ownership version 0.
+    /// together. Position establishes authority for a process, so it cannot
+    /// distinguish unmarked conversations that Antigravity runs in that same
+    /// process. Admission uses no vendor files and writes ownership version 0.
     /// Stop is an ordinary selecting report of the current conversation. A
     /// rival Stop acknowledges without effect or warning, including when pin
     /// liveness is unavailable; validation and storage failures remain errors.
@@ -125,7 +135,7 @@ impl Supervisor {
                     // Only positive evidence of exit, PID reuse or a non-running
                     // process permits release. An unreadable process is unknown.
                     // The historical Claude-named test seam exercises this
-                    // shared liveness boundary for both positional vendors.
+                    // shared liveness boundary for all positional vendors.
                     let evidence = match self
                         .seams
                         .faults

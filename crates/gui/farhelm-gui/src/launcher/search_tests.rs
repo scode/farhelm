@@ -708,15 +708,26 @@ fn model_rows_follow_the_chosen_agent() {
     assert_eq!(longer_first.search("model:GPT-FAST").default, 1);
 }
 
-/// Every agent type stays discoverable by search, OMP and Grok included, and `harness:` alone lists all nine in the
-/// launcher's order. Why: an agent type missing from search could only be chosen by hand (old
+/// Every agent type stays discoverable by search, and `harness:` alone lists
+/// them in the launcher's order. An agent type missing from search could only be chosen by hand (old
 /// `scoped_and_unscoped_search_offer_omp`).
 #[test]
 fn every_agent_type_is_discoverable() {
     let draft = Draft::agent(None);
-    assert_eq!(draft.rows("harness:").len(), 9);
+    let harnesses = draft.rows("harness:");
+    assert_eq!(harnesses.len(), LaunchHarness::ALL.len());
+    assert!(harnesses.windows(2).any(|pair| {
+        pair == [
+            Row::Harness(LaunchHarness::Claude),
+            Row::Harness(LaunchHarness::Antigravity),
+        ]
+    }));
     assert_eq!(draft.rows("omp"), vec![Row::Harness(LaunchHarness::Omp)]);
     assert_eq!(draft.rows("grok"), vec![Row::Harness(LaunchHarness::Grok)]);
+    assert_eq!(
+        draft.rows("antigravity"),
+        vec![Row::Harness(LaunchHarness::Antigravity)]
+    );
     assert_eq!(
         draft.rows("harness:open"),
         vec![Row::Harness(LaunchHarness::OpenCode)]

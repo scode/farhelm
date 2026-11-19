@@ -164,6 +164,9 @@ pub enum Script {
     /// Callers disable the instructions announcement through the supervisor
     /// seam because the shared callback oracle asserts complete silence.
     MuseHookReport,
+    /// Report an Antigravity conversation through the product hook and expose
+    /// the exact ID consumed by a replacement's native selector.
+    AntigravityHookReport,
     /// The whole agent-facing chain, acted out end to end: read the
     /// injected `SessionStart` hook out of this launch's own `--settings`
     /// argv, RUN it, obey the pointer line it prints by running `farhelm
@@ -341,9 +344,52 @@ pub fn run(
         Script::GrokConversation => grok_conversation::run(record_home),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
         Script::MuseHookReport => record_agent(RecordShape::Muse, record_home, true),
+        Script::AntigravityHookReport => antigravity_hook_agent(),
         Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),
     }
+}
+
+/// Model Antigravity's manual callback and native selector from a real pane.
+/// A typed event lets the test observe capture after the hook has returned.
+fn antigravity_hook_agent() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    if let Some(id) = option_after(std::env::args(), "--conversation") {
+        writeln!(out, "ANTIGRAVITY-RESUMED:{id}\r")?;
+    }
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+    for line in std::io::stdin().lock().lines() {
+        let line = line?;
+        let (event, id) = line
+            .trim()
+            .split_once(' ')
+            .context("expected an Antigravity event and conversation ID")?;
+        let payload = serde_json::json!({"conversationId": id, "hookEventName": event});
+        let mut child = std::process::Command::new(product_farhelm()?)
+            .args(["internal", "hook", "--vendor", "antigravity", "--announce"])
+            .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("spawn the product Antigravity callback")?;
+        child
+            .stdin
+            .take()
+            .context("piped Antigravity hook input")?
+            .write_all(payload.to_string().as_bytes())?;
+        wait_bounded(&mut child, HOOK_CHILD_DEADLINE, "Antigravity hook")?
+            .context("Antigravity hook timed out")?;
+        let result = child.wait_with_output()?;
+        anyhow::ensure!(
+            result.status.success() && result.stdout == b"{}\n" && result.stderr.is_empty(),
+            "Antigravity hook must return only an empty JSON object: {result:?}"
+        );
+        writeln!(out, "ANTIGRAVITY-REPORTED:{event}:{id}\r")?;
+        out.flush()?;
+    }
+    Ok(())
 }
 
 /// Drive the public spawn CLI from inside a supervised session.

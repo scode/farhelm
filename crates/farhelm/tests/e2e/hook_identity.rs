@@ -1170,6 +1170,87 @@ async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixtu
     serving.stop().await;
 }
 
+/// An Antigravity Stop can supply the first identity via the real manual hook.
+/// The fixture checks the JSON response with and without valid payloads. On
+/// Restart the replacement must consume the ID through agy's own selector.
+#[farhelm_testtrace::test]
+async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() {
+    use farhelm_proto::{LaunchHarness, RestartOffer};
+    let (h, _, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let invocation = format!(
+        "{} fake-agent --script antigravity-hook-report",
+        shell_words::quote(fixtures_bin())
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                LaunchHarness::Antigravity,
+                Some(&format!(
+                    "{invocation} --conversation {{conversation}} {{farhelm_args}}"
+                )),
+            ),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create Antigravity command launch");
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.restart_offer,
+        RestartOffer::NotCaptured
+    );
+    h.client
+        .send_keys(chan, b"PreToolUse wrong-conversation\r".to_vec())
+        .await;
+    wait_for(
+        &mut rx,
+        &mut seen,
+        "ANTIGRAVITY-REPORTED:PreToolUse:wrong-conversation",
+        15,
+    )
+    .await;
+    h.sup.reconcile_for_test().await;
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.restart_offer,
+        RestartOffer::NotCaptured
+    );
+    let id = "019a0000-0000-7000-8000-00000000c0de";
+    h.client
+        .send_keys(chan, format!("Stop {id}\r").into_bytes())
+        .await;
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("ANTIGRAVITY-REPORTED:Stop:{id}"),
+        15,
+    )
+    .await;
+    wait_for_watched_identity(&h, &session.id, id).await;
+    let before = snapshot_of(&h, &session.id).await;
+    assert_eq!(before.restart_offer, RestartOffer::Resume);
+    assert_eq!(before.capture_ownership_version, 0);
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart Antigravity");
+    drop(rx);
+    let (_, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach replacement");
+    wait_for(&mut rx, &mut seen, &format!("ANTIGRAVITY-RESUMED:{id}"), 20).await;
+    assert!(snapshot_of(&h, &session.id).await.generation > before.generation);
+    serving.stop().await;
+}
+
 /// A shelled-out child that inherited the session credential and fires its
 /// own reporting hook cannot replace the foreground's conversation: the
 /// supervisor refuses it, and the foreground's report stays the restart
@@ -1746,11 +1827,20 @@ impl Drop for ChildGuard {
 /// `.env` on the command, not `std::env::set_var`: see the section note
 /// above for why that distinction is load-bearing here specifically.
 fn hook_command(socket: &std::path::Path, session_id: &str) -> std::process::Command {
+    hook_command_for("claude", socket, session_id)
+}
+
+/// Select a real CLI adapter with an isolated credential and piped output.
+fn hook_command_for(
+    vendor: &str,
+    socket: &std::path::Path,
+    session_id: &str,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new(farhelm_bin());
     // The silence tests exercise the Claude entry point; the flag is
     // required since the envelope migration, and an invocation without it
     // fails closed at CLI parse rather than reporting untagged.
-    cmd.args(["internal", "hook", "--vendor", "claude"])
+    cmd.args(["internal", "hook", "--vendor", vendor])
         .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session_id)
         .env(
@@ -1776,7 +1866,17 @@ fn hook_command(socket: &std::path::Path, session_id: &str) -> std::process::Com
 /// Polled with `try_wait` rather than `wait` because the deadline is the
 /// assertion: a blocking wait on a hung child would hang the test instead
 /// of failing it.
-fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: bool) -> Duration {
+fn assert_silent(cmd: std::process::Command, payload: &[u8], hold_stdin: bool) -> Duration {
+    assert_hook_response(cmd, payload, hold_stdin, b"")
+}
+
+/// Assert the binary reaches its callback response even if reporting fails.
+fn assert_hook_response(
+    mut cmd: std::process::Command,
+    payload: &[u8],
+    hold_stdin: bool,
+    expected_stdout: &[u8],
+) -> Duration {
     use std::io::Write;
     let started = std::time::Instant::now();
     let mut child = ChildGuard(cmd.spawn().expect("spawn the hook binary"));
@@ -1834,10 +1934,10 @@ fn assert_silent(mut cmd: std::process::Command, payload: &[u8], hold_stdin: boo
         "the hook must always exit 0; a non-zero status is what makes the vendor show the \
          user a hook error"
     );
-    assert!(
-        out.is_empty(),
-        "a SessionStart hook's stdout is injected into the model's context as text, so it \
-         must be empty; got {:?}",
+    assert_eq!(
+        out,
+        expected_stdout,
+        "the hook must write only its adapter's response; got {:?}",
         String::from_utf8_lossy(&out)
     );
     assert!(
@@ -1953,6 +2053,53 @@ fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
         cmd,
         br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
         false,
+    );
+}
+
+/// Antigravity parses stdout as JSON even with no session credential or
+/// when the report cannot be saved. An accidental announce stays harmless.
+#[farhelm_testtrace::test]
+fn antigravity_hook_writes_json_on_early_exit_and_write_failure() {
+    use farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR;
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("supervisor.sock");
+    let payload = br#"{"conversationId":"conv-x","hookEventName":"SessionStart"}"#;
+    let mut outside = hook_command_for("antigravity", &socket, "sess-outside");
+    outside.arg("--announce").env_remove(SESSION_TOKEN_ENV_VAR);
+    assert_hook_response(outside, payload, false, b"{}\n");
+    assert_eq!(
+        sole_hook_log_outcome(state.path(), "sess-outside"),
+        "no-credential"
+    );
+
+    let report_dir =
+        farhelm_supervisor::hook_report::session_dir(state.path(), "sess-blocked").unwrap();
+    std::fs::create_dir_all(report_dir.parent().unwrap()).unwrap();
+    std::fs::write(report_dir, b"not a directory").unwrap();
+    assert_hook_response(
+        hook_command_for("antigravity", &socket, "sess-blocked"),
+        payload,
+        false,
+        b"{}\n",
+    );
+    assert!(sole_hook_log_outcome(state.path(), "sess-blocked").starts_with("write-failed "));
+}
+
+/// A held stdin exhausts the shared read budget before the Antigravity JSON
+/// response. A short observed response must still follow the timeout path.
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "requires the debug-only hook budget override"
+)]
+#[farhelm_testtrace::test]
+fn antigravity_hook_writes_json_after_a_stdin_timeout() {
+    let state = farhelm_teststate::tempdir().unwrap();
+    let socket = state.path().join("supervisor.sock");
+    let command = hook_command_for("antigravity", &socket, "sess-open");
+    assert_hook_response(command, b"partial", true, b"{}\n");
+    assert_eq!(
+        sole_hook_log_outcome(state.path(), "sess-open"),
+        "timeout stdin"
     );
 }
 

@@ -97,6 +97,7 @@ pub(crate) const fn copy_hint(kind: AgentKind) -> Option<&'static str> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Antigravity
         | AgentKind::Muse
         | AgentKind::Generic => None,
     }

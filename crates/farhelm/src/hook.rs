@@ -1,7 +1,8 @@
 //! `farhelm internal hook`: a bounded vendor callback that reports the
 //! conversation identity the agent is currently using.
 //!
-//! Claude, Codex and Muse report SessionStart and Stop. Grok uses three manually
+//! Claude, Codex, Muse and Antigravity report SessionStart and Stop. Antigravity
+//! uses callbacks the user installs. Grok uses three manually
 //! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
@@ -29,9 +30,12 @@
 //!    someone's terminal and at worst text the model reads as instruction.
 //!    (The per-session hook log below is the one place this run DOES
 //!    write, on purpose, precisely because it is not either of those
-//!    streams.) The single stdout exception is [`POINTER_LINE`], written
-//!    by [`announce`] when the supervisor injected `--announce`; it is
-//!    written on purpose, precisely BECAUSE the model reads it. See that
+//!    streams.) The two exceptions are single lines written by
+//!    [`write_response`] after the report. Antigravity always gets an empty
+//!    JSON object, even when reporting fails or never starts, because its
+//!    hook protocol reads stdout as a JSON reply. The other vendors get
+//!    [`POINTER_LINE`] only when the supervisor injected `--announce`, and
+//!    that line is written precisely BECAUSE the model reads it; see that
 //!    constant for what the vendors do with it and why it is one line.
 //! 2. **Exit 0, always** — including on panic. The caller ([`crate`]'s
 //!    `InternalCmd::Hook` arm) installs a no-op panic hook so a panic
@@ -220,7 +224,7 @@ pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
 /// for only by a session that goes and runs it.
 pub const POINTER_LINE: &str = farhelm_supervisor::agent_kind::INSTRUCTIONS_POINTER;
 
-/// Write [`POINTER_LINE`] and nothing else, ignoring any failure.
+/// Reply after the report attempt using the callback's stdout contract.
 ///
 /// Failure is IGNORED rather than reported, and the distinction matters
 /// more than it looks: `println!` panics when the write fails, and a hook
@@ -228,12 +232,28 @@ pub const POINTER_LINE: &str = farhelm_supervisor::agent_kind::INSTRUCTIONS_POIN
 /// `--announce` run outside any agent) would then unwind out of `main` and
 /// exit non-zero — turning the nicety into exactly the visible hook error
 /// the whole module exists to avoid. There is also nowhere to report to:
-/// stderr belongs to the agent's terminal.
+/// stderr belongs to the agent's terminal. Antigravity needs an empty JSON
+/// object on every path, including when no report was attempted or accepted.
 ///
 /// Takes the sink as a parameter so the bytes can be asserted in a unit
 /// test without a process and without touching the real stdout.
-pub fn announce(out: &mut impl std::io::Write) {
-    let _ = writeln!(out, "{POINTER_LINE}");
+pub fn write_response(out: &mut impl std::io::Write, vendor: ReportVendor, announce: bool) {
+    let response = match vendor {
+        ReportVendor::Antigravity => "{}",
+        ReportVendor::Claude
+        | ReportVendor::Codex
+        | ReportVendor::Muse
+        | ReportVendor::Goose
+        | ReportVendor::Pi
+        | ReportVendor::Omp
+        | ReportVendor::Grok => {
+            if !announce {
+                return;
+            }
+            POINTER_LINE
+        }
+    };
+    let _ = writeln!(out, "{response}");
 }
 
 /// Where a report goes, derived by the caller from a complete session
@@ -464,6 +484,7 @@ fn new_report(
 fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport, &'static str> {
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
     match entry_vendor {
+        ReportVendor::Antigravity => parse_antigravity_payload(&value),
         ReportVendor::Grok => parse_grok_payload(&value),
         ReportVendor::Muse => parse_muse_payload(&value),
         ReportVendor::Claude
@@ -508,6 +529,7 @@ fn parse_session_payload(
         ReportVendor::Pi => "pi",
         ReportVendor::Omp => "omp",
         ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
+        ReportVendor::Antigravity => unreachable!("Antigravity payloads use conversationId"),
     };
     match value.get("vendor") {
         None | Some(serde_json::Value::Null) => {}
@@ -527,6 +549,7 @@ fn parse_session_payload(
             None
         }
         ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
+        ReportVendor::Antigravity => unreachable!("Antigravity payloads use conversationId"),
     } {
         let session_file = match value.get("session_file") {
             None | Some(serde_json::Value::Null) => None,
@@ -582,6 +605,45 @@ fn parse_muse_payload(value: &serde_json::Value) -> Result<HookReport, &'static 
         report.agent_id = Some(marker.clone());
     }
     Ok(report)
+}
+
+/// Preserve the identity and event the Antigravity CLI actually reported.
+/// Its SessionStart and Stop both name a conversation, so either event can
+/// establish the binding. Antigravity CLI 1.5.12 sends the same shape for
+/// child conversations, without a field that identifies them as children.
+fn parse_antigravity_payload(value: &serde_json::Value) -> Result<HookReport, &'static str> {
+    match value.get("vendor") {
+        None | Some(serde_json::Value::Null) => {}
+        Some(serde_json::Value::String(vendor)) if vendor == "antigravity" => {}
+        Some(serde_json::Value::String(_)) => return Err("vendor-mismatch"),
+        Some(_) => return Err("vendor-not-a-string"),
+    }
+    let conversation = match value.get("conversationId") {
+        None | Some(serde_json::Value::Null) => return Err("missing-conversation-id"),
+        Some(serde_json::Value::String(id)) => id,
+        Some(_) => return Err("conversation-id-not-a-string"),
+    };
+    if conversation.is_empty() {
+        return Err("empty-conversation-id");
+    }
+    if conversation.len() > MAX_SESSION_ID_BYTES {
+        return Err("oversized-conversation-id");
+    }
+    let event = value.get("hookEventName");
+    if !matches!(
+        event.and_then(serde_json::Value::as_str),
+        Some("SessionStart" | "Stop")
+    ) {
+        return Err("unsupported-hook-event");
+    }
+    Ok(new_report(
+        ReportVendor::Antigravity,
+        conversation.clone(),
+        String::new(),
+        None,
+        event.cloned(),
+        None,
+    ))
 }
 
 /// Parse the three manually configured Grok callbacks into one bounded,
@@ -1102,6 +1164,65 @@ mod tests {
             .expect_err("a non-string session file is refused"),
             "session-file-not-a-string"
         );
+    }
+
+    /// Antigravity's lifecycle events each carry a complete identity. A Stop
+    /// must work even when the initial report was missed, and other event
+    /// types must never select a conversation.
+    #[farhelm_testtrace::test]
+    fn antigravity_accepts_only_its_lifecycle_payloads() {
+        for event in ["SessionStart", "Stop"] {
+            let payload = serde_json::json!({"conversationId": "conv-1", "hookEventName": event});
+            let report = parse_payload(payload.to_string().as_bytes(), ReportVendor::Antigravity)
+                .expect("Antigravity lifecycle payload");
+            assert_eq!(report.conversation, "conv-1");
+            assert_eq!(report.hook_event_name, Some(serde_json::json!(event)));
+            assert_eq!(report.vendor, ReportVendor::Antigravity);
+        }
+        for (payload, error) in [
+            (
+                serde_json::json!({"conversationId":"conv-1", "hookEventName":"PreToolUse"}),
+                "unsupported-hook-event",
+            ),
+            (
+                serde_json::json!({"session_id":"conv-1", "hookEventName":"Stop"}),
+                "missing-conversation-id",
+            ),
+            (
+                serde_json::json!({"conversationId":42, "hookEventName":"Stop"}),
+                "conversation-id-not-a-string",
+            ),
+            (
+                serde_json::json!({"conversationId":"", "hookEventName":"Stop"}),
+                "empty-conversation-id",
+            ),
+            (
+                serde_json::json!({"conversationId":"a".repeat(MAX_SESSION_ID_BYTES + 1), "hookEventName":"Stop"}),
+                "oversized-conversation-id",
+            ),
+            (
+                serde_json::json!({"conversationId":"conv-1", "hookEventName":"Stop", "vendor":"grok"}),
+                "vendor-mismatch",
+            ),
+        ] {
+            assert_eq!(
+                parse_payload(payload.to_string().as_bytes(), ReportVendor::Antigravity)
+                    .expect_err("non-lifecycle or malformed report"),
+                error,
+                "{payload}"
+            );
+        }
+    }
+
+    /// Antigravity's response is JSON on every attempt. A stray announce flag
+    /// cannot make it append text that the vendor would treat as malformed.
+    #[farhelm_testtrace::test]
+    fn antigravity_hook_response_ignores_announce() {
+        for announce in [false, true] {
+            let mut out = Vec::new();
+            write_response(&mut out, ReportVendor::Antigravity, announce);
+            assert_eq!(out, b"{}\n");
+        }
     }
 
     /// Grok emits both naming conventions in the same callback. Agreement
@@ -2053,7 +2174,7 @@ mod tests {
         assert!(single_line(&log).contains(" bad-payload oversized"));
     }
 
-    /// [`announce`] writes the pointer and exactly one newline.
+    /// An announcement-capable vendor receives the pointer and one newline.
     ///
     /// "Exactly one line" is the contract the vendors' context injection
     /// is judged against: a second line is a second thing the model reads
@@ -2062,21 +2183,17 @@ mod tests {
     #[farhelm_testtrace::test]
     fn announce_writes_one_line_and_nothing_else() {
         let mut out = Vec::new();
-        announce(&mut out);
+        write_response(&mut out, ReportVendor::Claude, true);
         let text = String::from_utf8(out).expect("the pointer is ASCII");
         assert_eq!(text, format!("{POINTER_LINE}\n"));
         assert_eq!(text.lines().count(), 1);
     }
 
-    /// [`announce`] survives a sink that always fails to write.
+    /// Losing the response pipe must not turn a report into a hook error.
     ///
     /// [`announce_writes_one_line_and_nothing_else`] above writes to a
-    /// `Vec<u8>`, which can never fail, so it never actually exercises the
-    /// "ignore write failures" half of [`announce`]'s own contract — the
-    /// real motivating case being a hook whose stdout is a closed pipe.
-    /// This sink fails every call, so reaching the end of this test at all
-    /// (rather than unwinding through `announce`'s `?`-free `let _ =`) is
-    /// the assertion.
+    /// `Vec<u8>`, which cannot model a closed pipe. The failure sink covers
+    /// both the injected pointer and the Antigravity JSON response.
     #[farhelm_testtrace::test]
     fn announce_survives_a_sink_that_always_fails() {
         struct AlwaysErrors;
@@ -2088,7 +2205,8 @@ mod tests {
                 Err(std::io::Error::other("simulated closed pipe"))
             }
         }
-        announce(&mut AlwaysErrors);
+        write_response(&mut AlwaysErrors, ReportVendor::Claude, true);
+        write_response(&mut AlwaysErrors, ReportVendor::Antigravity, false);
     }
 
     /// The pointer's SHAPE, which is what decides whether a vendor treats

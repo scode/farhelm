@@ -1122,6 +1122,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
         K::Pi => "pi",
         K::Omp => "omp",
         K::Grok => "grok",
+        K::Antigravity => "antigravity",
         K::Muse => "muse",
         K::Generic => "generic",
     }
@@ -1147,6 +1148,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "pi" => K::Pi,
         "omp" => K::Omp,
         "grok" => K::Grok,
+        "antigravity" => K::Antigravity,
         "muse" => K::Muse,
         "generic" => K::Generic,
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),

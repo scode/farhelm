@@ -307,10 +307,15 @@ fn the_agent_mark_follows_the_launch_and_inks_with_its_identity() {
             HarnessGlyph::Grok,
         ),
         (
+            agent("antigravity", json!("guarded"), &["agy", "--mode", "auto"]),
+            HarnessGlyph::Antigravity,
+        ),
+        (
             command("claude --yolo", true, Value::Null),
             HarnessGlyph::Terminal,
         ),
         (legacy("claude", "claude"), HarnessGlyph::Claude),
+        (legacy("agy", "antigravity"), HarnessGlyph::Antigravity),
         (legacy("claude", "generic"), HarnessGlyph::Terminal),
     ];
     for (launch, glyph) in cases {

@@ -245,7 +245,8 @@ impl TrustAgent {
             | LaunchHarness::Goose
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
-            | LaunchHarness::Grok => None,
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => None,
         }
     }
 

@@ -113,6 +113,10 @@ const fn guarded_mode(harness: LaunchHarness) -> Option<&'static str> {
             "Guarded · Grok auto-review\nGrok's auto-review classifier approves or blocks actions instead of asking \
              about every action.",
         ),
+        LaunchHarness::Antigravity => Some(
+            "Guarded · Antigravity auto mode\nAntigravity runs commands in its sandbox and evaluates requests to run \
+             outside it. Where auto mode is unavailable on your account or host, it uses its default mode.",
+        ),
         LaunchHarness::Muse => Some(
             "Guarded · Muse auto-review\nMuse's AI reviewer approves eligible actions; workspace commands use its \
              sandbox, and restricted actions may ask you.",

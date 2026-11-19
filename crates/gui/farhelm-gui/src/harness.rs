@@ -27,6 +27,7 @@ pub(crate) const fn glyph(harness: LaunchHarness) -> HarnessGlyph {
     match harness {
         LaunchHarness::Codex => HarnessGlyph::Codex,
         LaunchHarness::Claude => HarnessGlyph::Claude,
+        LaunchHarness::Antigravity => HarnessGlyph::Antigravity,
         LaunchHarness::Muse => HarnessGlyph::Muse,
         LaunchHarness::Cursor => HarnessGlyph::Cursor,
         LaunchHarness::Goose => HarnessGlyph::Goose,
@@ -44,6 +45,7 @@ pub(crate) const fn glyph(harness: LaunchHarness) -> HarnessGlyph {
 pub(crate) const fn kind_glyph(kind: AgentKind) -> HarnessGlyph {
     match kind {
         AgentKind::Claude => HarnessGlyph::Claude,
+        AgentKind::Antigravity => HarnessGlyph::Antigravity,
         AgentKind::Codex => HarnessGlyph::Codex,
         AgentKind::Goose => HarnessGlyph::Goose,
         AgentKind::Pi => HarnessGlyph::Pi,
@@ -62,6 +64,7 @@ pub(crate) const fn name(harness: LaunchHarness) -> &'static str {
     match harness {
         LaunchHarness::Codex => "Codex",
         LaunchHarness::Claude => "Claude Code",
+        LaunchHarness::Antigravity => "Antigravity",
         LaunchHarness::Muse => "Muse Code",
         LaunchHarness::Cursor => "Cursor",
         LaunchHarness::Goose => "Goose",
@@ -91,6 +94,7 @@ pub(crate) const fn screen_yolo_mode(harness: LaunchHarness) -> Option<&'static 
         | LaunchHarness::Goose
         | LaunchHarness::Pi
         | LaunchHarness::Omp
+        | LaunchHarness::Antigravity
         | LaunchHarness::OpenCode => None,
     }
 }
@@ -103,6 +107,7 @@ pub(crate) const fn icon(glyph: HarnessGlyph) -> Icon {
         HarnessGlyph::Cursor => Icon::HarnessCursor,
         HarnessGlyph::Codex => Icon::HarnessCodex,
         HarnessGlyph::Claude => Icon::HarnessClaude,
+        HarnessGlyph::Antigravity => Icon::HarnessAntigravity,
         HarnessGlyph::Muse => Icon::HarnessMuse,
         HarnessGlyph::Goose => Icon::HarnessGoose,
         HarnessGlyph::Pi => Icon::HarnessPi,
@@ -128,6 +133,7 @@ pub(crate) const fn ink(glyph: HarnessGlyph, palette: &Palette) -> Option<Token>
         HarnessGlyph::Omp => Some(palette.harness[4]),
         HarnessGlyph::Grok => Some(palette.harness[5]),
         HarnessGlyph::OpenCode => Some(palette.harness[6]),
+        HarnessGlyph::Antigravity => Some(palette.harness[7]),
         HarnessGlyph::Codex | HarnessGlyph::Goose | HarnessGlyph::Terminal => None,
     }
 }
@@ -230,6 +236,7 @@ mod tests {
             (HarnessGlyph::Omp, 0x9b4dff, 0x9b4dff),
             (HarnessGlyph::Grok, 0xd8b839, 0x987f1e),
             (HarnessGlyph::OpenCode, 0x83b94b, 0x638d37),
+            (HarnessGlyph::Antigravity, 0xe85d9a, 0xc73c7a),
         ];
         for (glyph, dark, light) in hues {
             assert_eq!(

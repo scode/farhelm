@@ -1,4 +1,4 @@
-//! Claude and Muse's durable authority, exercised through the report dispatcher.
+//! Durable positional authority, exercised through each vendor's report dispatcher.
 //!
 //! These tests supply recorded, already-anchored ancestry. Process walking and
 //! pane anchoring belong to corridor and end-to-end tests; the live test process
@@ -34,6 +34,13 @@ const MUSE: PinCase = PinCase {
     resume_selector: "resume",
     notice_kind: "muse_pin_corrected",
     notice_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
+};
+const ANTIGRAVITY: PinCase = PinCase {
+    kind: AgentKind::Antigravity,
+    vendor: farhelm_proto::ReportVendor::Antigravity,
+    resume_selector: "--conversation",
+    notice_kind: "antigravity_pin_corrected",
+    notice_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
 };
 
 /// Seed a historical plain-id capture in both representations without a terminal.
@@ -796,6 +803,14 @@ async fn claude_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
 #[farhelm_testtrace::test]
 async fn muse_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
     pin_corrects_ancestors_once_and_keeps_version_zero_resume(MUSE).await;
+}
+
+/// Antigravity attributes distinct processes even though its callbacks cannot
+/// distinguish two conversations from the same process. Ancestor correction
+/// must name Antigravity and preserve a version-0 Restart offer.
+#[farhelm_testtrace::test]
+async fn antigravity_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
+    pin_corrects_ancestors_once_and_keeps_version_zero_resume(ANTIGRAVITY).await;
 }
 
 /// Claude retains authority against nested, unrelated and reused process identities.
