@@ -32,11 +32,12 @@ fn model(id: &str, harness: LaunchHarness) -> ModelOption {
     ModelOption::Model {
         id: id.into(),
         harness,
+        latest: true,
     }
 }
 
 /// An older known ID still picks its one agent when typed. With a different explicit agent, it keeps working as
-/// that agent's custom ID. Its absence from the current suggestion rows cannot decide either result.
+/// that agent's custom ID. The older section is a display grouping and does not change either result.
 #[test]
 fn an_older_id_is_recognized_when_typed_without_reserving_its_spelling() {
     let older = LaunchCatalogModel {
@@ -46,12 +47,33 @@ fn an_older_id_is_recognized_when_typed_without_reserving_its_spelling() {
         harness: LaunchHarness::Codex,
         efforts: vec![],
     };
-    let catalog = [older];
-    let options = model_options(&catalog, None, "classic", false);
-    assert_eq!(options, [ModelOption::HarnessDefault]);
+    let catalog = [older].into_iter().chain(catalog()).collect::<Vec<_>>();
+    let older_option = ModelOption::Model {
+        id: "codex-classic".into(),
+        harness: LaunchHarness::Codex,
+        latest: false,
+    };
+    assert_eq!(
+        model_options(&catalog, None, "", false),
+        [
+            ModelOption::HarnessDefault,
+            model("codex-fast", LaunchHarness::Codex),
+            model("claude-fast", LaunchHarness::Claude),
+            older_option.clone(),
+        ]
+    );
+    let options = model_options(&catalog, Some(LaunchHarness::Codex), "CLASSIC", false);
+    assert_eq!(
+        options,
+        [
+            ModelOption::HarnessDefault,
+            older_option.clone(),
+            ModelOption::ShowAll
+        ]
+    );
     assert_eq!(
         model_enter_target(&options, None, "codex-classic", &catalog, None),
-        ModelEnterTarget::Option(model("codex-classic", LaunchHarness::Codex))
+        ModelEnterTarget::Option(older_option)
     );
     assert_eq!(
         model_enter_target(

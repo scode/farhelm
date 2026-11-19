@@ -44,16 +44,16 @@ use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    px,
 };
 
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
 use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal};
-use crate::components::{HoverHelp, OptionRow, Role, Vertical};
+use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
@@ -329,7 +329,7 @@ impl Launcher {
                 window,
                 cx,
             ),
-            Row::Model { id, harness } => {
+            Row::Model { id, harness, .. } => {
                 // A switch made from the Command tab raises no banner, as the draft's own rule says
                 // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the
                 // edit's escalation is judged as if from the Agent tab and dropped.
@@ -584,23 +584,11 @@ fn draw_search_rows(
     // node, which this leaves out (a recorded deviation): a nested row would scroll only its whole group into view.
     let mut active_child = None;
     for (group, rows) in results.groups() {
-        children.push(
-            div()
-                .id(SharedString::from(format!(
-                    "launcher-search-group-{}",
-                    group.label()
-                )))
-                .role(Role::Label)
-                .aria_label(group.label())
-                .pt(px(4.))
-                .px(px(6.))
-                .pb(px(1.))
-                .text_size(metrics::TEXT_SM)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::color(palette.fg_1))
-                .child(group.label())
-                .into_any_element(),
-        );
+        children.push(option_heading(
+            SharedString::from(format!("launcher-search-group-{}", group.label())),
+            group.label(),
+            palette,
+        ));
         for (index, row) in rows {
             if index == active {
                 active_child = Some(children.len());

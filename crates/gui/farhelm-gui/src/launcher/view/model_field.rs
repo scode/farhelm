@@ -34,11 +34,11 @@ use gpui::{
 use super::changed::Changed;
 use super::field_list::{Drawn, FieldList};
 use super::{Launcher, choices::status_line, row};
-use crate::components::{HoverHelp, OptionRow, Role, Vertical};
+use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, LaunchDraft, harness_label};
 use crate::launcher::model::{
-    ModelEnterTarget, ModelOption, NEEDS_HARNESS, model_enter_target, model_options,
+    ModelEnterTarget, ModelOption, NEEDS_HARNESS, OLDER_MODELS, model_enter_target, model_options,
     owned_elsewhere_message,
 };
 use crate::theme::{self, metrics};
@@ -188,7 +188,7 @@ impl Launcher {
                 self.close_model_list(window, cx);
                 self.changed(cx);
             }
-            ModelOption::Model { id, harness } => {
+            ModelOption::Model { id, harness, .. } => {
                 let wrapper = self.remembered_wrapper(harness, cx);
                 let edit = self.draft.choose_catalog_model(
                     harness,
@@ -251,7 +251,7 @@ impl Launcher {
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|model| model.latest && model.harness == harness)
+                    .filter(|model| model.harness == harness)
                     .count();
                 format!("{count} for {}", harness_label(harness))
             }
@@ -307,8 +307,8 @@ impl Launcher {
     }
 }
 
-/// The open model list's rows (`field_list`): the default, the catalog's models and the show-all switch below a rule,
-/// with the highlighted row selected.
+/// The open model list's rows (`field_list`): default, current models, older models under a heading, then Show all.
+/// The heading is a list child so the scroll handle can still reveal the selected option.
 fn draw_model_rows(
     launcher: &Launcher,
     list: Stateful<Div>,
@@ -322,10 +322,19 @@ fn draw_model_rows(
     let active = launcher.model_field.list.highlighted;
     let chosen = launcher.draft.agent.harness;
     let show_all = launcher.model_field.show_all;
-    let mut children: Vec<AnyElement> = Vec::with_capacity(options.len() + 1);
-    // The child index of the highlighted row, for scrolling it into view; the separator before show-all shifts it.
+    let mut children: Vec<AnyElement> = Vec::with_capacity(options.len() + 2);
+    // The heading and separator shift the drawn index without adding keyboard stops.
     let mut active_child = None;
+    let mut older_heading_drawn = false;
     for (index, option) in options.into_iter().enumerate() {
+        if !older_heading_drawn && option.is_older() {
+            children.push(option_heading(
+                "launcher-model-older",
+                OLDER_MODELS,
+                palette,
+            ));
+            older_heading_drawn = true;
+        }
         if option == ModelOption::ShowAll {
             // The rule between the models and the switch (`.launch-composer-listbox` draws one above it).
             children.push(
@@ -341,7 +350,7 @@ fn draw_model_rows(
         }
         let id = match &option {
             ModelOption::HarnessDefault => "launcher-model-default".to_owned(),
-            ModelOption::Model { id, harness } => {
+            ModelOption::Model { id, harness, .. } => {
                 format!("launcher-model-option-{}-{id}", harness_label(*harness))
             }
             ModelOption::ShowAll => "launcher-model-show-all".to_owned(),
@@ -385,7 +394,7 @@ fn row_words(
     let words = HostSentence::new(SharedString::from(format!("{row}-words")));
     match option {
         ModelOption::HarnessDefault => words.text(HARNESS_DEFAULT),
-        ModelOption::Model { id, harness } => {
+        ModelOption::Model { id, harness, .. } => {
             let words = words.host(&HostText::from_host(id.as_str()));
             if show_all || chosen.is_none() {
                 words.text(format!(" ({})", harness_label(*harness)))

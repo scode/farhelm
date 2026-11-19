@@ -130,7 +130,59 @@ fn model(id: &str, harness: LaunchHarness) -> Row {
     Row::Model {
         id: id.to_owned(),
         harness,
+        latest: true,
     }
+}
+
+/// Exact older IDs can be selected from model search. An earlier setup remains available as history even when
+/// the older catalog row is also present. The grouping is based on catalog generation, not table order.
+#[test]
+fn older_model_search_groups_known_rows_and_keeps_past_launches() {
+    let older = LaunchCatalogModel {
+        id: "gpt-fast-classic".into(),
+        family: "gpt-fast".into(),
+        latest: false,
+        harness: LaunchHarness::Codex,
+        efforts: vec![],
+    };
+    let past = launch("/a", LaunchHarness::Codex, Some(&older.id));
+    let draft = Draft {
+        catalog: Some([older].into_iter().chain(catalog()).collect()),
+        ..with_history(Some(LaunchHarness::Codex), vec![past.clone()], &[])
+    };
+    let broad = draft.search("model:gpt-fast");
+    assert_eq!(
+        broad
+            .groups()
+            .into_iter()
+            .map(|(group, _)| group)
+            .collect::<Vec<_>>(),
+        [Group::Models, Group::OlderModels]
+    );
+    assert_eq!(broad.rows[0], model("gpt-fast", LaunchHarness::Codex));
+    assert_eq!(
+        broad.rows[1],
+        history_model("gpt-fast-classic", LaunchHarness::Codex)
+    );
+    let older_row = Row::Model {
+        id: "gpt-fast-classic".into(),
+        harness: LaunchHarness::Codex,
+        latest: false,
+    };
+    assert_eq!(broad.rows[2], older_row);
+    assert_eq!(draft.rows("recent:gpt-fast-classic"), [recent(past)]);
+
+    let without_history = Draft {
+        history: None,
+        ..draft
+    };
+    let exact = without_history.search("model:gpt-fast-classic");
+    assert_eq!(exact.rows[exact.default], older_row);
+    let claude = Draft {
+        harness: Some(LaunchHarness::Claude),
+        ..without_history
+    };
+    assert!(claude.rows("model:gpt-fast-classic").is_empty());
 }
 
 fn efforts(list: &[Option<LaunchEffort>]) -> Vec<Row> {
@@ -920,9 +972,9 @@ fn an_environment_setup_names_its_own_placement() {
 }
 
 /// A model an earlier launch used that the catalog does not list is offered after the catalog's models, with the agent
-/// type it ran with, once however often it ran, and only for the chosen agent type when one is chosen. A model the
-/// catalog lists (in either spelling) is offered only as the catalog's. Why: a custom model id typed once should not
-/// have to be typed again, and a selected agent type narrows every model row (old
+/// type it ran with, once however often it ran, and only for the chosen agent type when one is chosen. A current
+/// model is offered only as the catalog's choice, including when history has an alternate spelling. A custom model
+/// ID typed once stays within reach, and a selected agent type narrows every model row (old
 /// `search_offers_a_used_custom_model_with_its_harness` and `search_models_follow_the_selected_harness`).
 #[test]
 fn past_models_follow_the_catalogs() {
@@ -1025,7 +1077,7 @@ fn history_row_words() {
             .words("w")
             .accessible_name()
             .as_ref(),
-        "Model: custom (Claude)"
+        "Model: custom (Claude, past launch)"
     );
 }
 

@@ -24,14 +24,14 @@
 
 use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
 use gpui::{
-    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
+    px,
 };
 
 use super::Launcher;
 use super::field_list::{Drawn, FieldList};
-use crate::components::{HoverHelp, OptionRow, Role, Vertical};
+use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::launcher::draft::Field;
 use crate::launcher::entry::local_host;
 use crate::theme::{self, metrics};
@@ -268,22 +268,6 @@ impl Launcher {
 // The rows
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// A group heading (`.launch-composer-folder-heading`), named for assistive technology.
-fn heading(id: &'static str, words: &'static str, palette: &theme::Palette) -> AnyElement {
-    div()
-        .id(id)
-        .role(Role::Label)
-        .aria_label(words)
-        .pt(px(4.))
-        .px(px(6.))
-        .pb(px(1.))
-        .text_size(metrics::TEXT_SM)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(palette.fg_1))
-        .child(words)
-        .into_any_element()
-}
-
 /// The open folder list's rows (`field_list`): the Recent heading and folders (or "No recent folders"), then the Reset
 /// heading and its rows, with the highlighted row selected.
 fn draw_folder_rows(
@@ -298,7 +282,8 @@ fn draw_folder_rows(
     let choices = launcher.folder_choices(cx);
     let active = launcher.folder_list.list.highlighted;
     // Headings and rows are all the list's own children, so the scroll handle can bring any row into view.
-    let mut children: Vec<AnyElement> = vec![heading("launcher-folder-recent", "Recent", palette)];
+    let mut children: Vec<AnyElement> =
+        vec![option_heading("launcher-folder-recent", "Recent", palette)];
     if !choices
         .iter()
         .any(|choice| matches!(choice, FolderChoice::Recent(_)))
@@ -318,7 +303,7 @@ fn draw_folder_rows(
     let mut active_child = None;
     for (index, choice) in choices.into_iter().enumerate() {
         if choice == FolderChoice::Home {
-            children.push(heading("launcher-folder-reset", "Reset", palette));
+            children.push(option_heading("launcher-folder-reset", "Reset", palette));
         }
         if active == Some(index) {
             active_child = Some(children.len());

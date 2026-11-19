@@ -28,8 +28,8 @@
 //! - **From the launch history** (`super::view::history`'s reads of the chosen host's and of the helm's new
 //!   environments): saved folders, the host's alone, offered after a typed path's "Use this path"; whole recent setups,
 //!   last, ranked as the recent setups strip ranks them but neither capped nor narrowed by the draft, each naming where
-//!   it ran; and models from past launches that the catalog does not list, after the catalog's own, each with the agent
-//!   type it ran with.
+//!   it ran; and models from past launches outside the current catalog suggestions, each with the agent type it ran
+//!   with. Older known models get their own group.
 //!
 //! - **Repositories** are offered only under `gh:`: the choices the managed-checkout destination gives the query
 //!   (`super::view::checkout`'s `repository_choices`, handed in by the view), so a valid typed `owner/repo` is always
@@ -46,6 +46,7 @@ use farhelm_proto::{GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::ElementId;
 
 use super::draft::{Tab, harness_label, repo_identifier};
+use super::model::OLDER_MODELS;
 use super::recents::{RecentFilter, destination_label, placement, ranked, selection_summary};
 use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
@@ -220,6 +221,7 @@ pub enum Row {
     Model {
         id: String,
         harness: LaunchHarness,
+        latest: bool,
     },
     /// A model from a past launch outside the current suggestions. Keep the spelling and agent it ran with.
     HistoryModel {
@@ -253,6 +255,7 @@ pub enum Group {
     Harnesses,
     Templates,
     Models,
+    OlderModels,
     Efforts,
     Permissions,
     Folders,
@@ -269,6 +272,7 @@ impl Group {
             Group::Harnesses => "Harnesses",
             Group::Templates => "Templates",
             Group::Models => "Models",
+            Group::OlderModels => OLDER_MODELS,
             Group::Efforts => "Efforts",
             Group::Permissions => "Permissions",
             Group::Folders => "Folders",
@@ -286,7 +290,8 @@ impl Row {
             Row::Host { .. } => Group::Hosts,
             Row::Harness(_) => Group::Harnesses,
             Row::Template(_) => Group::Templates,
-            Row::Model { .. } | Row::HistoryModel { .. } => Group::Models,
+            Row::Model { latest: false, .. } => Group::OlderModels,
+            Row::Model { latest: true, .. } | Row::HistoryModel { .. } => Group::Models,
             Row::Effort(_) => Group::Efforts,
             Row::Permission(_) => Group::Permissions,
             Row::UsePath(_) | Row::BrowsePath(_) | Row::Folder(_) => Group::Folders,
@@ -296,8 +301,8 @@ impl Row {
     }
 
     /// The row's visible words, which are also its accessible name (the old app's row text): "Set session name: " and
-    /// the name, "Host: " and the host as the host list names it, "Model: " and the id with its agent type, "Use this
-    /// path: " and the path in the monospace face; the rest are the app's own words. Host-supplied values are parts of
+    /// the name, "Host: " and the host as the host list names it, "Model: " and the id with its agent type. A past
+    /// launch is labelled so it is distinct from the same model in the catalog. Host-supplied values are parts of
     /// the sentence, so they are drawn and named escaped.
     pub fn words(&self, id: impl Into<ElementId>) -> HostSentence {
         let sentence = HostSentence::new(id);
@@ -310,10 +315,17 @@ impl Row {
             Row::Template(name) => sentence
                 .text("Template: ")
                 .host(&HostText::from_host(name.as_str())),
-            Row::Model { id, harness } | Row::HistoryModel { id, harness } => sentence
-                .text("Model: ")
-                .host(&HostText::from_host(id.as_str()))
-                .text(format!(" ({})", harness_label(*harness))),
+            Row::Model { id, harness, .. } | Row::HistoryModel { id, harness } => {
+                let suffix = if matches!(self, Row::HistoryModel { .. }) {
+                    ", past launch"
+                } else {
+                    ""
+                };
+                sentence
+                    .text("Model: ")
+                    .host(&HostText::from_host(id.as_str()))
+                    .text(format!(" ({}{suffix})", harness_label(*harness)))
+            }
             Row::Effort(effort) => sentence.text(format!("Effort: {}", effort_label(*effort))),
             Row::Permission(permission) => {
                 sentence.text(format!("Permissions: {}", permission.label()))
@@ -557,12 +569,12 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .catalog
                 .unwrap_or_default()
                 .iter()
-                .filter(|model| model.latest)
                 .filter(|model| harness.is_none_or(|chosen| chosen == model.harness))
                 .filter(|model| matches(&model.id.to_ascii_lowercase()))
                 .map(|model| Row::Model {
                     id: model.id.clone(),
                     harness: model.harness,
+                    latest: model.latest,
                 }),
         );
         // Retain past-launch matches for models outside the current suggestions, including recognized older IDs.
@@ -711,11 +723,12 @@ fn default_index(scope: Scope, lower: &str, rows: &[Row]) -> usize {
             Group::Efforts,
             Group::Permissions,
             Group::Models,
+            Group::OlderModels,
             Group::Harnesses,
         ],
         Scope::Host => &[Group::Hosts],
         Scope::Harness => &[Group::Harnesses],
-        Scope::Model => &[Group::Models],
+        Scope::Model => &[Group::Models, Group::OlderModels],
         Scope::Effort => &[Group::Efforts],
         Scope::Perms => &[Group::Permissions],
         Scope::Templates => &[Group::Templates],

@@ -59,6 +59,40 @@ fn a_word_and_enter_choose_it_and_empty_the_box(cx: &mut TestAppContext) {
     assert!(search_focused(cx), "focus stays in the box");
 }
 
+/// Composer search must draw its older-model group while keeping the group's rows in keyboard order.
+/// A partial model query lets Down move from the current match through the heading to the older match.
+#[gpui::test]
+fn model_search_draws_the_older_group_and_selects_with_enter(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher(cx);
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([
+            {"id":"sol-old", "family":"sol", "latest":false, "harness":"codex", "efforts":["high"]},
+            {"id":"sol-current", "family":"sol", "latest":true, "harness":"codex", "efforts":["high"]},
+        ])),
+    );
+    assert!(search_focused(cx));
+    type_in(cx, "model:sol");
+    assert!(results_shown(cx));
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Model: sol-current (Codex)")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-search-group-Older models").as_deref(),
+        Some("Older models")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-search-option-1").as_deref(),
+        Some("Model: sol-old (Codex)")
+    );
+
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("sol-old"));
+}
+
 /// Text that matches nothing offers "Set session name", and Enter names the session, the name field showing it. Why:
 /// typing a name and pressing Enter is how the old launcher named a session from search (SPEC.md: "the visible Set
 /// session name row for unmatched text").

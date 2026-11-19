@@ -83,6 +83,7 @@ pub use menu_item::MenuItem;
 pub use menu_keys::{MenuStart, home_end_keys, toggle_arrow_keys};
 pub use menu_separator::menu_separator;
 pub use option_row::OptionRow;
+pub(crate) use option_row::option_heading;
 pub use pulse::pulse_opacity;
 pub use radio_group::{RadioGroup, RadioOption};
 pub use rail_entry::{RAIL_ICON_BOX, rail_entry};

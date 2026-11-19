@@ -35,8 +35,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -45,6 +45,28 @@ use crate::theme::{self, metrics};
 
 /// The old row's padding, top and bottom then left and right (`padding: 9px 10px`).
 const PAD: (f32, f32) = (9., 10.);
+
+/// Label a run of options without becoming an option. This keeps the heading out of keyboard selection.
+pub(crate) fn option_heading(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    palette: &theme::Palette,
+) -> AnyElement {
+    let id = id.into();
+    div()
+        .id(id.clone())
+        .debug_selector(|| id.to_string())
+        .role(Role::Label)
+        .aria_label(label)
+        .pt(px(4.))
+        .px(px(6.))
+        .pb(px(1.))
+        .text_size(metrics::TEXT_SM)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::color(palette.fg_1))
+        .child(label)
+        .into_any_element()
+}
 
 /// One option of a picking list. See the module docs.
 #[derive(IntoElement)]
