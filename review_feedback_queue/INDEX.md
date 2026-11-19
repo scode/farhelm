@@ -941,9 +941,6 @@ consequences.
   — Template Save can retain a prefix that Launch later refuses, despite wording that the new placement check runs at
   Save time.
 
-- [`brace-literal-command-display-is-bash-inexact.md`](brace-literal-command-display-is-bash-inexact.md) — The displayed
-  command can give a brace-bearing literal suffix a different apparent Bash meaning from the actual argument.
-
 - [`cleanup-stop-transport-error-skips-delete.md`](cleanup-stop-transport-error-skips-delete.md) — A transport error
   from a cleanup Stop can prevent Delete even when the helper already knows the fake session's ID.
 

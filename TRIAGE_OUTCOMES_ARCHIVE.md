@@ -23882,6 +23882,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `szkmpottmlmkzuouqnmxzyzlulplxovy`, bookmark
   `plan/gui-ux-backend-fixes/03-agent-endpoint-refuses-valid`, https://github.com/scode/farhelm/pull/4237/changes.
 
+## brace-literal-command-display-is-bash-inexact.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Displayed command
+  shows x{a,b} unquoted. Bash would expand it; what runs is one literal argument. Display only. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: quote words with { } ! ^ (~5-15). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `yknsnwynztnvpupptxopyuwmsonpkqov`, bookmark
+  `plan/gui-ux-backend-fixes/04-brace-literal-command-display`, https://github.com/scode/farhelm/pull/4239/changes.
+
 ## approval-scrollports-lack-keyboard-entry.md
 
 - Outcome: `fix code`.
