@@ -3827,11 +3827,10 @@ pub(super) fn expand_tilde_cwd<'a>(
     Ok(Cow::Owned(format!("{}/{rest}", home.trim_end_matches('/'))))
 }
 
-/// Whether `cwd` is usable as a session's working directory, as the one
-/// precondition both a create and a restart check (SPEC.md: "Operations
-/// that need the working directory — restart, opening a terminal tab —
-/// fail with a clear error naming the directory if it has vanished since
-/// creation").
+/// Require a directory the agent or tab can enter before starting a terminal.
+/// Create, Restart and tab open share this preflight so their refusal names
+/// the folder in the same terms. The host still has to enter it at launch:
+/// permissions or the path may change after admission.
 ///
 /// Shared rather than duplicated specifically so restart's refusal is the
 /// SAME refusal create's is, down to the wording and the `ErrorKind`: a
@@ -3868,13 +3867,45 @@ async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
         )
         .into());
     }
-    match tokio::fs::metadata(cwd).await {
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(RequestError::new(
-            ErrorKind::InvalidRequest,
-            format!("working directory is not a directory: {cwd}"),
+    let cwd = cwd.to_owned();
+    tokio::task::spawn_blocking(move || check_cwd_access(&cwd))
+        .await
+        .context("checking the working directory")?
+}
+
+/// Use the kernel's search-permission check, as the terminal host's child will
+/// meet it on entering the folder. Reading metadata or opening the directory can
+/// succeed when the child would be denied entry. Both lookups can block on a
+/// filesystem.
+///
+/// The check uses the real IDs (no `EACCESS` flag): the supervisor is never
+/// setuid, so they equal the effective ones, and `EACCESS` makes rustix use the
+/// newer `faccessat2` call, which some older container seccomp profiles answer
+/// with "operation not permitted" rather than "no such call", and which would
+/// then refuse every launch inside such a container as a permission problem. A
+/// permission failure is the caller's mistake (the user picked a folder they
+/// cannot enter, and can pick another; the launcher marks the folder field),
+/// not a host I/O failure.
+fn check_cwd_access(cwd: &str) -> anyhow::Result<()> {
+    let access = match std::fs::metadata(cwd) {
+        Ok(metadata) if metadata.is_dir() => rustix::fs::accessat(
+            rustix::fs::CWD,
+            cwd,
+            rustix::fs::Access::EXEC_OK,
+            rustix::fs::AtFlags::empty(),
         )
-        .into()),
+        .map_err(std::io::Error::from),
+        Ok(_) => {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("working directory is not a directory: {cwd}"),
+            )
+            .into());
+        }
+        Err(error) => Err(error),
+    };
+    match access {
+        Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(RequestError::new(
             ErrorKind::InvalidRequest,
             format!("working directory does not exist: {cwd}"),
@@ -3882,15 +3913,15 @@ async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
         .into()),
         // `NotADirectory` is a path like `/tmp/some-file/child`, where a
         // non-final component is a regular file — a distinct precondition
-        // from the top-level "cwd itself is a file" case above, but the
-        // same caller mistake. `InvalidInput` is the OS rejecting the
-        // path text itself (a NUL byte, say) before it ever reaches the
-        // filesystem. Both are things the caller could have avoided by
-        // sending a different `cwd`, unlike the fallback below.
+        // from the top-level "cwd itself is a file" case above. InvalidInput
+        // includes a path with an embedded NUL. PermissionDenied can name
+        // the requested directory or an ancestor the host cannot traverse.
         Err(error)
             if matches!(
                 error.kind(),
-                std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
+                std::io::ErrorKind::NotADirectory
+                    | std::io::ErrorKind::InvalidInput
+                    | std::io::ErrorKind::PermissionDenied
             ) =>
         {
             Err(RequestError::new(
@@ -3899,13 +3930,8 @@ async fn ensure_cwd_usable(cwd: &str) -> anyhow::Result<()> {
             )
             .into())
         }
-        // Not classified: this is an I/O failure the caller could not have
-        // avoided by sending a different request (a permission problem, a
-        // symlink loop, a failing filesystem), so it defaults to
-        // `ErrorKind::Internal`.
-        Err(error) => {
-            Err(error).with_context(|| format!("reading working directory metadata for {cwd}"))
-        }
+        // Other filesystem failures keep their diagnostic and Internal kind.
+        Err(error) => Err(error).with_context(|| format!("checking working directory {cwd}")),
     }
 }
 
@@ -12322,11 +12348,14 @@ impl Supervisor {
             farhelm_proto::command_shell::validate_command_placeholders("resume command", source)
                 .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         }
+        // A saved transcript can live in the working directory. Refuse a
+        // directory the host cannot enter before a transcript read could
+        // mistake that refusal for a stale resume locator.
+        ensure_cwd_usable(&entry.info.cwd).await?;
         if named_start.is_none() && crate::agent_kind::verifies_resume_target(snapshot.kind) {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
         }
-        ensure_cwd_usable(&entry.info.cwd).await?;
         // The VERIFIED path travels with the relaunch rather than being
         // discarded once the comparison passes: `relaunch_into_terminal`
         // hands it to the new host, so a symlink repointed between here and there

@@ -10,6 +10,7 @@ use crate::harness::*;
 use crate::boot_id_durable_outcome::listed;
 use crate::restart_with_resume::{RC_MARKER_VAR, write_rc_files};
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 // ---------------------------------------------------------------------------
 // Terminal tabs (PLAN_M4.md item 2)
@@ -38,6 +39,95 @@ async fn harness_with_shell(shell: &str) -> Harness {
         },
     )
     .await
+}
+
+/// Temporarily deny entry while preserving the directory's existence and identity.
+/// Create and tab regressions share this premise: metadata and canonicalization
+/// succeed, but a real child cannot chdir. Drop restores permissions even after an
+/// assertion fails, so the test's retained state and eventual cleanup stay usable.
+pub(crate) struct DeniedDirectory {
+    path: std::path::PathBuf,
+    permissions: std::fs::Permissions,
+}
+
+impl DeniedDirectory {
+    /// Restrict an owned fixture directory after the caller has excluded root.
+    pub(crate) fn new(path: &std::path::Path) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = Self {
+            path: path.to_path_buf(),
+            permissions: std::fs::metadata(path).unwrap().permissions(),
+        };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(std::fs::metadata(path).unwrap().is_dir());
+        assert!(std::fs::canonicalize(path).is_ok());
+        let error = std::process::Command::new("/bin/pwd")
+            .current_dir(path)
+            .output()
+            .expect_err("fixture directory must deny actual process entry");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        guard
+    }
+}
+
+impl Drop for DeniedDirectory {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::set_permissions(&self.path, self.permissions.clone()) {
+            eprintln!(
+                "could not restore fixture directory {}: {error}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+/// Count first-stage starts even when the host later refuses its launch spec.
+/// A refused operation can leave an empty listing after cleanup, so the
+/// listing alone cannot establish that admission ran before any host start.
+pub(crate) async fn harness_counting_host_starts() -> (Harness, Arc<AtomicUsize>) {
+    let starts = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&starts);
+    let mut seams = SupervisorSeams::default();
+    seams.faults.host_start_interrupt = Some(Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }));
+    let harness = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    (harness, starts)
+}
+
+/// A directory can still exist after it loses search permission. Opening a
+/// tab then names the folder in its refusal and leaves the live session alone.
+#[farhelm_testtrace::test]
+async fn a_tab_refuses_a_directory_it_cannot_enter() {
+    // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("SKIPPED: root bypasses directory search permissions");
+        return;
+    }
+    let (h, starts) = harness_counting_host_starts().await;
+    let (session, work) = basic_session(&h).await;
+    assert_eq!(starts.load(Ordering::Relaxed), 1, "one agent host started");
+    assert!(matches!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Running | SessionStatus::Idle
+    ));
+    let _denied = DeniedDirectory::new(work.path());
+    let error = h
+        .client
+        .open_tab(&session.id)
+        .await
+        .expect_err("an unenterable directory must refuse the tab");
+    let error = error.downcast_ref::<SupervisorError>().unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidRequest);
+    let expected = format!("working directory is not usable: {}", work.path().display());
+    assert!(error.message().starts_with(&expected), "{error:#}");
+    assert_eq!(starts.load(Ordering::Relaxed), 1, "no tab host started");
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    assert!(matches!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Running | SessionStatus::Idle
+    ));
 }
 
 /// Agent startup must undo an rc-file cd, while a tab preserves the user's normal
