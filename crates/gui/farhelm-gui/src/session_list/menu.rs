@@ -417,6 +417,7 @@ impl SessionList {
         };
         let list = cx.weak_entity();
         let view = cx.new(|_| RowMenu {
+            action_frame: Default::default(),
             key: key.to_owned(),
             list,
             rename_focus,
@@ -527,7 +528,6 @@ impl SessionList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_menu(&target.key, window, cx);
         let allowed = match command {
             LifecycleCommand::Replace | LifecycleCommand::Stop => target.allows_active(false, cx),
             LifecycleCommand::Delete => target.allows_delete(cx),
@@ -535,6 +535,7 @@ impl SessionList {
         if !allowed {
             return;
         }
+        self.close_menu(&target.key, window, cx);
         match command {
             LifecycleCommand::Replace => self.replace(target, mark, window, cx),
             LifecycleCommand::Stop => self.stop(target, mark, window, cx),
@@ -828,6 +829,8 @@ fn actions_label(title: &str) -> String {
 /// The open menu of one row: drawn from the store while it is open, so its header and its commands' availability
 /// follow the session.
 pub(super) struct RowMenu {
+    /// The menu's drawn row and command availability, kept through click or keyboard dispatch.
+    action_frame: crate::prompt::ActionFrame<Actionable, [bool; 3]>,
     key: String,
     list: WeakEntity<SessionList>,
     /// The Rename command's focus handle: the menu's first command, where a click or Down opens it and Home goes.
@@ -864,7 +867,7 @@ impl RowMenu {
     /// it reads now; `panel` stays empty while the session is gone from the store, until the frame that drops its row
     /// closes the menu.
     fn contents(
-        &self,
+        &mut self,
         panel: Stateful<Div>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -902,6 +905,13 @@ impl RowMenu {
         // An environment session's own commands and freeze (the module docs), read from the registry now.
         let environment = Environment::of(row, store.read(cx).collections());
         let frozen = environment.is_some_and(|environment| environment.frozen());
+        let launch_wait = launch_wait(cx);
+        let Some(target) = Actionable::drawn(&self.key, row.clone(), cx) else {
+            return panel;
+        };
+        let captured =
+            self.action_frame
+                .capture(target, [busy, frozen, launch_wait.is_some()], window);
         let environment_items = environment
             .map(|environment| self.environment_items(environment, cx))
             .unwrap_or_default();
@@ -957,22 +967,20 @@ impl RowMenu {
                          help: &'static str,
                          description: &'static str,
                          command: LifecycleCommand| {
-            let (list, key) = (self.list.clone(), self.key.clone());
+            let (list, captured) = (self.list.clone(), captured.clone());
             MenuItem::new(id, icon, label, HoverHelp::tooltip(help), Role::MenuItem)
                 .description(description)
                 .danger()
                 .disabled(busy)
                 .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
-                    if let Some(target) = actionable(&key, cx) {
+                    if let Some(target) = captured.shown() {
                         let _ = list.update(cx, |list, cx| {
-                            list.lifecycle_from_menu(&target, &mark, command, window, cx)
+                            list.lifecycle_from_menu(target, &mark, command, window, cx)
                         });
                     }
                 })
         };
-        // Replace waits for a host change, its help saying why ([`launch_wait`]).
-        let launch_wait = launch_wait(cx);
         // Clone and Replace with open the launcher on this session. They are unavailable while the session's own
         // commands are refused, as Rename is, and while the launcher cannot open ([`launcher_wait`]: a launch pending,
         // a host change in flight), saying why then in place of their help and description.

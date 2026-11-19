@@ -430,7 +430,7 @@ pub(crate) fn draw(
     let wait = menu::launch_wait(cx);
     let mut buttons: Vec<AnyElement> = Vec::new();
     if restart::offered(row) {
-        let owner = key.to_owned();
+        let captured = action.clone();
         buttons.push(
             Button::new(
                 "session-card-restart",
@@ -443,7 +443,7 @@ pub(crate) fn draw(
             .accessible_name(restart::offer_label(row.info.restart_offer))
             .busy(wait.is_some())
             .disabled(busy || asking)
-            .on_click(move |_, _, cx| restart_from_card(&owner, cx))
+            .on_click(move |_, _, cx| restart_from_card(captured.as_ref(), cx))
             .into_any_element(),
         );
     }
@@ -555,14 +555,20 @@ pub(crate) fn draw(
 
 // ---- Acting ----------------------------------------------------------------------------------------------------------
 
-/// The card's Restart for the session filed under `key`, through the same `begin` the header's Restart calls. Nothing
-/// runs in an interrupted session, so `begin` sends it at once without asking; a row that reads working by the click
-/// is no longer the card's, and the question `begin` would hand back for it is dropped unasked.
-fn restart_from_card(key: &str, cx: &mut App) {
-    let Some(target) = menu::actionable(key, cx) else {
-        return;
-    };
-    let _ = restart::begin(key, &target.row, target.skips_questions, cx);
+/// The shown interrupted row supplies Restart's guard while the current row still offers Restart on this card.
+fn restart_from_card(snapshot: Option<&ShownAction<menu::Actionable>>, cx: &mut App) {
+    use session_list::environment::{self, Environment};
+
+    if let Some(target) = snapshot.and_then(ShownAction::shown)
+        && local_state::selected(cx).as_deref() == Some(target.key.as_str())
+        && target.allows(cx, |row| {
+            shows_row(&target.key, row, cx)
+                && restart::offered(row)
+                && !environment::of_key(&target.key, cx).is_some_and(Environment::frozen)
+        })
+    {
+        let _ = restart::begin(&target.key, &target.row, target.skips_questions, cx);
+    }
 }
 
 impl SessionPane {

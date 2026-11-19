@@ -21,9 +21,8 @@ consequences.
   — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`session-actions-use-unseen-liveness.md`](session-actions-use-unseen-liveness.md) — Deleting an ended session can
-  kill an agent that restarted after the screen was drawn. Stop, Restart and Replace can also act on more running work
-  than the window showed.
+- [`session-actions-use-unseen-liveness.md`](session-actions-use-unseen-liveness.md) — The Restart with and Replace with
+  launcher can carry permission to stop work beyond the warning shown when the user answers.
 
 - [`wayland-file-drop-uses-entry-position.md`](wayland-file-drop-uses-entry-position.md) — Dragging across a terminal
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list

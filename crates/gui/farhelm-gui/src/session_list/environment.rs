@@ -250,7 +250,7 @@ pub(crate) fn deleting_reason(key: &str, cx: &App) -> Option<&'static str> {
 
 /// The environment of the session the current UI session's store holds under `key`, or `None` for a key with no row
 /// and a session that is not an environment session ([`Environment::of`]).
-pub(super) fn of_key<'a>(key: &str, cx: &'a App) -> Option<Environment<'a>> {
+pub(crate) fn of_key<'a>(key: &str, cx: &'a App) -> Option<Environment<'a>> {
     let collections = session::current_store(cx)?.read(cx).collections();
     Environment::of(collections.get::<SessionRow>(key)?, collections)
 }

@@ -15,7 +15,7 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
-    PREFERENCES_KEY, Preferences,
+    PREFERENCES_KEY, Preferences, SessionRow,
 };
 use gpui::{
     Background, Bounds, Modifiers, Pixels, Role, ScrollDelta, ScrollEvent, TestAppContext,
@@ -1338,6 +1338,30 @@ fn skipped_confirmations_delete_on_the_click_with_the_rows_guard(cx: &mut TestAp
     choose_delete(cx, "session-menu-a");
     assert!(!any_layer(cx));
     assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/a"]);
+}
+
+/// An unseen restart cannot widen a skipped Delete's consent. The request uses the guard of the ended,
+/// tabless row that was on screen when the menu's Delete was pressed.
+#[gpui::test]
+fn skipped_delete_keeps_the_shown_guard_after_an_agent_restarts(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(ended("a"), 0)], true));
+    deletes(&mut fake);
+    test_support::click(cx, "session-menu-a");
+    test_support::show_next_frame(cx);
+    let at = test_support::center(cx, "session-menu-delete");
+    let live = change(listing_meta(&["a"], 1, false), &[session("a")], &[]);
+    let live = farhelm_helm_client::collections::decode_changes(live).unwrap();
+    cx.update(|window, cx| {
+        let store = session::current_store(cx).unwrap();
+        let old = store.read(cx).collections().get::<SessionRow>("a").unwrap();
+        assert!(old.info.status.has_ended() && old.info.tabs.is_empty());
+        store.update(cx, |store, cx| store.apply(&live, cx));
+        let row = store.read(cx).collections().get::<SessionRow>("a").unwrap();
+        assert!(!row.info.status.has_ended());
+        test_support::click_before_redraw(at, window, cx);
+    });
+    let sent = deletes(&mut fake);
+    assert_eq!(paths(&sent), ["/api/sessions/a?only_if_nothing_alive=true"]);
 }
 
 /// The prompt's guarantee at the real question (SPEC_impl.md, "Questions: the prompt"): the answer acts on what the

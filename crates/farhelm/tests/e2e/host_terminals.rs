@@ -410,6 +410,17 @@ async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
     wait_until_pid_gone(installed.pid, WAIT_SECS).await;
     assert_eq!(stored_outcome(&h, &session.id).await, LastOutcome::Running);
     let new_pid = host_process(new.socket()).expect("the new host's process");
+    // The request authorized by an ended session's screen cannot end the new agent.
+    let live = new
+        .child_root()
+        .expect("the restarted agent has a live child");
+    let refused = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::NothingAlive)
+        .await
+        .expect_err("the restarted agent is still running");
+    assert!(format!("{refused:#}").contains("agent is still running"));
+    assert!(is_listed(&h, &session.id).await && new.child_root() == Some(live));
     let report = tokio::time::timeout(Duration::from_secs(WAIT_SECS), new.shutdown())
         .await
         .expect("the new host's shutdown finishes in time")
