@@ -881,13 +881,13 @@ async fn checkpoints_are_taken_at_clean_reads_once_due() {
         }
     );
     assert!(restored_screen(&blob).contains("hello world!"));
-    assert_eq!(terminal.status().checkpoint, None);
-
     server.output(12, b"x\x1b[5n").await;
     assert_eq!(
         server.next().await,
         ClientMessage::Input(STATUS_ANSWER.to_vec())
     );
+    // The status answer proves the runtime progressed past the rejection before the next checkpoint can replace it.
+    assert_eq!(terminal.status().checkpoint, None);
     server.output(17, b"0123456789\x1b[5n").await;
     let (position, _) = snapshot_request(&mut server, true).await;
     assert_eq!(
