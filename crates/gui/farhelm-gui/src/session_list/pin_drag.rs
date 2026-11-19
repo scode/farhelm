@@ -1,4 +1,4 @@
-//! One grip gesture moves sessions between groups and reorders pins and group headers.
+//! The sidebar's one drag owner moves sessions by their grips and marks ranges by sweeping row bodies with Shift.
 //!
 //! SPEC.md, "Session list". The grip, capture and drop line come from the old app's `pin_drag.rs`
 //! and `assets/pin-order.js` (the gesture), `list/row.rs` (the grip, its name and help, and when it could not drag) and
@@ -38,11 +38,14 @@
 //!   rule for Escape with a layer open (SPEC_impl.md, "Overlays: the layer manager"), where the old listener ended the
 //!   drag and left the dialog open; in a focused terminal it is the program's; and with focus on the sidebar's width
 //!   divider or the session pane's controls, which only Tab can reach mid-drag, it does not reach the drag.
+//!   A sweep can leave keyboard focus in the terminal after its press. The shared cancel also handles Escape there
+//!   and while Shift is held ([`catch_sweep_escape`]). An open overlay that takes focus answers Escape first.
 //! - **The press stays the grip's.** It never opens the row, and on its way down it still reaches the order hold's
 //!   area, so it takes the hold like any other press (the old "do not stop pointer events").
 //! - **Capture.** From the press to the release the drag follows the pointer across the whole window ([`watch`]), in the
-//!   capture phase, and stops each move and the release there, as the old pointer capture did, so nothing under the
-//!   pointer (a terminal whose program reports the mouse, say) sees a drag that is not its. Each captured move counts
+//!   capture phase, stopping its moves and the grip's release. A sweep lets mouse-up reach GPUI so a row's native
+//!   pending press gets cleared. Only a Shift press that ended before sweeping another row may activate the row.
+//!   Each captured move counts
 //!   as activity over the rows for the hold, as the old list kept hearing the moves its grip captured. A move with the
 //!   primary button no longer held is a release the window never saw (outside it, or lost to another app): the old
 //!   `lostpointercapture`, which cancels. The window learns of such a release only at its next move inside it, so a
@@ -71,6 +74,9 @@
 //! - **Edge scrolling.** After the lift, bringing the pointer near a list edge can scroll while the button stays
 //!   held and the pointer stays still. The virtualized source can scroll out of view as its captured grip stays
 //!   active. Each tick judges its destination against the current bounds, and the drop samples them again.
+//! - **Range sweeps.** The same edge deadline moves the viewport and resamples the endpoint. The anchor is a session
+//!   key in the displayed listing, which survives scrolling. The first move to another session replaces the marks
+//!   using the displayed range, and moving back shrinks it. Cancellation restores the pre-press marks.
 //!
 //! The drag belongs to the UI session ([`super::Current`]), so a reset of the connection forgets it with the rest of the
 //! list's state.
@@ -80,19 +86,20 @@
 //! no grip, so a press in its gutter opens the row as a press anywhere else on it does.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
 use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupMembership, SessionGroupTarget};
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_proto::ui_channel::{Availability, Collection, SessionRow};
 use gpui::{
-    AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, Div, Hsla, InteractiveElement,
-    IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    SharedString, StatefulInteractiveElement as _, Styled, WeakEntity, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, Div, Entity, Hsla,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement as _, Styled,
+    WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
+use super::marking::Gesture;
 use super::menu::{self, SharedRows};
 use super::pins::{self, Placement};
 use super::row_marks::HelpPlace;
@@ -199,44 +206,88 @@ enum Drop {
     Membership(SessionGroupTarget),
 }
 
-/// A drag in progress, from the press on a grip to its release or cancellation.
+/// One primary-button gesture owns pointer capture and the edge timer from press to release or cancellation.
 struct Drag {
-    /// The dragged row's session key.
+    /// The row that received the press. A sweep can keep this anchor even after the row scrolls out of view.
     source: String,
-    /// The visible marks at the press, including the source. Later marks cannot join an active drag.
-    marked: Option<Rc<[String]>>,
-    /// Fix the source area when the drag begins. Another client's move
-    /// removes this grip from that area and cancels the gesture.
-    area: Area,
     /// Where the press was, in window coordinates.
     origin: Point<Pixels>,
     /// Last captured position in window coordinates. A stationary pointer can keep scrolling.
     at: Point<Pixels>,
     /// At most one pending tick, canceled along with this drag or when the pointer leaves the edge zone.
     edge_scroll: Option<ticker::Deadline>,
-    /// Whether the pointer has moved [`LIFT_DISTANCE`] from `origin` since the press: the row shows lifted, and only
-    /// then can a drop land.
-    lifted: bool,
-    /// Where a drop would land now, as the drop line shows it.
-    target: Option<Drop>,
     /// Whether the window was active at the press. Only such a drag ends when the window goes inactive: a headless
     /// compositor reports its window inactive throughout, and a drag there must still work.
     began_active: bool,
+    kind: Kind,
 }
 
-impl Drag {
+/// The outcomes have different lifetimes. A grip can lift and drop; a sweep can change and restore marks.
+enum Kind {
+    Move(MoveDrag),
+    Sweep(Sweep),
+}
+
+/// What only a grip needs. Another client's move out of the captured area cancels the drop.
+struct MoveDrag {
+    area: Area,
+    /// The visible marks at the press, including the source. Later marks cannot join the move.
+    marked: Option<Rc<[String]>>,
+    /// Only a lift after the pointer travels [`LIFT_DISTANCE`] can produce a drop.
+    lifted: bool,
+    target: Option<Drop>,
+}
+
+impl MoveDrag {
     /// Only a multi-session drag needs membership-only targets or an accompanying count.
     fn others(&self) -> usize {
         self.marked.as_ref().map_or(0, |keys| keys.len() - 1)
     }
 }
 
-/// What the pin drag keeps for one UI session: the drag, if one is on, and what the last frame drew of the movable
+/// A sweep remembers the pre-press selection and the last row it reached. No endpoint means the press can still
+/// activate the ordinary Shift-click path. Once the endpoint exists, returning to the source still ends a sweep.
+struct Sweep {
+    before: HashSet<String>,
+    end: Option<String>,
+}
+
+/// A row body can receive a native click from an older press whose release went outside the window. Classify the
+/// actual release in capture, before any row handles the native click in bubble.
+#[derive(Default)]
+enum RowRelease {
+    #[default]
+    Ordinary,
+    ShiftClick(String),
+    Sweep,
+}
+
+impl Drag {
+    /// Only grip moves contribute a lift, a drop line or a membership outline.
+    fn movement(&self) -> Option<&MoveDrag> {
+        match &self.kind {
+            Kind::Move(movement) => Some(movement),
+            Kind::Sweep(_) => None,
+        }
+    }
+
+    /// Only a pronounced movement can start edge scrolling before a sweep reaches another row.
+    fn traveled(&self, at: Point<Pixels>) -> bool {
+        let dx = f32::from(at.x - self.origin.x);
+        let dy = f32::from(at.y - self.origin.y);
+        dx.hypot(dy) >= LIFT_DISTANCE
+    }
+}
+
+/// What the sidebar drag keeps for one UI session: the gesture, if one is on, and what the last frame drew of the movable
 /// rows, which is what a move or the release is judged against. Shared with the virtualized list's item callback, which
 /// records each movable row's bounds as it draws it, and with the window-wide listeners [`watch`] registers.
 #[derive(Default)]
 pub(super) struct PinDrag {
     drag: Option<Drag>,
+    row_release: RowRelease,
+    /// Cancellation restores marks immediately, but the unfinished press can still deliver its last release.
+    cancelled_sweep: bool,
     /// The movable pins in the order the last frame drew them; empty while the listing is unavailable or the Hosts
     /// panel shows, so no grip is drawn then and a drag on cancels.
     targets: Targets,
@@ -253,6 +304,38 @@ impl PinDrag {
     fn start_frame(&mut self, targets: Targets) {
         self.bounds.clear();
         self.targets = targets;
+    }
+
+    /// Once a sweep has set marks, hold the source and endpoint in the same displayed order even while still.
+    pub(super) fn sweeping(&self) -> bool {
+        self.sweep_range().is_some()
+    }
+
+    /// A new listing can change the keys between these endpoints while the pointer is still.
+    pub(super) fn sweep_range(&self) -> Option<(&str, &str)> {
+        let drag = self.drag.as_ref()?;
+        match &drag.kind {
+            Kind::Sweep(sweep) => Some((drag.source.as_str(), sweep.end.as_deref()?)),
+            Kind::Move(_) => None,
+        }
+    }
+
+    /// A sweep keeps its source across scrolling. The listing itself or the window becoming inactive can end it.
+    pub(super) fn cancel_missing_sweep(
+        &mut self,
+        listed: &[String],
+        exposed: bool,
+        active: bool,
+    ) -> Option<HashSet<String>> {
+        let drag = self.drag.as_ref()?;
+        if matches!(drag.kind, Kind::Sweep(_))
+            && (!exposed || drag.began_active && !active || !listed.contains(&drag.source))
+            && let Kind::Sweep(sweep) = self.drag.take()?.kind
+        {
+            self.cancelled_sweep = true;
+            return sweep.end.is_some().then_some(sweep.before);
+        }
+        None
     }
 
     /// Only a movable item can start a drag. An empty edge has bounds but
@@ -282,20 +365,24 @@ impl PinDrag {
     fn lifted(&self, key: &str) -> bool {
         self.drag
             .as_ref()
-            .is_some_and(|drag| drag.lifted && drag.source == key)
+            .filter(|drag| drag.source == key)
+            .and_then(Drag::movement)
+            .is_some_and(|movement| movement.lifted)
     }
 
     /// Put the count on the lifted row alone, while it is carrying other sessions.
     fn accompanying(&self, key: &str) -> usize {
         self.drag
             .as_ref()
-            .filter(|drag| drag.lifted && drag.source == key)
-            .map_or(0, Drag::others)
+            .filter(|drag| drag.source == key)
+            .and_then(Drag::movement)
+            .filter(|movement| movement.lifted)
+            .map_or(0, MoveDrag::others)
     }
 
     /// The side of `key`'s row the drop line is drawn on now, if it is the drop target.
     fn drop_on(&self, key: &str) -> Option<Placement> {
-        let Drop::Position(target) = self.drag.as_ref()?.target.as_ref()? else {
+        let Drop::Position(target) = self.drag.as_ref()?.movement()?.target.as_ref()? else {
             return None;
         };
         (target.line.neighbor == key).then_some(target.line.placement)
@@ -303,21 +390,32 @@ impl PinDrag {
 
     /// The gap below the groups can receive a whole marked set or a single unpinned member, once lifted.
     pub(super) fn wants_ungroup_strip(&self) -> bool {
-        self.drag.as_ref().is_some_and(|drag| {
-            drag.lifted
-                && (drag.others() > 0
-                    || matches!(drag.area, Area::Unpinned(SessionGroupTarget::Group(_))))
-        })
+        self.drag
+            .as_ref()
+            .and_then(Drag::movement)
+            .is_some_and(|movement| {
+                movement.lifted
+                    && (movement.others() > 0
+                        || matches!(movement.area, Area::Unpinned(SessionGroupTarget::Group(_))))
+            })
     }
 
     /// Group headers and pins keep their positional priority. A membership drop has no insertion line because the
     /// existing order in the destination determines the row's position.
-    fn target(&self, drag: &Drag, clip: Bounds<Pixels>, at: Point<Pixels>) -> Option<Drop> {
-        let multiple = drag.others() > 0;
-        if !multiple && let Some(position) = self.positional_target(drag, clip, at) {
+    fn target(
+        &self,
+        source_key: &str,
+        movement: &MoveDrag,
+        clip: Bounds<Pixels>,
+        at: Point<Pixels>,
+    ) -> Option<Drop> {
+        let multiple = movement.others() > 0;
+        if !multiple
+            && let Some(position) = self.positional_target(source_key, movement.area, clip, at)
+        {
             return Some(Drop::Position(position));
         }
-        let source = match drag.area {
+        let source = match movement.area {
             Area::Groups => return None,
             Area::Pins(group) | Area::Unpinned(group) => group,
         };
@@ -328,7 +426,7 @@ impl PinDrag {
             if !multiple && band.target == source {
                 return None;
             }
-            let pin_append = !multiple && matches!(drag.area, Area::Pins(_));
+            let pin_append = !multiple && matches!(movement.area, Area::Pins(_));
             let hit = match (pin_append, band.target) {
                 (true, _) => self.hit_rows(&band.append_pin, at),
                 (false, SessionGroupTarget::Group(_)) => {
@@ -357,21 +455,22 @@ impl PinDrag {
     /// A header lands among headers. Test each pin band's original geometry independently of neighboring groups.
     fn positional_target(
         &self,
-        drag: &Drag,
+        source_key: &str,
+        source_area: Area,
         clip: Bounds<Pixels>,
         at: Point<Pixels>,
     ) -> Option<PositionalDrop> {
         self.targets
             .bands
             .iter()
-            .filter(|band| match drag.area {
+            .filter(|band| match source_area {
                 Area::Groups => band.area == Area::Groups,
                 Area::Pins(_) => matches!(band.area, Area::Pins(_)),
                 Area::Unpinned(_) => false,
             })
             .find_map(|band| {
                 if let Some(line) = &band.empty {
-                    if drag.area == band.area {
+                    if source_area == band.area {
                         return None;
                     }
                     let bounds = self.bounds.get(&line.neighbor)?;
@@ -390,7 +489,7 @@ impl PinDrag {
                     .iter()
                     .filter_map(|key| self.bounds.get(key).map(|bounds| (key.as_str(), *bounds)))
                     .collect();
-                let source = (drag.area == band.area).then_some(drag.source.as_str());
+                let source = (source_area == band.area).then_some(source_key);
                 let order = band.items.iter().map(String::as_str);
                 let line = drop_in_band(&rows, source, order, clip, at)?;
                 Some(PositionalDrop {
@@ -403,7 +502,7 @@ impl PinDrag {
 
     /// Which edges close the outline laid over this row. The list can paint the highlight one item at a time.
     fn highlighted(&self, key: &str) -> Option<(bool, bool)> {
-        let Drop::Membership(target) = self.drag.as_ref()?.target.as_ref()? else {
+        let Drop::Membership(target) = self.drag.as_ref()?.movement()?.target.as_ref()? else {
             return None;
         };
         let band = self
@@ -417,9 +516,12 @@ impl PinDrag {
 
     /// The divider between a group's pins and loose members is internal to the group outline.
     pub(super) fn highlights_group(&self, id: i64) -> bool {
-        self.drag.as_ref().is_some_and(|drag| {
-            drag.target == Some(Drop::Membership(SessionGroupTarget::Group(id)))
-        })
+        self.drag
+            .as_ref()
+            .and_then(Drag::movement)
+            .is_some_and(|movement| {
+                movement.target == Some(Drop::Membership(SessionGroupTarget::Group(id)))
+            })
     }
 }
 
@@ -808,10 +910,10 @@ fn drop_line(key: &str, placement: Placement, palette: &Palette) -> impl IntoEle
 // ---- Capture -------------------------------------------------------------------------------------------------------
 
 /// The drag's window-wide listeners, drawn by the list on every frame that draws its rows: a drag's moves and its
-/// release are watched wherever the pointer is, in the capture phase, and stopped there while a drag is on (see the
-/// module docs). Registered on every frame, not only while a drag is on, because a press, its moves and its release can
-/// all arrive before the next frame; with no drag on they return at once, having read only `shared`. While the row is
-/// lifted the whole window shows the closed hand, as the old list forced `grabbing` during a drag.
+/// release are watched wherever the pointer is, in the capture phase. Grip drag events stop there. A swept release
+/// lets GPUI clear pending clicks while preventing their default action. Registered on every frame, because a press,
+/// its moves and its release can all arrive before the next frame. With no active gesture or pending cancellation the
+/// listeners only consult `shared`. While the row is lifted the whole window shows the closed hand.
 pub(super) fn watch(shared: &Shared, list: &WeakEntity<SessionList>) -> impl IntoElement + use<> {
     let (shared, list) = (shared.clone(), list.clone());
     canvas(
@@ -821,10 +923,23 @@ pub(super) fn watch(shared: &Shared, list: &WeakEntity<SessionList>) -> impl Int
                 .borrow()
                 .drag
                 .as_ref()
-                .is_some_and(|drag| drag.lifted)
+                .and_then(Drag::movement)
+                .is_some_and(|movement| movement.lifted)
             {
                 window.set_window_cursor_style(CursorStyle::ClosedHand);
             }
+            let (pressing, pressed) = (shared.clone(), list.clone());
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                    let had_drag = pressing.borrow().drag.is_some();
+                    if had_drag {
+                        // The previous release went outside the window and the next event is a new press.
+                        let _ = pressed.update(cx, |list, cx| list.cancel_pin_drag(cx));
+                    }
+                    // This press begins a new input sequence. Any canceled sweep has already lost its release.
+                    pressing.borrow_mut().cancelled_sweep = false;
+                }
+            });
             let (moving, moved) = (shared.clone(), list.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                 if phase != DispatchPhase::Capture || moving.borrow().drag.is_none() {
@@ -842,15 +957,31 @@ pub(super) fn watch(shared: &Shared, list: &WeakEntity<SessionList>) -> impl Int
                 });
             });
             let (releasing, released) = (shared, list);
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                if phase != DispatchPhase::Capture
-                    || event.button != MouseButton::Left
-                    || releasing.borrow().drag.is_none()
-                {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                     return;
                 }
-                cx.stop_propagation();
+                let move_started = {
+                    let mut state = releasing.borrow_mut();
+                    state.row_release = RowRelease::Ordinary;
+                    if std::mem::take(&mut state.cancelled_sweep) {
+                        state.row_release = RowRelease::Sweep;
+                        window.prevent_default();
+                        return;
+                    }
+                    let Some(drag) = &state.drag else { return };
+                    drag.movement().is_some()
+                };
+                // A grip never records a native row press. For a sweep, leave capture running so GPUI clears its
+                // pending mouse-down state even when the final row click is rejected.
+                if move_started {
+                    cx.stop_propagation();
+                }
                 let _ = released.update(cx, |list, cx| list.pin_drag_released(event.position, cx));
+                if matches!(releasing.borrow().row_release, RowRelease::Sweep) {
+                    // GPUI still clears pending clicks, including an unrelated press whose release was lost.
+                    window.prevent_default();
+                }
             });
         },
     )
@@ -859,10 +990,10 @@ pub(super) fn watch(shared: &Shared, list: &WeakEntity<SessionList>) -> impl Int
 }
 
 /// `body`, the sidebar's body (the host rail, the list's column and the rail's foot), with Escape caught on its way
-/// down while a drag is on: a capture-phase listener for the dismiss action that ends the drag and stops the key there,
-/// so neither the list's own Escape (which clears the marks) nor the root's (which closes the topmost layer or a
-/// tooltip) acts on it, wherever focus is inside the body (see the module docs' "Escape"). With no drag on it does
-/// nothing and the key goes on.
+/// down while a grip drag or a Shift sweep is on: a capture-phase listener for the dismiss action that ends it and stops
+/// the key there, so neither the list's own Escape (which clears the marks) nor the root's (which closes the topmost
+/// layer or a tooltip) acts on it, wherever focus is inside the body. With nothing on it does nothing and the key goes
+/// on.
 pub(super) fn catch_escape(body: Div, cx: &mut Context<SessionList>) -> Div {
     body.capture_action(cx.listener(|list, _: &Dismiss, _, cx| {
         if list.cancel_pin_drag(cx) {
@@ -871,12 +1002,54 @@ pub(super) fn catch_escape(body: Div, cx: &mut Context<SessionList>) -> Div {
     }))
 }
 
+/// A Shift row press can leave focus in the terminal, which masks the Dismiss binding. Catch the same cancel at
+/// the pane's parent in that case and when Shift is still held. An overlay with focus keeps its own Escape.
+pub(crate) fn catch_sweep_escape(body: Div, list: &Entity<SessionList>) -> Div {
+    let dismiss = list.downgrade();
+    let raw = dismiss.clone();
+    body.capture_action(move |_: &Dismiss, window, cx| {
+        if !layers::focus_layer_open(window, cx)
+            && dismiss
+                .update(cx, SessionList::cancel_sweep)
+                .unwrap_or(false)
+        {
+            focus::note_closing(true, window, cx);
+            cx.stop_propagation();
+        }
+    })
+    .capture_key_down(move |event, window, cx| {
+        let mods = event.keystroke.modifiers;
+        if event.keystroke.key == "escape"
+            && !mods.control
+            && !mods.alt
+            && !mods.platform
+            && !mods.function
+            && !layers::focus_layer_open(window, cx)
+            && raw.update(cx, SessionList::cancel_sweep).unwrap_or(false)
+        {
+            focus::note_closing(true, window, cx);
+            cx.stop_propagation();
+        }
+    })
+}
+
 // ---- The list's side ---------------------------------------------------------------------------------------------------
 
 impl SessionList {
     /// The list's pin drag state for the current UI session.
     fn pin_drag(&mut self, cx: &App) -> Shared {
         self.current.current(cx).pin_drag.clone()
+    }
+
+    /// The main pane's key capture belongs only to sweeps. Grip drags keep the sidebar's original Escape scope.
+    fn cancel_sweep(&mut self, cx: &mut Context<Self>) -> bool {
+        let is_sweep = self
+            .pin_drag(cx)
+            .borrow()
+            .drag
+            .as_ref()
+            .is_some_and(|drag| matches!(drag.kind, Kind::Sweep(_)));
+        is_sweep && self.cancel_pin_drag(cx)
     }
 
     /// At the top of a frame that draws the rows (or would, but for the Hosts panel or an unavailable listing):
@@ -895,9 +1068,11 @@ impl SessionList {
             let mut state = shared.borrow_mut();
             state.start_frame(targets);
             state.drag.as_ref().is_some_and(|drag| {
-                state.area_of(&drag.source) != Some(drag.area)
-                    || refused(&drag.source, cx)
-                    || (drag.began_active && !window_active)
+                drag.movement().is_some_and(|movement| {
+                    state.area_of(&drag.source) != Some(movement.area)
+                        || refused(&drag.source, cx)
+                        || (drag.began_active && !window_active)
+                })
             })
         };
         if gone {
@@ -933,16 +1108,62 @@ impl SessionList {
         let marked = (area != Area::Groups && shown.iter().any(|row| row == key)).then_some(shown);
         shared.borrow_mut().drag = Some(Drag {
             source: key.to_owned(),
-            marked,
-            area,
             origin: at,
             at,
             edge_scroll: None,
-            lifted: false,
-            target: None,
             began_active: active,
+            kind: Kind::Move(MoveDrag {
+                area,
+                marked,
+                lifted: false,
+                target: None,
+            }),
         });
         true
+    }
+
+    /// A Shift press starts with the native button's focus and click behavior still in place. Its release gets that
+    /// click only if the shared drag owner sees it finish without sweeping another row.
+    pub(super) fn begin_sweep(
+        &mut self,
+        key: &str,
+        at: Point<Pixels>,
+        active: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.marking.can_mark() {
+            return;
+        }
+        let shared = self.pin_drag(cx);
+        let mut state = shared.borrow_mut();
+        if state.drag.is_none() {
+            state.drag = Some(Drag {
+                source: key.to_owned(),
+                origin: at,
+                at,
+                edge_scroll: None,
+                began_active: active,
+                kind: Kind::Sweep(Sweep {
+                    before: self.current.current(cx).marks.snapshot(),
+                    end: None,
+                }),
+            });
+        }
+    }
+
+    /// A swept release admits no row click, including a stale unmodified press on the endpoint. A Shift click
+    /// must be admitted for its source by this release. The next primary release resets the classification.
+    pub(super) fn admit_row_click(&mut self, key: &str, shift_press: bool, cx: &App) -> bool {
+        let shared = self.pin_drag(cx);
+        let mut state = shared.borrow_mut();
+        match &state.row_release {
+            RowRelease::Ordinary => !shift_press,
+            RowRelease::ShiftClick(source) if shift_press && source == key => {
+                state.row_release = RowRelease::Sweep;
+                true
+            }
+            RowRelease::ShiftClick(_) | RowRelease::Sweep => false,
+        }
     }
 
     /// The pointer moved to `at` with the primary button held during a drag: it is activity over the rows for the order
@@ -956,12 +1177,18 @@ impl SessionList {
     }
 
     /// A lift can add the ungroup strip in the next frame, so identify the edge without using the old scroll limit.
-    fn edge_scroll_delta(&self, at: Point<Pixels>) -> Pixels {
+    /// A sweep clamps beyond an edge and can scroll within one zone's width outside it as well.
+    fn edge_scroll_delta(&self, at: Point<Pixels>, sweep: bool) -> Pixels {
         let clip = self.rows.viewport_bounds();
-        if !clip.contains(&at) {
+        let zone = EDGE_SCROLL_ZONE.min(clip.size.height / 2.);
+        let margin = if sweep { zone } else { px(0.) };
+        let region = Bounds::from_corners(
+            gpui::point(clip.left(), clip.top() - margin),
+            gpui::point(clip.right(), clip.bottom() + margin),
+        );
+        if !region.contains(&at) {
             return px(0.);
         }
-        let zone = EDGE_SCROLL_ZONE.min(clip.size.height / 2.);
         if at.y < clip.top() + zone {
             -EDGE_SCROLL_STEP
         } else if at.y > clip.bottom() - zone {
@@ -972,8 +1199,8 @@ impl SessionList {
     }
 
     /// Use the list's measured scroll bounds at tick time. Stop at the limit even while the pointer stays in the zone.
-    fn edge_scroll_step(&self, at: Point<Pixels>) -> Pixels {
-        let delta = self.edge_scroll_delta(at);
+    fn edge_scroll_step(&self, at: Point<Pixels>, sweep: bool) -> Pixels {
+        let delta = self.edge_scroll_delta(at, sweep);
         let offset = -self.rows.scroll_px_offset_for_scrollbar().y;
         let end = self.rows.max_offset_for_scrollbar().y;
         delta.clamp(-offset.max(px(0.)), (end - offset).max(px(0.)))
@@ -987,7 +1214,11 @@ impl SessionList {
         let Some(drag) = state.drag.as_mut() else {
             return;
         };
-        if !drag.lifted || self.edge_scroll_delta(drag.at) == px(0.) {
+        let moving = match &drag.kind {
+            Kind::Move(movement) => movement.lifted,
+            Kind::Sweep(sweep) => sweep.end.is_some() || drag.traveled(drag.at),
+        };
+        if !moving || self.edge_scroll_delta(drag.at, drag.movement().is_none()) == px(0.) {
             drag.edge_scroll = None;
         } else if drag.edge_scroll.is_none() {
             let list = cx.weak_entity();
@@ -1001,13 +1232,13 @@ impl SessionList {
     /// pointer activity for the order hold, just as a wheel event does.
     fn edge_scroll_tick(&mut self, cx: &mut Context<Self>) {
         let shared = self.pin_drag(cx);
-        let at = {
+        let (at, sweep) = {
             let mut state = shared.borrow_mut();
             let Some(drag) = state.drag.as_mut() else {
                 return;
             };
             drag.edge_scroll = None;
-            drag.at
+            (drag.at, drag.movement().is_none())
         };
         if self.resample_pin_drag(at, cx) {
             cx.notify();
@@ -1015,7 +1246,7 @@ impl SessionList {
         if shared.borrow().drag.is_none() {
             return;
         }
-        let step = self.edge_scroll_step(at);
+        let step = self.edge_scroll_step(at, sweep);
         if step != px(0.) {
             self.pointer_activity(cx);
             // Arm before the scroll so its final step still gets a fresh target sample at the limit.
@@ -1025,27 +1256,51 @@ impl SessionList {
         }
     }
 
-    /// The primary button came up at `at` during a drag: the drag ends, and a drop on a drop line sends its one move.
+    /// Finish the captured primary release. A grip sends its admitted move. A sweep keeps its marks and may admit
+    /// just the original row click if it never left its start.
     pub(super) fn pin_drag_released(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let shared = self.pin_drag(cx);
+        let sweep_missing = shared.borrow().drag.as_ref().is_some_and(|drag| {
+            matches!(drag.kind, Kind::Sweep(_))
+                && !self.sweep_source_in_current_listing(&drag.source, cx)
+        });
+        if sweep_missing {
+            // MouseUp can arrive after a listing push but before the sidebar has drawn it.
+            self.cancel_pin_drag(cx);
+            let mut state = shared.borrow_mut();
+            state.cancelled_sweep = false;
+            state.row_release = RowRelease::Sweep;
+            return;
+        }
         // A resample that ends the drag (its row no longer eligible, a request in flight) leaves nothing to take below,
         // and the row it lifted must still be redrawn.
         if self.resample_pin_drag(at, cx) {
             cx.notify();
         }
-        let shared = self.pin_drag(cx);
         let Some(drag) = shared.borrow_mut().drag.take() else {
             return;
         };
         cx.notify();
-        if let (true, Some(target)) = (drag.lifted, drag.target) {
-            match (drag.marked, target) {
+        let movement = match drag.kind {
+            Kind::Move(movement) => movement,
+            Kind::Sweep(sweep) => {
+                shared.borrow_mut().row_release = if sweep.end.is_some() {
+                    RowRelease::Sweep
+                } else {
+                    RowRelease::ShiftClick(drag.source)
+                };
+                return;
+            }
+        };
+        if let (true, Some(target)) = (movement.lifted, movement.target) {
+            match (movement.marked, target) {
                 (Some(marked), Drop::Membership(target)) => self.drop_marked(&marked, target, cx),
                 // A lone marked pin whose mark was cleared mid-drag: the drag no longer stands for a marked
                 // selection, and a positional move was never offered for one, so it is dropped on purpose, as
                 // `drop_marked` skips rows that are no longer marked.
                 (Some(_), Drop::Position(_))
                     if !self.current.current(cx).marks.contains(&drag.source) => {}
-                (_, target) => self.send_drop(&drag.source, drag.area, target, cx),
+                (_, target) => self.send_drop(&drag.source, movement.area, target, cx),
             }
         }
     }
@@ -1166,54 +1421,155 @@ impl SessionList {
     /// whether a drag was on, so Escape goes on to whatever else takes it when none was.
     pub(super) fn cancel_pin_drag(&mut self, cx: &mut Context<Self>) -> bool {
         let shared = self.pin_drag(cx);
-        let ended = shared.borrow_mut().drag.take().is_some();
-        if ended {
-            cx.notify();
+        let Some(drag) = shared.borrow_mut().drag.take() else {
+            return false;
+        };
+        if let Kind::Sweep(sweep) = drag.kind {
+            shared.borrow_mut().cancelled_sweep = true;
+            if sweep.end.is_some() {
+                self.restore_sweep(sweep.before, cx);
+            }
         }
-        ended
+        cx.notify();
+        true
     }
 
-    /// Judge the drag on at `at` against the movable rows as last drawn, as the old gesture's `sample` did before every
-    /// paint and before the drop: losing its grip before lift or ceasing to be movable ends the drag. Otherwise it
-    /// lifts once the pointer is [`LIFT_DISTANCE`] from the press, and once lifted its
-    /// target is where a drop at `at` lands ([`drop_target`]). Returns whether what the rows show changed.
+    /// Judge the gesture at `at` against the last measured frame, for both movement and release. A grip that goes
+    /// away before lift cancels its move. A sweep's source can stay listed without being drawn. Returns whether the
+    /// rows show a changed drop target or marking, or need to take down a lift after cancellation.
     fn resample_pin_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         let clip = self.rows.viewport_bounds();
         let shared = self.pin_drag(cx);
         let mut state = shared.borrow_mut();
-        let Some(drag) = state.drag.as_ref() else {
+        let Some(mut drag) = state.drag.take() else {
             return false;
         };
-        let source = drag.source.clone();
-        if state.area_of(&source) != Some(drag.area)
-            || (!drag.lifted && !state.bounds.contains_key(&source))
-            || refused(&source, cx)
-            || !source_matches(&source, drag.area, cx)
-        {
-            state.drag = None;
-            return true;
-        }
-        let lifted = drag.lifted || {
-            let (dx, dy) = (
-                f32::from(at.x - drag.origin.x),
-                f32::from(at.y - drag.origin.y),
-            );
-            dx.hypot(dy) >= LIFT_DISTANCE
-        };
-        let target = if lifted {
-            state.target(drag, clip, at)
-        } else {
-            None
-        };
-        let Some(drag) = state.drag.as_mut() else {
-            return false;
-        };
-        let changed = (drag.lifted, &drag.target) != (lifted, &target);
-        drag.lifted = lifted;
-        drag.target = target;
+        let traveled = drag.traveled(at);
         drag.at = at;
+        let changed = match &mut drag.kind {
+            Kind::Move(movement) => {
+                let source = &drag.source;
+                if state.area_of(source) != Some(movement.area)
+                    || (!movement.lifted && !state.bounds.contains_key(source))
+                    || refused(source, cx)
+                    || !source_matches(source, movement.area, cx)
+                {
+                    return true;
+                }
+                let lifted = movement.lifted || traveled;
+                let target = if lifted {
+                    state.target(source, movement, clip, at)
+                } else {
+                    None
+                };
+                let changed = (movement.lifted, &movement.target) != (lifted, &target);
+                movement.lifted = lifted;
+                movement.target = target;
+                changed
+            }
+            // A Shift press that only wobbles stays a Shift+click: like the grip's lift, a sweep starts only once the
+            // pointer has moved the lift distance, so a press near a row's edge does not mark a different range.
+            Kind::Sweep(sweep) if sweep.end.is_none() && !traveled => false,
+            Kind::Sweep(sweep) => {
+                let target = match self.sweep_row_at(clip, at) {
+                    Some(target) if target != sweep.end.as_deref().unwrap_or(&drag.source) => {
+                        Some(target.to_owned())
+                    }
+                    // A header keeps the last session endpoint. Before there is another endpoint, that is the start row.
+                    None if sweep.end.is_none() && at != drag.origin => Some(drag.source.clone()),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    self.mark_rows(Some(&drag.source), &target, Gesture::Range, cx);
+                    sweep.end = Some(target);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        state.drag = Some(drag);
         changed
     }
+
+    /// Find the endpoint in the measured part of the virtual list. A header or separator without a session leaves
+    /// the endpoint alone. Clamping uses the closest visible session at the edge, even if that edge begins at a header.
+    fn sweep_row_at(&self, clip: Bounds<Pixels>, at: Point<Pixels>) -> Option<&str> {
+        let measured = self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(self.rows.logical_scroll_top().item_ix)
+            .map_while(|(index, (key, _))| {
+                self.rows
+                    .bounds_for_item(index)
+                    .map(|bounds| (key.as_str(), bounds))
+            })
+            .take_while(|(_, bounds)| bounds.top() < clip.bottom());
+        sweep_target(measured, clip, at)
+    }
+
+    /// A changed listing can move a row under a stationary pointer. By the time this runs the new viewport has
+    /// been measured; leave a canceled, finished or newly pressed sweep alone.
+    pub(super) fn resample_sweep_after_layout(&mut self, cx: &mut Context<Self>) {
+        let shared = self.pin_drag(cx);
+        let at = shared.borrow().drag.as_ref().and_then(|drag| {
+            matches!(&drag.kind, Kind::Sweep(sweep) if sweep.end.is_some()).then_some(drag.at)
+        });
+        if let Some(at) = at
+            && self.resample_pin_drag(at, cx)
+        {
+            cx.notify();
+        }
+    }
+    /// Read membership and collapse independently of the frame. A hidden anchor can cancel a sweep even when the
+    /// listing does not establish deletion. Use the held display band when membership has changed under the hold.
+    fn sweep_source_in_current_listing(&mut self, key: &str, cx: &App) -> bool {
+        let Some(store) = crate::session::current_store(cx) else {
+            return false;
+        };
+        let collections = store.read(cx).collections();
+        let Some(row) = collections.get::<SessionRow>(key) else {
+            return false;
+        };
+        let in_listing = collections.meta(Collection::Sessions).is_some_and(|meta| {
+            meta.availability == Availability::Available
+                && meta.order.iter().any(|listed| listed == key)
+        });
+        let current = self.current.current(cx);
+        let group = match current.hold.band_of(key) {
+            Some(groups::Band::Group(group)) => Some(group),
+            Some(groups::Band::GlobalPins | groups::Band::Tail) => None,
+            None => row.group,
+        };
+        in_listing
+            && !current.hosts_shown
+            && !groups::roster(collections).iter().any(|item| {
+                Some(item.id) == group && groups::Collapse::shown(&current.group_collapse, item, cx)
+            })
+    }
+}
+
+/// Scroll geometry describes only the pointer's endpoint. The source can live anywhere in the displayed order.
+fn sweep_target<'a>(
+    measured: impl Iterator<Item = (&'a str, Bounds<Pixels>)>,
+    clip: Bounds<Pixels>,
+    at: Point<Pixels>,
+) -> Option<&'a str> {
+    if at.x < clip.left() || at.x >= clip.right() {
+        return None;
+    }
+    let mut rows = measured.filter(|(key, bounds)| {
+        groups::header_id(key).is_none() && *key != UNGROUP_STRIP && bounds.intersects(&clip)
+    });
+    if at.y < clip.top() {
+        return rows.next().map(|(key, _)| key);
+    }
+    if at.y >= clip.bottom() {
+        return rows.last().map(|(key, _)| key);
+    }
+    rows.find(|(_, bounds)| bounds.top() <= at.y && at.y < bounds.bottom())
+        .map(|(key, _)| key)
 }
 
 /// Grip geometry comes from the last frame, which can precede a membership push. Recheck the dragged session's
@@ -1270,6 +1626,29 @@ pub(super) fn crossed_after(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Headers and offscreen focus placeholders cannot be endpoints. An outside pointer clamps to the visible row
+    /// nearest that edge even when the edge itself is a header.
+    #[test]
+    fn a_sweep_clamps_to_visible_rows_and_skips_headers() {
+        let bounds =
+            |top, bottom| Bounds::from_corners(point(px(0.), px(top)), point(px(100.), px(bottom)));
+        let measured = [
+            ("offscreen", bounds(-30., -10.)),
+            ("group/10", bounds(-10., 15.)),
+            ("first", bounds(15., 35.)),
+            ("group/20", bounds(35., 45.)),
+            ("last", bounds(45., 70.)),
+            ("below", bounds(70., 90.)),
+        ];
+        let clip = bounds(0., 60.);
+        let at = |y| sweep_target(measured.into_iter(), clip, point(px(50.), px(y)));
+        assert_eq!(at(-1.), Some("first"));
+        assert_eq!(at(20.), Some("first"));
+        assert_eq!(at(40.), None);
+        assert_eq!(at(55.), Some("last"));
+        assert_eq!(at(61.), Some("last"));
+    }
     use gpui::{point, size};
 
     /// Three rows of 40 pixels from the top of a 400-pixel view, as the list would draw a, b and c.

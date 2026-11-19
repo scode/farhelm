@@ -22,14 +22,16 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement, Pixels, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{Handler, HoverHelp};
 use crate::focus;
 use crate::theme::{self, metrics};
+
+type PressHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App)>;
 
 /// The open control of one list row. See the module docs.
 #[derive(IntoElement)]
@@ -43,6 +45,7 @@ pub struct ListRow {
     paint_hover_fill: bool,
     lines: Vec<AnyElement>,
     on_click: Option<Handler>,
+    on_primary_press: Option<PressHandler>,
 }
 
 impl ListRow {
@@ -65,6 +68,7 @@ impl ListRow {
             paint_hover_fill: true,
             lines: Vec::new(),
             on_click: None,
+            on_primary_press: None,
         }
     }
 
@@ -99,6 +103,16 @@ impl ListRow {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    /// Observe a press on the row's own control, after its nested controls have had their turn. The row still
+    /// tracks the native click, so the caller can let an ordinary press and release activate it normally.
+    pub(crate) fn on_primary_press(
+        mut self,
+        handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_primary_press = Some(Box::new(handler));
         self
     }
 }
@@ -158,12 +172,11 @@ impl RenderOnce for ListRow {
                 );
         }
         let row = super::with_hover_help(row, &self.id, &self.help, true, Some(&focus), window, cx);
-        super::activate_on_click(
-            super::activate_on_enter_or_space(
-                focus::track(row, &focus, focus::OnPress::Control),
-                key_handler,
-            ),
-            handler,
-        )
+        let row = focus::track(row, &focus, focus::OnPress::Control);
+        let row = match self.on_primary_press {
+            Some(press) => row.on_mouse_down(MouseButton::Left, press),
+            None => row,
+        };
+        super::activate_on_click(super::activate_on_enter_or_space(row, key_handler), handler)
     }
 }

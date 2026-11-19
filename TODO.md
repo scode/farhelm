@@ -67,12 +67,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with no terminal after a reboot. Rejected: a new disconnect reason that stops the retrying, because the same refusal
   may be transient while a Restart relaunches the terminal. Plan: `plans/queue/exited-session-no-terminal.md`.
 
-- **Shift+drag across sidebar rows should mark them too.** Today only Shift+click marks a range (from the open session
-  to the clicked row), and holding Shift while dragging the pointer over several sessions marks nothing. The maintainer
-  has reached for Shift+drag several times expecting it to multi-select. Make a Shift+drag over the session list mark
-  the rows it sweeps, consistent with Shift+click's range rule, and update SPEC's marking gestures to match. Plan:
-  `plans/queue/shift-drag-marking.md`.
-
 - **A maximized Mac window grows into place on launch.** When the desktop app was maximized (zoomed) at quit, the next
   launch restores that, but the window first appears at its ordinary size and then visibly animates to full size for
   about a second. GPUI opens a maximized window at its ordinary frame and then asks macOS to zoom it, and that zoom

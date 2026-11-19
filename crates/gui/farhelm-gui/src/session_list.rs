@@ -135,7 +135,8 @@
 //! rail's expansion are written the same way ([`queued_preference`]): a choice made while another preference save is
 //! in flight is shown at once and sent once that save settles, never dropped.
 //!
-//! Shift-click and Cmd-click (Ctrl-click on Linux) on a row mark sessions without opening them ([`marking`]). The marks
+//! Shift-click, Shift-drag and Cmd-click (Ctrl-click on Linux) on a row mark sessions without opening them
+//! ([`marking`]). The marks
 //! belong to the UI session, and every frame projects them onto the rows it shows; while any is shown, the heading's
 //! band is the marked bar ("N marked", Stop, Delete, the marked menu's ⋯ and Clear) in place of the title, the count
 //! and the heading's actions, and Escape anywhere in the list's column clears them. Bulk Stop and Delete, their
@@ -218,6 +219,8 @@ pub(crate) mod menu_tests;
 
 #[cfg(test)]
 mod pin_drag_tests;
+#[cfg(test)]
+mod shift_drag_tests;
 
 #[cfg(test)]
 mod pins_tests;
@@ -419,8 +422,8 @@ struct Current {
     /// The frame's complete layout before collapse, for a hold taken by
     /// the pointer before the next frame.
     last_uncollapsed: Option<hold::Held>,
-    /// A pinned row's drag by its grip and the movable rows the last frame drew ([`pin_drag`]). Per UI session, so a
-    /// reset forgets a drag with the listing it was over.
+    /// The shared grip drag and Shift sweep owner, including the movable rows drawn in the last frame ([`pin_drag`]).
+    /// A UI session reset drops the gesture with the listing it was over.
     pin_drag: pin_drag::Shared,
     /// Collapse saves are independent for each group and retire with this
     /// UI session's operation store.
@@ -780,9 +783,7 @@ impl Render for SessionList {
         render_count::record("session-list", cx);
 
         // The sidebar's body: the host rail, then the list's own column in the width the rail leaves, then the rail's
-        // foot, which this row positions absolutely over the room the rail leaves at its bottom. Escape ends a pin drag
-        // wherever focus is in the sidebar's body: the host rail, the list's column and the rail's foot
-        // ([`pin_drag::catch_escape`]).
+        // foot, which this row positions absolutely over the room the rail leaves at its bottom.
         let body_row = pin_drag::catch_escape(div().relative().flex().flex_row().size_full(), cx);
         let list = div()
             .id("session-list")
@@ -835,7 +836,9 @@ impl Render for SessionList {
             let collections = store.read(cx).collections();
             let list_id = self.list_id(collections, cx);
             let current = self.current.current(cx);
-            current.hold.release_if_due(menu_open);
+            current
+                .hold
+                .release_if_due(menu_open || current.pin_drag.borrow().sweeping());
             let roster = groups::roster(collections);
             let served = selection::listed(collections);
             let open = selected.as_deref().and_then(|key| {
@@ -884,6 +887,29 @@ impl Render for SessionList {
                 rows: listed,
                 drag,
             } = frame;
+            let unchanged = keys.len() == self.entries.len()
+                && keys
+                    .iter()
+                    .zip(self.entries.iter())
+                    .all(|(next, (key, _))| next == key);
+            {
+                let mut drag_state = current.pin_drag.borrow_mut();
+                if let Some(before) =
+                    drag_state.cancel_missing_sweep(&keys, exposed, window.is_window_active())
+                {
+                    current
+                        .marks
+                        .restore(before, |key| session::listing_proves_gone(collections, key));
+                } else if !unchanged && let Some((start, end)) = drag_state.sweep_range() {
+                    // A server push can change the rows between the two endpoints without a pointer move.
+                    let displayed: Vec<_> = listed.iter().map(|session| session.key).collect();
+                    if displayed.contains(&end) {
+                        current
+                            .marks
+                            .mark(&displayed, Some(start), end, marking::Gesture::Range);
+                    }
+                }
+            }
             let projection = exposed.then(|| marking::project(&listed, &current.marks));
             self.moves = if exposed { moves } else { HashMap::new() };
             // The rows a drag may land beside, and whose grips may drag them: the movable pins, in the order drawn, and
@@ -894,11 +920,6 @@ impl Render for SessionList {
             } else {
                 pin_drag::Targets::default()
             };
-            let unchanged = keys.len() == self.entries.len()
-                && keys
-                    .iter()
-                    .zip(self.entries.iter())
-                    .all(|(next, (key, _))| next == key);
             let keys = (!unchanged).then_some(keys);
             // The sidebar bell takes the place of the running dot, so a
             // muted row alone needs no tick for the running animation.
@@ -954,6 +975,12 @@ impl Render for SessionList {
             zone: local_time::zone(cx),
             compact: self.order_state(cx).read(cx).compact_shown(stored_compact),
         };
+        if keys.is_some() && pin_drag.borrow().sweeping() {
+            let list = cx.weak_entity();
+            window.defer(cx, move |_, cx| {
+                let _ = list.update(cx, Self::resample_sweep_after_layout);
+            });
+        }
         if self.sync_rows(keys, window, cx) {
             cx.notify();
         }
@@ -1205,7 +1232,6 @@ fn draw_row(
     let Some(row) = collections.get::<SessionRow>(key) else {
         return div().into_any_element();
     };
-    let (open, list) = (key.to_owned(), weak.clone());
     row::row(
         Listed { key, row },
         collections,
@@ -1219,13 +1245,7 @@ fn draw_row(
         card,
         focus,
         hover,
-        // A plain click opens the session and clears the marks; Shift or Cmd or Ctrl marks instead ([`marking`]).
-        move |gesture, _, cx| {
-            if gesture == marking::Gesture::Open {
-                selection::choose(&open, cx);
-            }
-            let _ = list.update(cx, |list, cx| list.row_clicked(&open, gesture, cx));
-        },
+        weak,
         cx,
     )
 }

@@ -2238,10 +2238,16 @@ hover text and accessible names explain the actions, and New remains the sidebar
 
 The open session is separate from the **marked** sessions. Shift+click on a row marks the inclusive range from the open
 session to that row in displayed order, without opening it; each range click replaces the previous marking. When the
-open session is not displayed, it marks only the clicked row. Cmd+click (macOS) or Ctrl+click (Linux) toggles one row's
-mark, including the open row. Shift takes precedence when both kinds of modifier are held. A plain accepted row click
-opens that session and clears all marks. Row controls keep their own actions. The open row keeps its blue fill; a
-distinct side marker and tint identify marked rows.
+open session is not displayed, it marks only the clicked row. Shift+drag from a session row's body replaces the marks
+with the range from that row to the row under the pointer. Sweeping back shrinks the range. Group headers keep the last
+endpoint, collapsed members are left out, and going above or below the list uses its nearest visible session row. Near
+an edge the list scrolls and extends the range while the original row remains its anchor. A Shift press that stays on
+its row is a Shift+click. Once a sweep starts, release keeps the marks without opening a row. Escape, interrupted
+pointer capture, or the start row leaving the listing restores the earlier marks.
+
+Cmd+click (macOS) or Ctrl+click (Linux) toggles one row's mark, including the open row. Shift takes precedence when both
+kinds of modifier are held. A plain accepted row click opens that session and clears all marks. Row controls keep their
+own actions. The open row keeps its blue fill; a distinct side marker and tint identify marked rows.
 
 Marks belong to the window and are not saved. Counts, offered actions and targets include only marked rows displayed
 now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose no
@@ -2567,13 +2573,13 @@ list or has been completely still over it for 5 seconds (a scroll counts as move
 in place; a session that disappears is removed at once, since a deleted session must not stay clickable; and a new
 session appears at the bottom of the list, moving no row above it, until the hold ends and it takes its place. Changing
 the list's host, filter, or order is asking for a different list, so the hold does not apply to it. An open row or group
-menu or its naming dialog keeps the hold even if the pointer leaves the list or stays still. Movement over the list
-starts the 5 seconds of stillness over. Original groups and original pins still pinned in their held area follow the
-shared manual order in their existing slots. When this window completes a cross-area drag, the moved row enters its new
-area in the hold at once, with an unpinned row going after the destination's pins. Other membership changes and pin or
-unpin changes update rows in place until the hold ends, when the rows take their proper places. Group headers follow the
-held rows. Collapsing or expanding a group applies at once. Newly pinned rows offer no grip or Move actions until the
-hold ends, and original pins cannot use them as Move neighbors.
+menu, its naming dialog or an active marking sweep keeps the hold even if the pointer leaves the list or stays still.
+Movement over the list starts the 5 seconds of stillness over. Original groups and original pins still pinned in their
+held area follow the shared manual order in their existing slots. When this window completes a cross-area drag, the
+moved row enters its new area in the hold at once, with an unpinned row going after the destination's pins. Other
+membership changes and pin or unpin changes update rows in place until the hold ends, when the rows take their proper
+places. Group headers follow the held rows. Collapsing or expanding a group applies at once. Newly pinned rows offer no
+grip or Move actions until the hold ends, and original pins cannot use them as Move neighbors.
 
 A muted pin glyph immediately before the title names a pinned row in its tooltip and accessible text. The heavier
 separator with a small gap follows the displayed leading contiguous run of global pins when anything follows. The

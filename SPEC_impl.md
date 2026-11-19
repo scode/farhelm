@@ -5627,6 +5627,12 @@ installation it is on, so it follows an open session the sidebar's filter hides
   measured targets. The source can leave the viewport while it stays in its movable band. Interrupted capture, a hidden
   or unavailable list, or a source that ceases to be movable cancels the gesture and its deadline without a write.
 
+  The row body's Shift sweep uses the same drag owner, capture and edge deadline as the grip. It samples its endpoint
+  from the list's measured viewport and applies the same range rule as Shift+click over the full displayed order. A row
+  scrolled out of view keeps its place in that order. The owner admits a native Shift-press click only when its release
+  ends before the range has swept to another row. A released or canceled sweep leaves no click permission. Cancellation
+  restores the marks kept at press, subject to the listing's usual rule for forgetting vanished sessions.
+
   Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
   failure leaves the source intact. If deletion fails, both survivors can be pinned at the same position. Positions have
   the total order `(position, host_id, session_id)` to cover those ties. A replay keeps existing replacement choices and

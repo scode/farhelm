@@ -1,4 +1,4 @@
-//! Bulk marking: Shift-click and Cmd-click (Ctrl-click on Linux) mark sessions in the list without opening them, and
+//! Bulk marking: Shift-click, Shift-drag and Cmd-click (Ctrl-click on Linux) mark sessions without opening them, and
 //! the heading's bar acts on the marked sessions that are shown.
 //!
 //! SPEC.md, "Session list" (the marks paragraphs). Ported from the old app's `list/marking.rs` (`Gesture`, `mark`,
@@ -10,7 +10,8 @@
 //!   marks only the clicked row. Cmd-click or Ctrl-click toggles one row, the open one included;
 //!   [`Gesture::from_modifiers`] takes either key on every platform, but on macOS the platform layer turns a Ctrl-click
 //!   into a secondary click before it reaches the row, so there Cmd-click is the toggle, as SPEC.md now says.
-//!   Shift wins when both are held, and Alt changes nothing. A plain click opens the session and clears every mark.
+//!   Shift wins when both are held, and Alt changes nothing. Shift-drag takes the start row as the range anchor and
+//!   reuses the grip's drag owner ([`super::pin_drag`]). A plain click opens the session and clears every mark.
 //!   Marking never changes which session is open. Only the row's open control reads a gesture: its menu button, its
 //!   status dot and its bell keep their own actions and neither mark nor clear.
 //! - **Stored and effective marks.** The window keeps the marked keys, never saved, per UI session, so a reset forgets
@@ -77,6 +78,7 @@ use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::local_state;
 use crate::operations::Work;
+use crate::session;
 use crate::theme::{self, metrics};
 
 /// What a click on a row's open button asks for, read from the modifiers held (the old `Gesture::from_modifiers`).
@@ -120,6 +122,19 @@ pub(super) struct Marks {
 }
 
 impl Marks {
+    /// Capture the selection before a sweep, including marks outside the current filter. The revision stays live.
+    pub(super) fn snapshot(&self) -> HashSet<String> {
+        self.stored.clone()
+    }
+
+    /// Restore a canceled sweep while respecting sessions the listing proved gone during it. Count a new choice so
+    /// an earlier bulk action can never mistake the restored marks for the targets it started with.
+    pub(super) fn restore(&mut self, mut keys: HashSet<String>, gone: impl Fn(&str) -> bool) {
+        keys.retain(|key| !gone(key));
+        self.stored = keys;
+        self.revision += 1;
+    }
+
     /// Apply `gesture` on the row `target` to the marks, with `displayed` the keys the list shows in their order and
     /// `anchor` the open session: a plain click clears every mark wherever it landed, and a range or a toggle on a row
     /// the list does not show changes nothing. Every call counts as a choice.
@@ -418,6 +433,11 @@ pub(super) struct Kept {
 }
 
 impl Kept {
+    /// The sidebar is showing an available listing, even if it has no marks right now.
+    pub(super) fn can_mark(&self) -> bool {
+        self.projection.is_some()
+    }
+
     /// The bar's state before anything is marked.
     pub(super) fn new(cx: &mut App) -> Kept {
         Kept {
@@ -523,22 +543,47 @@ impl SessionList {
     /// and open nothing. A marking gesture does nothing while the last frame let no mark count (a listing that is not
     /// available). Visible to the crate for the screenshot goldens, which mark rows without a click.
     pub(crate) fn row_clicked(&mut self, key: &str, gesture: Gesture, cx: &mut Context<Self>) {
-        if gesture != Gesture::Open && self.marking.projection.is_none() {
+        if gesture != Gesture::Open && !self.marking.can_mark() {
             return;
         }
         let anchor = local_state::selected(cx);
+        self.mark_rows(anchor.as_deref(), key, gesture, cx);
+        cx.notify();
+    }
+
+    /// Use the same range operation for a click or sweep. The caller chooses the anchor; both use displayed sessions
+    /// in list order, including entries above and below the viewport.
+    pub(super) fn mark_rows(
+        &mut self,
+        anchor: Option<&str>,
+        key: &str,
+        gesture: Gesture,
+        cx: &mut Context<Self>,
+    ) {
         // A clone of the shared slice, so the marks can be borrowed mutably beside it.
         let entries = self.entries.clone();
         let displayed: Vec<&str> = entries
             .iter()
             .map(|(key, _)| key.as_str())
-            .filter(|key| super::groups::header_id(key).is_none())
+            .filter(|key| {
+                super::groups::header_id(key).is_none() && *key != super::pin_drag::UNGROUP_STRIP
+            })
             .collect();
         self.current
             .current(cx)
             .marks
-            .mark(&displayed, anchor.as_deref(), key, gesture);
-        cx.notify();
+            .mark(&displayed, anchor, key, gesture);
+    }
+
+    /// Cancel from an input event between renders, keeping the same vanished-session rule as the frame path.
+    pub(super) fn restore_sweep(&mut self, before: HashSet<String>, cx: &mut Context<Self>) {
+        let store = session::current_store(cx);
+        let marks = &mut self.current.current(cx).marks;
+        marks.restore(before, |key| {
+            store.as_ref().is_some_and(|store| {
+                session::listing_proves_gone(store.read(cx).collections(), key)
+            })
+        });
     }
 
     /// Forget every mark, shown or hidden (Escape in the list, Clear, a metadata action).

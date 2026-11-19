@@ -90,18 +90,18 @@
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, Entity, FocusHandle, FontWeight, HoverListenerMode, InteractiveElement,
-    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    AnyElement, App, ClickEvent, Entity, FocusHandle, FontWeight, HoverListenerMode,
+    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 
 use super::environment::{self, Environment};
 use super::marking::Gesture;
 use super::row_marks::{self, HelpPlace, RowMarks};
-use super::selection::Listed;
+use super::selection::{self, Listed};
 use super::status::{self, Badge};
 use super::summary::{self, SummaryCard};
-use super::{age, delete, outcome, replace, replace_yolo, stop};
+use super::{SessionList, age, delete, outcome, replace, replace_yolo, stop};
 use crate::assets::{self, Icon};
 use crate::components::{HoverHelp, ListRow, Role, StatusMark};
 use crate::focus;
@@ -259,9 +259,10 @@ impl Inks {
 /// which the list owns and registers with its list state: the row's item tracks it so it contains whichever of the
 /// row's controls holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is
 /// over it, for the menu button's reveal. `marked` draws the marked look (see the module docs). `grouped` follows the
-/// displayed band, including while the hovered list holds a moved member in its former slot. `on_open` runs when the
-/// user activates the row, with the gesture the click's modifiers ask for; the keyboard's Enter and Space carry none,
-/// so they always open.
+/// displayed band, including while the hovered list holds a moved member in its former slot. `list` is the session list
+/// the row reports activation to: a plain click opens the session and clears the marks, Shift or Cmd or Ctrl marks
+/// instead (a Shift press can also begin a sweep, which the list decides), and the keyboard's Enter and Space carry no
+/// modifiers, so they always open.
 #[allow(
     clippy::too_many_arguments,
     reason = "one row's inputs, all drawn from by one function"
@@ -279,7 +280,7 @@ pub(crate) fn row(
     card: Entity<SummaryCard>,
     focus: &FocusHandle,
     hover: RowHover,
-    on_open: impl Fn(Gesture, &mut Window, &mut App) + 'static,
+    list: &WeakEntity<SessionList>,
     cx: &App,
 ) -> AnyElement {
     let palette = theme::palette(cx);
@@ -485,9 +486,31 @@ pub(crate) fn row(
     if !compact && let Some(meta) = meta_line(session, collections, inks) {
         control = control.line(meta);
     }
-    control = control.on_click(move |event, window, cx| {
-        on_open(Gesture::from_modifiers(&event.modifiers()), window, cx)
-    });
+    let (press_list, press_key) = (list.clone(), session.key.to_owned());
+    let (click_list, click_key) = (list.clone(), session.key.to_owned());
+    control = control
+        .on_primary_press(move |event, window, cx| {
+            if event.modifiers.shift {
+                let active = window.is_window_active();
+                let _ = press_list.update(cx, |list, cx| {
+                    list.begin_sweep(&press_key, event.position, active, cx);
+                });
+            }
+        })
+        .on_click(move |event, _, cx| {
+            let gesture = Gesture::from_modifiers(&event.modifiers());
+            let _ = click_list.update(cx, |list, cx| {
+                if let ClickEvent::Mouse(mouse) = event
+                    && !list.admit_row_click(&click_key, mouse.down.modifiers.shift, cx)
+                {
+                    return;
+                }
+                if gesture == Gesture::Open {
+                    selection::choose(&click_key, cx);
+                }
+                list.row_clicked(&click_key, gesture, cx);
+            });
+        });
 
     // The row itself is the list's item, and it is what carries "selected" for assistive technology: AccessKit
     // reports selection only on item-like roles (a list item, an option), not on a button. The old app marked its open
