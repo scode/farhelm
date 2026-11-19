@@ -1302,6 +1302,31 @@ fn a_session_deleted_elsewhere_leaves_the_next_sessions_header_usable(cx: &mut T
     test_support::settle(cx);
 }
 
+/// An automatic selection change has no pointer press to dismiss a question. The new session's action must not
+/// inherit an anchor for a question whose answer still targets the original session.
+#[gpui::test]
+fn an_open_header_question_does_not_follow_automatic_selection(cx: &mut TestAppContext) {
+    let rows = vec![entry(&session("a"), 0), entry(&session("b"), 0)];
+    let (mut fake, cx) = open_main(cx, snapshot_of(rows, false));
+    pending(&mut fake);
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    test_support::click(cx, "session-header-restart");
+    assert!(drawn(cx, "prompt"), "a has an unanswered Restart question");
+
+    cx.update(|_, cx| crate::session_list::selection::open_automatically("b", cx));
+    test_support::settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("b"));
+    assert!(
+        drawn(cx, "session-header-restart"),
+        "b has its own Restart control"
+    );
+    assert!(!any_layer(cx), "the question belonged to a's header");
+    assert!(
+        pending(&mut fake).is_empty(),
+        "no lifecycle request was sent"
+    );
+}
+
 // ---- Focus ---------------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Keyboard focus": "Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus

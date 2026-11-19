@@ -2083,20 +2083,6 @@
   change.
 - Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
-## header-questions-follow-anchor-across-sessions.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A header question
-  can show under the next session's button. Only route found: the open session is filtered out and deleted elsewhere;
-  answering is then refused by the helm. Bucket: re-bucketed from high to other (no established route to a high
-  consequence).
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix code: session key in the anchors, as the carets do (~45 with test); bucket other. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
-  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
-  entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
-
 ## session-navigation-interrupts-close-all.md
 
 - Outcome: `fix code`.

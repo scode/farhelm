@@ -32,7 +32,7 @@ use crate::session_list::environment_tests::{
 use crate::session_list::host_rail::tests::hover_help;
 use crate::session_list::menu_tests::{any_layer, drawn, label_of};
 use crate::session_list::status::HostLookup;
-use crate::session_list::tests::session;
+use crate::session_list::tests::{selected, session};
 use crate::test_support::{self, frame};
 
 /// The left edge of the element drawn under `id`.
@@ -154,6 +154,30 @@ fn the_header_suspends_and_resumes_beside_stop(cx: &mut TestAppContext) {
     assert_eq!(label_of(cx, control).as_deref(), Some("Suspend"));
     test_support::click(cx, "session-header-delete");
     assert!(drawn(cx, "prompt"), "Delete asks again");
+}
+
+/// A delayed activity reply must not hang a Suspend confirmation under the next session's Suspend control.
+#[gpui::test]
+fn a_suspend_question_waiting_on_activity_does_not_follow_the_selection(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Container, connected());
+    let (mut fake, cx) = open(cx, &[(session("a"), 0), (session("b"), 0)], false, &host);
+    pending(&mut fake);
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    test_support::click(cx, ENVIRONMENT_ID);
+    let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
+    cx.update(|_, cx| crate::session_list::selection::open_automatically("b", cx));
+    test_support::settle(cx);
+    assert_eq!(selected(cx).as_deref(), Some("b"));
+    assert_eq!(label_of(cx, ENVIRONMENT_ID).as_deref(), Some("Suspend"));
+
+    fake.reply(
+        read,
+        200,
+        Some(listing(&[session("a"), session("b")], false)),
+    );
+    test_support::settle(cx);
+    assert!(!any_layer(cx), "the reply belonged to a's header");
+    assert!(pending(&mut fake).is_empty(), "the reply sent no Suspend");
 }
 
 /// The header's Suspend is the row menu's: the same activity read and question, here under its own button. Specified:
