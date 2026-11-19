@@ -52,3 +52,81 @@ outdated spec wording and a draft accessor that needed its explicit-load require
 passed a separate cold read.
 
 The reviewer verified all four findings were resolved in the final draft at `a53a964e`.
+
+### Landing
+
+#### What landed with it
+
+It landed in a round of nine plans: session-group-follow-ups, model-families, session-limit-notice,
+reserved-resource-names, secrets-logs-and-screen, checkout-settings-stale-save, concealed-link-target, triage-misc-nov18
+and triage-discards-nov18. Since its base, main gained the previous round's plans (submenus that open on hover, Clone
+keeping invisible characters, the retired old-terminal announcement, quick switcher screenshot folders, the update
+survival wording) and docs screenshot tooling. secrets-logs-and-screen, in this round, also changed the shared
+text-field draft this plan builds on; I merged the two by keeping both, as that plan's notes describe. The compatibility
+with an older app or helm that the report describes works in both directions, and the reviewers found no problem in it.
+
+At your request this landing was reviewed with extra skepticism, by me and by independent reviewers, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. No part of it is bigger than
+the plan needed.
+
+#### Fixes made while landing
+
+- **The changelog fragment lacked its caveat.** A refused save now discards the typed edit and shows the stored value
+  again. That includes a conflict, where a long post-clone command must be typed again, and a refusal for an invalid
+  value such as a relative folder, which used to keep the text for correction. Both follow SPEC.md's rule, but users
+  will notice, so the fragment now says so for the release notes.
+- **A code comment at the extension point was stale.** The shared draft's comment still said compare-on-save was not
+  built. It now names the three new operations, what each is for, and points to the checkout settings code that uses
+  them.
+
+#### Things you should know that the report does not say
+
+- After a refusal in the launcher's inline setup, once the refresh has removed the setup field, the launcher keeps
+  saying "Review the current value before saving again" with nothing left to review or save. SPEC.md now requires the
+  refusal to stay visible, so changing this means adjusting that sentence too. Possible follow-up: drop the message once
+  the field it refers to is gone.
+
+#### Checks
+
+This round landed nine plans together, so these checks cover all nine on one tree: the nine stacks one after another on
+main. Between them the plans change the desktop app's GUI crates, the helm and its client, the shared protocol, the
+supervisor, the desktop process, SPEC.md, SPEC_impl.md and the triage records. The landing ran the lints, the whole Rust
+workspace suite, the desktop process's own tests, the app's end-to-end smoke and the reference screenshots (goldens).
+Builds ran locally; the workspace suite and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plans as delivered, stacked on main as it stood when the round started:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, `python3 -B scripts/test-gui-e2e-smoke.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`, once without and once with `--features agent`: passed.
+- `dprint check`: failed on `TRIAGE_OUTCOMES_ARCHIVE.md`, which triage-misc-nov18 wrote unformatted. Fixed.
+- `cargo nextest run --workspace --exclude farhelm-desktop`, from a locally built archive, split in three across boats:
+  2744, 2653 and 2625 tests, 8022 in all (`1ffb9472-9f12-4890-b0d5-032dd87718d0`,
+  `7c3ef63b-2e2b-4903-acff-22cbe9409601`, `7c539d75-d409-48c7-901b-391169215c11`). One failed: the macro
+  compile-contract test, which builds a small crate offline from this machine's cargo cache, which a boat does not have,
+  so it fails there every time; it passed locally (below). No runtime skips.
+- `cargo nextest run -p farhelm-desktop`, locally: 176 passed (`59017e5e-7626-4dca-9c45-0b4972a89aca`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed, the new step that
+  drags an unpinned session into a group included, and the clipboard paste step was skipped, as always on Linux
+  (`b1164f8b-3d55-4cac-9fb1-a76e9a8da60c`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`da0dca91-646f-483a-a436-b10b43ffafe2`), the new groups
+  pictures included.
+
+On the fixed tree (comments, SPEC.md, SPEC_impl.md, changelog fragments, the triage archive's formatting, and one
+notice's wording changed):
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, `cargo clippy --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`: passed.
+- The bell notices' tests in the GUI and the helm, locally: 26 passed (`80fb276d-1ba3-4b09-a84a-370aef2b9605`).
+- `cargo nextest run -p farhelm-testtrace-macros`, locally: 2 passed, the compile-contract test included
+  (`a8a9bf1f-6dc9-4e24-8831-e5d4b7f5dbc0`).
+
+The boat suites, the smoke and the goldens were reused for the fixed tree: after them only comments, documents,
+changelog fragments, formatting and one notice's wording changed, which the focused runs above cover.
+
+Skipped:
+
+- The Linux app lifecycle: startup and quit are untouched.
+- The Mac-only checks: no Mac-specific code changed.
