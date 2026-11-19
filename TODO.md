@@ -392,6 +392,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
+- **Show the version in Settings > App.** add the current version of farhelm in the settings -> app dialog in addition
+  to the header of the app (user feedback, someone looked for it there).
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
