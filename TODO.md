@@ -291,14 +291,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   exception into SPEC_impl.md. A process inside an environment writing the seal itself is not a trust boundary the
   maintainer cares about (decided 2026-11-18). Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-- **Make terminal hosts refuse an unusable folder or size clearly.** Known gaps in SPEC_impl.md since
-  tmux-end-old-terminals (#3358 to #3370): creating a session or opening a tab in a folder that cannot be entered fails
-  with an error that names `systemd-run` rather than the folder, and attaching at size 0x0 is mishandled. Terminal hosts
-  should refuse both up front with a clear message, the SPEC_impl.md known-gaps entries go, and the three tests that
-  were lost with tmux come back on terminal hosts. The same plan also lost, without porting, the check that memory stays
-  flat while a slow viewer stalls and two file-upload tests beside a busy or deleted session; port those with this.
-  Recorded by the maintainer on 2026-11-18 from the plan's review. Plan: `plans/queue/unusable-folder-refusals.md`.
-
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
   installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0

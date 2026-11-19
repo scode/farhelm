@@ -110,6 +110,8 @@ mod session_rename;
 #[cfg(target_os = "linux")]
 mod supervisor_stop;
 #[cfg(target_os = "linux")]
+mod terminal_backpressure;
+#[cfg(target_os = "linux")]
 mod terminal_host_cleanup;
 
 #[cfg(target_os = "linux")]
