@@ -22800,6 +22800,21 @@ prior terminal output" (rebased revision)
 - Execution: change `ntwknytvnuzyyqyysnoyruqrzwkqsmym`, bookmark `plan/gui-ux-gui-test-gaps/02-catalog-retry-test-does`,
   [PR #4209](https://github.com/scode/farhelm/pull/4209/changes).
 
+## launcher-escalation-test-misses-banner-premise.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Agent switch clears
+  the banner" test never checks the banner appeared. Passes if the banner never showed. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert the banner in the fixture (~3). At execution, fix the test only if the fix is obvious
+  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
+  say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: change `kqpynzlowqztlsukqmoxrvnnlsqovqlu`, bookmark
+  `plan/gui-ux-gui-test-gaps/03-launcher-escalation-test-misses`,
+  [PR #4212](https://github.com/scode/farhelm/pull/4212/changes).
+
 ## stale-reply-test-lacks-processing-witness.md
 
 - Outcome: `fix code`.

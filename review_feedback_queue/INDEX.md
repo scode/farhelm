@@ -2944,9 +2944,6 @@ consequences.
 - [`trash-repeats-animation-and-focus-wiring.md`](trash-repeats-animation-and-focus-wiring.md) — Trash repeats the
   spinner's timer and independently looks up the same focus destination on confirmation and cancellation.
 
-- [`launcher-escalation-test-misses-banner-premise.md`](launcher-escalation-test-misses-banner-premise.md) — The test
-  intended to prove that switching agents clears an escalation warning can pass when the warning never appeared.
-
 - [`launcher-model-height-test-accepts-collapsed-list.md`](launcher-model-height-test-accepts-collapsed-list.md) — The
   launcher model list's height test can pass if the list collapses to zero height.
 
