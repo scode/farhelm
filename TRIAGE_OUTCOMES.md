@@ -1895,22 +1895,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-discards-nov18.md`
 
-## trailing-restart-seed-history-promoted-into-launch-excerpt.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. Restart seeds the
-  previous run's history above a blank screen at the old size (core/host_restart.rs); the vendored emulator pulls
-  history into view when the terminal grows (vendor/alacritty_terminal grid/resize.rs); the never-started launch's error
-  quote reads the visible screen (service/launch_artifacts.rs), so after growing it can quote the session's own previous
-  run. The cross-session disclosure is refuted. SPEC_impl.md ("a Restart's new host starts with a blank screen, so no
-  quote reaches back into the previous run") and the launch_artifacts.rs doc comment are inaccurate once the terminal
-  grows. Not reproduced. Bucket: other.
-- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): fix spec.
-- Completion criteria: SPEC_impl.md and the launch_artifacts.rs doc comment say that after a Restart the quote may
-  include lines of the same session's previous run when the terminal grew before the failure (about 10 lines). No
-  behavior change. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/triage-misc-nov18.md`
-
 ## trailing-agent-environment-target-history-admission-lacks-origin.md
 
 - Outcome: `discard`.

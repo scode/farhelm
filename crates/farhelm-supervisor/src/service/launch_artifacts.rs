@@ -41,19 +41,19 @@ impl LaunchError {
 
 /// Append terminal evidence only after the caller has proved never-started.
 ///
-/// A host runs one child for its whole life, so everything on its screen is
-/// this launch's output, and the entry's host is this generation's. The
-/// excerpt is the visible screen its emulator holds, quoted only once the
-/// host's exit record has been processed
+/// The excerpt is the visible screen of this generation's terminal host,
+/// quoted only once the host's exit record has been processed
 /// (`crate::hosts::HostStatus::evidence` says dead), which the host sends
 /// after the child's drained output, so the quote is the final screen. A
 /// caller that proved the launch never started from the earlier process
 /// probe (Stop) waits for that record first
 /// (`crate::hosts::HostTerminal::holds_final_state`); without it, this
 /// quotes nothing rather than a screen that may still be missing the line
-/// that explains the failure. A Restart seeds a new host with the old
-/// terminal's history but a blank screen, so the visible screen never
-/// quotes the previous run. The client shows the exit state itself,
+/// that explains the failure. Restart seeds the new host with the
+/// terminal history recovered from the same session, above a blank
+/// screen. If the terminal
+/// grows before the failure, it can bring lines from earlier runs into
+/// view and into the excerpt. The client shows the exit state itself,
 /// outside the terminal's content, so there is no exit banner to leave
 /// out. The read is in memory and cannot fail.
 pub(crate) fn append_launch_excerpt(
