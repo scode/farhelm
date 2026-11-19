@@ -10,7 +10,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight af9ead] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
 - [in-flight 03a898] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
 - [complete] `update-survival-wording.md` — General survival statements stay general: SPEC.md records the principle and the old-terminal update note
-- [in-flight 746968] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
+- [complete] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
 - [pending] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
 - [pending] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
 - [pending] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
