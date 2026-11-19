@@ -102,15 +102,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
   real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
 
-- **Investigate private paths in quick switcher screenshots.** The v0.40.0 release-notes capture used the Linux 2x
-  tooling from main (#4088), with product code matching the release. The quick switcher showed the intended ranked
-  matches for #3966, but the privacy check refused the image before cropping because all three rows displayed their real
-  working directories under the private staged run. The switcher queries its own session list, which the harness's
-  display-path substitution for the main session list does not cover. Investigate how to give those rows safe display
-  paths while keeping their real fixture working directories and the pre-crop privacy check. The image was dropped from
-  the release notes. Focused capture evidence: recorder run `0f04c908-2a73-40e0-a5bc-1044b0ffdec8`. Plan:
-  `plans/queue/quick-switcher-shot-paths.md`.
-
 - **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
   the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
   a reference picture. Today it runs only during development and landings: its reference pictures live outside this

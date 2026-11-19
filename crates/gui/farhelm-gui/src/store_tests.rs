@@ -175,7 +175,8 @@ fn a_staged_session_shows_the_scenarios_age_and_folder_and_another_is_untouched(
     // Held for the test's length: the connection is what feeds the store.
     let (mut fake, _connection) = started(cx);
     let anchor = cx.update(|cx| age::seconds(ticker::wall_now(cx))).unwrap();
-    let file = r#"{"sessions": [{"title": "staged", "age": 120, "cwd": "~/src/farhelm"}]}"#;
+    let file =
+        r#"{"sessions": [{"title": "staged", "age": 120, "cwd": "~/src/farhelm"}], "hosts": []}"#;
     cx.update(|cx| cx.set_global(StagedValues::parse(file, anchor).unwrap()));
     let snapshot = || CollectionState {
         collection: Collection::Sessions,

@@ -328,9 +328,11 @@ pub(crate) fn mark_positions(raw: &str, shown: &str, query: &str) -> Vec<usize> 
 /// equally good matches the most recently active comes first. A scattered title match still comes before an exact
 /// match in a folder: the group outranks the tier.
 ///
-/// The query is trimmed first. Matching reads the raw values (the title, `host_name` and `cwd` as the host wrote
-/// them), so a hidden character in a title is found by typing it, and typing its escaped spelling (`<U+200B>`) finds
-/// nothing. An empty query matches every row in one tier, which leaves the helm's order as it is.
+/// The query is trimmed first. Matching reads the listing's title, `host_name` and `cwd` before display escaping,
+/// so a hidden character in a title is found by typing it, and typing its escaped spelling (`<U+200B>`) finds nothing
+/// (unlike the launcher's editable fields, where a typed spelling stands for its character). A staged capture supplies
+/// its display folders in that listing.
+/// An empty query matches every row in one tier, which leaves the helm's order as it is.
 pub(crate) fn ranked(sessions: &[SessionRow], query: &str) -> Vec<usize> {
     /// Which group a row is in, title matches first; the derived `Ord` is the group order.
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -445,9 +447,9 @@ pub(crate) fn open(
 /// ([`operations::read`]), and hand the answer to `switcher` if it is still open. It is fetched although sessions are
 /// pushed state, because the switcher searches every session in the helm's activity order up to the helm's listing
 /// cap, which the pushed listing (filtered and sorted as the sidebar asks) does not hold. Failures use the helper's
-/// wording. The reply holds the switcher weakly and
-/// each opening makes a switcher of its own, so a reply after its switcher closed reaches nobody, and never a switcher
-/// opened since. A reset retires the UI session, which drops the wait, and closes every dialog, the switcher included.
+/// wording. A staged capture rewrites this window's copy before it searches or draws the rows. Each opening makes a
+/// switcher of its own and the reply holds it weakly, so a reply after close cannot reach a later opening. A reset
+/// retires the UI session, which drops the wait, and closes every dialog, the switcher included.
 fn read_sessions(switcher: WeakEntity<QuickSwitcher>, cx: &mut App) {
     let path =
         ApiPath::api(&["sessions"]).and_then(|path| path.with_query(&[("sort", "activity")]));
@@ -465,7 +467,10 @@ fn read_sessions(switcher: WeakEntity<QuickSwitcher>, cx: &mut App) {
     // this same update, so a switcher that exists always has its read on the way.
     operations::read::<SessionList>(path, "GET /api/sessions", cx, move |answer, cx| {
         let read = match answer {
-            Ok(list) => Read::Loaded(list),
+            Ok(mut list) => {
+                crate::agent_startup::stage_session_rows(&mut list.sessions, cx);
+                Read::Loaded(list)
+            }
             Err(reason) => Read::Failed(reason),
         };
         // A switcher that closed is gone, so the update fails and the reply is dropped.
