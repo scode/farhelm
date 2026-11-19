@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `exited-session-no-terminal.md` — An exited session whose terminal is gone shows Restart and Replace instead of reconnecting forever (protocol bump)
 - [landing 79e60c] `shift-drag-marking.md` — Shift+drag across the session list marks the rows it sweeps (after `session-group-follow-ups.md`)
 - [complete] `one-helm-per-supervisor.md` — Each host records its owning helm, refuses others, and is taken over only on request (protocol bump)
-- [complete] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
+- [landing c0e96d] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
 - [complete] `unusable-folder-refusals.md` — A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
 - [complete] `gui-ux-discards.md` — Fifty discards from the 2026-11-18 GUI UX triage, in one PR
 - [complete] `gui-ux-backend-test-gaps.md` — Fifteen small supervisor, terminal-host and e2e test fixes from the 2026-11-18 GUI UX triage
