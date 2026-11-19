@@ -12,7 +12,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `concealed-link-target.md` — Hidden terminal text cannot change where a printed link goes
 - [complete] `triage-misc-nov18.md` — natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
 - [complete] `triage-discards-nov18.md` — nine discards from the 2026-11-18 highest-bucket triage
-- [pending] `covered-link-refusal.md` — A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
+- [in-flight 45f2b3] `covered-link-refusal.md` — A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
 - [pending] `exited-session-no-terminal.md` — An exited session whose terminal is gone shows Restart and Replace instead of reconnecting forever (protocol bump)
 - [pending] `shift-drag-marking.md` — Shift+drag across the session list marks the rows it sweeps (after `session-group-follow-ups.md`)
 - [pending] `demo-video-capture.md` — The README demo video's capture runs on the desktop app again (mechanism only)
