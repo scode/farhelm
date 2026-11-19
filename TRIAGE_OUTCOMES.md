@@ -1757,21 +1757,6 @@
   feedback file and its index entry in the same change.
 - Execution: `pending`.
 
-## keyboard-overview-omits-in-sequence-number-action.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shortcuts overview
-  doesn't say what a number chord does inside a sequence. Inside a sequence it queues the unfinished word first; no row
-  says so. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix: add an in-sequence row (~5)). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## digit-leading-template-limit-overstated.md
 
 - Outcome: `fix spec`.

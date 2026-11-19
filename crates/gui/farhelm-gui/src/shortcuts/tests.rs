@@ -165,6 +165,11 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
     linux.extend(owned(&[
         (
             "Launching",
+            "In a sequence: add a numbered template after any unfinished word",
+            "Ctrl+Shift+0–9",
+        ),
+        (
+            "Launching",
             "In a sequence: add the ⚡ template",
             "Ctrl+Shift+P",
         ),
@@ -188,6 +193,11 @@ fn each_platform_shows_only_its_own_forms_with_new_on_the_mac_alone() {
     ]);
     mac.extend(owned(&sequence));
     mac.extend(owned(&[
+        (
+            "Launching",
+            "In a sequence: add a numbered template after any unfinished word",
+            "⌘0–9",
+        ),
         ("Launching", "In a sequence: add the ⚡ template", "⌘P"),
         ("Launching", "In a sequence: launch", "Enter"),
         ("Launching", "In a sequence: cancel", "Escape"),
@@ -257,7 +267,11 @@ fn runs(name: &Name) -> Runs {
         Name::Words("Begin launch sequence") => action(&BeginSequence),
         Name::Words("Smaller terminal text") => action(&DecreaseTerminalTextSize),
         Name::Words("Larger terminal text") => action(&IncreaseTerminalTextSize),
-        Name::Words("Launch a numbered template") => Runs::NumberKeys,
+        // The armed sequence recognizes the same physical number chords as direct launch.
+        Name::Words(
+            "Launch a numbered template"
+            | "In a sequence: add a numbered template after any unfinished word",
+        ) => Runs::NumberKeys,
         Name::Words("Templates") => action(&TemplateList),
         // The ⚡ chord inside an armed sequence is the same chord: the sequence's key rules read it from the constants
         // the binding is built from.
