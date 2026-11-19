@@ -14,6 +14,10 @@ description = "The control plane: host registry, SSH transport, aggregation, HTT
 [package.metadata.dist]
 dist = false
 
+[features]
+# Keep native Podman probes tied to disposable storage in integration tests.
+test-seams = []
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true

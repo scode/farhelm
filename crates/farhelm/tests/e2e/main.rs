@@ -80,6 +80,8 @@ mod marker_model;
 #[cfg(target_os = "linux")]
 mod scoped_podman;
 #[cfg(target_os = "linux")]
+mod scoped_podman_real;
+#[cfg(target_os = "linux")]
 mod tab_lifecycle_edges;
 #[cfg(target_os = "linux")]
 mod terminal_tabs;

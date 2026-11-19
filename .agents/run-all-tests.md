@@ -201,7 +201,9 @@ nextest. The same goes for that job's desktop supervisor record and stop tests a
 (`managed_supervisor::`, `procs::tests::finished_exiting`).
 
 The workspace nextest selection includes `scoped_podman` lifecycle coverage with a real systemd user manager and fake
-Podman and conmon. Read any `SKIPPED` output as missing scope coverage.
+Podman and conmon. Read any `SKIPPED` output as missing scope coverage. The ignored `scoped_podman_real` test runs when
+explicitly selected on Linux with rootless Podman, systemd user scopes and static BusyBox. It uses its own Podman store
+and requires no base image or payload.
 
 The workspace nextest selection includes historical `containerized_sessions` compatibility and the real Linux
 `podman_environments` managed-checkout and lifecycle fixture. It covers credential delivery and ordinary tab, file,

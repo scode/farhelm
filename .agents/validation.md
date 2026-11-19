@@ -73,7 +73,13 @@ systemd or SSH substrate ran.
   `cargo nextest run -p farhelm --test e2e -E 'test(/^scoped_podman::/)'`. Read and report a runtime `SKIPPED` as
   missing scope coverage. Parser and failed-stop state checks use
   `cargo nextest run -p farhelm-supervisor --lib -E 'test(/^service::sweep::podman::tests::/)'`. The module also checks
-  unresolved Podman cleanup notices on Stop, Restart and tab close, and in Delete's reply. The existing
+  unresolved Podman cleanup notices on Stop, Restart and tab close, and in Delete's reply.
+- The opt-in Linux `scoped_podman_real` e2e test uses rootless Podman with a systemd user manager and a static
+  `/usr/bin/busybox`, verified with `file`. It runs the production probe and all its Podman commands in a private store
+  and gives its three containers an offline root filesystem. It checks auto-removal, retained exited state, and a live
+  container started outside Farhelm that the agent joined with `podman exec`. Select it with
+  `cargo nextest run -p farhelm --test e2e --run-ignored only -E 'test(/^scoped_podman_real::/)'`. Read runtime
+  `SKIPPED` output as missing real-engine coverage. The existing
   `a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host` test covers the startup deadline with a
   stalled Podman command and a real scope that still must be reaped.
 - The real Linux `podman_environments` e2e module uses a throwaway helm, the production provider and the ordinary

@@ -567,6 +567,42 @@ async fn probe(commands: &dyn PlaceCommands, route: &BaseRoute) -> Result<ReadyP
         .map_err(|error| error.to_string())
 }
 
+/// Run the production local capability check with a test's private Podman
+/// arguments. Even `podman info` can initialize or refresh a Podman store.
+#[cfg(all(target_os = "linux", feature = "test-seams"))]
+pub async fn probe_local_podman_with_test_storage(
+    control_dir: &Path,
+    storage_args: &[String],
+) -> Result<String, String> {
+    struct OwnedStoreProbe<'a> {
+        native: SystemPlaceCommands,
+        storage_args: &'a [String],
+    }
+
+    #[async_trait::async_trait]
+    impl PlaceCommands for OwnedStoreProbe<'_> {
+        async fn run(&self, route: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
+            if argv.get(1).is_some_and(|arg| arg == "info") {
+                let mut args = argv.to_vec();
+                args.splice(1..1, self.storage_args.iter().cloned());
+                self.native.run(route, &args).await
+            } else {
+                self.native.run(route, argv).await
+            }
+        }
+    }
+
+    let commands = OwnedStoreProbe {
+        native: SystemPlaceCommands {
+            control_dir: control_dir.to_owned(),
+        },
+        storage_args,
+    };
+    probe(&commands, &BaseRoute::Local)
+        .await
+        .map(|ready| ready.version)
+}
+
 /// Refusals identify the failed prerequisite and discard raw command errors.
 /// Manager output can contain proxy credentials, so none reaches public reasons.
 async fn run(

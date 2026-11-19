@@ -84,6 +84,10 @@
 
 use anyhow::Context;
 use axum::{Router, response::IntoResponse, routing::get};
+
+#[cfg(all(target_os = "linux", feature = "test-seams"))]
+#[doc(hidden)]
+pub use environment::podman_probe::probe_local_podman_with_test_storage;
 use farhelm_proto::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
