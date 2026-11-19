@@ -33,10 +33,6 @@ consequences.
   — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-osc52-classifier-removal-clipboard-read-disclosure.md`](trailing-osc52-classifier-removal-clipboard-read-disclosure.md)
-  — Removing the raw OSC 52 classifier does not expose clipboard reads. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`header-actions-follow-unseen-session.md`](header-actions-follow-unseen-session.md) — A Stop, Restart, Replace or
   Delete aimed at one session can act on a different session when the selection just changed. Replace on the
   interrupted-session card has the same problem. Skipping confirmations can make the wrong action take effect
