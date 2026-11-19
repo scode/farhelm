@@ -1638,8 +1638,11 @@ includes sessions opened in an existing checkout and replacements of the session
 subdirectory clones to the new checkout's top level. Clone of other sessions, Replace with, and plain Replace start from
 the source's actual directory; a managed checkout then requires an explicit repository selection, a saved repository
 setup, or a template that sets one. While Replace with still shows the source's folder, the launcher names its managed
-checkout and says the replacement keeps working in it with its changes. `farhelm agent clone` keeps its
-existing-directory behavior.
+checkout and says the replacement keeps working in it with its changes. If the source has a managed checkout, choosing
+Managed checkout in Replace with warns under Where that the replacement starts from a fresh clone without the source
+checkout's changes. If Replace removes the checkout's last session, the checkout moves to that host's trash. In a
+session's own sandbox or container, this is trash inside the environment, which is discarded when the environment is
+deleted. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
 root. The default checkout folder and all-hosts post-clone command can be set or cleared under **Checkouts** in Settings
@@ -2060,12 +2063,15 @@ submission and focus-return behavior.
   are offered. Clone, replace with, and New are one launcher — same layout, same controls, same search, same validation
   — differing only in what is pre-filled when they open and in what launching does (create; create then delete the
   source). When Folder holds the source's own folder in a managed checkout, a checkout mark and a line below Folder name
-  that checkout and explain that the replacement keeps working in it with its changes. Its launch button is the
-  confirmation of that delete: while the source has anything alive, the launcher shows Replace's warning about the
-  source beside it, following the source's state as the client sees it while the launcher stays open, and launching
-  carries the precondition matching what the launcher showed at the click (see the confirmation rule below). A source
-  that has more alive by then, such as one restarted while the launcher was open, is kept: the new session is still
-  created first, with no liveness check before it, and the user gets Replace's both-sessions-exist error.
+  that checkout and explain that the replacement keeps working in it with its changes. For a source in a managed
+  checkout, selecting Managed checkout warns below Where that the replacement starts from a fresh clone and that
+  replacing the old checkout's last session moves it to the host's trash, as described under Managed checkouts. Its
+  launch button is the confirmation of that delete: while the source has anything alive, the launcher shows Replace's
+  warning about the source beside it, following the source's state as the client sees it while the launcher stays open,
+  and launching carries the precondition matching what the launcher showed at the click (see the confirmation rule
+  below). A source that has more alive by then, such as one restarted while the launcher was open, is kept: the new
+  session is still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist
+  error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
   confirmation that says so when anything is still alive, unless session confirmations are skipped (below). Deletion may
   make partial progress before failing, including removing attachment files while retaining the session row for retry.

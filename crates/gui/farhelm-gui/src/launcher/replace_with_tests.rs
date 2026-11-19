@@ -12,7 +12,7 @@ use serde_json::json;
 
 use super::draft::Mode;
 use super::entry::open_replace_with;
-use super::entry_tests::{destination, window_with};
+use super::entry_tests::{destination, environment_window, window_with};
 use super::folder_default_tests::edit_draft;
 use super::view_tests::{Field, SELECT_ALL, draft, focused, name_of, shown_refusal};
 use crate::local_state;
@@ -106,20 +106,26 @@ fn replace_with_prefills_the_source_and_holds_its_host(cx: &mut TestAppContext) 
 
 /// Give the live Replace source a checkout whose working directory is below
 /// its root. The hint follows the directory the launch would actually use.
-fn source_in_checkout(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
-    let source = session("a").host(9).cwd("/linked/widget/lib");
+fn source_in_checkout(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    key: &'static str,
+    host: i64,
+    cwd: &str,
+) {
+    let source = session(key).host(host).cwd(cwd);
     let mut pushed = change(
         listing_meta(&["a", "b", "c", "d"], 5, false),
         &[source],
         &[],
     );
-    pushed.upsert[0].value["host_identity"] = json!("identity9");
+    pushed.upsert[0].value["host_identity"] = json!(format!("identity{host}"));
     pushed.upsert[0].value["canonical_cwd"] = json!("/work/widget/lib");
     pushed.upsert[0].value["working_copy"] = json!({
         "id": "checkout-1",
         "repo": {"owner": "acme", "name": "widget"},
         "canonical_path": "/work/widget",
-        "origin_session_id": "a"
+        "origin_session_id": key
     });
     helm.push(pushed);
     settle(cx);
@@ -157,7 +163,7 @@ fn answer_folder_check(
 #[gpui::test]
 fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
-    source_in_checkout(&mut helm, cx);
+    source_in_checkout(&mut helm, cx, "a", 9, "/linked/widget/lib");
     assert!(replace_with(cx, "a"));
     assert_eq!(destination(cx), (Some(9), "/linked/widget/lib".into()));
     let folder = "launcher-replacement-checkout-folder";
@@ -196,12 +202,67 @@ fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppConte
 #[gpui::test]
 fn replace_with_does_not_promise_a_repointed_checkout_folder(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
-    source_in_checkout(&mut helm, cx);
+    source_in_checkout(&mut helm, cx, "a", 9, "/linked/widget/lib");
     assert!(replace_with(cx, "a"));
     assert_eq!(destination(cx), (Some(9), "/linked/widget/lib".into()));
     answer_folder_check(&mut helm, cx, "/linked/widget/lib", "/unrelated/lib");
     assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
     assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
+}
+
+/// The new clone can use another repository. The warning still names the
+/// source's checkout and explains why its edits could end up in the trash.
+/// Returning to Folder puts the checkout's own hint back.
+#[gpui::test]
+fn replace_with_warns_where_about_the_sources_checkout(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    source_in_checkout(&mut helm, cx, "a", 9, "/work/widget/lib");
+    assert!(replace_with(cx, "a"));
+    let folder = "launcher-replacement-checkout-folder";
+    let warning = "launcher-replacement-checkout-warning";
+    assert!(name_of(cx, folder).is_some(), "the source has a checkout");
+    assert_eq!(name_of(cx, warning), None);
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    edit_draft(cx, |draft| {
+        draft.choose_repository(farhelm_proto::parse_github_repo("other/repo").unwrap());
+    });
+    assert_eq!(
+        draft(cx).checkout.and_then(|checkout| checkout.repo),
+        Some(farhelm_proto::parse_github_repo("other/repo").unwrap()),
+        "the replacement's repository differs from the source's"
+    );
+    assert_eq!(name_of(cx, folder), None);
+    assert_eq!(
+        name_of(cx, warning).as_deref(),
+        Some(
+            "Starts from a fresh clone without the changes in this session's checkout of acme/widget. If this replaces its last session, the old checkout moves to the trash."
+        )
+    );
+    test_support::click(cx, "launcher-destination-Folder");
+    settle(cx);
+    assert!(name_of(cx, folder).is_some());
+    assert_eq!(name_of(cx, warning), None);
+}
+
+/// Replacing into a fresh checkout in the source's own sandbox releases the
+/// old checkout through Replace's usual archive path. The trash remains in
+/// the sandbox and goes away when the sandbox is deleted.
+#[gpui::test]
+fn replace_with_warns_that_the_checkouts_trash_stays_inside_the_sandbox(cx: &mut TestAppContext) {
+    let (mut helm, cx) = environment_window(cx, "c", "web");
+    source_in_checkout(&mut helm, cx, "c", 11, "/work/widget/lib");
+    assert!(replace_with(cx, "c"));
+    assert_eq!(draft(cx).host, Some(11));
+    assert!(name_of(cx, "launcher-replacement-checkout-folder").is_some());
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    settle(cx);
+    assert!(draft(cx).checkout.is_some());
+    assert_eq!(
+        name_of(cx, "launcher-replacement-checkout-warning").as_deref(),
+        Some(
+            "Starts from a fresh clone without the changes in this session's checkout of acme/widget. If this replaces its last session, the old checkout moves to the trash inside the sandbox or container. Deleting the sandbox or container also deletes its trash."
+        )
+    );
 }
 
 /// Launch provenance alone does not tell us that the source still uses a
@@ -219,6 +280,10 @@ fn replace_with_of_an_unmanaged_source_has_no_checkout_hint(cx: &mut TestAppCont
     assert!(replace_with(cx, "a"));
     assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
     assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    settle(cx);
+    assert!(draft(cx).checkout.is_some());
+    assert_eq!(name_of(cx, "launcher-replacement-checkout-warning"), None);
 }
 
 /// The launch button is the confirmation of the source's delete, so it must say what that delete stops, and the request

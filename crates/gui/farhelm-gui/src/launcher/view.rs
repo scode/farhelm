@@ -2333,6 +2333,7 @@ impl Render for Launcher {
             .gap(px(ROW_GAP))
             .child(section_label("Destination", palette))
             .children(where_row)
+            .children(self.replacement_checkout_warning(palette, cx))
             .children(placement)
             .children(host_row)
             .children(
