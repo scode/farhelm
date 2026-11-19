@@ -103,11 +103,11 @@ other agents".
 ## Claude Code shell commands: no globs, no expansions
 
 This section applies only to Claude Code sessions and their subagents; other harnesses do not have the problem it works
-around. If you are Claude Code, a shell command you compose and run (through your shell tool, or in a prompt to a Claude
-Code subagent that will run it) contains no glob and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no
-variables (`$HOME`, `$d`), no `$(...)` or backticks, no `${...}`, no `$((...))`. Anything that needs one of those is
-written as a Deno TypeScript script, in a file, and run as that file. Put it in your scratch directory (see "Agent
-scratch space") unless it belongs in the repository. Plain commands with literal arguments (`git status`,
+around. When running as Claude Code, a shell command you compose and run (through your shell tool, or in a prompt to a
+Claude Code subagent that will run it) contains no glob and no `$` expansion of any kind: no `*`, `?` or `[...]`
+patterns, no variables (`$HOME`, `$d`), no `$(...)` or backticks, no `${...}`, no `$((...))`. Anything that needs one of
+those is written as a Deno TypeScript script, in a file, and run as that file. Put it in your scratch directory (see
+"Agent scratch space") unless it belongs in the repository. Plain commands with literal arguments (`git status`,
 `gh pr view 123`, `cargo nextest run -p farhelm-helm`) and pipelines of them stay fine in the shell.
 
 The reason is that Claude Code can still ask for approval of a shell command when the session runs with every permission
