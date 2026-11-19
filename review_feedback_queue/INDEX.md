@@ -2439,10 +2439,6 @@ consequences.
   — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md`](trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md)
-  — Listing error comments falsely claim unreadable launch sentinels fail the request. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-pre-range-grid-first-input-queue-acceptance-wording.md`](trailing-pre-range-grid-first-input-queue-acceptance-wording.md)
   — Direct grid input call preserves the prior delivery contract. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

@@ -23917,6 +23917,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `pnmlxnwopwszouluvsompmqsopylkyvk`, bookmark `plan/gui-ux-wording/05-late-activity-test-doc`,
   [PR #4257](https://github.com/scode/farhelm/pull/4257/changes).
 
+## trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Listing comments say
+  an unreadable launch file fails the list. Contradicts SPEC_impl ("does not fail lists") and the code. Confirmed.
+  Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comments (~4)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `vvvwwvryrwszvowpusuwqtmutywrykwv`, bookmark `plan/gui-ux-wording/06-list-reply-doc-prescribes`,
+  [PR #4258](https://github.com/scode/farhelm/pull/4258/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.
