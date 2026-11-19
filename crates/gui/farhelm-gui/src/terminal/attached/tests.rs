@@ -4530,6 +4530,8 @@ fn a_program_hyperlink_shows_its_destination_and_opens_on_a_click(cx: &mut TestA
 
 /// The disclosed target authorizes an open only while all of it is visible. An approval card can cover some of
 /// the panel while the link and pointer remain outside the card, so hit testing the pointer cannot enforce this.
+/// The reason draws over the card while the link's panel is held back (the pointer has not moved to another cell),
+/// then returns to its ordinary place, so it never covers the reopened panel.
 #[gpui::test]
 fn a_real_approval_card_covering_the_link_panel_refuses_the_click(cx: &mut TestAppContext) {
     use crate::approvals::region_tests::{push, stop, waiting};
@@ -4556,6 +4558,80 @@ fn a_real_approval_card_covering_the_link_panel_refuses_the_click(cx: &mut TestA
         Some(
             "cannot open: full link details are covered by another Farhelm surface; move the pointer and hover again"
         )
+    );
+    let drawn_after = |cx: &mut VisualTestContext, other: &str| {
+        let frame = test_support::frame(cx);
+        let index = |id: &str| {
+            let mut nodes = frame
+                .iter()
+                .enumerate()
+                .filter(|(_, node)| node.element_id.as_deref() == Some(id));
+            let (index, _) = nodes.next().unwrap_or_else(|| panic!("{id} was drawn"));
+            assert!(nodes.next().is_none(), "{id} was exposed only once");
+            index
+        };
+        index("terminal-link-refusal") > index(other)
+    };
+    let raised_at = test_support::bounds(h.cx, "terminal-link-refusal");
+    assert!(
+        raised_at.intersects(&card),
+        "the ordinary line and card overlap"
+    );
+    assert!(drawn_after(h.cx, "approval-region"));
+
+    let pane = h.pane.clone();
+    let question = h.cx.update(|window, cx| {
+        use crate::components::{HoverHelp, Tier};
+        use crate::prompt::{self, Answer, Question};
+
+        let anchor = pane.read(cx).cover_anchor.clone().expect("drawn anchor");
+        let anchor = anchor.placed_by(|_, _, _| point(px(60.), px(0.)));
+        let mark = focus::Mark::take(cx);
+        prompt::ask_anchored(
+            Question::new(
+                "Delete this session?",
+                Answer::new(
+                    "Delete",
+                    HoverHelp::tooltip("Delete it for good"),
+                    Tier::Danger,
+                ),
+                (),
+            ),
+            anchor,
+            None,
+            &mark,
+            |(), _, _| {},
+            window,
+            cx,
+        )
+        .expect("the question opened without moving the pointer")
+    });
+    settle(h.cx);
+    assert!(test_support::bounds(h.cx, "prompt").intersects(&raised_at));
+    assert!(!drawn_after(h.cx, "prompt"), "the question stays readable");
+    h.cx.update(|window, cx| layers::close(question, window, cx));
+    settle(h.cx);
+    assert!(drawn_after(h.cx, "approval-region"));
+
+    // A move to another cell of the same link reopens its panel, so the reason must drop under it: raised, it would
+    // paint over the panel's destination line, which the cover check cannot see.
+    let within = h.at_cell(4, 0);
+    assert!(!card.contains(&within));
+    h.rest_on(within);
+    assert!(
+        !drawn_after(h.cx, "approval-region"),
+        "moving to another cell of the link lowers the reason under the reopened panel"
+    );
+
+    let off = h.at_cell(15, 0);
+    h.rest_on(off);
+    assert!(
+        !drawn_after(h.cx, "approval-region"),
+        "leaving the link lowers the reason"
+    );
+    assert_eq!(
+        test_support::bounds(h.cx, "terminal-link-refusal"),
+        raised_at
     );
 }
 

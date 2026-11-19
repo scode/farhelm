@@ -220,6 +220,8 @@ linux/template-number-menu--dark.png 2c5ed5cf67321290f38eba392d396aea4d98be7a
 linux/template-number-menu--light.png 5c71e027d22f09f1f6d28963e8374e1c761de0c7
 linux/templates-dialog--dark.png 8dfdf8cc25742fc465aacbb5163bba51a4346589
 linux/templates-dialog--light.png d065b97a005d9fc35c557ed2428e918d5535837c
+linux/terminal-covered-link--dark.png f4f8d6746094ec5b19ed65f0b1b796b42e5bbf7a
+linux/terminal-covered-link--light.png e9f23c56971c4956d563b8821f699a30d1673496
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d
 linux/terminal-cursors--light.png 132a4374cd6c6d9f0caf116436286f67a99df8e9
 linux/terminal-delete-scrim--dark.png 003f83508000483997e7455343e31346be48de97

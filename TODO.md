@@ -50,12 +50,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and Settings and a session's own Suspend and Resume. The old app's 13 launch-after-wake cases (tensorlake-lifecycle)
   are the spec. Design the wake with an opus consult.
 
-- **A link click should be refused when another Farhelm surface covers its panel.** SPEC asks this; nothing checks it in
-  the GPUI app. It needs a hit test in the layer manager, which today cannot see popovers that pass the pointer through
-  (`layers::Popover::passes_pointer`; see `terminal/disclosure.rs`, `fully_visible`). Parity rows in
-  `docs/gpui/parity/terminal.md`: terminal-files' covered-hover cases, terminal-links' covered-display refusal,
-  grid-attach 1099 and 1464. Plan: `plans/queue/covered-link-refusal.md`.
-
 - **An exited session without a terminal keeps "reconnecting" forever.** When a session's terminal host has died (for
   example after a container was stopped and started from outside Farhelm), the session correctly reads "Exited", but its
   pane stays on "Session unavailable — reconnecting" and retries every 30 seconds. The supervisor refuses the attach

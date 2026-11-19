@@ -99,13 +99,14 @@
 //!   the control without either in a window too narrow for that. The [`beside`] submodule has the numbers.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
-//! - **Two pill slots that are not layers** ([`show_pill`], [`show_launch_pill`]). They are the things a feature draws
+//! - **Display-only pill slots** ([`show_pill`], [`show_launch_pill`], [`show_terminal_refusal`]). They let a feature draw
 //!   over the dialogs without opening one. The pill is SPEC.md's quick-launch sequence pill, which stays in view above
 //!   the launcher's veil; it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and
 //!   goes when that element is no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started"
 //!   report, centered 20 pixels above the window's bottom edge, where the old `.launch-progress-pill` was fixed. The
-//!   z-order ladder below gives each its place. Each slot holds one pill, and the two show at once, each hidden only
-//!   through the id its show returned ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only, like
+//!   z-order ladder below gives each its place. A refused link's explanation uses an anchored slot above the approval
+//!   cards. Each slot holds one pill, and the slots can show together. Each is hidden through the id its show returned
+//!   ([`hide_pill`]); all go on a reset ([`close_all`]). They are display only, like
 //!   the tooltip: they ask for no pointer input and hold no focus, so a press on one is a press on whatever it covers,
 //!   and nothing that asks about layers ([`any_open`], Tab's trap, where focus recovers, Escape's [`dismiss_top`]) sees
 //!   them.
@@ -134,7 +135,7 @@
 //!
 //! The one order in which a window draws everything, bottom to top. Every other doc in this module, and SPEC_impl.md's
 //! "Overlays: the layer manager", that says what an overlay is drawn over or under points here; a new slot gets a rung
-//! here first. [`overlay`] draws rungs 2 to 8 as `deferred` elements whose priorities follow this order. Each rung
+//! here first. [`overlay`] draws rungs 2 to 9 as `deferred` elements whose priorities follow this order. Each rung
 //! gives the old app's z-index for what it ports, from the old stylesheet's z-index ladder comment at `.header-confirm`
 //! (`crates/farhelm-ui/assets/app.css` at reference commit `24bc0580`, lines 2187-2272, cited below by line), where
 //! equal values were ordered by their place in the page.
@@ -143,7 +144,7 @@
 //! 2. **The layers**, each over the one opened before it: dialogs over their veils, popovers (menus and lists) and
 //!    anchored dialogs (questions). Old: the row menus at 20 (line 2220), the header questions at 30 (line 2227) and
 //!    the modal dialogs' backdrops at 40 (line 2243). Only the layers under the lowest raised one are on this rung; it
-//!    and every layer opened over it are on rung 6.
+//!    and every layer opened over it are on rung 7.
 //! 3. **The launch pill** ([`show_launch_pill`]). Old: 40, the progress pill inside the launcher's backdrop and the
 //!    "Started" report on its own (lines 6527 and 6564, past the ladder comment), level with the dialogs, so the page's
 //!    order put it over some and under others. Here it is over every dialog on rung 2, a deviation chosen by the
@@ -154,12 +155,15 @@
 //!    blocking backdrop ([`above_approval_region`] has the decision).
 //! 5. **The approval region** ([`install_approval_region`]). Old: the approval cards at 45 (line 2247), above every
 //!    modal backdrop.
-//! 6. **The raised layers**: the lowest raised layer's box, and every layer opened over it, whole, veils included, each
+//! 6. **The terminal link refusal** ([`show_terminal_refusal`]), at its ordinary line's bounds with pointer input
+//!    still going to the approval card beneath it. While a layer holds the keyboard, draw the refusal under the
+//!    layers so it cannot obscure the question there.
+//! 7. **The raised layers**: the lowest raised layer's box, and every layer opened over it, whole, veils included, each
 //!    over the one before. Old: the tunnel consent dialog at 50 (line 2261). A dialog opened over it would have sat at
 //!    40, under it; here it goes over it, so that the drawn order stays the stack's ([`above_approval_region`]).
-//! 7. **The sequence pill** ([`show_pill`]). Old: `.launch-sequence-indicator` at 50 (line 2256), later in the page
+//! 8. **The sequence pill** ([`show_pill`]). Old: `.launch-sequence-indicator` at 50 (line 2256), later in the page
 //!    than the tunnel consent dialog.
-//! 8. **The tooltip** ([`tooltip`]). Old: `.farhelm-tooltip` at 50 (line 2258), "above every panel and modal backdrop,
+//! 9. **The tooltip** ([`tooltip`]). Old: `.farhelm-tooltip` at 50 (line 2258), "above every panel and modal backdrop,
 //!    the approval cards included", its card appended to the page's body (`tooltip.js` line 388).
 
 use std::cell::Cell;
@@ -211,7 +215,7 @@ impl LayerId {
     }
 }
 
-/// One window's overlays: its open layers, bottom to top, its two pills and its tooltip.
+/// One window's overlays: its open layers, display-only slots, approval region and tooltip.
 pub struct LayerStack {
     window: AnyWindowHandle,
     layers: Vec<Layer>,
@@ -222,8 +226,10 @@ pub struct LayerStack {
     /// The launch pill showing in this window, if any ([`show_launch_pill`]): the second slot, kept apart from `layers`
     /// for the same reason as `pill`, and apart from `pill` so that neither show replaces the other's pill.
     launch_pill: Option<ShownLaunchPill>,
-    /// The id the next shown pill gets, in either slot: one counter, so a [`PillId`] names one pill in one slot and
-    /// [`hide_pill`] never takes down a pill in the other.
+    /// The terminal's refused-link line while the pointer still rests on the link. Its own slot lets the line
+    /// explain the refusal over the card that covered the details without disturbing the other pills.
+    terminal_refusal: Option<ShownPill>,
+    /// One counter across the slots so a [`PillId`] always names a single pill.
     next_pill_id: u64,
     /// The approval region installed in this window, if any ([`install_approval_region`]). Kept apart from `layers`,
     /// as the pill is, so that nothing that walks the layers for focus, Escape or "is anything open" counts it.
@@ -436,6 +442,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         next_id: 0,
         pill: None,
         launch_pill: None,
+        terminal_refusal: None,
         next_pill_id: 0,
         region: None,
         tooltip: None,
@@ -825,7 +832,7 @@ impl Popover {
     /// which go to the topmost layer the user answers, passing over this one ([`dismiss_top`]). Opening it leaves the
     /// tooltip up, as the pill does, since it covers nothing the user is pointing at.
     ///
-    /// It is an ordinary layer on rung 2 of the module docs' z-order ladder (rung 6 over a raised one), in stack order,
+    /// It is an ordinary layer on rung 2 of the module docs' z-order ladder (rung 7 over a raised one), in stack order,
     /// not a slot of its own like the pill: a dialog opened while it shows covers it, its veil taking even the presses
     /// on its controls, and one opened over a dialog passes the pointer to that dialog or its veil, never to the page
     /// beneath.
@@ -1529,8 +1536,8 @@ fn close_taking(
 /// This is the one close that does not need the layer's id: a reset is not any opener's decision, and a dialog that
 /// survived it would keep its veil over the inert window, where it takes the clicks meant for Take back or Retry and
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
-/// that took focus opened (and going home once that is no longer drawn). Both pills go too ([`show_pill`],
-/// [`show_launch_pill`]): what they showed belonged to the UI session the reset retired, and their features, which live
+/// that took focus opened (and going home once that is no longer drawn). Pills go too: their views belonged to
+/// the UI session the reset retired, and their features, which live
 /// in that session, are no longer there to hide them. The tooltip is left alone: it goes with its control. So is the
 /// approval region ([`install_approval_region`]): its feature installs it once per window, and its view draws from the
 /// current UI session, which after a reset has no cards until the new session brings them.
@@ -1542,8 +1549,11 @@ pub fn close_all(cx: &mut App) {
         windows.0.values().filter_map(WeakEntity::upgrade).collect();
     for stack in stacks {
         stack.update(cx, |stack, cx| {
-            // `|`, not `||`: both slots are emptied whatever the first held.
-            if stack.pill.take().is_some() | stack.launch_pill.take().is_some() {
+            // Eager evaluation empties every slot even if the first also held a pill.
+            if stack.pill.take().is_some()
+                | stack.launch_pill.take().is_some()
+                | stack.terminal_refusal.take().is_some()
+            {
                 cx.notify();
             }
         });
@@ -1633,8 +1643,7 @@ pub(crate) fn pointer_covers(panel: HitboxId, window: &Window) -> Option<bool> {
     panel.is_occluded(window)
 }
 
-/// Whether any dialog or popover is open in `window`. Neither pill ([`show_pill`], [`show_launch_pill`]) is a layer, and
-/// neither ever counts.
+/// Whether any dialog or popover is open in `window`. The display-only slots never count as open layers.
 pub fn any_open(window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| !stack.read(cx).layers.is_empty())
 }
@@ -1832,7 +1841,7 @@ pub struct Pill {
     pub placement: PillPlacement,
 }
 
-/// Identifies one shown pill, in either slot. Returned by [`show_pill`] and [`show_launch_pill`]; the only way to hide
+/// Identifies one shown pill, in any slot. Returned by the slot's show function; the only way to hide
 /// that pill, as a [`LayerId`] is the only way to close its layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PillId(u64);
@@ -1862,7 +1871,7 @@ struct ShownPill {
     _drawn: Subscription,
 }
 
-/// Show `pill` in `window`, above every layer (rung 7 of the module docs' z-order ladder), replacing any pill showing
+/// Show `pill` in `window`, above every layer (rung 8 of the module docs' z-order ladder), replacing any pill showing
 /// there. Returns the id that hides it, or `None` when its anchor element is already gone (there is nowhere to place
 /// it) or the window has no layer stack.
 ///
@@ -1885,6 +1894,36 @@ struct ShownPill {
 /// [`crate::local_state`] notifies), or the pill is gone until then. [`pill_shown`] is there for a feature that must
 /// check.
 pub fn show_pill(pill: Pill, window: &mut Window, cx: &mut App) -> Option<PillId> {
+    show_anchored_pill(pill, |stack| &mut stack.pill, window, cx)
+}
+
+/// Show a terminal refusal over the approval cards when no layer holds the keyboard. The caller anchors it to the
+/// line's normal place and supplies a view without input, so the approval cards' controls keep working underneath.
+pub(crate) fn show_terminal_refusal(
+    view: AnyView,
+    anchor: Anchor,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<PillId> {
+    show_anchored_pill(
+        Pill {
+            view,
+            anchor,
+            placement: PillPlacement::Centered,
+        },
+        |stack| &mut stack.terminal_refusal,
+        window,
+        cx,
+    )
+}
+
+/// Anchored slots share one lifetime rule: the slot's own subscription retires it when its anchor leaves the frame.
+fn show_anchored_pill(
+    pill: Pill,
+    slot: fn(&mut LayerStack) -> &mut Option<ShownPill>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<PillId> {
     let Pill {
         view,
         anchor,
@@ -1895,11 +1934,11 @@ pub fn show_pill(pill: Pill, window: &mut Window, cx: &mut App) -> Option<PillId
     let id = stack.update(cx, |stack, cx| {
         let id = PillId(stack.next_pill_id);
         stack.next_pill_id += 1;
-        let drawn = cx.observe_release(&state, |stack, _, cx| {
-            stack.pill = None;
+        let drawn = cx.observe_release(&state, move |stack, _, cx| {
+            *slot(stack) = None;
             cx.notify();
         });
-        stack.pill = Some(ShownPill {
+        *slot(stack) = Some(ShownPill {
             id,
             view,
             anchor: anchor.bounds,
@@ -1969,8 +2008,7 @@ pub fn show_launch_pill(view: AnyView, window: &mut Window, cx: &mut App) -> Opt
     Some(id)
 }
 
-/// Take down the pill `id` in `window`, in whichever slot it shows, if it still shows. Nothing happens once another
-/// show has replaced it, and the pill in the other slot is never touched.
+/// Take down the pill `id` in `window`, in whichever slot it shows. Only the exact id in its slot can match.
 pub fn hide_pill(id: PillId, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
@@ -1984,16 +2022,28 @@ pub fn hide_pill(id: PillId, window: &mut Window, cx: &mut App) {
             stack.launch_pill = None;
             cx.notify();
         }
+        if stack
+            .terminal_refusal
+            .as_ref()
+            .is_some_and(|pill| pill.id == id)
+        {
+            stack.terminal_refusal = None;
+            cx.notify();
+        }
     });
 }
 
-/// Whether the pill `id` still shows in `window`, in either slot: not hidden, replaced, taken down by a reset, or gone
+/// Whether the pill `id` still shows in `window`: not hidden, replaced, taken down by a reset, or gone
 /// with its anchor.
 pub fn pill_shown(id: PillId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| {
         let stack = stack.read(cx);
         stack.pill.as_ref().is_some_and(|pill| pill.id == id)
             || stack.launch_pill.as_ref().is_some_and(|pill| pill.id == id)
+            || stack
+                .terminal_refusal
+                .as_ref()
+                .is_some_and(|pill| pill.id == id)
     })
 }
 
@@ -2041,7 +2091,7 @@ pub fn install_approval_region(view: AnyView, window: &mut Window, cx: &mut App)
 }
 
 /// Draw the open layer `id`'s own box, and every layer opened over it, above the approval region until it closes (rung
-/// 6 of the module docs' z-order ladder); its veil stays under the cards (rung 4). Its opener calls this right after
+/// 7 of the module docs' z-order ladder); its veil stays under the cards (rung 4). Its opener calls this right after
 /// the open, before a frame shows it. Only SPEC.md's tunnel warning does, so a card that asks for the warning cannot
 /// cover it: the old app drew that dialog at z-index 50, over the approval cards' 45 (`.tunnel-consent-backdrop` and
 /// `.approval-cards` in `app.css` at reference commit `24bc0580`, lines 9790 and 8842, and the z-index ladder at
@@ -2145,7 +2195,7 @@ impl LayerStack {
 
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
-/// Everything above the window's content, which the root view draws as its last child: rungs 2 to 8 of the module
+/// Everything above the window's content, which the root view draws as its last child: rungs 2 to 9 of the module
 /// docs' z-order ladder, from the layers under the lowest raised one ([`above_approval_region`]) up to the tooltip.
 #[allow(
     clippy::disallowed_methods,
@@ -2158,20 +2208,27 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         && stack.launch_pill.is_none()
         && stack.region.is_none()
         && stack.pill.is_none()
+        && stack.terminal_refusal.is_none()
         && stack.tooltip.is_none()
     {
         return None;
     }
-    // The deferred priorities, bottom to top, are the module docs' z-order ladder. Rungs 3 to 5 (the launch pill, the
-    // lowest raised dialog's veil and the region) go between the layers under the lowest raised one and the rest, so a
-    // layer's priority is its place in the stack plus one, or plus four from the lowest raised one up.
+    // The launch pill, raised veil, approval region and terminal refusal go between ordinary layers and raised
+    // layers. Keep their priorities consecutive so the same rung always wins if they overlap.
     let (raised, above) = (stack.raised_from(), stack.layers.len());
     let (launch_depth, veil_depth, region_depth) = (raised + 1, raised + 2, raised + 3);
-    let (pill_depth, tooltip_depth) = (above + 4, above + 5);
+    // An open question must be readable even if it and the refusal overlap. Determine priority here, so opening
+    // or closing a focus-taking layer takes effect in the same frame without a terminal redraw.
+    let refusal_depth = if stack.layers.iter().any(|layer| layer.takes_focus) {
+        0
+    } else {
+        raised + 4
+    };
+    let (pill_depth, tooltip_depth) = (above + 5, above + 6);
     let palette = theme::palette(cx);
     let mut overlay = div().absolute().top_0().left_0().size_full();
     for (index, layer) in stack.layers.iter().enumerate() {
-        let depth = if index < raised { index + 1 } else { index + 4 };
+        let depth = if index < raised { index + 1 } else { index + 5 };
         let id = layer.id;
         let main_action = layer.main_action.clone();
         let container = layer.container.clone();
@@ -2333,10 +2390,15 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         };
         overlay = overlay.child(gpui::deferred(placed).with_priority(region_depth));
     }
+    // These wrappers take no input, so a press on either pill reaches what it covers.
+    if let Some(refusal) = &stack.terminal_refusal {
+        let placed = PlacedLate {
+            place: LateBox::AtAnchor(refusal.anchor.clone()),
+            child: refusal.view.clone().into_any_element(),
+        };
+        overlay = overlay.child(gpui::deferred(placed).with_priority(refusal_depth));
+    }
     if let Some(pill) = &stack.pill {
-        // Rung 7 of the ladder: above every layer, under the tooltip. Nothing here asks for the pointer (no listener,
-        // no `occlude`), so GPUI registers no hit area for the placing wrapper and a press on the pill reaches what it
-        // covers.
         let placed = PlacedLate {
             place: LateBox::Pill {
                 anchor: pill.anchor.clone(),
@@ -2587,6 +2649,8 @@ struct PlacedLate {
 
 /// The box a [`PlacedLate`] lays its child out in.
 enum LateBox {
+    /// The refusal takes the exact bounds of its ordinary line, which are already snapped to physical pixels.
+    AtAnchor(AnchorBounds),
     /// Over the pill's anchor, as its [`PillPlacement`] says.
     Pill {
         anchor: AnchorBounds,
@@ -2644,6 +2708,12 @@ impl Element for PlacedLate {
         cx: &mut App,
     ) -> bool {
         let (origin, size) = match &self.place {
+            LateBox::AtAnchor(anchor) => {
+                let Some(anchor) = anchor.get() else {
+                    return false;
+                };
+                (anchor.origin, anchor.size)
+            }
             LateBox::Window => (point(px(0.), px(0.)), window.viewport_size()),
             LateBox::WindowBottom => {
                 // A window-sized column that sets the view on its bottom inset, centered across: the old pill's
@@ -2682,7 +2752,10 @@ impl Element for PlacedLate {
                     PillPlacement::Bottom => frame.items_end(),
                 };
                 self.child = frame.child(content).into_any_element();
-                (anchor.origin, anchor.size)
+                (
+                    point(anchor.origin.x.round(), anchor.origin.y.round()),
+                    anchor.size,
+                )
             }
         };
         let space = gpui::size(
@@ -2690,8 +2763,7 @@ impl Element for PlacedLate {
             AvailableSpace::Definite(size.height),
         );
         self.child.layout_as_root(space, window, cx);
-        self.child
-            .prepaint_at(point(origin.x.round(), origin.y.round()), window, cx);
+        self.child.prepaint_at(origin, window, cx);
         true
     }
 

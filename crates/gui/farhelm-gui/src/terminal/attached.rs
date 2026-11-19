@@ -510,10 +510,14 @@ pub struct AttachedTerminal {
     press_visibility: Option<Result<(), Hidden>>,
     /// The explanation of a refused link click, shown at the top of the terminal until the next press there.
     refusal: Option<SharedString>,
-    /// Set by a refused click and cleared once the pointer moves to another cell: while set, no destination display
-    /// shows, so the refusal's advice (enlarge the window and hover again) means hovering again, as in the old app,
-    /// and the display that was not fully visible does not keep sitting over the explanation.
-    refusal_raised: bool,
+    /// Suppress the destination panel until the pointer reaches a new cell, so the hover does not immediately
+    /// reopen over the refusal. An adjacent cell of the same link is enough to hover again.
+    refusal_waits_for_hover: bool,
+    /// The line stays above approvals as long as the pointer is still on the refused link, even if moving within
+    /// the span has already restarted the disclosure.
+    refusal_target: Option<RefusalTarget>,
+    /// The display-only copy over the approval cards, anchored to the ordinary message line.
+    refusal_pill: Option<layers::PillId>,
     /// The session's tunnels: what the destination display offers for a remote host's loopback link, and what a
     /// Cmd-click opens through ([`super::tunnels`]). One per session: a tab shares its agent terminal's
     /// ([`AttachedTerminal::sharing`]).
@@ -711,7 +715,9 @@ impl AttachedTerminal {
             drag_notice: DragNotice::default(),
             press_visibility: None,
             refusal: None,
-            refusal_raised: false,
+            refusal_waits_for_hover: false,
+            refusal_target: None,
+            refusal_pill: None,
             tunnels,
             files,
             _files: files_watch,
@@ -781,6 +787,7 @@ impl AttachedTerminal {
         if inert {
             self.select = None;
             self.link_press = None;
+            self.refusal_target = None;
             // Dropping the task drops the paste still reading the clipboard, and the earlier ones it waits on, as
             // retiring the terminal does.
             self.paste = None;
@@ -2293,7 +2300,7 @@ impl Render for AttachedTerminal {
         // The file links' download status line has the refused click's place, as the old app's one message line did:
         // a refusal stands in for it ([`FileLinks::status_line`]).
         let refusal = self
-            .refusal_line(cx)
+            .refusal_line(window, cx)
             .or_else(|| self.files.read(cx).status_line(cx));
         let tunnel_notice = tunnels::notice_line(&self.tunnels, window, cx);
         // The attachments' strip, over the bottom right of the grid's area: it takes no room, so it never resizes the
@@ -2626,7 +2633,7 @@ impl AttachedTerminal {
                 .disclosure
                 .as_ref()
                 .is_some_and(|shown| shown.dismissed_at.is_some());
-            if std::mem::take(&mut self.refusal_raised) || dismissed {
+            if std::mem::take(&mut self.refusal_waits_for_hover) || dismissed {
                 cx.notify();
             }
         }
@@ -2637,6 +2644,10 @@ impl AttachedTerminal {
             if view.read(cx).hovered_link().is_some() != before {
                 cx.notify();
             }
+        }
+        if self.refusal_target.is_some() && !self.refusal_still_raised(cx) {
+            self.refusal_target = None;
+            cx.notify();
         }
     }
 
@@ -2745,7 +2756,8 @@ impl AttachedTerminal {
             });
             if let Some(refusal) = refusal {
                 self.refusal = Some(refusal.into());
-                self.refusal_raised = true;
+                self.refusal_waits_for_hover = true;
+                self.refusal_target = Some(RefusalTarget::Link(press.link));
                 cx.notify();
             }
             return;
@@ -2760,7 +2772,8 @@ impl AttachedTerminal {
         };
         if let Err(hidden) = press.visibility {
             self.refusal = Some(hidden.link_words().into());
-            self.refusal_raised = true;
+            self.refusal_waits_for_hover = true;
+            self.refusal_target = Some(RefusalTarget::Link(press.link));
             // The refusal takes the file status line's place, as it took the old app's one message's.
             self.files.update(cx, |files, cx| files.clear_status(cx));
             cx.notify();
@@ -2986,6 +2999,15 @@ impl AttachedTerminal {
         self.disclosure.as_ref().map(|shown| shown.drawn.clone())
     }
 
+    /// Stage a refused open in the screenshot scene. The pointer dispatch and cover check are exercised by the
+    /// attached-terminal tests. The scene pins only where the result draws.
+    #[cfg(test)]
+    pub(crate) fn stage_covered_refusal(&mut self) {
+        self.refusal = Some(Hidden::Covered.link_words().into());
+        self.refusal_waits_for_hover = true;
+        self.refusal_target = Some(RefusalTarget::Golden);
+    }
+
     /// The terminal's file links, for tests: they hand in the fake transfers and read the clicks a check admitted.
     #[cfg(test)]
     pub(crate) fn files(&self) -> &Entity<FileLinks> {
@@ -3018,7 +3040,9 @@ impl AttachedTerminal {
     ) -> Option<AnyElement> {
         let pressing = self.link_press.is_some() || self.select.is_some() || self.reporting != 0;
         self.request_tunnels(cx);
-        let wanted = self.disclosed_link(cx).filter(|_| !self.refusal_raised);
+        let wanted = self
+            .disclosed_link(cx)
+            .filter(|_| !self.refusal_waits_for_hover);
         // The hint counts too: a display opened before the session's tunnels were read opens again with it.
         let cell = self
             .committed
@@ -3222,16 +3246,98 @@ impl AttachedTerminal {
         disclosure::visibility(&panel.drawn, window)
     }
 
-    /// The refused click's explanation, drawn at the top of the grid's area until the next press there (the old app's
-    /// `.terminal-file-message`: a status line clear of the newest output at the bottom, at most three lines tall).
-    fn refusal_line(&self, cx: &App) -> Option<AnyElement> {
+    /// Keep the line at its ordinary position even when an approval card could cover it. The hidden placeholder
+    /// preserves its height for the tunnel notice below. It supplies the anchor without announcing a second line.
+    fn refusal_line(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pill = self
+            .refusal_pill
+            .filter(|id| layers::pill_shown(*id, window, cx));
+        if self.refusal_pill.is_some() && pill.is_none() {
+            // The terminal left the frame. Its cached hover cannot justify raising a notice when it returns.
+            self.refusal_pill = None;
+            self.refusal_target = None;
+        } else if !self.refusal_still_raised(cx) {
+            self.refusal_target = None;
+        }
+        // Raised only while the link's panel is still held back. The first move to another cell reopens the panel,
+        // and a raised line would then paint over its top, the destination line, while the cover check (which sees
+        // only hit areas) let the next click through.
+        let raise = self.refusal_waits_for_hover
+            && self.refusal_target.is_some()
+            && !self.inert
+            && self.refusal.is_some();
+        if let Some(id) = pill.filter(|_| !raise) {
+            let owner = cx.weak_entity();
+            window.defer(cx, move |window, cx| {
+                layers::hide_pill(id, window, cx);
+                let _ = owner.update(cx, |owner, cx| {
+                    if owner.refusal_pill == Some(id) {
+                        owner.refusal_pill = None;
+                        cx.notify();
+                    }
+                });
+            });
+        }
         let text = self.refusal.clone()?;
-        Some(super::disclosure::message_line(
-            "terminal-link-refusal",
-            text.clone(),
-            text,
-            cx,
-        ))
+        if !raise && pill.is_none() {
+            return Some(link_refusal(text, cx));
+        }
+        let anchor = Anchor::for_element("terminal-link-refusal-anchor", window, cx);
+        let tracker = anchor.track();
+        if raise && pill.is_none() {
+            let owner = cx.weak_entity();
+            let expected = text.clone();
+            window.defer(cx, move |window, cx| {
+                let _ = owner.update(cx, |owner, cx| {
+                    // A move, new press or retirement can arrive before the anchor is ready.
+                    if owner.refusal_still_raised(cx)
+                        && owner.refusal_waits_for_hover
+                        && !owner.inert
+                        && owner.refusal.as_ref() == Some(&expected)
+                        && owner.refusal_pill.is_none()
+                    {
+                        let view = cx.new(|_| RefusalPill { text: expected });
+                        owner.refusal_pill =
+                            layers::show_terminal_refusal(view.into(), anchor, window, cx);
+                        if owner.refusal_pill.is_some() {
+                            cx.notify();
+                        }
+                    }
+                });
+            });
+        }
+        // Publish exactly one status during the handoff in either direction, including the frame that removes
+        // the old pill. The placeholder only measures the text and tracks its bounds.
+        let line = if pill.is_some() {
+            disclosure::message_frame(cx)
+                .invisible()
+                .child(text)
+                .into_any_element()
+        } else {
+            link_refusal(text, cx)
+        };
+        Some(
+            div()
+                .relative()
+                .child(line)
+                .child(tracker)
+                .into_any_element(),
+        )
+    }
+
+    /// Compare the hovered link itself. A redraw can change the link while leaving the pointer in its former cells.
+    fn refusal_still_raised(&self, cx: &App) -> bool {
+        match &self.refusal_target {
+            Some(RefusalTarget::Link(refused)) => {
+                self.committed
+                    .as_ref()
+                    .and_then(|view| view.read(cx).hovered_link())
+                    == Some(refused)
+            }
+            #[cfg(test)]
+            Some(RefusalTarget::Golden) => true,
+            None => false,
+        }
     }
 
     /// The file status line shows something new (a save started or finished): it replaces a refused click's
@@ -3239,10 +3345,34 @@ impl AttachedTerminal {
     /// the refusal and cleared with it at the next press.
     fn file_status_shown(&mut self, cx: &mut Context<Self>) {
         let refused = self.refusal.take().is_some();
-        let raised = std::mem::take(&mut self.refusal_raised);
+        let raised = std::mem::take(&mut self.refusal_waits_for_hover)
+            | self.refusal_target.take().is_some();
         if refused || raised {
             cx.notify();
         }
+    }
+}
+
+/// A real refusal follows the link's identity. A screenshot stages the outcome without injecting a mouse event.
+enum RefusalTarget {
+    Link(TerminalLink),
+    #[cfg(test)]
+    Golden,
+}
+
+/// The same status element paints at either rung without grabbing the pointer or keyboard.
+fn link_refusal(text: SharedString, cx: &App) -> AnyElement {
+    disclosure::message_line("terminal-link-refusal", text.clone(), text, cx)
+}
+
+/// The fixed text from a refused click. Its next press drops this instance before another refusal can replace it.
+struct RefusalPill {
+    text: SharedString,
+}
+
+impl Render for RefusalPill {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().w_full().child(link_refusal(self.text.clone(), cx))
     }
 }
 
@@ -3808,11 +3938,15 @@ impl AttachedTerminal {
     /// selection already there extends it (the old app's `startSelection`, from xterm.js 6.0.0's `SelectionService`;
     /// MIT, notices in `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a press without the forcing
     /// modifier, of any button, is the program's ([`AttachedTerminal::report_press`]) and selects nothing.
-    fn press(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn press(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // A refused click's explanation stays until the next press in the terminal, as the old app's did.
+        if let Some(id) = self.refusal_pill.take() {
+            layers::hide_pill(id, window, cx);
+        }
         if self.refusal.take().is_some() {
             cx.notify();
         }
+        self.refusal_target = None;
         // So does a failed download's line ([`FileLinks::pressed`]).
         self.files.update(cx, |files, cx| files.pressed(cx));
         if let Some(shown) = &mut self.disclosure {

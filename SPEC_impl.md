@@ -713,7 +713,7 @@ Kit's.
 
 ### Overlays: the layer manager
 
-Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the two pills and tooltips.
+Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill slots and tooltips.
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
@@ -757,16 +757,19 @@ empty space (label text included) keeps focus on the control in use is a propert
 says; a dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's
 destination disclosure is covered is a hit test. The layer manager asks GPUI whether any mouse-blocking hitbox drawn
 after the disclosure overlaps its rectangle, clipped to the covering hitbox's content mask. A pass-through popover
-contributes no blocker of its own. Display-only surfaces such as the quick-launch sequence pill contribute none either.
-The drag-copy notice stays off the disclosure by never opening while it is shown. Things the user did not start never
-open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took when the
-user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements
-when nothing is open ahead of it). Each takes its mark through its own constructor, `focus::Mark::at_ui_session_start`,
-when its owner first sees a new UI session, before that session's first snapshot is drawn. If the user types or clicks
-before the open, the layer manager refuses it and the dialog stays unseen until a later window start or reset, as the
-maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome card (and, after Send feedback now,
-behind the feedback dialog) is not an exception: it opens with a mark taken when the last of them closes, which always
-follows a press of the user's.
+contributes no blocker of its own. Display-only surfaces such as the quick-launch sequence pill contribute none either,
+which is a gap against SPEC.md: a display-only surface over the disclosure (the quick-launch sequence pill, the very
+surface the old app's hand-kept list of covering surfaces missed; the launch pill; a keyboard-focus tooltip) does not
+refuse the click. The terminal's own raised refusal line is kept off the reopened panel instead: it is raised only while
+the panel is held back. The drag-copy notice stays off the disclosure by never opening while it is shown. Things the
+user did not start never open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark
+its feature took when the user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the
+first batch of announcements when nothing is open ahead of it). Each takes its mark through its own constructor,
+`focus::Mark::at_ui_session_start`, when its owner first sees a new UI session, before that session's first snapshot is
+drawn. If the user types or clicks before the open, the layer manager refuses it and the dialog stays unseen until a
+later window start or reset, as the maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome
+card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken when the
+last of them closes, which always follows a press of the user's.
 
 A submenu opened on hover starts without focus and records its parent at open, like a submenu opened by a key. The layer
 manager gives it keyboard ownership when the pointer or a key enters it, so Tab and focus recovery then see the child.
@@ -784,19 +787,22 @@ Escape. It sits centered over an anchor element or centered across that element'
 hides it, on a reset (`layers::close_all`), and when the element is no longer drawn, so the feature anchors it to the
 element SPEC.md names for the current state (the terminal area, or the main area with no session open), best one element
 drawn under the same key in both states, and otherwise shows the pill again on the new anchor when a session opens or
-closes. A window has two pill slots: the pill, and the launch pill (`layers::show_launch_pill`) for SPEC.md's launch
+closes. The sequence pill has its own slot. The launch pill (`layers::show_launch_pill`) is for SPEC.md's launch
 progress pill and the "Started" report after it (one slot for both; the launcher decides which shows), which can show
 while a sequence is armed. Each slot's show replaces only that slot's pill, and hiding takes down only the pill that
 show returned. The launch pill follows the pill's rules (display only, not a layer, gone on a reset) but has no anchor:
 it is centered across the window 20 pixels above its bottom edge and kept 20 pixels from its sides, as the old
 `.launch-progress-pill` was fixed there. It is drawn above every layer but a raised one and under the sequence pill (the
-z-order ladder, below), so where the two pills overlap (the launch pill and a sequence pill on the main area's bottom
-edge while the launcher is open) the sequence pill covers it, as in the old app. The old dialogs sat at 40 beside the
-old launch pills, except the tunnel consent dialog at 50, which was always above them; among the 40s element order
-decided, so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the Hosts panel's
-dialogs sat under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help menu's) covered
-them. Drawing the launch pill above every dialog but the raised tunnel consent dialog, which matches the launcher and
-the other dialogs that start a launch, is a deliberate deviation.
+z-order ladder, below), so where the launch and sequence pills overlap (a sequence pill on the main area's bottom edge
+while the launcher is open) the sequence pill covers it, as in the old app. The old dialogs sat at 40 beside the old
+launch pills, except the tunnel consent dialog at 50, which was always above them; among the 40s element order decided,
+so the launcher, the quick switcher, the templates dialog, the checkout trash dialog and the Hosts panel's dialogs sat
+under the pills, and Delete, Stop, Rename and the app bar's dialogs (Settings and the help menu's) covered them. Drawing
+the launch pill above every dialog but the raised tunnel consent dialog, which matches the launcher and the other
+dialogs that start a launch, is a deliberate deviation. A third anchored slot (`layers::show_terminal_refusal`) puts the
+terminal's refused-link explanation above the approval cards. The ordinary line's placeholder supplies its location and
+keeps room for a tunnel notice below. The raised line takes no input. Moving the pointer off the link lowers the
+explanation. A new terminal press clears it.
 
 Another feature-supplied element is drawn above every dialog and popover but a raised one (the z-order ladder, below)
 without being a layer: the approval region (`layers::install_approval_region`), where SPEC.md's independent agent
@@ -815,8 +821,8 @@ card; Tab from a card goes back into the dialog, while the dialog's own Tab neve
 going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it cannot close the dialog
 behind it, as the old app's keyboard safety net passed over the cards. A view that reads `drawn_bounds` picks its anchor
 from its own state, not from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and
-nothing redraws then. A card's ordinary occluding hitbox counts as covering a terminal link's disclosure. Raising the
-refusal above the card is still pending.
+nothing redraws then. A card's ordinary occluding hitbox counts as covering a terminal link's disclosure. The raised
+refusal can cover the top of the card while the card still receives pointer input.
 
 One layer's box is drawn above the approval region: SPEC.md's tunnel warning, whose opener raises it as it opens
 (`layers::above_approval_region`), however it was asked (a terminal Cmd-click, Settings' switch, a card's Tunnel and
@@ -845,9 +851,11 @@ docs cite by line):
 3. The launch pill (old: 40, level with the dialogs; over every dialog but a raised one here, the deviation above).
 4. The lowest raised dialog's veil (old: 50 with its dialog, over the cards; under them here, the decision above).
 5. The approval region (old: the cards at 45).
-6. The lowest raised layer's box and every layer opened over it, whole (old: the tunnel consent dialog at 50).
-7. The sequence pill (old: 50).
-8. The tooltip (old: 50).
+6. The terminal link refusal while the pointer stays on the refused link. A layer holding the keyboard moves the refusal
+   below the layers, leaving a confirmation readable.
+7. The lowest raised layer's box and every layer opened over it, whole (old: the tunnel consent dialog at 50).
+8. The sequence pill (old: 50).
+9. The tooltip (old: 50).
 
 One tooltip shows at a time. When a control with hover help sits inside another that has its own (a session row's marks
 inside the row), the innermost one under the pointer shows its help, as the old app's tooltip took the help nearest the
