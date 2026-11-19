@@ -21434,6 +21434,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
 - Execution: complete; removed during the 2026-11-18 highest-bucket triage.
 
+## terminal-selection-copies-concealed-text.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism (selection
+  copies concealed characters, crates/gui/farhelm-grid-model/src/selection.rs), but it grants nothing a program cannot
+  already do: SPEC.md accepts programs replacing the clipboard through OSC 52. Matches xterm and the old app. Bucket:
+  other.
+- Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
+  Q4).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `vyovwpryspll`, bookmark `plan/triage-discards-nov18/01-discard-selection-concealed`,
+  https://github.com/scode/farhelm/pull/4157/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
