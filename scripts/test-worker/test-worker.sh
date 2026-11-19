@@ -11,8 +11,8 @@
 #
 # Commands (each takes --checkout DIR, default the checkout holding this script, and --config FILE):
 #
-#   bootstrap                  install what the suites need on the worker (idempotent; run once, or after a change
-#                              to remote/bootstrap.sh)
+#   bootstrap                  install what the suites need on the worker (idempotent). rust, gui and run do this
+#                              themselves first when the worker is fresh or remote/bootstrap.sh changed
 #   rust --out DIR [-- ARG...] sync the working copy, then run the Rust workspace suite there
 #                              (`cargo nextest run --workspace --exclude farhelm-desktop ARG...`) through the recorder
 #   gui --out DIR [SUITE...]   sync, build the GPUI app there, and run `smoke` and/or `lifecycle` (both by default)
@@ -132,6 +132,17 @@ fetch_out() {
   rsync -a -e "$rsh" "$destination:$base/out/$run/" "$out/" >/dev/null
 }
 
+# Bootstrap first when the worker has never been bootstrapped with this version of the bootstrap script: a fresh or
+# reset worker has no marker, and a changed script needs its new steps. A finished bootstrap is only a hash compare.
+ensure_bootstrapped() {
+  local want have
+  want=$(sha256sum "$here/remote/bootstrap.sh" | cut -d' ' -f1) || return 1
+  have=$(remote cat farhelm-test-worker/bootstrapped 2>/dev/null)
+  [ "$have" = "$want" ] && return 0
+  echo "test-worker: bootstrapping $destination first (fresh worker or changed bootstrap)" >&2
+  remote bash "$base/tools/bootstrap.sh" >&2
+}
+
 need_out() {
   [ -n "$out" ] || die "$cmd needs --out DIR"
 }
@@ -146,6 +157,7 @@ bootstrap)
 rust | gui | run)
   need_out
   push_tools || die "could not reach $destination or copy the worker scripts"
+  ensure_bootstrapped || die "could not bootstrap $destination (run the bootstrap command to see why)"
   sync_tree || die "could not sync the working copy to $destination"
   remote bash "$base/tools/with-lock.sh" "$base" "run-$cmd.sh" "${args[@]}"
   code=$?
