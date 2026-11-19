@@ -2621,6 +2621,11 @@
       "reference": null
     },
     {
+      "golden": "terminal-covered-link",
+      "title": "The reason a terminal link cannot open appears above the approval card covering it",
+      "reference": null
+    },
+    {
       "golden": "sequence-pill",
       "title": "The quick-launch sequence pill outside the launcher: chips, the word in progress and its candidates (compared with the old stylesheet; there is no reference picture)",
       "reference": null
@@ -2916,6 +2921,11 @@
       "reference": "hosts-panel-host-unreachable"
     },
     {
+      "golden": "hosts-panel-owned-elsewhere",
+      "title": "A frozen Hosts row names the other Farhelm managing the host and offers Take over",
+      "reference": null
+    },
+    {
       "golden": "hosts-panel-credentials-not-delivered",
       "title": "The Hosts panel with Details on and a connected Tensorlake sandbox whose credentials were not delivered: its row amber, and its details naming the sandbox, recipe and size, then Credentials not delivered and the helm's reason",
       "reference": "hosts-panel-details"
@@ -2969,6 +2979,11 @@
       "golden": "host-add-setup-plan",
       "title": "The setup confirmation a probe's plan opens: the numbered plan with its paths, Copy plan, the footer note and the three answers",
       "reference": "host-add-setup-plan"
+    },
+    {
+      "golden": "host-add-takeover",
+      "title": "Add host asks before taking over and names when the other Farhelm last connected",
+      "reference": null
     },
     {
       "golden": "host-setup-running-hosts-panel",

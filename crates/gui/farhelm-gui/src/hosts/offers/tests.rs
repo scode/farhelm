@@ -411,18 +411,32 @@ fn the_greyed_updates_reason_is_this_platforms_way_to_update() {
 /// half. That check is not the panel's Update: the inline button and Update all must never send the helm's refused
 /// local Update, and the rerun of a failed panel Update there stays greyed. Specified: with the app's updater running,
 /// the local host's menu offers [`Update::CheckForRelease`] ("Check for a newer Farhelm and install it") when idle,
-/// with no supervisor, during a run and with work in flight, every other offer as [`offers`] says; a failed Update's
-/// rerun there stays greyed; the panel's own [`offers`] still greys it; without the updater the menu's offers are
-/// [`offers`]'s; and an SSH host's are [`offers`]'s either way.
+/// with no supervisor, during a run, with work in flight, and when a different helm owns the local supervisor.
+/// The app can check its own release even when its helm cannot provision the local host. A failed host Update's
+/// rerun stays greyed. Without the app updater the menu's offers are [`offers`]'s, as they are on an SSH host.
 #[test]
 fn in_the_desktop_app_the_local_hosts_update_checks_for_a_release() {
     let local = host(1, "local", connected());
+    let owned_elsewhere = host(
+        1,
+        "local",
+        HostStateView::OwnedElsewhere {
+            host_identity: "local-installation".into(),
+            owner: farhelm_proto::HelmOwnerRefusal {
+                tag: "ab12".into(),
+                owner_revision: "earlier-owner".into(),
+                connected: true,
+                last_connected_at: 42,
+            },
+        },
+    );
     let running = run(1, ProvisioningOperation::Add, RunStatus::Running);
     for (view, progress, in_flight) in [
         (local.clone(), None, false),
         (host(1, "local", local_down("")), None, false),
         (local.clone(), Some(&running), false),
         (local.clone(), None, true),
+        (owned_elsewhere.clone(), None, false),
     ] {
         assert_eq!(
             menu_offers(&view, progress, in_flight, true),
@@ -447,6 +461,7 @@ fn in_the_desktop_app_the_local_hosts_update_checks_for_a_release() {
         Some((Rerun::Update, false))
     );
     assert_eq!(offers(&local, None, false).update, Some(Update::Greyed));
+    assert_eq!(offers(&owned_elsewhere, None, false).update, None);
     let ssh = host(2, "ssh", connected());
     assert_eq!(menu_offers(&ssh, None, false, true), idle_ssh());
 }

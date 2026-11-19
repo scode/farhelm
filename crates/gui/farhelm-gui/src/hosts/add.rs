@@ -83,6 +83,7 @@ pub(crate) mod tests;
 use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_proto::HelmOwnerRefusal;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
 use farhelm_proto::ui_channel::HostView;
@@ -107,6 +108,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::{display_name, host_mark};
 use crate::layers::{self, Dialog, Dismissal, LayerId, MainAction, Subject};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
+use crate::prompt::{self, Answer, Question};
 use crate::session;
 use crate::theme::{self, metrics};
 use tensorlake::TensorlakeForm;
@@ -496,6 +498,12 @@ pub(super) enum Reply {
     Added,
     /// Why the probe leads nowhere, to show: why setup is manual, a refusal, a reply that cannot be read.
     Show(Problem),
+    /// The target answered with another owner. User Add needs its own
+    /// confirmation before a registry entry exists.
+    TakeOver {
+        probe_id: String,
+        owner: HelmOwnerRefusal,
+    },
     /// No supervisor answered, and the helm offers this plan to set one up ([`setup`]).
     Setup {
         probe_id: String,
@@ -549,12 +557,7 @@ pub(super) fn read_reply(outcome: &Outcome) -> Reply {
     // confirms by the probe's id, and the helm acts only on the plan it kept under that id.
     match ProbeReply::<IgnoredAny>::deserialize(body) {
         Ok(ProbeReply::Discovered { .. }) => Reply::Added,
-        Ok(ProbeReply::OwnedElsewhere { owner, .. }) => {
-            Reply::Show(Problem::Helm(HostText::from_host(format!(
-                "Another Farhelm ({}) manages this host.",
-                owner.tag
-            ))))
-        }
+        Ok(ProbeReply::OwnedElsewhere { probe_id, owner }) => Reply::TakeOver { probe_id, owner },
         Ok(ProbeReply::Manual { reason }) => {
             Reply::Show(Problem::Helm(HostText::from_host(reason.as_str())))
         }
@@ -576,6 +579,79 @@ pub(super) fn read_reply(outcome: &Outcome) -> Reply {
         // text.
         Err(error) => Reply::Show(Problem::Unreadable(HostText::from_host(error.to_string()))),
     }
+}
+
+/// Setup reruns and agent Add may explain the refusal but cannot confirm it.
+pub(super) fn ownership_problem(owner: &HelmOwnerRefusal) -> Problem {
+    Problem::Helm(HostText::from_host(format!(
+        "Another Farhelm ({}) manages this host.",
+        owner.tag
+    )))
+}
+
+/// A one-use takeover question carries the ownership report from the Add
+/// probe. The normal setup preference cannot approve it.
+pub(crate) fn ask_takeover(
+    destination: &str,
+    owner: &HelmOwnerRefusal,
+    mark: &Mark,
+    on_confirm: impl FnOnce(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let name = HostText::from_host(destination);
+    let connected = if owner.connected {
+        "That Farhelm is connected now.".to_string()
+    } else {
+        let now = crate::ticker::wall_now(cx)
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+            .unwrap_or(owner.last_connected_at);
+        let elapsed = now.saturating_sub(owner.last_connected_at).max(0);
+        let (count, unit) = match elapsed {
+            0..=59 => (0, "minute"),
+            60..=3599 => (elapsed / 60, "minute"),
+            3600..=86399 => (elapsed / 3600, "hour"),
+            _ => (elapsed / 86400, "day"),
+        };
+        if count == 0 {
+            "That Farhelm connected less than a minute ago.".to_string()
+        } else {
+            format!(
+                "That Farhelm connected {count} {unit}{} ago.",
+                if count == 1 { "" } else { "s" }
+            )
+        }
+    };
+    let summary = HostSentence::new("host-take-over-summary")
+        .host(&name)
+        .text(" is managed by another Farhelm (helm ")
+        .mono(&HostText::from_host(owner.tag.as_str()))
+        .text("). ")
+        .text(connected);
+    let confirm = Answer::new(
+        "Take over",
+        HoverHelp::tooltip("Manage this host and its sessions from this Farhelm"),
+        Tier::Primary,
+    );
+    let question = Question::new("Take over host", confirm, ())
+        .summary(summary)
+        .line(concat!(
+            "Taking over makes this Farhelm the host's manager. ",
+            "The other Farhelm loses access to the host and its sessions until it takes it back."
+        ))
+        .width(px(WIDTH))
+        .starts_on_cancel()
+        .wait_until_shown();
+    prompt::ask(
+        question,
+        None,
+        mark,
+        |(), window, cx| on_confirm(window, cx),
+        window,
+        cx,
+    );
 }
 
 /// The open dialog: its two fields, what it last had to say, the key its probe runs under, and its layer.
@@ -904,9 +980,6 @@ impl AddHostDialog {
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let Some(operations) = session::current_operations(cx) else {
-            return;
-        };
         let command = match probe_command(&destination, &alias, self.from_agent) {
             Ok(command) => command,
             Err(error) => {
@@ -914,10 +987,22 @@ impl AddHostDialog {
                 return;
             }
         };
+        self.request(command, handle, cx);
+    }
+
+    /// Probing and confirming use one operation slot. The fields stay
+    /// read-only while either request holds it.
+    fn request(&mut self, command: Command, handle: AnyWindowHandle, cx: &mut Context<Self>) {
+        let Some(operations) = session::current_operations(cx) else {
+            return;
+        };
+        let confirming = matches!(command.work(), Work::TakeOverHost { registers: true });
         let dialog = cx.weak_entity();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&self.key, command, cx, move |settled, cx| {
-                let _ = dialog.update(cx, |dialog, cx| dialog.settled(settled, handle, cx));
+                let _ = dialog.update(cx, |dialog, cx| {
+                    dialog.settled(settled, confirming, handle, cx)
+                });
             })
         });
         match started {
@@ -926,17 +1011,65 @@ impl AddHostDialog {
                 self.set_read_only(true, cx);
                 cx.notify();
             }
-            Err(not_started) => tracing::debug!(?not_started, "host probe not sent"),
+            Err(not_started) => tracing::debug!(?not_started, "host add request not sent"),
         }
     }
 
     /// The probe settled: free the fields, then close the dialog for a registered host, show what the helm said, or
     /// go on to setup in one of the three ways [`super::setup`]'s module docs describe.
-    fn settled(&mut self, settled: &Settled, window: AnyWindowHandle, cx: &mut Context<Self>) {
+    fn settled(
+        &mut self,
+        settled: &Settled,
+        confirming: bool,
+        window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
         self.set_read_only(false, cx);
-        match read_reply(&settled.outcome) {
+        let reply = read_reply(&settled.outcome);
+        if confirming && !matches!(reply, Reply::Added | Reply::Show(_)) {
+            self.problem =
+                Some(error_line().text("Farhelm could not confirm that it added the host."));
+            cx.notify();
+            return;
+        }
+        match reply {
             Reply::Added => self.close_later(None, window, cx),
             Reply::Show(problem) => self.problem = Some(problem.sentence(error_line())),
+            Reply::TakeOver { owner, .. } if self.from_agent => {
+                self.problem = Some(ownership_problem(&owner).sentence(error_line()));
+            }
+            Reply::TakeOver { probe_id, owner } => {
+                let mark = self.probe_mark;
+                if focus::has_moved_on(&mark, cx) {
+                    self.problem = Some(ownership_problem(&owner).sentence(error_line()));
+                } else {
+                    let destination = self.destination.draft().value().clone();
+                    let dialog = cx.weak_entity();
+                    cx.defer(move |cx| {
+                        let _ = window.update(cx, |_, window, cx| {
+                            if dialog.upgrade().is_none() {
+                                return;
+                            }
+                            ask_takeover(
+                                &destination,
+                                &owner,
+                                &mark,
+                                move |window, cx| {
+                                    let _ = dialog.update(cx, |dialog, cx| {
+                                        dialog.confirm_takeover(
+                                            probe_id,
+                                            window.window_handle(),
+                                            cx,
+                                        );
+                                    });
+                                },
+                                window,
+                                cx,
+                            );
+                        });
+                    });
+                }
+            }
             Reply::Setup {
                 probe_id,
                 confirmation,
@@ -974,6 +1107,35 @@ impl AddHostDialog {
             }
         }
         cx.notify();
+    }
+
+    /// Confirm the probe shown by the question. The helm owns the id and
+    /// checks the retained discovery before registering anything.
+    fn confirm_takeover(
+        &mut self,
+        probe_id: String,
+        window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        if super::launch_in_flight(cx) {
+            self.problem = Some(error_line().text(super::LAUNCH_IN_FLIGHT));
+            cx.notify();
+            return;
+        }
+        let Ok(path) = ApiPath::api(&["hosts", "take-over"]) else {
+            return;
+        };
+        self.request(
+            Command::new(
+                Work::TakeOverHost { registers: true },
+                Method::Post,
+                path,
+                Some(json!({ "probe_id": probe_id })),
+                "POST /api/hosts/take-over",
+            ),
+            window,
+            cx,
+        );
     }
 
     /// The destination field's state, for a golden scene to put text in, since a scene cannot type. Setting it leaves

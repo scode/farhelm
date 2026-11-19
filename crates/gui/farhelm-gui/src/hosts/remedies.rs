@@ -56,14 +56,42 @@ use crate::session;
 pub(super) enum Action {
     Retry,
     Adopt,
+    TakeOver,
 }
 
-/// One of the two remedies, which decides its route, its body, its kind of work and its words.
+/// The installation and incumbent shown when a Take over control was
+/// drawn. The helm rejects a stale answer for either.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct TakeoverTarget {
+    host_identity: String,
+    owner_revision: String,
+    pub(super) owner_tag: String,
+}
+
+impl TakeoverTarget {
+    pub(super) fn of(state: &HostStateView) -> Option<Self> {
+        let HostStateView::OwnedElsewhere {
+            host_identity,
+            owner,
+        } = state
+        else {
+            return None;
+        };
+        Some(Self {
+            host_identity: host_identity.clone(),
+            owner_revision: owner.owner_revision.clone(),
+            owner_tag: owner.tag.clone(),
+        })
+    }
+}
+
+/// A connection remedy holds the parameters the user approved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Remedy {
     Retry,
     /// Adopt the identity the menu showed, raw, as the helm compares it.
     Adopt(String),
+    TakeOver(TakeoverTarget),
     /// Delete again a machine whose deletion failed: Retry on a host in that phase ([`retry`]).
     DeleteAgain,
 }
@@ -88,6 +116,16 @@ impl Remedy {
                 Some(json!({ "reported": reported })),
                 "POST /api/hosts/[host]/adopt",
             ),
+            Remedy::TakeOver(target) => Command::new(
+                Work::TakeOverHost { registers: false },
+                Method::Post,
+                ApiPath::api(&["hosts", &key, "take-over"])?,
+                Some(json!({
+                    "host_identity": target.host_identity,
+                    "owner_revision": target.owner_revision,
+                })),
+                "POST /api/hosts/[host]/take-over",
+            ),
             Remedy::DeleteAgain => Command::new(
                 Work::RetryHost,
                 Method::Post,
@@ -103,6 +141,7 @@ impl Remedy {
         match self {
             Remedy::Retry | Remedy::DeleteAgain => "Retry host",
             Remedy::Adopt(_) => "Adopt host",
+            Remedy::TakeOver(_) => "Take over host",
         }
     }
 
@@ -112,6 +151,7 @@ impl Remedy {
         match self {
             Remedy::Retry | Remedy::DeleteAgain => Action::Retry,
             Remedy::Adopt(_) => Action::Adopt,
+            Remedy::TakeOver(_) => Action::TakeOver,
         }
     }
 
@@ -120,6 +160,7 @@ impl Remedy {
         match self {
             Remedy::Retry | Remedy::DeleteAgain => "Retry",
             Remedy::Adopt(_) => "Adopt",
+            Remedy::TakeOver(_) => "Take over",
         }
     }
 
@@ -128,6 +169,7 @@ impl Remedy {
         match self {
             Remedy::Retry | Remedy::DeleteAgain => "hosts-retry-not-started",
             Remedy::Adopt(_) => "hosts-adopt-not-started",
+            Remedy::TakeOver(_) => "hosts-take-over-not-started",
         }
     }
 }
@@ -155,6 +197,23 @@ pub(super) fn adopt(host: i64, reported: String, mark: Mark, window: &mut Window
     send(
         host,
         Remedy::Adopt(reported),
+        mark,
+        window.window_handle(),
+        cx,
+    );
+}
+
+/// Retry with the ownership approval shown by the row or its menu.
+pub(super) fn take_over(
+    host: i64,
+    target: TakeoverTarget,
+    mark: Mark,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    send(
+        host,
+        Remedy::TakeOver(target),
         mark,
         window.window_handle(),
         cx,

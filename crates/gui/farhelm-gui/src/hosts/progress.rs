@@ -353,6 +353,7 @@ pub(crate) fn status(
         Work::UninstallHost => Some(Status::Pending(Run::Uninstall)),
         Work::RetryHost
         | Work::AdoptHost
+        | Work::TakeOverHost { .. }
         | Work::RemoveHost
         | Work::Save
         | Work::Rename

@@ -448,6 +448,7 @@ pub(crate) fn disclosed(
     refused: bool,
 ) -> bool {
     details
+        || matches!(host.state, HostStateView::OwnedElsewhere { .. })
         || progress::opens_row(progress, seen)
         || offers::failed_operation(progress).is_some()
         || refused

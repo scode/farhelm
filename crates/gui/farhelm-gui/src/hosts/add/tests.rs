@@ -29,7 +29,8 @@ use crate::hosts::tests::{aliased, connected, host, hosts, nothing_in_flight, st
 use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
-    self, any_open, click, focused, focused_id, keys, label, one_command, settle, started,
+    self, any_open, click, focused, focused_id, keys, label, one_command, settle, show_next_frame,
+    started,
 };
 use crate::{root, session};
 
@@ -397,6 +398,92 @@ fn add_probes_while_work_that_creates_no_session_is_in_flight(cx: &mut TestAppCo
 }
 
 // ---- The outcomes --------------------------------------------------------------------------------------------------
+
+/// Finding another owner always asks, even when ordinary setup skips its
+/// question. A queued key can reach Take over before GPUI presents the question, so the answer must wait for the
+/// first visible frame. Cancel sends nothing, and Take over sends the displayed probe's one-use id on a separate route.
+#[gpui::test]
+fn a_discovered_owner_requires_takeover_confirmation(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, KeyedEntry, PREFERENCES_KEY};
+
+    let preferences = CollectionState {
+        collection: Collection::Preferences,
+        meta: test_support::meta(&[PREFERENCES_KEY]),
+        entries: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: json!({ "skip_host_setup_confirmation": true }),
+        }],
+    };
+    let (mut helm, cx, add) = open_rail_with(cx, vec![preferences]);
+    assert!(
+        cx.update(|_, cx| !crate::hosts::setup::asks_first(cx)),
+        "the app has read the preference to skip setup confirmation"
+    );
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    for probe_id in ["cancelled", "approved"] {
+        click(cx, "add-host-submit");
+        let (id, _) = one_probe(&mut helm);
+        helm.reply(
+            id,
+            200,
+            Some(json!({
+                "result": "owned-elsewhere",
+                "probe_id": probe_id,
+                "owner": {
+                    "tag": "ab12",
+                    "owner_revision": "owner-1",
+                    "connected": true,
+                    "last_connected_at": 42,
+                }
+            })),
+        );
+        settle(cx);
+        assert_eq!(label(cx, "prompt-confirm").as_deref(), Some("Take over"));
+        assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+        assert_eq!(
+            label(cx, "host-take-over-summary").as_deref(),
+            Some(
+                "dev@newbox is managed by another Farhelm (helm ab12). That Farhelm is connected now."
+            )
+        );
+        assert!(
+            helm.commands().is_empty(),
+            "the question alone cannot register a host"
+        );
+        if probe_id == "cancelled" {
+            click(cx, "prompt-cancel");
+            assert!(helm.commands().is_empty(), "Cancel leaves the host alone");
+            assert_eq!(destination(cx), "dev@newbox");
+        }
+    }
+    // Raw keystrokes, not `keys`: that helper shows the next frame first, which would put the question on screen and
+    // let the Enter through, so it could not test input that arrives before the question is presented.
+    cx.simulate_keystrokes("tab");
+    crate::test_support::check(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    cx.simulate_keystrokes("enter");
+    crate::test_support::check(cx);
+    assert!(
+        helm.commands().is_empty(),
+        "input before presentation cannot take over"
+    );
+    assert_eq!(label(cx, "prompt-confirm").as_deref(), Some("Take over"));
+    show_next_frame(cx);
+    click(cx, "prompt-confirm");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/hosts/take-over");
+    assert_eq!(body, json!({ "probe_id": "approved" }));
+    helm.reply(
+        id,
+        200,
+        Some(json!({
+            "result": "discovered", "host_id": 3, "build_version": "0.16.0", "host_identity": "id-3"
+        })),
+    );
+    settle(cx);
+    assert!(!any_open(cx));
+    assert!(focused(cx, &add));
+}
 
 /// SPEC.md, "Topology": a running supervisor is registered as it is. The dialog has nothing more to ask, and the new
 /// host shows in the pushed hosts list; leaving the dialog open would invite a second Add that the helm refuses as a

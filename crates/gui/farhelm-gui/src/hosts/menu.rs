@@ -201,6 +201,7 @@ pub fn open_menu(
         retry_focus,
         adopt_focus,
         adopt_identity: offers::adoptable(&view.state).map(str::to_owned),
+        takeover_target: super::remedies::TakeoverTarget::of(&view.state),
         rerun_focus,
         update_focus,
         settings_focus,
@@ -273,6 +274,8 @@ pub(crate) struct HostMenu {
     /// is refused by the helm, and opening the menu again shows what it reports now. A menu opened before the host
     /// became mismatched offers no Adopt until it is opened again.
     adopt_identity: Option<String>,
+    /// Take over sends the incumbent and installation held at menu open.
+    takeover_target: Option<super::remedies::TakeoverTarget>,
     /// Re-run's focus handle, where the menu starts when it offers no Retry (an environment being deleted) and Re-run
     /// can act, or is the first command drawn when nothing can.
     rerun_focus: FocusHandle,
@@ -383,6 +386,31 @@ impl Render for HostMenu {
                     let mark = Mark::take(cx);
                     close(&menu, window, cx);
                     super::remedies::adopt(host, reported.clone(), mark, window, cx);
+                })
+            });
+        let take_over = self
+            .takeover_target
+            .clone()
+            .filter(|_| super::remedies::TakeoverTarget::of(&view.state).is_some())
+            .map(|target| {
+                let (menu, host) = (cx.weak_entity(), self.host);
+                let shown = HostSentence::new("host-menu-owner")
+                    .text("Managed by helm ")
+                    .mono(&HostText::from_host(target.owner_tag.as_str()));
+                MenuItem::new(
+                    "host-menu-take-over",
+                    Icon::Adopt,
+                    "Take over",
+                    HoverHelp::tooltip("Manage this host and its sessions from this Farhelm"),
+                    Role::MenuItem,
+                )
+                .description_sentence(shown)
+                .disabled(offered.retry != Some(true))
+                .focus(&self.adopt_focus)
+                .on_click(move |_, window, cx| {
+                    let mark = Mark::take(cx);
+                    close(&menu, window, cx);
+                    super::remedies::take_over(host, target.clone(), mark, window, cx);
                 })
             });
         let rerun = rerun(&view, &offered).map(|(which, enabled)| {
@@ -557,6 +585,7 @@ impl Render for HostMenu {
                 .children(retry)
                 .children(lifecycle)
                 .children(adopt)
+                .children(take_over)
                 .children(rerun)
                 .children(update)
                 .child(settings)
