@@ -410,7 +410,8 @@ fn clone_prefills_the_sources_host_folder_title_and_launch(cx: &mut TestAppConte
 }
 
 /// A Clone spells out invisible characters in the copied fields, so the user can see what they are about to launch.
-/// The spelling is editable. Leaving it alone sends the source's exact bytes, and a new edit shows its own text.
+/// Typing beside the spellings keeps the hidden characters in both the draft and the launch request. A hidden character
+/// typed into the field is spelled out at once, and a spelling typed by hand becomes the character it names.
 #[gpui::test]
 fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -443,6 +444,33 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
         ("/srv/work<U+200B>box".into(), "fix<U+202E> login".into())
     );
 
+    test_support::click(cx, "launcher-folder-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .folder
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "end x");
+    assert_eq!(draft(cx).folder.value(), "/srv/work\u{200b}boxx");
+    // The recent-folder list covers the name field. Escape dismisses the list while keeping Clone open.
+    test_support::keys(cx, "backspace escape");
+
+    test_support::click(cx, "launcher-name-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .name
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "end x");
+    assert_eq!(draft(cx).name.value(), "fix\u{202e} loginx");
+    test_support::keys(cx, "backspace");
+    assert_eq!(
+        shown(cx),
+        ("/srv/work<U+200B>box".into(), "fix<U+202E> login".into())
+    );
+    let edited = draft(cx);
+    assert!(edited.folder.is_touched() && edited.name.is_touched());
+    assert_eq!(edited.folder.value(), "/srv/work\u{200b}box");
+    assert_eq!(edited.name.value(), "fix\u{202e} login");
+
     test_support::click(cx, "launcher-launch");
     let sent = creates(&mut helm, cx);
     let [create] = &sent[..] else {
@@ -453,6 +481,8 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
     assert_eq!(body["title"], json!("fix\u{202e} login"));
     created(&mut helm, cx, create.id, "copy");
 
+    // A hidden character typed or pasted into the field is spelled out at once (the edit resyncs the field), and a
+    // spelling typed by hand stands for the character it names.
     assert!(clone(cx, "e"), "the source can be copied again");
     test_support::click(cx, "launcher-name-row");
     assert!(read(cx, |launcher, window, cx| launcher
@@ -462,12 +492,16 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
     test_support::keys(cx, "end");
     cx.simulate_input("\u{200b}");
     settle(cx);
-    assert_eq!(shown(cx).1, "fix<U+202E> login\u{200b}");
-    assert_eq!(draft(cx).name.value(), "fix<U+202E> login\u{200b}");
+    assert_eq!(shown(cx).1, "fix<U+202E> login<U+200B>");
+    assert_eq!(draft(cx).name.value(), "fix\u{202e} login\u{200b}");
+    cx.simulate_input("<U+200B>");
+    settle(cx);
+    assert_eq!(shown(cx).1, "fix<U+202E> login<U+200B><U+200B>");
+    assert_eq!(draft(cx).name.value(), "fix\u{202e} login\u{200b}\u{200b}");
 }
 
 /// The managed-checkout name is calculated from the copied title. Its automatic suffix must keep the title's
-/// spelling through draws. The draft's checkout title still has the source's original characters.
+/// spelling through draws. Editing the numbered suggestion makes it an exact name with the same hidden characters.
 #[gpui::test]
 fn a_managed_clones_numbered_name_spells_out_its_source_title(cx: &mut TestAppContext) {
     let mut source = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
@@ -489,6 +523,18 @@ fn a_managed_clones_numbered_name_spells_out_its_source_title(cx: &mut TestAppCo
         "the copied title seeds a numbered name"
     );
     let (_helm, cx) = super::view_tests::launcher_on(cx, start);
+    assert_eq!(draft(cx).checkout_title(), "fix\u{202e} login-clone-2");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),
+        "fix<U+202E> login-clone-2"
+    );
+    test_support::click(cx, "launcher-name-row");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .name
+        .focus_handle(cx)
+        .is_focused(window)));
+    test_support::keys(cx, "end x backspace");
+    assert!(draft(cx).name.is_touched());
     assert_eq!(draft(cx).checkout_title(), "fix\u{202e} login-clone-2");
     assert_eq!(
         read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),

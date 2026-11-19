@@ -68,8 +68,8 @@ pub(super) struct FolderList {
 }
 
 /// The recent folders `folders` (newest first, as typed) offer for the field's `text`: all of them while the folder
-/// is only seeded, else those holding `text` ignoring case, matched on the folder as typed (not its escaped spelling, so
-/// a visible `<U+…>` never stands for the character it escapes), at most [`RECENT_LIMIT`].
+/// is only seeded, else those holding `text` ignoring case, at most [`RECENT_LIMIT`]. Both inputs are raw paths so an
+/// invisible character cannot match the literal characters of its spelling on disk.
 pub(in crate::launcher) fn recent_folders<'a>(
     folders: impl IntoIterator<Item = &'a str>,
     text: &str,
@@ -134,12 +134,14 @@ impl Launcher {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let text = self.folder.text(cx);
-        let mut choices: Vec<FolderChoice> =
-            recent_folders(folders, &text, self.folder_list.filtering)
-                .into_iter()
-                .map(|folder| FolderChoice::Recent(folder.to_owned()))
-                .collect();
+        let mut choices: Vec<FolderChoice> = recent_folders(
+            folders,
+            self.draft.folder.value(),
+            self.folder_list.filtering,
+        )
+        .into_iter()
+        .map(|folder| FolderChoice::Recent(folder.to_owned()))
+        .collect();
         choices.push(FolderChoice::Home);
         if !self.draft.holds(Field::Host) {
             choices.push(FolderChoice::LocalHome);

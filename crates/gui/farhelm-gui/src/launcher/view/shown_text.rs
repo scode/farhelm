@@ -6,26 +6,27 @@
 //! Why: these values often come from somewhere other than the user's typing (a session's stored launch, which may
 //! have come from another host or an agent, a remembered prefix, a template), and a field showing them raw could hide or
 //! reverse what the words say. The draft always holds the raw text, so an untouched value is sent byte for byte; only
-//! the field shows the spelling, set by the launcher ([`super::Launcher`]'s `sync_fields`), which raises no edit, so the
-//! spelling never flows back into the draft by itself. Ported from the old launcher at reference commit `24bc0580`,
-//! field by field, in two kinds:
+//! the field shows the spelling, set by the launcher (`sync_fields`), which raises no edit. Ported from the old launcher
+//! at reference commit `24bc0580`. One rule per field (`Input::spelling`) decides both how it shows its value and how an
+//! edit is read back, so no field can decode an edit and then show the result raw. Here's the TLDR of the three kinds:
 //!
 //! - **Read-only, with a Clear button**, where editing the spelling would turn the escape text into new launch words:
-//!   the wrapper prefix in any mode, judged on whatever the field holds, typed text included (`launch_controls.rs`'s
-//!   `wrapper_unsafe`); the initial prompt, judged without its newlines and tabs, whose Clear is the prompt's own Clear
-//!   initial prompt (`prompt_read_only`); and Restart with's stored command line and resume command while they are
-//!   still the stored ones (`list/create_form.rs`'s `restart_command_readonly` and `restart_resume_readonly`).
-//! - **Editable**, where an edit takes the field's text as it then reads, the spelling included, as the old fields did:
-//!   Custom flags, judged on whatever the field holds (`editable_peer`), and a command line or resume command only while
-//!   it is still the one the launcher opened with, such as the ones Clone and Replace with copy from their source
-//!   (`create_form/draft.rs`'s `seed_invocation` and `seed_command_fields`, which spelled out only the copied value). A
-//!   command the user typed or pasted is shown as typed: it reaches Bash as written (SPEC.md, "Command launch"), and
-//!   the `<` and `>` of a spelling would be redirections there. Clone's copied folder and session name follow the same
-//!   opened-value rule.
+//!   the wrapper prefix in any mode, judged on whatever the field holds, typed text included; the initial prompt,
+//!   judged without its newlines and tabs, whose Clear is the prompt's own Clear initial prompt; and Restart with's
+//!   stored command line and resume command while they still hold the stored value. Clear ends that for the rest of
+//!   the opening, so retyping the stored command leaves the field editable, as the old field stayed after its first
+//!   edit.
+//! - **Editable and spelled out** while the value holds a hidden character: Custom flags in every mode, the command line
+//!   and resume command (Restart with's once cleared), and Clone's folder and session name, a managed Clone's numbered
+//!   name included. An edit turns each complete spelling back into its character before the draft sees it, so typing
+//!   beside a spelling never turns it into literal text (in a command, its `<` and `>` would be Bash redirections). A
+//!   spelling the user types by hand stands for the same character, which the maintainer accepted on 2026-11-18; so a
+//!   copied value holding the literal text `<U+200B>` becomes that character once its field is edited.
+//! - **Raw**, shown and taken as typed: the conversation id, and the folder and name outside Clone.
 //!
-//! An editable spelling escapes only the hidden characters, as `editable_peer` did, so an edit never turns a literal
-//! `<U+` the user typed into an escape of its own; a read-only one uses the app's full host-text spelling
-//! ([`farhelm_proto::text::escaped`]), which also marks a literal `<U+`, since it is never edited.
+//! An editable spelling escapes only the hidden characters, and the decoder accepts only exactly the spelling the app
+//! writes, so `<U+0041>`, `<U+200b>` or `<U+0200B>` stay as typed. A read-only one uses the app's full host-text
+//! spelling ([`farhelm_proto::text::escaped`]), which also marks a literal `<U+`, since it is never edited.
 //!
 //! Old specs: `restart-with.spec.ts`'s "restart with shows an unsafe stored wrapper prefix without editing its escape
 //! text" and "restart with preserves raw command bytes", and `launcher-tabs.spec.ts`'s "agent switch loads that agent's
@@ -34,7 +35,7 @@
 use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
 use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Window, div, px};
 
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher, on_launcher};
+use super::{Input, LABEL_COLUMN, LABEL_GAP, Launcher, on_launcher};
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::launcher::draft::{LaunchDraft, Mode};
 
@@ -45,26 +46,26 @@ pub(super) struct FieldText {
     pub(super) read_only: bool,
 }
 
-/// The opening command fields, folder and name. The command fields may come from Clone, Replace with or Restart with.
-/// Only Clone uses the folder and name here. An edited value is shown as entered, including a template's value when
-/// it differs from the one the launcher opened with.
+/// Restart with locks an unsafe opening command while its field holds that value. Clear releases the lock for the
+/// rest of this opening, so a command retyped after Clear stays editable.
 #[derive(Default)]
 pub(super) struct Opened {
-    command: String,
-    resume: String,
-    folder: String,
-    name: String,
+    command: Option<String>,
+    resume: Option<String>,
 }
 
 impl Opened {
-    /// What `draft` holds as the launcher opens.
+    /// Only Restart with can lock what was in its opening command fields.
     pub(super) fn of(draft: &LaunchDraft) -> Self {
-        Opened {
-            command: draft.command.command.clone(),
-            resume: draft.command.resume.clone(),
-            folder: draft.folder.value().clone(),
-            name: draft.name.value().clone(),
+        if matches!(draft.mode, Mode::RestartWith(_)) {
+            return Self {
+                command: needs_escaping(&draft.command.command, false)
+                    .then(|| draft.command.command.clone()),
+                resume: needs_escaping(&draft.command.resume, false)
+                    .then(|| draft.command.resume.clone()),
+            };
         }
+        Self::default()
     }
 }
 
@@ -75,7 +76,7 @@ fn needs_escaping(text: &str, multiline: bool) -> bool {
         .any(|ch| !(multiline && matches!(ch, '\n' | '\t')) && is_presentation_unsafe(ch))
 }
 
-/// `raw` with only its hidden characters spelled out (the old `editable_peer`).
+/// The editable spelling leaves ordinary punctuation alone so the field can still be edited as written.
 fn spelled(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
@@ -86,6 +87,31 @@ fn spelled(raw: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Decode the app's exact spelling. Comparing with `notation` keeps case and padding in step with the renderer.
+fn unspell(mut visible: &str) -> String {
+    let mut raw = String::with_capacity(visible.len());
+    while let Some(start) = visible.find("<U+") {
+        raw.push_str(&visible[..start]);
+        visible = &visible[start..];
+        let candidate = visible.as_bytes().iter().take(10).position(|b| *b == b'>');
+        if let Some(end @ 7..=9) = candidate
+            && let Ok(code) = u32::from_str_radix(&visible[3..end], 16)
+            && let Some(ch) = char::from_u32(code)
+            && is_presentation_unsafe(ch)
+            && notation(ch) == visible[..=end]
+        {
+            raw.push(ch);
+            visible = &visible[end + 1..];
+        } else {
+            // An invalid prefix can precede a valid spelling. Resume at the end of the prefix.
+            raw.push_str("<U+");
+            visible = &visible[3..];
+        }
+    }
+    raw.push_str(visible);
+    raw
 }
 
 /// `raw` as a field shows it: spelled out while it holds a hidden character (read-only with the full spelling when
@@ -121,68 +147,69 @@ pub(super) fn display(raw: &str) -> String {
     }
 }
 
-/// The wrapper prefix, in any mode: the old launcher judged the prefix the field holds, so a remembered prefix loaded
-/// by an agent switch is shown the same way as a stored one.
-pub(super) fn wrapper(draft: &LaunchDraft) -> FieldText {
-    shown(&draft.agent.wrapper, false, true)
+/// A field's spelling contract in the current draft. Editable spellings must decode through the same policy that
+/// put them on screen. Locked spellings are the full host-text form, with no edit path through that text.
+enum Spelling {
+    Raw,
+    Editable,
+    Lock { multiline: bool },
 }
 
-/// The initial prompt: read-only while it holds a hidden character other than a newline or a tab; shown then with
-/// those escaped too, as the old read-only display did.
-pub(super) fn prompt(draft: &LaunchDraft) -> FieldText {
-    shown(&draft.prompt, true, true)
-}
-
-/// Custom flags, spelled out and editable, judged on whatever the field holds.
-pub(super) fn flags(draft: &LaunchDraft) -> FieldText {
-    shown(&draft.agent.permission_flags, false, false)
-}
-
-/// The command line: spelled out while it is still the one the launcher opened with (read-only in Restart with, whose
-/// opening value is the session's stored launch; editable otherwise), else as typed.
-pub(super) fn command(draft: &LaunchDraft, opened: &Opened) -> FieldText {
-    as_opened(&draft.command.command, &opened.command, &draft.mode)
-}
-
-/// The resume command, under [`command`]'s rule.
-pub(super) fn resume(draft: &LaunchDraft, opened: &Opened) -> FieldText {
-    as_opened(&draft.command.resume, &opened.resume, &draft.mode)
-}
-
-/// Clone's copied working directory stays editable, with its hidden characters visible until the value changes.
-pub(super) fn folder(draft: &LaunchDraft, opened: &Opened) -> String {
-    copied(draft.folder.value(), &opened.folder, &draft.mode)
-}
-
-/// Show the draft's effective name, spelling out a copied title or the checkout name it produces. Once a checkout
-/// name is edited it is exact, so the field shows the new text rather than treating it as another numbered default.
-pub(super) fn name(draft: &LaunchDraft, opened: &Opened) -> String {
-    let name = draft.shown_name();
-    if matches!(draft.mode, Mode::Clone)
-        && draft.name.value() == &opened.name
-        && (draft.checkout.is_none() || !draft.name.is_touched())
-    {
-        shown(&name, false, false).text
-    } else {
-        name
+impl Input {
+    /// Keep the display, edit decoding and resync on the same field policy.
+    fn spelling(self, draft: &LaunchDraft, opened: &Opened) -> Spelling {
+        match self {
+            Self::Folder | Self::Name if matches!(draft.mode, Mode::Clone) => Spelling::Editable,
+            Self::Flags => Spelling::Editable,
+            Self::Command if opened.command.as_deref() == Some(&draft.command.command) => {
+                Spelling::Lock { multiline: false }
+            }
+            Self::Resume if opened.resume.as_deref() == Some(&draft.command.resume) => {
+                Spelling::Lock { multiline: false }
+            }
+            Self::Command | Self::Resume => Spelling::Editable,
+            Self::Wrapper => Spelling::Lock { multiline: false },
+            Self::Prompt => Spelling::Lock { multiline: true },
+            Self::Folder | Self::Name | Self::Conversation => Spelling::Raw,
+        }
     }
-}
 
-/// The display of an editable copied value. The draft still holds its raw bytes, just as it does for a command.
-fn copied(value: &str, opened: &str, mode: &Mode) -> String {
-    if matches!(mode, Mode::Clone) && value == opened {
-        shown(value, false, false).text
-    } else {
-        value.to_owned()
+    /// Render the effective draft value. A managed Clone uses the numbered checkout title until the user edits it.
+    pub(super) fn present(self, draft: &LaunchDraft, opened: &Opened) -> FieldText {
+        let name;
+        let raw = match self {
+            Self::Folder => draft.folder.value(),
+            Self::Name => {
+                name = draft.shown_name();
+                &name
+            }
+            Self::Conversation => &draft.conversation,
+            Self::Wrapper => &draft.agent.wrapper,
+            Self::Prompt => &draft.prompt,
+            Self::Flags => &draft.agent.permission_flags,
+            Self::Command => &draft.command.command,
+            Self::Resume => &draft.command.resume,
+        };
+        match self.spelling(draft, opened) {
+            Spelling::Raw => as_typed(raw),
+            Spelling::Editable => shown(raw, false, false),
+            Spelling::Lock { multiline } => shown(raw, multiline, true),
+        }
     }
-}
 
-/// `value` against what its field `opened` with: [`command`]'s rule.
-fn as_opened(value: &str, opened: &str, mode: &Mode) -> FieldText {
-    if value != opened {
-        return as_typed(value);
+    /// Interpret a user edit without changing raw fields or reinterpreting values loaded directly into the draft.
+    pub(super) fn edited_text(self, text: String, draft: &LaunchDraft, opened: &Opened) -> String {
+        if matches!(self.spelling(draft, opened), Spelling::Editable) && text.contains("<U+") {
+            unspell(&text)
+        } else {
+            text
+        }
     }
-    shown(value, false, matches!(mode, Mode::RestartWith(_)))
+
+    /// An edit can introduce a hidden character or complete a spelling. Resync any field whose policy can show one.
+    pub(super) fn shown_through_text_rules(self, draft: &LaunchDraft, opened: &Opened) -> bool {
+        !matches!(self.spelling(draft, opened), Spelling::Raw)
+    }
 }
 
 /// A Clear button under a field shown read-only, indented to the fields' column: `id`, its words, and its hover help.
@@ -213,6 +240,7 @@ impl Launcher {
 
     /// Clear agent command: Restart with's command emptied and editable.
     pub(super) fn clear_command(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.opened.command = None;
         self.draft.edit_command(String::new());
         self.sync_fields(window, cx);
         self.changed(cx);
@@ -220,8 +248,29 @@ impl Launcher {
 
     /// Clear resume command: Restart with's resume command emptied and editable.
     pub(super) fn clear_resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.opened.resume = None;
         self.draft.edit_command_resume(String::new());
         self.sync_fields(window, cx);
         self.changed(cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{spelled, unspell};
+
+    /// Nearby edits must keep the bytes the renderer spelled out, including controls and supplementary characters.
+    #[test]
+    fn editable_spellings_round_trip() {
+        let raw = "é\u{0}\t\n\u{1b}\u{200b}\u{202e}\u{e0001}";
+        assert_eq!(unspell(&spelled(raw)), raw);
+    }
+
+    /// Accept only spellings the renderer could write. A malformed prefix may sit beside a real spelling.
+    #[test]
+    fn only_canonical_hidden_characters_decode() {
+        let literal = "<U+0041><U+0200B><U+200b><U+D800><U+110000><U+200Bえ><U+200B";
+        assert_eq!(unspell(literal), literal);
+        assert_eq!(unspell("<U+x<U+200B>"), "<U+x\u{200b}");
     }
 }

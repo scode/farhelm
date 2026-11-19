@@ -1117,7 +1117,8 @@ agent choice is independent of that destination:
   idempotency key, its exact value is part of that key's retry identity.
 - Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. The text
   reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments, compound
-  commands, pipes and redirection have Bash meaning. Each placeholder must stand as its own unquoted word; a quoted
+  commands, pipes and redirection have Bash meaning. In the launcher's editable command fields, a spelled-out invisible
+  character such as `<U+200B>` stands for that character. Each placeholder must stand as its own unquoted word; a quoted
   placeholder, or one joined to other text where it cannot be substituted safely, is refused on save and again at spawn
   for an older stored command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument
   for `{farhelm_args}`. The command may reference the session's working directory as `{cwd}` and takes a required YOLO

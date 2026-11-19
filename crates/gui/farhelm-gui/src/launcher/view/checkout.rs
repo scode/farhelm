@@ -481,7 +481,7 @@ impl Launcher {
         // The name field follows a name the draft changed on its own: a numbered default moving on, or the copied title
         // ignored or shown again as the destination changes. Typing changes the draft to the field's text, so this
         // never fights the user.
-        let shown = super::shown_text::name(&self.draft, &self.opened);
+        let shown = super::Input::Name.present(&self.draft, &self.opened).text;
         if self.name.text(cx).as_ref() != shown {
             self.name.set_text(shown, window, cx);
         }
