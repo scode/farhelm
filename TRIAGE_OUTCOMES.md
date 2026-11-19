@@ -1826,22 +1826,6 @@
   same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## wayland-enter-overtakes-pending-text-paste.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism. On Wayland
-  a paste waits for the asynchronous clipboard read (and only behind earlier pastes), while typed keys are sent at once
-  (terminal/attached.rs), so Enter can run a half-typed command before the pasted rest arrives, which then lands at the
-  next prompt. macOS reads the clipboard synchronously. Needs a slow clipboard source or a key-injection macro. SPEC.md
-  declines to add complexity for slow clipboards. Bucket: high (highest only if a different command running than the one
-  composed counts as lost work in itself).
-- Decision: settled by the same pick as `header-actions-follow-unseen-session.md` (2026-11-18 highest-bucket triage
-  page, Q3): spec note for paste order.
-- Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
-  still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
-  entry in the same change.
-- Execution: planned in `plans/queue/triage-misc-nov18.md`
-
 ## terminal-selection-copies-concealed-text.md
 
 - Outcome: `discard`.

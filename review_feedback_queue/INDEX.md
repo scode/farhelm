@@ -62,10 +62,6 @@ consequences.
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
   when the pointer moves.
 
-- [`wayland-enter-overtakes-pending-text-paste.md`](wayland-enter-overtakes-pending-text-paste.md) — On Wayland, Enter
-  can run the command already on the line while Farhelm is still fetching pasted text meant to finish it. The paste can
-  then arrive at the next prompt.
-
 - [`terminal-selection-copies-concealed-text.md`](terminal-selection-copies-concealed-text.md) — Selecting a visible
   line in the terminal can copy hidden text along with it. Pasting it into another shell or application can use more
   than you selected by sight.
