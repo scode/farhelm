@@ -71,10 +71,6 @@ consequences.
   history numbering can hang the page when the user selects text in a later screen row. The record now supplies its
   missing hostile-host acceptance context and preserves the unresolved browser scope.
 
-- [`gone-retry-forgets-pinned-foreground-child.md`](gone-retry-forgets-pinned-foreground-child.md) — Recovery can
-  discard a previously identified foreground child after its terminal host disappears. A complete production sequence
-  leaving that program running after removal remains unverified after investigation.
-
 - [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
@@ -258,10 +254,6 @@ consequences.
   slow to open or close a shell tab can make Farhelm reconnect to a helm that was still answering. If you were editing a
   new session in the meantime, the launcher closes and loses that draft.
 
-- [`desktop-state-rewrite-blocks-startup.md`](desktop-state-rewrite-blocks-startup.md) — If its desktop settings file
-  cannot be read, decoded or rewritten, Farhelm can stop at a startup alert while sessions keep running in the
-  background.
-
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
@@ -325,9 +317,6 @@ consequences.
 - [`instruction-file-case-alias-evades-check.md`](instruction-file-case-alias-evades-check.md) — Case aliases evade the
   local instruction-file check; actual vendor lookup on case-insensitive filesystems is unverified.
 
-- [`normal-quit-misses-empty-download-directory.md`](normal-quit-misses-empty-download-directory.md) — A narrow
-  normal-Quit race may leave an empty download staging folder; saved files are unaffected by this mechanism.
-
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
@@ -357,9 +346,6 @@ consequences.
 - [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — Landing reports defer
   recording recurring baseline flakes, including quick-launch and further browser observations. Private browser evidence
   remains unauthenticated; inspected Rust failures do not establish latent flakiness.
-
-- [`numeric-version-guard-hides-artifact-filenames.md`](numeric-version-guard-hides-artifact-filenames.md) — Some bare
-  artifact filenames lose file actions under the numeric-version guard; acceptance is ambiguous.
 
 - [`host-dialog-reservation-does-not-exclude-settings.md`](host-dialog-reservation-does-not-exclude-settings.md) —
   Settings or the shortcuts overview during host-dialog admission may leave both dialogs inert until Escape; native
@@ -625,15 +611,6 @@ consequences.
   decisions accept failed reads and later moves, but this interval's coverage is ambiguous; selection still captures the
   displayed template name.
 
-- [`tab-helper-can-fail-after-open-succeeds.md`](tab-helper-can-fail-after-open-succeeds.md) — A tab can pass its short
-  initial liveness check before its helper fails to enter the folder, then disappear without the promised directory
-  error. No wrong-directory command execution or work loss is established.
-
-- [`spare-ancestry-fallback-skips-destination-recheck.md`](spare-ancestry-fallback-skips-destination-recheck.md) — A
-  prepared-checkout ancestry refusal returns before the post-fetch destination ownership check, and fallback cloning can
-  use a replacement empty folder. No existing-file loss is shown; the scope of the accepted check/move window is
-  ambiguous.
-
 - [`closed-model-enter-test-can-misattribute-restart.md`](closed-model-enter-test-can-misattribute-restart.md) — An
   incorrectly admitted early Enter can start an asynchronous restart after the immediate request-count assertion; the
   later primary press can then be refused while the earlier request satisfies the test. Production behavior remains
@@ -841,10 +818,6 @@ consequences.
 - [`old-executor-close-resets-new-holder-bookmarks.md`](old-executor-close-resets-new-holder-bookmarks.md) — An old
   executor's prescribed full-close cleanup can reset plan bookmarks already being used by the new holder.
 
-- [`network-state-wal-failure-topology-unresolved.md`](network-state-wal-failure-topology-unresolved.md) — The WAL
-  conversion has a conditional network-filesystem concern, but no supported topology producing the remaining persistent
-  failure was established.
-
 - [`muse-current-hook-override-semantics-unresolved.md`](muse-current-hook-override-semantics-unresolved.md) — Current
   Muse hook overrides may conflict with Farhelm's generated mapping; the actual vendor merge/duplicate behavior remains
   unverified.
@@ -852,10 +825,6 @@ consequences.
 - [`legacy-muse-hook-preservation-source-gap.md`](legacy-muse-hook-preservation-source-gap.md) — A broad legacy
   hook-preservation claim remains uncertain for an unrecognized override spelling and destructive vendor replacement
   behavior.
-
-- [`muse-unmarked-same-process-child-attribution.md`](muse-unmarked-same-process-child-attribution.md) — An unmarked
-  Muse child reporting from the same process might be mistaken for the session conversation; an ordinary vendor producer
-  remains unestablished.
 
 - [`short-trash-frame-reachability-unresolved.md`](short-trash-frame-reachability-unresolved.md) — A very short Trash
   window may leave its content or controls unreachable; actual supported geometry and recovery remain unverified.
@@ -891,12 +860,6 @@ consequences.
 - [`older-muse-restart-refusal-blames-command-mode.md`](older-muse-restart-refusal-blames-command-mode.md) — Plain
   Restart can describe an older Muse agent launch as a command launch with reporting disabled.
 
-- [`header-copy-warning-survives-different-copy.md`](header-copy-warning-survives-different-copy.md) — Copying a
-  different header field can leave the earlier field's hidden-character warning visible briefly.
-
-- [`transfer-result-height-can-hide-destination.md`](transfer-result-height-can-hide-destination.md) — A long transfer
-  result may hide the saved destination or refusal without an expansion or scroll control.
-
 - [`attachment-failure-announcement-unresolved.md`](attachment-failure-announcement-unresolved.md) — Attachment errors
   have no explicit live announcement, so screen-reader users may miss a failed paste without navigating to its message.
 
@@ -906,9 +869,6 @@ consequences.
 
 - [`host-permission-copy-quotes-retired-labels.md`](host-permission-copy-quotes-retired-labels.md) — Specifications and
   helm refusal text quote old host-permission labels rather than the controls users now see.
-
-- [`backup-warning-can-imply-inconsistent-live-copy.md`](backup-warning-can-imply-inconsistent-live-copy.md) — The
-  live-WAL backup warning may read as a complete copying recipe even though uncoordinated copies can be inconsistent.
 
 - [`trash-question-reopen-skips-answer-focus.md`](trash-question-reopen-skips-answer-focus.md) — Reopening the same
   visible Trash question can leave keyboard focus on its opener, so Enter reopens it again instead of reaching an
@@ -1023,10 +983,6 @@ consequences.
 - [`selected-expanded-host-hover-white-on-white.md`](selected-expanded-host-hover-white-on-white.md) — In Light
   appearance, hovering the selected expanded host can make its name and destination unreadable.
 
-- [`signal-test-child-lacks-unwind-cleanup.md`](signal-test-child-lacks-unwind-cleanup.md) — Failed signal-log,
-  supervisor and terminal-host fixtures can leave owned processes running before cleanup ownership is armed. Additional
-  reviewed scope: A failed regression setup can leave its stand-in shell running after the test exits.
-
 - [`bash-source-admission-retains-literal-splitter.md`](bash-source-admission-retains-literal-splitter.md) — Some valid
   Bash command source is refused despite the product's Bash-source promise.
 
@@ -1036,9 +992,6 @@ consequences.
 
 - [`brace-literal-command-display-is-bash-inexact.md`](brace-literal-command-display-is-bash-inexact.md) — The displayed
   command can give a brace-bearing literal suffix a different apparent Bash meaning from the actual argument.
-
-- [`refused-add-rewrites-new-destination-owner.md`](refused-add-rewrites-new-destination-owner.md) — A racing ADD can
-  change another busy host entry's install paths before returning Busy.
 
 - [`cleanup-stop-transport-error-skips-delete.md`](cleanup-stop-transport-error-skips-delete.md) — A transport error
   from a cleanup Stop can prevent Delete even when the helper already knows the fake session's ID.
@@ -1084,19 +1037,12 @@ consequences.
 - [`inherited-lock-test-self-dup.md`](inherited-lock-test-self-dup.md) — A terminal-host regression can pass without
   inheriting its intended version lock if the opened file already has descriptor 8; that allocation was not observed.
 
-- [`desktop-owner-record-lacks-boot-domain.md`](desktop-owner-record-lacks-boot-domain.md) — A Linux desktop development
-  build can recognize another boot's coincident process identity as its own and stop it during replacement. A qualifying
-  user-work-loss route remains unestablished; this is not a macOS claim.
-
 - [`literal-deleted-suffix-breaks-desktop-owner.md`](literal-deleted-suffix-breaks-desktop-owner.md) — A development
   executable literally ending in ` (deleted)` can lose ownership recognition and leave an older answering build reused.
 
 - [`desktop-smoke-supervisor-precedes-cleanup-record.md`](desktop-smoke-supervisor-precedes-cleanup-record.md) —
   Interruption before desktop-test ownership publication can leave a detached supervisor outside cleanup; timing and
   survivor duration are unmeasured, and an older browser-helper discard's broader intent is ambiguous.
-
-- [`failed-client-close-test-lacks-writer-premise.md`](failed-client-close-test-lacks-writer-premise.md) — The
-  failed-client close regression can pass before its continuously sending peer runs, missing the intended receive bound.
 
 - [`stalled-input-test-accepts-discarded-bytes.md`](stalled-input-test-accepts-discarded-bytes.md) — The stalled-input
   regression accepts discarded typing rather than proving that controls remain responsive beside pending input.
@@ -1128,10 +1074,6 @@ consequences.
 
 - [`late-listener-blocks-start-test-cleanup.md`](late-listener-blocks-start-test-cleanup.md) — A delayed test listener
   can turn the cleanup regression into a five-minute runner timeout instead of a bounded fixture failure.
-
-- [`staged-start-test-lacks-reader-drain-witness.md`](staged-start-test-lacks-reader-drain-witness.md) — The new
-  regression test can pass without protecting the boundary that prevents a terminal from starting before its owner is
-  recorded.
 
 - [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
   with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
@@ -1198,14 +1140,6 @@ consequences.
 
 - [`snapshot-comparison-ignores-link-grouping.md`](snapshot-comparison-ignores-link-grouping.md) — Snapshot regression
   checks can pass after terminal hyperlink identities or boundaries change.
-
-- [`peak-memory-test-lacks-baseline-headroom.md`](peak-memory-test-lacks-baseline-headroom.md) — The memory tests may
-  hide an excessive checkpoint allocation below an earlier process memory peak. After source investigation, the physical
-  headroom needed for an actual false pass in these fixtures remains unestablished.
-
-- [`malformed-snapshot-fixtures-mask-intended-validators.md`](malformed-snapshot-fixtures-mask-intended-validators.md) —
-  Several terminal-snapshot corruption fixtures never exercise the validation they name, so they remain green after
-  those checks regress.
 
 - [`recording-loader-rejects-valid-json-field-spacing.md`](recording-loader-rejects-valid-json-field-spacing.md) — A
   developer can provide a private terminal recording in the documented JSON-lines format and have the snapshot test
@@ -1302,10 +1236,6 @@ consequences.
 - [`exit-notice-hides-oldest-scrollback-row.md`](exit-notice-hides-oldest-scrollback-row.md) — Once an agent's program
   exits, scrolling to the beginning of its retained output can still leave the oldest row clipped out of view.
 
-- [`secondary-button-erases-intercepted-primary-ownership.md`](secondary-button-erases-intercepted-primary-ownership.md)
-  — Holding a web-link click and pressing a second mouse button loses the primary click's interception, so its
-  subsequent drag/release reaches the terminal program and its original link no longer opens.
-
 - [`grid-drop-suppresses-refusal-explanation.md`](grid-drop-suppresses-refusal-explanation.md) — Dropping content onto a
   grid terminal historically suppressed its refusal explanation. The later native-drop repair is recorded for explicit
   cleanup; physical delivery on every engine is not certified.
@@ -1383,10 +1313,6 @@ consequences.
   regression can reject correct output preservation because its agent has published readiness before installing the
   exit-output trap.
 
-- [`held-start-test-lacks-prelaunch-fencing-witness.md`](held-start-test-lacks-prelaunch-fencing-witness.md) — The
-  regression can pass when the next agent launches before an earlier outstanding first stage is fenced, so it does not
-  protect the before-launch ordering its assertion claims.
-
 - [`host-preservation-test-can-select-starter-pid.md`](host-preservation-test-can-select-starter-pid.md) — The
   reserved-session preservation regression can blame correct startup cleanup for a fixture launcher exiting normally,
   because its readiness check can save that temporary launcher as the terminal-host process.
@@ -1459,13 +1385,6 @@ consequences.
   Same-supervisor recovery exposes contradictory product and implementation promises for the missing-output notice's
   lifetime.
 
-- [`long-launch-status-crops-painted-edge.md`](long-launch-status-crops-painted-edge.md) — Long launch-status labels
-  crop the pill's decorative edge in both static engines; elapsed text remains visible.
-
-- [`attention-list-refresh-failure-scope-unresolved.md`](attention-list-refresh-failure-scope-unresolved.md) — A
-  connected host's session list can stop refreshing without entering the attention list. Whether that omission violates
-  the intended scope remains unverified after investigation.
-
 - [`sandbox-create-cancel-lacks-opening-guard.md`](sandbox-create-cancel-lacks-opening-guard.md) — Cancel lacks the
   creation question's opening check. A normal input sequence dismissing a later question remains unverified after
   investigation.
@@ -1494,10 +1413,6 @@ consequences.
 - [`sandbox-status-diagnosis-bypasses-cleaning.md`](sandbox-status-diagnosis-bypasses-cleaning.md) — Accepted sandbox
   failure descriptions bypass normal cleaning and redaction before reaching clients. An actual provider description
   containing a credential remains unverified after investigation.
-
-- [`failed-setup-refresh-overwrites-held-lifecycle-status.md`](failed-setup-refresh-overwrites-held-lifecycle-status.md)
-  — After setup's registry synchronization fails, a later refresh can replace in-progress Suspend or Resume with
-  Connecting while the operation is still running.
 
 - [`retired-connection-leaves-suspend-progress-stuck.md`](retired-connection-leaves-suspend-progress-stuck.md) — A
   failed Suspend on a retired connection can leave the host showing Suspending with lifecycle controls disabled until a
@@ -1635,10 +1550,6 @@ consequences.
   snapshot becoming visible only after cleanup's last listing could remain after builder removal. The provider's
   relevant visibility guarantees remain unverified after investigation.
 
-- [`changed-project-key-cleanup-absence-unresolved.md`](changed-project-key-cleanup-absence-unresolved.md) — After an
-  account key changes projects, cleanup may confuse inaccessible resources with absent ones. The provider's foreign-ID
-  response behavior remains unverified after investigation.
-
 - [`detached-recipe-write-crosses-recreated-generation.md`](detached-recipe-write-crosses-recreated-generation.md) — A
   detached database write can outlive its recipe generation and update a later recipe recreated with the same name.
 
@@ -1656,10 +1567,6 @@ consequences.
 - [`packages-build-result-retired-under-changed-image-source.md`](packages-build-result-retired-under-changed-image-source.md)
   — A build that captured a Packages source can have its result retired after the recipe's current source changes to
   Image.
-
-- [`rebuild-order-test-misses-persistence-boundary.md`](rebuild-order-test-misses-persistence-boundary.md) — The
-  rebuild-order regression observes calls without proving the database state was persisted at the boundary it claims to
-  protect.
 
 - [`orphan-cleanup-start-does-not-invalidate-feed.md`](orphan-cleanup-start-does-not-invalidate-feed.md) — Starting
   orphan cleanup does not notify the live feed, so other views may miss its new in-progress state.
@@ -1686,10 +1593,6 @@ consequences.
 
 - [`neighbor-status-redraw-cancels-stable-url-click.md`](neighbor-status-redraw-cancels-stable-url-click.md) — A status
   change elsewhere can cancel a click on an unchanged terminal URL.
-
-- [`first-state-directory-ancestor-durability-unresolved.md`](first-state-directory-ancestor-durability-unresolved.md) —
-  A first-created state directory does not flush every required ancestor explicitly. Whether supported filesystem
-  behavior can lose the admitted state remains unverified after investigation.
 
 - [`automatic-update-opt-out-can-roll-back.md`](automatic-update-opt-out-can-roll-back.md) — A power loss can roll back
   opting out of automatic updates and allow later unattended updates. Whether the general preference-loss acceptance
@@ -1737,20 +1640,12 @@ consequences.
   marked count may move the menu button onto another toolbar line while its popup stays put. The necessary rendered
   geometry remains unverified after investigation.
 
-- [`truncated-empty-filter-result-omits-clear-actions.md`](truncated-empty-filter-result-omits-clear-actions.md) — A
-  truncated empty-filter result can omit the clear-filter links needed to recover through that view.
-
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 
 - [`stty-tool-format-mismatch.md`](stty-tool-format-mismatch.md) — The terminal-settings test can fail on a Mac with GNU
   command-line tools first on PATH even when the host's terminal settings are correct. Its reference and host samples
   use different stty implementations, whose saved-settings strings cannot match.
-
-- [`closed-stdin-epipe-witness.md`](closed-stdin-epipe-witness.md) — The test for keeping SSH input open after the
-  remote stops accepting it can pass without ever reaching the failure-handling boundary it claims to check. A refactor
-  that buffers input without forwarding it can leave that boundary untested while the test stays green. This is a
-  regression-test sensitivity defect, not evidence that current forwarding is wrong.
 
 - [`resume-preview-readiness-witness.md`](resume-preview-readiness-witness.md) — The regression test never forces a
   ready checkout preview while the form still displays Connecting. A regression at that boundary can consume the single
@@ -1803,11 +1698,6 @@ consequences.
 - [`grid-text-omits-blank-columns.md`](grid-text-omits-blank-columns.md) — The new test helper can turn visibly
   separated terminal text into a different string. A test searching that transcript for the displayed text may then time
   out or match text that was never contiguous on screen. No currently failing assertion was identified.
-
-- [`hook-waiter-missing-invocation-binding.md`](hook-waiter-missing-invocation-binding.md) — A repeated hook callback
-  can be credited with an earlier callback's terminal result. Report-write counts prove that reports ran and were
-  accepted, but do not prove the second callback exited successfully and stayed silent. The exact false-pass scheduling
-  remains unverified after investigation.
 
 - [`reboot-concurrency-early-release.md`](reboot-concurrency-early-release.md) — The reboot tests do not keep their
   integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
@@ -1873,18 +1763,6 @@ consequences.
 
 - [`recipe-cleanup-navigation.md`](recipe-cleanup-navigation.md) — Navigation rejection skips a browser test's owned
   recipe and credential deletions, potentially contaminating later tests on its private stack.
-
-- [`ambiguous-codex-seed-renewal.md`](ambiguous-codex-seed-renewal.md) — Unverified after investigation: an uncertain
-  Codex login upload can replay after renewal. Whether restoring the saved seed makes authentication or later refresh
-  unusable remains unestablished; explicit exactly-once ambiguity coverage is partial.
-
-- [`launcher-live-draft-submission-source-gap.md`](launcher-live-draft-submission-source-gap.md) — The launcher reads
-  live choices at submission, but no complete supported sequence establishes a contradictory accepted launch for the
-  remaining generic concern. Other priority; unverified after investigation.
-
-- [`notification-read-failure-leaves-stale-cell.md`](notification-read-failure-leaves-stale-cell.md) — After a
-  notification read fails just after a session notification is recorded or resolved, the bell can stay missing or
-  urgently unresolved after storage recovers; normal capture passes do not retry that publication.
 
 - [`tunnel-dns-outlives-dial-admission.md`](tunnel-dns-outlives-dial-admission.md) — Unverified after investigation:
   stalled hostname resolution can outlive recipe tunnel timeouts and admission limits, potentially accumulating work or
@@ -1985,10 +1863,6 @@ consequences.
   retained terminal history repeats full-row decoding for its characters. Added work is confirmed; material pointer or
   UI latency remains unverified after investigation.
 
-- [`attention-save-error-can-exhaust-list-height.md`](attention-save-error-can-exhaust-list-height.md) — A retained
-  update-preference error and wrapped header may leave no reachable attention-list body. The required supported viewport
-  and font geometry remain unverified after investigation.
-
 - [`approval-scrollports-lack-keyboard-entry.md`](approval-scrollports-lack-keyboard-entry.md) — Keyboard users lack a
   named focus target for horizontally clipped approval facts and text-only scrolling approval bodies. The layout test
   currently requires that omission.
@@ -1996,10 +1870,6 @@ consequences.
 - [`approval-copy-test-assumes-clipboard-object.md`](approval-copy-test-assumes-clipboard-object.md) — The Copy ID test
   can fail before its assertion if the engine provides no clipboard object. Whether the supported browser configuration
   omits it remains unverified after investigation.
-
-- [`short-progress-card-can-hide-overflow-notice.md`](short-progress-card-can-hide-overflow-notice.md) — A very short
-  update-progress hover may hide its Full details guidance even after diagnostics shrink. Reachable native geometry
-  remains unverified after investigation.
 
 - [`progress-hover-keeps-short-host-name.md`](progress-hover-keeps-short-host-name.md) — Update progress repeats a
   shortened host name instead of revealing its full display name, so similarly named hosts remain indistinguishable
@@ -2090,10 +1960,6 @@ consequences.
 
 - [`cache-lock-repair-child-lifetime.md`](cache-lock-repair-child-lifetime.md) — Repository-cache repair assumes Git
   cannot outlive its outer-lock owner; a real collision or damage remains unverified after investigation.
-
-- [`subline-progress-preview-hides-diagnosis.md`](subline-progress-preview-hides-diagnosis.md) — A positive sub-line
-  host-diagnostic budget can round its preview to zero; reachable production geometry remains unverified after
-  investigation.
 
 - [`pending-stop-header-width.md`](pending-stop-header-width.md) — Pending Stopping feedback may exceed the compact
   header's 650px budget with a tunnel pill; actual geometry remains unverified after investigation.
@@ -2202,10 +2068,6 @@ consequences.
   — Agent guide explicitly qualifies key and wait advice for environment launches. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md`](trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md)
-  — Supplied timing-comment defect is source-confirmed and already owned by g020/l7. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-environment-test-responders-heartbeat-control-decode.md`](trailing-environment-test-responders-heartbeat-control-decode.md)
   — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
@@ -2213,10 +2075,6 @@ consequences.
 - [`trailing-intermediate-agent-delete-calls-podman-container-sandbox.md`](trailing-intermediate-agent-delete-calls-podman-container-sandbox.md)
   — Intermediate agent refusal calls a Podman container a sandbox. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md`](trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md)
-  — Shared rollback allowance does not remove the refusal tests observable boundaries. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md`](trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md)
   — Recipe-template refusals still claim agent use is GUI-only. Abbreviated collection; confidence, proposed dismissals
@@ -2293,10 +2151,6 @@ consequences.
 - [`trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md`](trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md)
   — Whole-host Delete does not record sealed deletion failures. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md`](trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md)
-  — Deleting extends the known incomplete backend phase-test matrix. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md`](trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md)
   — Normal removal parks or cancels the listing before clearing its seal. Abbreviated collection; confidence, proposed
@@ -2378,10 +2232,6 @@ consequences.
   — A delayed Delete result can leave a destroyed environment described as staying. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md`](trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md)
-  — The nothing-decided terminology refutation does not cover the stronger no-change comment. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-environment-delete-expanded-error-false-no-change-comment.md`](trailing-environment-delete-expanded-error-false-no-change-comment.md)
   — Expanded Delete error handling retains a false no-change explanation. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -2430,17 +2280,9 @@ consequences.
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md`](trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md)
-  — REST admission owns registration before the launch task is spawned. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md`](trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md)
   — Intermediate reach-test comment accurately names the remaining uninstall consumer. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md`](trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md)
-  — Provider preparation callbacks await insertion before reporting phases. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md`](trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md)
   — Cleanup test misstates legacy tmux ownership. Abbreviated collection; confidence, proposed dismissals and unresolved
@@ -2478,20 +2320,12 @@ consequences.
   — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md`](trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md)
-  — Failed install cleanup discards the safe session-limit diagnosis. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md`](trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md)
   — Legacy tmux server may survive uninstall; specification explicitly accepts it. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-podman-literal-image-user-argument-injection.md`](trailing-podman-literal-image-user-argument-injection.md)
   — Literal input boundary refutation persists through the review tip. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md`](trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md)
-  — Deletion ownership refutation remains separate from warning repair. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-shared-recipe-container-base-summary-raw-presentation.md`](trailing-shared-recipe-container-base-summary-raw-presentation.md)
@@ -2662,10 +2496,6 @@ consequences.
   — failed-relaunch warning policy and restoration route predate the full range. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md`](trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md)
-  — Launch-error reduction now allocates full rows before enforcing its tiny result limit. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md)
   — Unmarked tab-shell cleanup loses its integrated regression oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -2834,10 +2664,6 @@ consequences.
   — The deleted raw-input test leaves cursor/control-sequence delivery without its end-to-end oracle. Abbreviated
   collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-removed-live-alternate-screen-reattach-oracle.md`](trailing-removed-live-alternate-screen-reattach-oracle.md)
-  — The live alternate-screen reattach oracle was deleted without a host replacement. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-removed-serving-legacy-binary-final-output-oracle.md`](trailing-removed-serving-legacy-binary-final-output-oracle.md)
   — Deleting the immediate-exit test loses the real-ticker legacy final-output oracle. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
@@ -2936,10 +2762,6 @@ consequences.
 
 - [`trailing-pre-range-tmux-probe-fixture-process-oracles.md`](trailing-pre-range-tmux-probe-fixture-process-oracles.md)
   — Retained probe fixtures and process oracles are unchanged from the range base. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-excerpt-whole-row-intermediate-allocation.md`](trailing-launch-excerpt-whole-row-intermediate-allocation.md)
-  — Deleted reducer has distinct provenance and temporary-allocation consequences. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md`](trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md)
@@ -3116,10 +2938,6 @@ consequences.
   from a session can paste control characters from the host's attachment directory into the same terminal along with the
   path.
 
-- [`destructive-action-tests-omit-request-targets.md`](destructive-action-tests-omit-request-targets.md) — Several GUI
-  regressions would pass if Farhelm sent a destructive request for a different session, host, credential, or recipe. One
-  Tensorlake test does not check that its request clears the key.
-
 - [`secret-handling-tests-omit-output-assertions.md`](secret-handling-tests-omit-output-assertions.md) — Credential
   tests can pass even if a token, login file, or device credential appears outside the intended entry field or request,
   because they rarely look for the secret in the painted frame, refusal text, or logs.
@@ -3161,15 +2979,8 @@ consequences.
 - [`desktop-supervisor-ownership-save-is-silent.md`](desktop-supervisor-ownership-save-is-silent.md) — Farhelm can start
   its supervisor and then silently fail to record it. Later launches can treat that supervisor as externally started.
 
-- [`open-source-notices-window-failure-is-silent.md`](open-source-notices-window-failure-is-silent.md) — Choosing
-  Open-source notices can do nothing when the notices window cannot open.
-
 - [`launcher-stale-search-selection-fails-silently.md`](launcher-stale-search-selection-fails-silently.md) — Choosing a
   vanished host or stale recent setup can clear the search or do nothing without saying why.
-
-- [`desktop-startup-reopen-can-wait-on-reused-pid.md`](desktop-startup-reopen-can-wait-on-reused-pid.md) — If the old
-  Farhelm process number is reused during a handoff, the reopen helper can wait indefinitely and fail to open the
-  replacement window.
 
 - [`gui-labels-and-refusals-name-different-actions.md`](gui-labels-and-refusals-name-different-actions.md) — Several
   dialogs, menus and accessible labels describe the same action differently. A few messages name the wrong operation or
@@ -3231,10 +3042,6 @@ consequences.
 - [`credential-chooser-test-assumes-missing-global-path.md`](credential-chooser-test-assumes-missing-global-path.md) —
   The missing-file test depends on a machine-wide file path staying absent instead of controlling that premise in its
   fixture.
-
-- [`open-types-acknowledgement-only-in-dialog.md`](open-types-acknowledgement-only-in-dialog.md) — Only the Settings
-  dialog asks for the acknowledgement SPEC requires before adding a file type that opens with a modifier-click; the helm
-  stores any parseable list.
 
 - [`staged-payloads-and-automatic-host-updates.md`](staged-payloads-and-automatic-host-updates.md) — Whether automatic
   host updates can push an operator-staged, unverified payload directory without a per-host action has not been checked.
