@@ -296,7 +296,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Auto-update hosts by default.** Existing users who have NOT checked auto-update get enrolled in auto-updates. Only
   people who explicitly turn auto-update off AFTER this change has been made get a persistent preference and are not
   auto-updated. Make sure we get this right in terms of the settings representation. UI wise, it's the same setting as
-  today, it just goes to being checked by default on new installations and on upgraded installations.
+  today, it just goes to being checked by default on new installations and on upgraded installations. Plan:
+  `plans/queue/auto-update-hosts-default.md`.
 
 ## Mid term
 
