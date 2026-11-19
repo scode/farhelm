@@ -683,13 +683,9 @@ fn only_a_complete_listing_forgets_a_vanished_mark(cx: &mut TestAppContext) {
 
 // ---- The bar -------------------------------------------------------------------------------------------------------
 
-/// Why this matters: SPEC.md: with any effective marks, the bar replaces "the ordinary title, count and icon buttons"
-/// while "any truncation or unsupported-filter warning" remains; the old app kept the cut band beside its bar. Clear
-/// hands focus to the order's title when the click put focus on it, since Clear itself goes with the bar, and leaves
-/// it alone otherwise. Specified: over a cut listing, marking b replaces the title, Trash, Templates and New with "1
-/// marked", the ⋯ and Clear while the cut band stays; under the Linux click rule (a click focuses the control), Clear
-/// brings them all back, marks nothing and leaves focus on the title; under the macOS rule (a click focuses nothing),
-/// with focus on b's row, Clear clears the marks and focus stays on the row.
+/// The marked bar replaces the ordinary heading and leaves the truncation warning visible. Clearing the marks
+/// brings the heading back. Focus returns to the terminal when Clear held it. With a macOS-style click while a row
+/// holds focus, the row keeps it.
 #[gpui::test]
 fn the_bar_replaces_the_heading_and_the_cut_band_stays(cx: &mut TestAppContext) {
     let mut cut = fleet(&["a", "b"]);
@@ -718,13 +714,16 @@ fn the_bar_replaces_the_heading_and_the_cut_band_stays(cx: &mut TestAppContext) 
         assert!(drawn(cx, control), "{control} is drawn");
     }
 
+    focus_bar_control(&list, BarControl::Menu, cx);
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(CLEAR_ID));
     test_support::click(cx, CLEAR_ID);
     test_support::settle(cx);
     for control in heading {
         assert!(drawn(cx, control), "{control} is back");
     }
     assert!(!stored(&list, "b", cx));
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order"));
+    assert!(test_support::terminal_focused(cx));
 
     click_with(cx, "session-row-b", ctrl());
     assert_eq!(markers(cx), ["b"], "the premise: b is marked again");
@@ -1031,7 +1030,7 @@ impl Render for Floating {
 /// the old spec's "Escape on Clear clears without preventing default". The window's own Escape (closing the top layer,
 /// putting a tooltip away) must still happen. Specified: with b marked, focus moved to "N marked" (as the bulk
 /// question's Confirm will move it) and a popover open that takes no focus, Escape clears the marks, the window's
-/// Escape closes the popover, and focus goes to the order's title, since the count went with the bar.
+/// Escape closes the popover, and focus returns to the terminal, since the count went with the bar.
 #[gpui::test]
 fn escape_in_the_list_clears_the_marks_and_goes_on(cx: &mut TestAppContext) {
     let (_fake, list, cx) = open_list(cx, fleet(&["a", "b"]));
@@ -1067,7 +1066,7 @@ fn escape_in_the_list_clears_the_marks_and_goes_on(cx: &mut TestAppContext) {
         !test_support::is_open(cx, layer),
         "and went on to the window's Escape"
     );
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order"));
+    assert!(test_support::terminal_focused(cx));
 }
 
 /// Why this matters: Escape mostly comes from a row or a filter, not the bar; SPEC.md: "Escape clears marks only from
@@ -1092,11 +1091,10 @@ fn escape_from_a_row_clears_the_marks_and_leaves_focus_on_the_row(cx: &mut TestA
     assert_eq!(focused_id(cx).as_deref(), Some("session-item-a"));
 }
 
-/// Why this matters: the old bar's Escape handed focus to the order's title before it cleared, as Clear did; without
-/// it a keyboard user on Clear or the ⋯ loses their place in the sidebar when the bar goes. Specified: with b marked,
-/// focus on the ⋯ and Tab taking it to Clear, Escape clears the marks and leaves focus on the order's title.
+/// Escape removes the focused marked bar and gives the keyboard back to the open session's terminal. Tab from the
+/// marked menu puts focus on Clear before Escape, so recovery has to hand off from the disappearing control.
 #[gpui::test]
-fn escape_on_the_bar_hands_focus_to_the_order_title(cx: &mut TestAppContext) {
+fn escape_on_the_bar_returns_focus_to_the_terminal(cx: &mut TestAppContext) {
     let (_fake, list, cx) = open_list(cx, fleet(&["a", "b"]));
     click_with(cx, "session-row-b", ctrl());
     assert_eq!(markers(cx), ["b"], "the premise");
@@ -1112,7 +1110,7 @@ fn escape_on_the_bar_hands_focus_to_the_order_title(cx: &mut TestAppContext) {
     test_support::settle(cx);
     assert!(!stored(&list, "b", cx));
     assert_eq!(count(cx), None);
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order"));
+    assert!(test_support::terminal_focused(cx));
 }
 
 /// Why this matters: SPEC.md: Escape "yields to a menu, dialog or terminal that owns the key"; the old spec's "Escape

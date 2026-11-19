@@ -2123,19 +2123,6 @@
   change.
 - Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
-## bulk-completion-focuses-sort.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A finished bulk
-  action sends focus to the sort title, not the terminal. SPEC says focus goes to the terminal when a control goes away;
-  code chose consistency with Clear/Escape. Bucket: other.
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix code: send focus home on completion, and Clear/Escape alike (~3-10 + test). Size gate: about
-  100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
-  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
-  entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
-
 ## selected-template-state-contrast.md
 
 - Outcome: `fix code`.
