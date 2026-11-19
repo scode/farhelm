@@ -65,3 +65,79 @@ None.
 All five PRs passed independent review after corrections. The fixes leave open menus readable, keep the ring visible on
 selected controls and follow their corners, and recenter a visible scroll-box tooltip when keyboard focus takes over.
 The focused tests cover those cases.
+
+### Landing
+
+#### What landed with it
+
+It landed alone in its round. Since its base, main gained stop-agent-podman-containers (supervisor cleanup of Podman
+containers) and the scripts for running slow tests on a test machine of your own; neither touches the desktop app. The
+independent reviewer also checked the earlier template-summary ellipsis and Emacs text-field keys against this plan's
+Templates dialog and text-field changes, and found no interaction.
+
+At your request this landing was reviewed with extra skepticism, by me and by an independent reviewer, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. I looked at the new reference
+screenshots: help for a quick switcher row now sits beside the list instead of over the rows, and help for a Help menu
+item sits beside the menu.
+
+#### Fixes made while landing
+
+- **Help for waiting approval requests stopped avoiding the list once it scrolled.** The list's help edge was drawn
+  inside the list that scrolls, and the app moves a scrolling list's contents, the edge included, by the scroll
+  distance. With four or more waiting requests scrolled to the bottom, a header's help fell back to covering the header
+  above it, the overlap this plan removes elsewhere. The edge now sits on a wrapper that does not scroll.
+- **Three descriptions of "beside" placement were stale.** The GPUI foundation notes, the sidebar's and the component
+  layer's comments still said only the sidebar draws an edge, once per window, and that help without one shows at the
+  pointer. They now say that lists and dialogs draw their own edges. Help sits against the nearest edge that contains
+  its control, and takes ordinary placement when there is none.
+
+#### Checks
+
+The plan changes only the desktop app's GUI crate (with new reference screenshots). So the landing ran the GUI crate's
+whole test suite, the app's end-to-end smoke, both GUI clippy runs and the reference screenshots (goldens). The suite,
+the smoke and clippy ran on the maintainer's own test machine, an arm64 Linux VM that builds and tests the tree itself.
+The goldens and the small checks ran locally on x86_64.
+
+On the plan as delivered, rebased on main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop -E 'package(farhelm-gui)'`, on the test machine
+  (`c613c98e-640b-4ae1-a2fb-a4ce44729915`): all 3193 passed, with no runtime skips.
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on the test machine: 49 of its 50 steps passed, and the
+  clipboard paste step was skipped, as always on Linux (`0624e572-a629-47b4-a9fc-ca106a8613a5`).
+- `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings` and the same with `--features agent`, on the test
+  machine: passed.
+- `python3 scripts/check-gui-goldens.py`, locally: passed with the plan's new references
+  (`686a9c1f-cc2c-4a73-b205-8e8441abe284`).
+
+On the fixed tree:
+
+- `cargo fmt --all -- --check`, `dprint check` and `python3 scripts/check-agents-md.py`, locally: passed.
+- The GUI crate's whole suite again, on the test machine (`97598ef7-5e48-4ef8-86f3-0fcb43e3adc1`): all 3193 passed.
+- `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings`, on the test machine: passed.
+- `python3 scripts/check-gui-goldens.py`, locally, since the approval list's layout changed: passed
+  (`a4d9af91-8dc3-4ecc-be6c-d758d10a6534`).
+
+The smoke was reused for the fixed tree: the fixes moved one help edge onto a wrapper and changed comments.
+
+Skipped:
+
+- Anything on a Mac: hover help placement was not tried on macOS.
+- A test of the scrolled approval list's help: none exists, and I did not add one.
+
+#### Things you should know that the report does not say
+
+- **There is no single rule for help near an open menu.** Help beside an edge treats open menus three ways: sidebar rows
+  ignore them, the host rail hides its card, and lists fall back to ordinary placement. Menus, below-first help and tall
+  controls each have their own variant again. In one case this shows: the host row's ⋯ button, whose menu opens beside
+  it, can put its help over the top of that open menu when the pointer leaves and comes back. The rail fixed and tested
+  its identical case. Possible follow-up: one rule. A panel that contains the control is its surface, every other open
+  panel is an obstacle, and help that has no room hides. That would also remove two easy mistakes: a popover row added
+  without its `in_popover` flag silently loses its help, and a later style call can turn rail help back into sidebar
+  placement.
+- **Two new tests pass even when no help card is drawn.** The sort menu test and the template ⚡ help test only check
+  the card's position if one is found, so a regression that stopped drawing it would pass.
+- **The Help menu's help mostly repeats each item's own description** ("Announcements: show the announcements Farhelm
+  has shown you before…" beside "Shows previously shown announcements again"). That predates this plan; only its
+  placement changed here.
