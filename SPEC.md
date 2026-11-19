@@ -3258,7 +3258,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   counts as disclosing the target only while fully visible, inside the window and not covered by another Farhelm surface
   such as an approval card or tunnel-error notice. A click whose hover is not fully visible is refused with an
   explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text need no such display, because
-  what is shown is what opens, apart from the remote-localhost tunnel hint below.
+  what is shown is what opens, apart from the remote-localhost tunnel hint below. Concealed terminal cells break a
+  printed URL. This rule concerns the terminal's conceal attribute. Text drawn in the background color is outside its
+  scope.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink

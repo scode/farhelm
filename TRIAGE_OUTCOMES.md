@@ -1861,22 +1861,6 @@
   entry in the same change.
 - Execution: planned in `plans/queue/triage-misc-nov18.md`
 
-## concealed-terminal-cells-change-link-target.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Concealed cells are not drawn
-  (crates/gui/farhelm-gui/src/terminal.rs) but link detection reads their characters
-  (crates/gui/farhelm-grid-model/src/links.rs), so a printed link that looks like one address can open another with no
-  preview, contradicting the rationale "what is shown is what opens" (SPEC.md "Terminal experience") and bypassing the
-  approval `farhelm agent open-url` would need. Text in the background color cannot reasonably be detected. Bucket:
-  highest.
-- Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
-  Q4).
-- Completion criteria: link detection stops at concealed cells, with a test; SPEC.md says concealed text is not part of
-  a printed link and text drawn in the background color is out of scope. Remove the feedback file and its index entry in
-  the same change.
-- Execution: planned in `plans/queue/concealed-link-target.md`
-
 ## terminal-selection-copies-concealed-text.md
 
 - Outcome: `discard`.

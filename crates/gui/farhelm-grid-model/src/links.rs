@@ -256,9 +256,10 @@ impl<'a> Identities<'a> {
 }
 
 impl GridModel {
-    /// Every OSC 8 stretch on this row precedes plain URLs. Text detection walks
-    /// only the pinned 2048-character neighboring window and preserves UTF-16
-    /// ownership across soft wraps; even inert OSC targets keep their cells.
+    /// Every OSC 8 stretch on this row precedes plain URLs, and even an inert OSC target keeps its cells. Text detection
+    /// walks only the pinned 2048-character neighboring window and preserves UTF-16 ownership across soft wraps.
+    /// Concealed cells break a printed URL: a plain click opens its address without showing it first, so it may only
+    /// open what the terminal actually draws.
     pub fn row_links(&self, line: u64) -> Vec<TerminalLink> {
         let Some((_, row)) = self.selection_line(line) else {
             return Vec::new();
@@ -316,7 +317,7 @@ impl GridModel {
         let Some((first, last)) = self.url_window(line) else {
             return found;
         };
-        let cells = self.word_cells(first, last);
+        let cells = self.word_cells(first, last, true);
         let text =
             String::from_utf16_lossy(&cells.iter().map(|cell| cell.unit).collect::<Vec<_>>());
         for matched in URLS.find_iter(&text) {

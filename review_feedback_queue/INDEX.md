@@ -74,10 +74,6 @@ consequences.
   can run the command already on the line while Farhelm is still fetching pasted text meant to finish it. The paste can
   then arrive at the next prompt.
 
-- [`concealed-terminal-cells-change-link-target.md`](concealed-terminal-cells-change-link-target.md) — A printed link
-  can look like one site but open another when the terminal hides part of the address. Farhelm’s ordinary printed-link
-  click does not disclose that difference.
-
 - [`terminal-selection-copies-concealed-text.md`](terminal-selection-copies-concealed-text.md) — Selecting a visible
   line in the terminal can copy hidden text along with it. Pasting it into another shell or application can use more
   than you selected by sight.
