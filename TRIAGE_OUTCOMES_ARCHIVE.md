@@ -21497,6 +21497,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `zpyquwlkvzol`, bookmark `plan/triage-discards-nov18/05-discard-lone-tab-oracles`,
   https://github.com/scode/farhelm/pull/4164/changes.
 
+## trailing-osc52-classifier-removal-clipboard-read-disclosure.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): incorrect. The supervisor's emulator
+  drops OSC 52 read requests and passes on only writes (crates/farhelm-terminal-emulator/src/effects.rs), and the app
+  reads the clipboard only on a user paste, meeting SPEC.md "an OSC 52 READ is never answered with clipboard contents".
+  The removed classifier belonged to the browser path, which no longer exists. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `mxoxnpsnwkuv`, bookmark `plan/triage-discards-nov18/06-discard-osc52-classifier`,
+  https://github.com/scode/farhelm/pull/4165/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
