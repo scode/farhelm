@@ -91,12 +91,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the cache wrapper, the one large lever, which drops a cached view's screen-reader information unless GPUI is patched
   to replay it. Look into caching with that patch, or another way to cut per-element cost.
 
-- **Rebuild the demo video's capture flow on the GPUI app.** Deferred past the GPUI migration on 2026-11-16. The README
-  hero and docs-screenshot capture run on the GPUI screenshot tooling; the demo video (`scripts/readme-video.sh`,
-  `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
-  real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
-  Plan: `plans/queue/demo-video-capture.md`.
-
 - **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
   the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
   a reference picture. Today it runs only during development and landings: its reference pictures live outside this

@@ -11,10 +11,6 @@ reading list in `website/AGENTS.md`.
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
-> NOTE: The demo video cannot be refreshed until its removed browser capture is rebuilt on the GPUI tooling. Its
-> procedure below is kept for that rebuild. The docs screenshot runner uses the GPUI harness on Linux. The README
-> screenshot has been rebuilt on the GPUI tooling.
-
 ## Brand marks: the icon and the wordmark
 
 The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` and `Farhelm.icns` beside it). The
@@ -42,16 +38,13 @@ which is its whole validation and needs no network.
 
 ## README demo video
 
-Unavailable until rebuilt on the GPUI app's tooling (see the note at the top).
-
-The demo video is recorded from the web UI against a staged fleet, governed by `docs/readme-video/SPEC.md`; read it
-before touching anything under `docs/readme-video/` or `e2e/readme-video/`. "Refresh the demo video" means: run
-`scripts/readme-video.sh`, and if a beat no longer works on the current UI, rewrite that beat in
-`e2e/readme-video/capture.spec.ts` to realise the same intent, then look at every still it prints and fix annotation
-placement until each one points at the right thing and hides nothing the viewer should see.
-`docs/readme-video/intent.md`, the scenario, and the transcripts are the maintainer's design and change only when asked.
-While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the machinery; say so when handing
-it over. The upload is manual; nothing in CI records or checks the video.
+The demo video is recorded from the desktop app against a staged fleet on Linux. Read `docs/readme-video/SPEC.md` before
+touching anything under `docs/readme-video/`. "Refresh the demo video" means run `scripts/readme-video.sh`, inspect
+every marked still, and adjust placement in `scripts/readme_video.py` until each callout points at the right thing and
+leaves the relevant UI visible. Rewrite a beat that no longer works against the current UI to realise the same intent,
+then record again. `docs/readme-video/intent.md`, the scenario, and the transcripts are the maintainer's design and
+change only when asked. While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the
+machinery; say so when handing it over. The upload is manual; nothing in CI records or checks the video.
 
 ## Docs refresh
 

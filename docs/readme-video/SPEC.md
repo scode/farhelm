@@ -1,90 +1,70 @@
-# README demo video: requirements
+# README demo video requirements
 
-This directory is the design of the demo video, and the requirements that govern how it is produced. The recording code
-lives under `e2e/readme-video/` and the command under `scripts/`; this file is what they are built to satisfy. It is the
-video counterpart of `docs/readme-hero/SPEC.md`, and everything that document says about what is real and what is staged
-applies here unchanged, because the video stages its fleet with the same code.
+`scripts/readme-video.sh` records the Farhelm desktop app against a staged fleet. The staging rules in
+[the README hero requirements](../readme-hero/SPEC.md) apply to both captures.
 
-NOTE: The current `intent.md`, scenario, and transcripts are a throwaway sample that only demonstrates the machinery.
-This document describes the machinery and the process, which outlive that sample.
+NOTE: The current intent, scenario and transcripts are a throwaway sample that exercises the recorder. Nothing in CI
+records or compares the video.
 
-NOTE: This is not a visual regression fixture. Nothing in CI records the video, compares it, or fails when it drifts. It
-exists so the published video shows the real product at whatever version is checked out, and so an agent can refresh it
-without inventing anything.
+## Design and choreography
 
-## The one rule, and the layer the screenshot does not have
+`intent.md` gives the order of the beats and the exact wording of their annotations. The fleet in `scenario.json5` and
+its transcripts are also part of the design. The maintainer changes those files when the video needs a different design.
+The fleet and transcripts use the screenshot's scenario format, with one addition: a session whose transcript stops
+part-way for input names what it does after its transcript ends (`then`), since its starting status no longer implies
+that.
 
-The design is fixed and the pixels are not, as for the screenshot. What differs is that a video has a choreography:
-clicks, typing, annotations that point at things, all of which have to be expressed against a UI that keeps changing.
-That is split into two layers with different owners.
-
-`intent.md` is the script in the film sense: what happens, in what order, and the exact wording of every annotation. It
-is the maintainer's, and it changes only when the maintainer wants a different video. It says nothing about selectors,
-coordinates, or timings, so a UI change never invalidates it.
-
-`e2e/readme-video/capture.spec.ts` is the compiled form of the intent: a Playwright spec that makes each beat happen
-against the UI as it is today, with its beats numbered as in the intent. An agent writes it from the intent and rewrites
-it when the UI moves under it. A refresh does not involve an agent driving the browser live; it replays the compiled
-spec. That is deliberate. An agent deciding each step while the recording runs puts its thinking time into the video as
-dead air and makes every run different, which is exactly what a reproducible capture is for avoiding.
-
-`scenario.json5` and the transcripts under `transcripts/` are part of the design, like the intent. They use the
-screenshot's scenario format, with one addition: a session whose transcript stops part-way for input names what it does
-after its transcript ends (`then`), since its starting status no longer implies that.
-
-## What the agent does on a refresh
-
-"Refresh the demo video" means:
-
-- Run `scripts/readme-video.sh`. It builds what is missing, stages the fleet, runs the choreography while recording, and
-  prints the MP4, a marks file, and a directory of stills, one per mark.
-- If the run fails because a beat can no longer happen as written (a selector that no longer matches, a control that
-  moved behind a menu), rewrite that beat in the capture spec to realise the same intent on the current UI and run it
-  again. Do not change the intent to make the capture pass.
-- Look at every still. Each mark sits where an annotation is fully on screen, so the stills are the review surface: an
-  arrow must point at what the intent says it points at, and an annotation must not cover what the viewer is meant to be
-  watching. Fix placement in the capture spec (each callout takes a preferred side) and record again.
-- Hand the MP4 to the maintainer to watch. An agent's look at the stills catches misplaced annotations; it does not
-  replace someone watching the result.
-
-The capture is not a test, but its waits are real readiness checks against the helm and the terminal buffer, so a beat
-that cannot happen fails the run instead of recording a video in which nothing happens.
+`scripts/readme_video.py` runs the numbered beats against the current app. It locates controls by the bridge's stable
+element IDs, checks the real status from the helm and waits for replay in the focused terminal before typing. If a
+control moves or a beat no longer works, update the script to realize the same intent. Do not change the intent to make
+the capture pass. The script runs without a person or agent driving the app live, so thinking time stays off the
+timeline.
 
 ## Recording
 
-The video is recorded through Playwright's screencast API, not its built-in video recording, whose encoder settings are
-fixed (VP8 at about one megabit) and smear text. The screencast delivers each repaint as a JPEG with a timestamp;
-`e2e/readme-video/recorder.ts` lays those frames out on a timeline, holding each one until the next, and encodes H.264
-with ffmpeg once the choreography has finished, so encoding speed never affects what the browser shows.
+The script starts its own Linux desktop and staged Farhelm instance through `scripts/gui-agent.py`. The viewport gives
+the output's resolution at scale 1. The recorder checks the window's decorated size and each PNG's dimensions before
+encoding. The MP4 and the marked stills use the same crop. At scale 1, it removes the 21 px Linux frame on each side and
+the 34 px app title bar at the top, giving the content an origin of (21, 55) in the bridge's window coordinates. A crop
+that fails leaves the run for inspection.
 
-Frames arrive at the viewport's CSS-pixel size whatever the device scale factor (observed with headless Chromium and
-Playwright 1.62), so the scenario's viewport is the video's resolution and its scale stays 1. A page has one screencast,
-and the first client to start it picks the frame size; Playwright's trace screenshots are such a client and cap frames
-at 800 pixels wide, so the video's config keeps failure traces but turns their screenshots off, and the recorder fails
-the run on any frame that is not the viewport's size. The first recordings came out at 800x450 before that was
-understood.
+Each segment starts and stops the bridge's PNG recorder. Its measured duration gives its frames their playback rate. The
+default capture rate is 1 fps at 1920×1080. At 24 fps, readback on the test machine's software renderer kept the bridge
+from handling clicks and keys. Use `--fps` to set a higher rate on a machine that can sustain it. At lower rates, the
+script gives the fades and pointer glides time to appear across several frames. Between segments, the script waits for a
+state the viewer need not sit through. Joining those segments leaves that wait out. A cut is a jump in time, so it
+belongs where nothing on screen depends on continuity. At each mark the recorder waits for the cue to paint, then starts
+a fresh segment with the cue still in place. The bridge saves PNGs asynchronously, so the newest file from the previous
+segment could still show the previous cue. The script spaces each segment's PNGs evenly across its measured duration.
+ffmpeg encodes the joined timeline once as H.264, preserving the assigned times. The marks file gives the first frame's
+time on the joined timeline, and the review still is cropped from that frame's PNG.
 
-Waits the viewer should not sit through, such as a status that takes several seconds to be re-sampled, are cut from the
-timeline: the spec pauses the recorder around the wait and resumes it afterwards, and the video continues from the
-paused frame without a gap. A cut is a jump in time, so it belongs where nothing on screen depends on continuity.
-
-Everything the viewer sees is the real UI driving real terminals, with the screenshot's two exceptions (the staged fleet
-and the two rewritten listing fields; see its SPEC). Because the video's rows keep the scenario's ages through the
-listing rewrite, a session that becomes active during the video still shows its scenario age, and the list does not
-reorder under the viewer.
+Every frame and still must be free of private paths and names. The fleet and fake-agent replies are staged. Terminals
+and agent status are real, and the app uses the same pinned ages and folders as the hero capture. The recorder parks the
+real pointer away from hover targets between clicks. It runs the screenshot privacy checks at segment boundaries and
+marks, using the raw window tree and focused terminal. A detected machine detail fails the capture before it writes the
+MP4.
 
 ## Annotations
 
-Annotations (a visible pointer, callouts with arrows, highlights with an optional spotlight, captions, and title cards)
-are drawn by the page itself, in an overlay injected by `e2e/readme-video/overlay.ts`, so they are part of every
-recorded frame. They are anchored to elements rather than coordinates: the overlay re-measures its target every frame
-and draws the arrow to wherever it is. That is what lets annotation wording stay fixed in the intent while the layout
-under it changes.
+The bridge measures controls in the decorated window. The harness subtracts the crop origin before laying out callouts
+with the docs screenshot helpers, then sends the finished coordinates to the app. The app paints the pointer, captions,
+title cards, callouts, rings and spotlights above the existing layers in staged capture builds. The overlay stays out of
+focus and pointer dispatch. The script uses the real bridge input for each click and waits for the pointer glide to
+finish first.
 
-The overlay sits in a shadow root on a full-viewport host that takes no pointer events, so scripted clicks reach the app
-as if it were not there, nothing in the app's layout moves, and neither side's CSS can restyle the other. Headless
-Chromium draws no mouse pointer, so the overlay draws one, and every scripted click glides it to the target and clicks
-exactly where it lands.
+## Refresh and review
+
+1. Run `scripts/readme-video.sh` on Linux. It builds the capture app and prints the MP4, marks file and review stills.
+   The default output is `target/readme-video/readme-video.mp4`. Use `--no-build` with current binaries and `--output`
+   for a different destination. Failed runs keep their private directory for diagnosis.
+2. Look at every still. Arrows should point at the intended control or terminal line and leave the relevant UI visible.
+   Adjust the placement in `scripts/readme_video.py` and record again if needed.
+3. Play the whole MP4 to check the cuts, cue timing and privacy. Hand over the MP4, marks and stills for review. Mention
+   the throwaway sample while `intent.md` still says so. Upload is manual.
+
+The harness needs the Linux tools in [the GUI agent instructions](../gui-agent.md), including Mutter and lavapipe, and
+ffmpeg with libx264. It starts a private SSH server for its staged hosts.
 
 ## Publishing
 
@@ -92,11 +72,3 @@ The video is meant for YouTube, and the upload is done by hand. YouTube's upload
 projects to private, and an audit is not worth it for something refreshed this rarely. GitHub strips iframes from
 READMEs, so the README cannot embed a player; it can show a still that links to the video. The docs website can embed
 the player. Neither page is wired up yet.
-
-## Prerequisites
-
-Those of the screenshot (a cargo build, a dx web build, Playwright with Chromium installed under `e2e/`, passwordless
-ssh to the scenario's remote destinations), plus ffmpeg with libx264 on `PATH`. The recorder needs Playwright's
-`page.screencast`, which arrived in 1.59; `e2e/package-lock.json` pins 1.62, while `e2e/package.json` still admits older
-versions, so install from the lockfile (`npm ci` or `npm install` without upgrading). The recorder fails with a named
-error if the API is missing.

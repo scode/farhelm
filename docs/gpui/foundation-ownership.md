@@ -82,6 +82,7 @@ table conflicted across all of it.
 | Enforcement                     | `crates/gui/clippy.toml`, `crates/gui/lint-demo/`, `scripts/check-gui-lints.py`, `scripts/test-check-gui-lints.py`, `scripts/check-crate-layering.py`, `scripts/test-check-crate-layering.py`, `deny.toml`, `docs/gpui/foundation-ownership.md`                                                        | [none](#enforcement)                     | none                                  |
 | Helm client                     | `crates/farhelm-helm-client/`                                                                                                                                                                                                                                                                          | [none](#helm-client)                     | the crate itself                      |
 | Test-automation bridge          | `crates/farhelm-desktop/src/agent.rs`, `crates/gui/farhelm-gui/src/agent_startup.rs`, `scripts/gui-agent.py`, `scripts/test-gui-agent.py`, `docs/gui-agent.md`, `scripts/gui-screenshot-batch.py`, `scripts/test-gui-screenshot-batch.py`, `scripts/gui-e2e-smoke.py`, `scripts/test-gui-e2e-smoke.py` | [reported](#test-automation-bridge)      | none                                  |
+| Demo video recording            | `crates/gui/farhelm-gui/src/demo_video.rs`, `scripts/readme-video.sh`, `scripts/readme_video.py`, `scripts/test-readme-video.py`                                                                                                                                                                       | [reported](#demo-video-recording)        | none                                  |
 | Host identity                   | `crates/gui/farhelm-gui/src/hosts/identity.rs`, `crates/gui/farhelm-gui/src/hosts/identity/`                                                                                                                                                                                                           | [reported](#host-identity)               | none                                  |
 | Harness answers                 | `crates/gui/farhelm-gui/src/harness.rs`                                                                                                                                                                                                                                                                | [reported](#harness-answers)             | none                                  |
 | Permission shield               | `crates/gui/farhelm-gui/src/permission.rs`                                                                                                                                                                                                                                                             | [reported](#permission-shield)           | none                                  |
@@ -534,6 +535,18 @@ Extension points: reported:
 The Rust side (`agent.rs`, and `agent_startup.rs`, which also holds the guard that refuses the `agent` feature in
 optimized builds) has none. The `agent` feature itself is the bridge's too but is declared in Bootstrap's manifest: a
 change to it is a request although the manifest is reported.
+
+Lint exceptions: none.
+
+### Demo video recording
+
+Extension points: reported. Capture changes keep scene timing and geometry in the recorder and leave input routing to
+the existing bridge.
+
+The capture script owns the sample's timing and geometry. It shares callout placement with docs screenshots and sends
+the resulting shapes through a named bridge action. The app only paints them. The layer manager places that paint above
+the window's existing layers without creating a focus or pointer surface. The overlay module exists in bridge builds and
+handles the action in staged runs.
 
 Lint exceptions: none.
 
@@ -1215,6 +1228,10 @@ without a conflict marker.
 | Test-automation bridge | `scripts/test-gui-screenshot-batch.py`                           | `reported`    |
 | Test-automation bridge | `scripts/gui-e2e-smoke.py`                                       | `reported`    |
 | Test-automation bridge | `scripts/test-gui-e2e-smoke.py`                                  | `reported`    |
+| Demo video recording   | `crates/gui/farhelm-gui/src/demo_video.rs`                       | `reported`    |
+| Demo video recording   | `scripts/readme-video.sh`                                        | `reported`    |
+| Demo video recording   | `scripts/readme_video.py`                                        | `reported`    |
+| Demo video recording   | `scripts/test-readme-video.py`                                   | `reported`    |
 | Host identity          | `crates/gui/farhelm-gui/src/hosts/identity.rs`                   | `reported`    |
 | Host identity          | `crates/gui/farhelm-gui/src/hosts/identity/`                     | `reported`    |
 | Harness answers        | `crates/gui/farhelm-gui/src/harness.rs`                          | `reported`    |

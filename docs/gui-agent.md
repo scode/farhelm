@@ -303,7 +303,7 @@ NOTE: A capture refuses rather than repairs. It never resizes the window, rescal
 drawing; a picture it cannot take at the scenario's size is no picture.
 
 `capture OUT.png` on a scenario run takes the scenario's picture: `scripts/readme-screenshot.sh` runs it for the README
-hero, and `scripts/docs_shots.py` uses it for docs screenshots. The demo video can reuse it when rebuilt. In order, it:
+hero, and `scripts/docs_shots.py` uses it for docs screenshots. In order, it:
 
 - settles the open session: when no terminal holds focus it clicks the open session's terminal, then waits (30 seconds)
   until it shows the last line its transcript prints;
@@ -333,6 +333,11 @@ Any failure stops with the step and the reason, writes nothing to OUT, and leave
 at. A size failure quotes the window's points and scale. A window smaller than requested means the screen's usable area
 is too small. On Linux, pass a `--size` that fits the window and the scenario's `--scale`. On a Mac the actual screen
 must fit (see "On a Mac").
+
+`scripts/readme-video.sh` uses the same staged app, privacy checks and Linux crop. It drives the capture build's
+`farhelm_agent::SetDemoScene` action and records PNG segments through the bridge's recorder. Its overlay paints the
+recording cues while real input reaches the controls beneath them. The video command joins the segments and prints the
+MP4, marks file and review stills. See [the video requirements](readme-video/SPEC.md).
 
 ## User-session runs
 

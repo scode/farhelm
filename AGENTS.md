@@ -335,9 +335,8 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   main work changes the docs, start the preview and hand over page links when reporting, without being asked; unattended
   runs and incidental docs edits start no preview server and name the changed page instead.
 - **Screenshots, demo video, brand marks** ("refresh the README screenshot", "refresh the demo video", "refresh the docs
-  screenshots", anything showing Farhelm's icon or name as a mark): `.agents/docs-media.md`. The demo video refresh is
-  unavailable until rebuilt for the GPUI app. Fence: only the publish scripts push the screenshot refs; never commit a
-  captured screenshot on main; never hand-edit the wordmark SVGs.
+  screenshots", anything showing Farhelm's icon or name as a mark): `.agents/docs-media.md`. Fence: only the publish
+  scripts push the screenshot refs; never commit captured media on main; never hand-edit the wordmark SVGs.
 - **Agent screens** ("re-capture agent screens", checking a new claude or codex against status detection):
   `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
 - **Agent TUI behavior**: before relying on a claim about how an installed agent behaves in a terminal, read
