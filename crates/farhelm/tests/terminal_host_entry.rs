@@ -88,7 +88,7 @@ impl Drop for Running {
 }
 
 /// A host started through `farhelm internal terminal-host` while it inherits
-/// a shared lock on a version file (as descriptor 8, announced in
+/// a shared lock on a version file (with its descriptor announced in
 /// `FARHELM_VERSION_LOCK_FD`, the way the forwarder hands its lock to the
 /// program it starts) keeps neither the lock nor the variable.
 ///
@@ -109,26 +109,37 @@ fn a_terminal_host_holds_no_version_of_farhelm() {
     let lock = std::fs::File::open(&version).unwrap();
     lock.lock_shared().unwrap();
     let lock_fd = lock.as_raw_fd();
+    // Duplicating onto the file's own descriptor would leave close-on-exec set.
+    let target = if lock_fd == 8 { 9 } else { 8 };
+    let probe = std::fs::File::open(&version).unwrap();
     let socket = dir.path().join("h");
     let mut command = Command::new(env!("CARGO_BIN_EXE_farhelm"));
     command
         .args(["internal", "terminal-host", "--socket"])
         .arg(&socket)
-        .env("FARHELM_VERSION_LOCK_FD", "8")
+        .env("FARHELM_VERSION_LOCK_FD", target.to_string())
         .stdin(Stdio::piped())
         .stderr(Stdio::piped());
-    // SAFETY: dup2 is async-signal-safe; it gives the child the lock as fd 8.
+    // SAFETY: dup2 is async-signal-safe. A distinct target carries the lock across exec.
     // A failed handoff fails the spawn: a host that never got the lock would
     // pass the check below without testing anything.
     unsafe {
         command.pre_exec(move || {
-            if libc::dup2(lock_fd, 8) == -1 {
+            if libc::dup2(lock_fd, target) == -1 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
         });
     }
     let mut child = command.spawn().unwrap();
+    // The starter waits for its spec. After the parent drops its copy, only the inherited lock can block the probe.
+    drop(lock);
+    let inherited = probe.try_lock();
+    if !matches!(inherited, Err(std::fs::TryLockError::WouldBlock)) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("the starter must hold the inherited lock: {inherited:?}");
+    }
     let spawn = Spawn {
         argv: vec![b"/bin/sleep".to_vec(), b"60".to_vec()],
         cwd: b"/".to_vec(),
@@ -154,8 +165,6 @@ fn a_terminal_host_holds_no_version_of_farhelm() {
         pid: peer_pid(&UnixStream::connect(&socket).unwrap()),
         socket,
     };
-    drop(lock);
-    let probe = std::fs::File::open(&version).unwrap();
     let result = probe.try_lock();
     #[cfg(target_os = "linux")]
     let host_files: Vec<std::path::PathBuf> = std::fs::read_dir(format!("/proc/{}/fd", host.pid))
