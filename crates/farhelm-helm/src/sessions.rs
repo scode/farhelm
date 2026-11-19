@@ -3796,7 +3796,19 @@ pub(crate) async fn within_host_reply_bound_saying(
     work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
     timed_out: String,
 ) -> axum::response::Response {
-    let mut task = tokio::spawn(work);
+    await_host_reply(tokio::spawn(work), timed_out).await
+}
+
+/// A tab request polls here inline, so it is still cancellable until a timeout
+/// commits the helm to finishing it. Other callers already own their tasks.
+async fn await_host_reply(
+    mut task: impl std::future::Future<
+        Output = Result<axum::response::Response, tokio::task::JoinError>,
+    > + Send
+    + Unpin
+    + 'static,
+    timed_out: String,
+) -> axum::response::Response {
     match tokio::time::timeout(HOST_REPLY_BOUND, &mut task).await {
         Ok(Ok(response)) => response,
         Ok(Err(join)) if join.is_panic() => std::panic::resume_unwind(join.into_panic()),
@@ -3813,7 +3825,9 @@ pub(crate) async fn within_host_reply_bound_saying(
 
 /// Wait for work whose caller was already told it is still running, and log
 /// its reply if that reply is not a success: nobody else will ever see it.
-async fn log_late_failure(task: tokio::task::JoinHandle<axum::response::Response>) {
+async fn log_late_failure(
+    task: impl std::future::Future<Output = Result<axum::response::Response, tokio::task::JoinError>>,
+) {
     /// How much of a late failure's text the log keeps: enough for the
     /// helm's own sentence, without logging an arbitrarily large body.
     const SHOWN: usize = 400;
@@ -5144,7 +5158,7 @@ fn replace_reply(
 /// (`?tab=<id>` on `term_ws`). Every refusal the supervisor can give
 /// (vanished working directory, an agent terminal that is gone or cannot
 /// be read, a shell dead by reply time) reaches the client through the
-/// same `http_error` mapping every other endpoint uses, verbatim.
+/// usual error mapping before the host reply bound.
 pub(crate) async fn open_tab(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -5157,10 +5171,16 @@ pub(crate) async fn open_tab(
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    match client.open_tab(&key.session_id).await {
-        Ok(tab) => axum::Json(serde_json::json!({ "tab": tab })).into_response(),
-        Err(e) => http_error(e),
-    }
+    await_host_reply(
+        Box::pin(async move {
+            Ok(match client.open_tab(&key.session_id).await {
+                Ok(tab) => axum::Json(serde_json::json!({ "tab": tab })).into_response(),
+                Err(e) => http_error(e),
+            })
+        }),
+        "the host did not answer in time and the request to open the tab is still being carried out".into(),
+    )
+    .await
 }
 
 /// `DELETE /api/sessions/{id}/tabs/{tab_id}` — close a terminal tab: kill
@@ -5182,10 +5202,16 @@ pub(crate) async fn close_tab(
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    match client.close_tab(&key.session_id, &tab_id).await {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
-        Err(e) => http_error(e),
-    }
+    await_host_reply(
+        Box::pin(async move {
+            Ok(match client.close_tab(&key.session_id, &tab_id).await {
+                Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+                Err(e) => http_error(e),
+            })
+        }),
+        "the host did not answer in time and the request to close the tab is still being carried out".into(),
+    )
+    .await
 }
 
 // Tests occupy three quarters of this module, so they live in a sibling file. `#[path]`

@@ -226,10 +226,6 @@ consequences.
   link can stay at “Checking…” or “Downloading…” indefinitely while the host still appears connected and the rest of
   Farhelm works.
 
-- [`stalled-tab-request-resets-healthy-helm-channel.md`](stalled-tab-request-resets-healthy-helm-channel.md) — A host
-  slow to open or close a shell tab can make Farhelm reconnect to a helm that was still answering. If you were editing a
-  new session in the meantime, the launcher closes and loses that draft.
-
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
