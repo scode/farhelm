@@ -349,7 +349,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   points at the row's bottom edge instead of the line; `session-row-<key>-place` on the row's meta line
   (`session_list/row.rs`) would let it point there.
 
-- **Support Antigravity.** add support for antigravity.
+- **Support Antigravity.** add support for antigravity. Plan: `plans/queue/antigravity-support.md`.
 
 ### Tensorlake
 
