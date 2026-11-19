@@ -293,6 +293,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   answer goes back. Every other ssh client keeps `BatchMode=yes`. Cancel in the UI should kill the ssh process rather
   than rely on the helper's exit code, because ssh turns a failed askpass into an empty answer, which counts as a failed
   2FA attempt. `SSH_ASKPASS_REQUIRE` needs OpenSSH 8.4 or later. Plan: `plans/queue/ssh-askpass-2fa.md`.
+- **Auto-update hosts by default.** Existing users who have NOT checked auto-update get enrolled in auto-updates. Only
+  people who explicitly turn auto-update off AFTER this change has been made get a persistent preference and are not
+  auto-updated. Make sure we get this right in terms of the settings representation. UI wise, it's the same setting as
+  today, it just goes to being checked by default on new installations and on upgraded installations.
 
 ## Mid term
 
