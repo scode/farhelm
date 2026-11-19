@@ -832,30 +832,50 @@ impl SessionList {
         let mark = Mark::take(cx);
         let shown = self.marking.shown();
         let mut targets = admitted(drawn, &shown, &self.current.current(cx).marks);
+        if let Choice::Group(destination) = choice {
+            let keys = targets.iter().filter_map(|target| {
+                matches!(target.write, Write::Group).then_some(target.key.as_str())
+            });
+            let naming = groups::move_marked(keys, destination, None, cx);
+            if matches!(destination, Destination::New) {
+                // Before dispatch, cancel returns to the toggle. After dispatch the bar goes away with the marks.
+                let returns_to = focus::ReturnTo::Control(self.marking.menu_focus.clone());
+                if !naming.is_empty()
+                    && let Some(layer) = super::rename::group(
+                        None,
+                        naming,
+                        Some(cx.weak_entity()),
+                        returns_to,
+                        &mark,
+                        window,
+                        cx,
+                    )
+                {
+                    self.current.current(cx).rows.borrow_mut().opened(
+                        "marked/group",
+                        layer,
+                        menu::Opened::Question,
+                    );
+                }
+                return;
+            }
+            self.clear_marks(cx);
+            focus::focus_control(&self.order_focus, &mark, window, cx);
+            return;
+        }
         // A child menu can stay open while the helm changes individual
         // mutes. Drop rows that no longer qualify without gaining rows.
         targets.retain(|target| {
             let action = match target.write {
                 Write::Mute => MetadataAction::Mute,
                 Write::Unmute => MetadataAction::Unmute,
-                Write::Group => {
-                    return match choice {
-                        Choice::Group(Destination::New) => {
-                            groups::eligible_member(&target.key, None, cx)
-                        }
-                        Choice::Group(Destination::Existing(group)) => {
-                            groups::eligible_member(&target.key, Some(group), cx)
-                        }
-                        _ => false,
-                    };
-                }
+                Write::Group => return false,
                 Write::Pin(_) | Write::Seen(_) => return true,
             };
             self.marking.offers().iter().any(|offer| {
                 offer.action == action && offer.targets.iter().any(|row| row.key == target.key)
             })
         });
-        let mut naming = Vec::new();
         for target in targets {
             // The row menu draws these items unavailable then (`menu::refused`); the bulk action says so on the row.
             if menu::refused(&target.key, cx) {
@@ -863,7 +883,7 @@ impl SessionList {
                     Write::Pin(_) => (Work::Pin, "Pin"),
                     Write::Mute => (Work::Mute, "Mute"),
                     Write::Unmute => (Work::Mute, "Unmute"),
-                    Write::Group => (Work::SessionGroup, "Move to group"),
+                    Write::Group => continue,
                     Write::Seen(_) => (Work::Seen, "Seen"),
                 };
                 bulk::not_started(&target.key, work, label, cx);
@@ -877,42 +897,12 @@ impl SessionList {
                     }
                 }
                 Write::Unmute => mute::send(&target.key, SessionMuteRequest::Unmute, cx),
-                Write::Group => match choice {
-                    Choice::Group(Destination::New) => naming.push(target.key),
-                    Choice::Group(Destination::Existing(group)) => {
-                        groups::move_member(&target.key, group, cx)
-                    }
-                    _ => {}
-                },
+                Write::Group => continue,
                 Write::Seen(toggle) => seen::send(&target.key, toggle, cx),
             }
         }
-        if matches!(choice, Choice::Group(Destination::New)) {
-            // Name the toggle so cancellation before dispatch returns to it.
-            // After dispatch it is gone and the focus coordinator recovers
-            // to a drawn control, even though the bar still owns the handle.
-            let returns_to = focus::ReturnTo::Control(self.marking.menu_focus.clone());
-            if !naming.is_empty()
-                && let Some(layer) = super::rename::group(
-                    None,
-                    naming,
-                    Some(cx.weak_entity()),
-                    returns_to,
-                    &mark,
-                    window,
-                    cx,
-                )
-            {
-                self.current.current(cx).rows.borrow_mut().opened(
-                    "marked/group",
-                    layer,
-                    menu::Opened::Question,
-                );
-            }
-        } else {
-            self.clear_marks(cx);
-            focus::focus_control(&self.order_focus, &mark, window, cx);
-        }
+        self.clear_marks(cx);
+        focus::focus_control(&self.order_focus, &mark, window, cx);
     }
 }
 

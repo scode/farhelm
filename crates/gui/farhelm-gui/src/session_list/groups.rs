@@ -2,7 +2,9 @@
 //! named groups and the ungrouped tail. The quick switcher reads the
 //! helm's listing directly, so layout choices here never change its order.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::session_requests::{
@@ -24,7 +26,7 @@ use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, MenuItem, Role, StatusMark, Tier, submenu};
 use crate::focus;
 use crate::host_text::{self, HostSentence, HostText};
-use crate::operations::{Command, OpKey, Work};
+use crate::operations::{Command, NotStarted, OpKey, Operations, Work};
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -472,6 +474,124 @@ pub(super) fn move_member(key: &str, target: SessionGroupTarget, cx: &mut App) {
             ),
             cx,
         );
+    }
+}
+
+/// Admit marked targets in display order for both the menu and a drop. An existing destination holds each eligible
+/// row for a reply-paced membership write. A new group returns the admitted keys to name together in a single write.
+/// Only a drop supplies its list, so only a drop carries expected pin areas and moves that window's held slots.
+pub(super) fn move_marked<'a>(
+    keys: impl IntoIterator<Item = &'a str>,
+    destination: Destination,
+    dropped_in: Option<WeakEntity<SessionList>>,
+    cx: &mut App,
+) -> Vec<String> {
+    let target = match destination {
+        Destination::Existing(target) => Some(target),
+        Destination::New => None,
+    };
+    let Some(operations) = session::current_operations(cx) else {
+        return Vec::new();
+    };
+    let mut naming = Vec::new();
+    let mut pending = Vec::new();
+    for key in keys {
+        if !eligible_member(key, target, cx) {
+            continue;
+        }
+        if menu::refused(key, cx) {
+            super::bulk::not_started(key, Work::SessionGroup, "Move to group", cx);
+        } else if let Some(target) = target {
+            let op = OpKey::session(key);
+            if operations
+                .update(cx, |ops, cx| ops.hold(&op, Work::SessionGroup, cx))
+                .is_err()
+            {
+                super::bulk::not_started(key, Work::SessionGroup, "Move to group", cx);
+                continue;
+            }
+            let pin_source = dropped_in.as_ref().and_then(|_| {
+                let store = session::current_store(cx)?;
+                let row = store.read(cx).collections().get::<SessionRow>(key)?;
+                row.pinned.then(|| row.group.into())
+            });
+            pending.push((
+                key.to_owned(),
+                SessionGroupMembership { target, pin_source },
+            ));
+        } else {
+            naming.push(key.to_owned());
+        }
+    }
+    if !pending.is_empty() {
+        MarkedMoves {
+            pending: Rc::new(RefCell::new(pending.into_iter())),
+            operations: operations.downgrade(),
+            dropped_in,
+        }
+        .advance(cx);
+    }
+    naming
+}
+
+/// The current reply owns the rest of the accepted batch. One write at a time keeps a large selection within the
+/// helm's channel bound. Retiring the operation store drops the reply and its remaining held rows together.
+#[derive(Clone)]
+struct MarkedMoves {
+    pending: Rc<RefCell<std::vec::IntoIter<(String, SessionGroupMembership)>>>,
+    operations: WeakEntity<Operations>,
+    dropped_in: Option<WeakEntity<SessionList>>,
+}
+
+impl MarkedMoves {
+    /// Trade the next row's hold for its request in one update. Remote changes can make a queued row ineligible
+    /// before its turn, and a refusal settles just that row. In both cases keep processing the rest.
+    fn advance(&self, cx: &mut App) {
+        let Some(operations) = self.operations.upgrade() else {
+            return;
+        };
+        loop {
+            let Some((key, request)) = self.pending.borrow_mut().next() else {
+                return;
+            };
+            let op = OpKey::session(&key);
+            operations.update(cx, |ops, cx| ops.release(&op, cx));
+            if !eligible_member(&key, Some(request.target), cx) {
+                continue;
+            }
+            if menu::refused(&key, cx) {
+                super::bulk::not_started(&key, Work::SessionGroup, "Move to group", cx);
+                continue;
+            }
+            let Ok(command) = membership(&key, request) else {
+                continue;
+            };
+            let batch = self.clone();
+            let moved = key.clone();
+            let started = operations.update(cx, |ops, cx| {
+                ops.start(&op, command, cx, move |settled, cx| {
+                    if let Some(list) = &batch.dropped_in {
+                        pin_drag::crossed_after(
+                            list,
+                            &moved,
+                            request.target,
+                            request.pin_source.is_some(),
+                            None,
+                            settled,
+                            cx,
+                        );
+                    }
+                    batch.advance(cx);
+                })
+            });
+            match started {
+                Ok(()) | Err(NotStarted::Retired) => return,
+                Err(NotStarted::Busy(_)) => {
+                    super::bulk::not_started(&key, Work::SessionGroup, "Move to group", cx)
+                }
+                Err(NotStarted::Path(_)) => {}
+            }
+        }
     }
 }
 

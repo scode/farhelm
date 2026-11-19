@@ -430,6 +430,24 @@ pub(crate) fn row(
                     .then(|| super::mute::bell(session, selected, steps, cx)),
             ),
         })
+        .children((drag.accompanying > 0).then(|| {
+            let count = drag.accompanying;
+            // Reverse the badge's ink on the open row so it stays visible on the lifted blue fill.
+            let (fill, ink) = if selected {
+                (palette.on_fill, palette.accent_fill)
+            } else {
+                (palette.accent_fill, palette.on_fill)
+            };
+            div()
+                .flex_none()
+                .rounded_full()
+                .px(px(5.))
+                .bg(theme::color(fill))
+                .text_color(theme::color(ink))
+                .text_size(metrics::TEXT_SM)
+                .debug_selector(|| format!("session-drag-accompanying-{count}"))
+                .child(format!("+{count}"))
+        }))
         // A compact stale row's clock, after the title, which gives way to it (`.compact-qualifier`), or a compact
         // suspended row's pause mark in its place.
         .children(
@@ -614,7 +632,9 @@ fn marker(key: &str, selected: bool, palette: &Palette) -> impl IntoElement {
     .debug_selector(|| format!("session-marked-{key}"))
 }
 
-/// Full-height leading stripe shared by marked rows and collapsed headers that hold the open session.
+/// Full-height leading stripe shared by marked rows and collapsed headers that hold the open session: [`MARKER_WIDTH`]
+/// down the element's whole leading edge, drawn over everything else in it (a collapsed header's grip included). No
+/// listeners, so it takes no presses and never blocks the grip or the row under it.
 pub(super) fn leading_marker(ink: crate::theme::Token) -> gpui::Div {
     div()
         .absolute()
