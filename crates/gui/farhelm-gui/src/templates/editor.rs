@@ -130,8 +130,9 @@ struct Input {
     _events: Subscription,
 }
 
-/// The id of the sentence in the editor's status line, the one every refusal is said in (the line around it is the
-/// dialog's `templates-editor-status`).
+/// The id of the sentence in the editor's status line that the editor's own refusals are said in (the line around it
+/// is the dialog's `templates-editor-status`). A template name's refusal brings its own sentence,
+/// `template-name-refusal`, built in `fields.rs`.
 const STATUS: &str = "templates-editor-status-text";
 
 /// A refusal in the app's own words, for the status line (the dialog's own refusals of an Undo too).
@@ -688,17 +689,17 @@ impl Editor {
 
     /// Why the draft cannot be saved now, in the old editor's order, or `None`. `catalog` is the dialog's model catalog,
     /// which judges the effort; `None` (unread, or a failed read) refuses no effort.
-    fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>, cx: &App) -> Option<String> {
+    fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>, cx: &App) -> Option<HostSentence> {
         let name = &self.draft.name;
         let renamed = self.previous.as_deref() != Some(name.as_str());
         if renamed && let Err(reason) = check_new_template_name(name) {
-            return Some(capitalized(reason));
+            return Some(said(capitalized(reason)));
         }
         if let Err(reason) = check_template_shape(&self.draft.template()) {
-            return Some(capitalized(reason));
+            return Some(said(capitalized(reason)));
         }
         if let Some(reason) = self.draft.refusal(catalog) {
-            return Some(reason);
+            return Some(said(reason));
         }
         let names = stored_names(cx);
         let names: Option<Vec<&str>> = names
@@ -720,7 +721,7 @@ impl Editor {
             return false;
         }
         if let Some(reason) = self.refusal(catalog, cx) {
-            self.status = Some(said(reason));
+            self.status = Some(reason);
             cx.notify();
             return false;
         }

@@ -377,8 +377,15 @@ fn a_refused_save_is_reported_kept_and_never_retried(cx: &mut TestAppContext) {
 /// template has; and none of them sends anything. A free name then saves.
 #[gpui::test]
 fn save_refusals_come_in_the_old_order_and_send_nothing(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
+    let taken = "סקירה";
+    let mut templates = templates();
+    templates[0].name = taken.into();
+    let (mut helm, cx) = open_header(cx, &templates, None);
     open_editor(&mut helm, "templates-new", cx);
+    assert!(
+        cx.debug_bounds("template-open-סקירה").is_some(),
+        "the conflicting template is already listed"
+    );
     cx.simulate_input("my codex");
     settle(cx);
     click(cx, "templates-add");
@@ -391,7 +398,7 @@ fn save_refusals_come_in_the_old_order_and_send_nothing(cx: &mut TestAppContext)
     );
 
     click(cx, "templates-name");
-    retype(cx, "codex-deep");
+    retype(cx, taken);
     click(cx, "templates-save");
     assert!(
         painted(cx).contains("Type the session name, or remove its field"),
@@ -403,8 +410,18 @@ fn save_refusals_come_in_the_old_order_and_send_nothing(cx: &mut TestAppContext)
     click(cx, "templates-save");
     let text = painted(cx);
     assert!(
-        text.contains("A template named \"codex-deep\" already exists"),
+        text.contains("A template named \"סקירה\" already exists"),
         "{text}"
+    );
+    // A long explanation and an RTL name share the line. The name must stay within its own direction boundary.
+    assert!(
+        frame(cx)
+            .into_iter()
+            .flat_map(|node| node.texts)
+            .any(
+                |line| crate::host_text::tests::paints_isolated(&line.text, taken)
+                    && line.text.contains("already exists")
+            )
     );
     assert!(saves(&mut helm).is_empty(), "no refused save was sent");
 

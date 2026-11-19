@@ -31,6 +31,7 @@ use farhelm_proto::launcher::{
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 
 use super::summary::permission_label;
+use crate::host_text::{HostSentence, HostText};
 use crate::permission::words::effort_label;
 
 /// A field the editor can show. The order is the old editor's, which is the order the "Sets" list and the add menu
@@ -476,12 +477,16 @@ impl Draft {
 /// never checked: a stored spaced name keeps saving under itself. Any other save, a new template or a rename, must use
 /// a name without whitespace (SPEC.md: "Creating a template or renaming one refuses any whitespace in its name") that
 /// no template has ([`taken_refusal`]).
-pub fn name_refusal(previous: Option<&str>, name: &str, names: Option<&[&str]>) -> Option<String> {
+pub fn name_refusal(
+    previous: Option<&str>,
+    name: &str,
+    names: Option<&[&str]>,
+) -> Option<HostSentence> {
     if previous == Some(name) {
         return None;
     }
     if let Err(reason) = farhelm_proto::launcher::check_new_template_name(name) {
-        return Some(capitalized(reason));
+        return Some(HostSentence::new("template-name-refusal").text(capitalized(reason)));
     }
     taken_refusal(name, names)
 }
@@ -492,17 +497,20 @@ pub fn name_refusal(previous: Option<&str>, name: &str, names: Option<&[&str]>) 
 ///
 /// This is the whole name check for a delete's Undo, which restores the dialog's loaded copy under its old name: a
 /// stored spaced name predates the whitespace rule and keeps its Undo (SPEC.md: existing names with whitespace "retain
-/// delete undo"), so Undo must not run [`name_refusal`]'s new-name rule. The wording speaks of saving; Undo's view
-/// decides how to phrase its own refusal.
-pub fn taken_refusal(name: &str, names: Option<&[&str]>) -> Option<String> {
+/// delete undo"), so Undo must not run [`name_refusal`]'s new-name rule. The sentence names the conflicting template
+/// as its own host value so the name cannot reorder the words around it. Undo supplies its own wording.
+pub fn taken_refusal(name: &str, names: Option<&[&str]>) -> Option<HostSentence> {
+    let sentence = HostSentence::new("template-name-refusal");
     match names {
-        None => Some(
+        None => Some(sentence.text(
             "The template list could not be read, so Farhelm cannot check that no other template has this name; \
-             save again once it is back"
-                .to_owned(),
-        ),
+             save again once it is back",
+        )),
         Some(names) => names.contains(&name).then(|| {
-            format!("A template named {name:?} already exists; edit that one, or choose another name")
+            sentence
+                .text("A template named \"")
+                .host(&HostText::from_host(name))
+                .text("\" already exists; edit that one, or choose another name")
         }),
     }
 }

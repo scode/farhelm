@@ -377,16 +377,18 @@ fn new_and_renamed_names_must_be_free_and_unspaced() {
     );
     assert!(
         name_refusal(Some("review"), "my codex", Some(&names))
-            .is_some_and(|reason| reason.contains("whitespace"))
+            .is_some_and(|reason| reason.accessible_name().contains("whitespace"))
     );
     assert_eq!(
-        name_refusal(None, "review", Some(&names)).as_deref(),
+        name_refusal(None, "review", Some(&names))
+            .map(|reason| reason.accessible_name())
+            .as_deref(),
         Some("A template named \"review\" already exists; edit that one, or choose another name")
     );
     assert_eq!(name_refusal(None, "fresh", Some(&names)), None);
     assert!(
         name_refusal(None, "fresh", None)
-            .is_some_and(|reason| reason.contains("could not be read"))
+            .is_some_and(|reason| reason.accessible_name().contains("could not be read"))
     );
 }
 
@@ -689,7 +691,9 @@ fn the_open_name_always_saves_and_a_rename_must_be_free() {
         );
     }
     assert_eq!(
-        name_refusal(Some("build"), "review", Some(&names)).as_deref(),
+        name_refusal(Some("build"), "review", Some(&names))
+            .map(|reason| reason.accessible_name())
+            .as_deref(),
         Some("A template named \"review\" already exists; edit that one, or choose another name")
     );
 }

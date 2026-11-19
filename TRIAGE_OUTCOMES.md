@@ -2094,17 +2094,6 @@
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
 - Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
-## template-collision-refusal-mixes-unisolated-name.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Name already taken"
-  embeds the name as plain debug-quoted text. Template names are shown as host text elsewhere. Confirmed. Bucket: other.
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix code: build the refusal as a host sentence (~5-15). Size gate: about 100 lines of diff (code,
-  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
-  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
-
 ## gui-labels-and-refusals-name-different-actions.md
 
 - Outcome: `fix code`.

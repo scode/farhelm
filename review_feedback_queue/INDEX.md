@@ -2810,9 +2810,6 @@ consequences.
   credential editor can keep an extra copy of a rejected or superseded token or login file in app memory after you have
   edited the draft.
 
-- [`template-collision-refusal-mixes-unisolated-name.md`](template-collision-refusal-mixes-unisolated-name.md) — When a
-  name is already taken, the refusal can display a right-to-left name differently from how Farhelm shows it elsewhere.
-
 - [`attachment-paste-keeps-directory-control-bytes.md`](attachment-paste-keeps-directory-control-bytes.md) — Uploading
   from a session can paste control characters from the host's attachment directory into the same terminal along with the
   path.
