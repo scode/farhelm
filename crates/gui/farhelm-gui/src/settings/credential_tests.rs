@@ -133,7 +133,7 @@ fn key_typed(cx: &mut VisualTestContext) -> String {
     })
 }
 
-/// The open editor's secret: the field's text and its draft's value.
+/// The open editor's secret: the paste field's text and the value the editor would save.
 fn secret(cx: &mut VisualTestContext) -> (String, String) {
     let editor = editor(cx);
     cx.update(|_, cx| editor.read(cx).secret(cx))
@@ -630,16 +630,19 @@ fn back_cancel_and_closing_discard_the_draft_without_asking(cx: &mut TestAppCont
     );
 }
 
-/// SPEC.md: the agent-login editor selects Claude Code or Codex, and Codex "accepts a pasted or selected auth.json";
-/// SPEC_impl.md: "A native file selection fills the Codex draft and never submits it". The Codex editor also carries
-/// the shared refresh token's caveat. A chosen file that filled the field but not the draft would save something other
-/// than what is shown. Specified: Add agent login starts at Claude Code with its setup-token help; choosing Codex shows
-/// the refresh-token caveat and Choose file…, whose dialog's chosen file fills the box and the draft with the file's
-/// text and sends nothing; a file that cannot be read says so and leaves the box as it was; text typed while the
-/// dialog is open wins over the file chosen in it (SPEC_impl.md: "a generation check discards reads superseded by
-/// paste"; a paste and typing reach the box the same way).
+/// A screen share of the Codex editor can show which file is staged without revealing the account data. Choose shows
+/// the filename and shape check without sending a command. An unreadable replacement keeps the selection. Clear
+/// restores the paste box, where an edit supersedes an outstanding choice. Save sends the selected file's contents.
+/// The agent choice also switches from Claude Code's setup-token help to Codex's shared refresh token warning.
 #[gpui::test]
-fn a_chosen_file_fills_the_codex_login_and_saves_nothing(cx: &mut TestAppContext) {
+fn a_chosen_codex_login_is_hidden_and_saved_only_on_submit(cx: &mut TestAppContext) {
+    const FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/credentials/example-auth.json"
+    );
+    const CONTENTS: &str = include_str!("../../tests/fixtures/credentials/example-auth.json");
+    const PRIVATE_MARKER: &str = "fictional-credential-contents";
+
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_credentials(&mut helm, cx, json!([]));
     press(cx, "credentials-add-agent-login");
@@ -660,43 +663,80 @@ fn a_chosen_file_fills_the_codex_login_and_saves_nothing(cx: &mut TestAppContext
     );
     assert!(text.contains("provider's terms of service"), "{text}");
 
-    // The crate's own manifest stands in for an auth.json: the box takes any text, and Save checks it.
-    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+    assert!(CONTENTS.contains(PRIVATE_MARKER));
+    assert!(drawn(cx, "credential-secret"));
     press(cx, "credential-choose-file");
     assert!(
         cx.did_prompt_for_paths(),
         "the platform's file dialog opened"
     );
-    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(file)]));
+    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(FILE)]));
     settle(cx);
-    let wanted = std::fs::read_to_string(file).unwrap();
     assert_eq!(
         secret(cx),
-        (wanted.clone(), wanted.clone()),
-        "the field and the draft hold the file"
+        (String::new(), CONTENTS.to_owned()),
+        "only the value held for Save contains the file"
     );
+    let text = painted(cx);
+    assert!(text.contains("example-auth.json"));
+    assert!(text.contains("Validated"));
+    assert!(!text.contains(PRIVATE_MARKER));
+    assert!(!drawn(cx, "credential-secret"));
+    assert_eq!(available(cx, "credential-clear-file"), Some(true));
     assert_eq!(sent(&mut helm), [], "choosing saves nothing");
 
     press(cx, "credential-choose-file");
     cx.simulate_path_prompt_response(|_| {
-        Some(vec![std::path::PathBuf::from("/nonexistent/auth.json")])
+        Some(vec![
+            std::path::PathBuf::from(FILE).join("unreadable-child"),
+        ])
     });
     settle(cx);
     assert_eq!(
         label_of(cx, "credential-error").as_deref(),
         Some("Could not read that login file.")
     );
-    assert_eq!(secret(cx), (wanted.clone(), wanted), "the box is as it was");
+    assert_eq!(secret(cx).1, CONTENTS, "the earlier selection is kept");
 
+    press(cx, "credential-clear-file");
+    assert!(drawn(cx, "credential-secret"));
+    assert!(!drawn(cx, "credential-clear-file"));
+    assert_eq!(secret(cx), (String::new(), String::new()));
+
+    const PASTE: &str = "{\"pasted\": true}";
+    fill(cx, "credential-secret", PASTE);
+    assert_eq!(secret(cx).1, PASTE);
     press(cx, "credential-choose-file");
-    fill(cx, "credential-secret", "{\"pasted\": true}");
-    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(file)]));
+    assert!(cx.did_prompt_for_paths());
+    // An edit must win even if comparing the values before and after the chooser would say nothing changed.
+    fill(cx, "credential-secret", "{}");
+    fill(cx, "credential-secret", PASTE);
+    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(FILE)]));
     settle(cx);
     assert_eq!(
         secret(cx).1,
-        "{\"pasted\": true}",
+        PASTE,
         "the typed text wins over the file chosen meanwhile"
     );
+    assert!(painted(cx).contains(PASTE));
+    assert!(!drawn(cx, "credential-clear-file"));
+
+    press(cx, "credential-choose-file");
+    cx.simulate_path_prompt_response(|_| Some(vec![std::path::PathBuf::from(FILE)]));
+    settle(cx);
+    assert!(
+        drawn(cx, "credential-clear-file"),
+        "the file is staged again"
+    );
+    fill(cx, "credential-name", "codex-login");
+    press(cx, "credential-save");
+    let (_, method, path, body) = one_command(&mut helm);
+    assert_eq!((method, path.as_str()), (Method::Post, "/api/credentials"));
+    assert_eq!(
+        body,
+        json!({ "name": "codex-login", "kind": "codex_login", "secret": CONTENTS })
+    );
+    assert!(!painted(cx).contains(PRIVATE_MARKER));
 }
 
 /// A Delete's reply can arrive after the user went Back and opened another editor; closing whatever editor is open

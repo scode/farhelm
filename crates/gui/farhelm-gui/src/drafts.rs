@@ -178,6 +178,8 @@ pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
 pub struct DraftInput {
     draft: Draft<String>,
     input: TextInputState,
+    /// Distinguishes intervening user edits even when the field has returned to the same text.
+    edit_revision: u64,
     /// The value the helm last pushed for the field: what an untouched draft takes up again after a refused save.
     pushed: String,
     _events: Subscription,
@@ -228,6 +230,7 @@ impl DraftInput {
         DraftInput {
             draft: Draft::load(value.to_owned()),
             input,
+            edit_revision: 0,
             pushed: value.to_owned(),
             _events: events,
         }
@@ -236,6 +239,11 @@ impl DraftInput {
     /// The draft: its value, whether it is touched or saving, and the last refusal.
     pub fn draft(&self) -> &Draft<String> {
         &self.draft
+    }
+
+    /// Compare across an async action on this field to tell if a user edit superseded it.
+    pub(crate) fn edit_revision(&self) -> u64 {
+        self.edit_revision
     }
 
     /// The field's state, for the editor to draw. The draft owns its subscription; the editor never subscribes to it.
@@ -258,7 +266,9 @@ impl DraftInput {
     /// the field's undo history, which is why read-only is the main guard and this only the backstop.
     fn edited<V: 'static>(&mut self, window: &mut Window, cx: &mut Context<V>) {
         let text = self.input.text(cx).to_string();
-        if !self.draft.edit(text) {
+        if self.draft.edit(text) {
+            self.edit_revision = self.edit_revision.wrapping_add(1);
+        } else {
             self.input.set_text(self.draft.value().clone(), window, cx);
         }
         cx.notify();

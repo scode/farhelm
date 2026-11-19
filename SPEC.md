@@ -2351,16 +2351,17 @@ lists. Names use the recipe-name grammar, are unique across all kinds, and canno
 the kind of a saved credential. Lists show the name, recipe use and saved or replaced time. Editing opens in place with
 Back, Name, a write-only secret field, Delete, Cancel and Save. The agent-login editor selects Claude Code or Codex:
 Claude accepts the token from `claude setup-token`; Codex accepts a pasted or selected `auth.json`, validated only as a
-JSON object of at most 64 KiB. An empty replacement keeps the saved value. Settings never returns a saved secret; a
-failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style departure
-question. Recipes select API endpoint tokens, GitHub tokens and Claude or Codex subscription logins by name; setup,
-connection and replacement delivery resolve current saved values. A successful save with failed deliveries closes and
-clears the secret editor, and shows the delivery failures on the Credentials overview. The Codex login editor explains
-that copies share a rotating refresh token: when one copy renews, the other copies cannot renew and need a fresh
-sign-in, so use one login per host. It recommends a proxy or load balancer through an API endpoint for shared inference
-access and makes the user responsible for following the provider's terms of service. Delete is unavailable while a
-recipe uses a credential, with the recipe names shown. Reference changes refresh an open credential editor without
-discarding its unsaved replacement text.
+JSON object of at most 64 KiB. A selected file is shown by name and validation status, with Clear to return to the empty
+paste box. Pasted text stays visible for editing. An empty replacement keeps the saved value. Settings never returns a
+saved secret; a failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style
+departure question. Recipes select API endpoint tokens, GitHub tokens and Claude or Codex subscription logins by name;
+setup, connection and replacement delivery resolve current saved values. A successful save with failed deliveries closes
+and clears the secret editor, and shows the delivery failures on the Credentials overview. The Codex login editor
+explains that copies share a rotating refresh token: when one copy renews, the other copies cannot renew and need a
+fresh sign-in, so use one login per host. It recommends a proxy or load balancer through an API endpoint for shared
+inference access and makes the user responsible for following the provider's terms of service. Delete is unavailable
+while a recipe uses a credential, with the recipe names shown. Reference changes refresh an open credential editor
+without discarding its unsaved replacement text.
 
 Credentials includes the same Tensorlake API key form as Tensorlake, with Save, Test and Clear, labelled **Tensorlake
 API key** there and **API key** in Tensorlake. The Credentials overview and every credential editor each show one

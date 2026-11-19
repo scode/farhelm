@@ -5769,10 +5769,12 @@ color and attention grouping independently of connection phase. No timer or sepa
 The Settings dialog owns one Tensorlake account context above both mounted panels. Key editors share only acknowledged
 metadata, key/test discovery revisions and serialization of key requests. Their secret drafts and outcomes stay local.
 Accepted API saves survive editor dismissal, with mounted fences preventing late responses from touching retired
-signals. A native file selection fills the Codex draft and never submits it; a generation check discards reads
-superseded by paste, agent selection or submission. The metadata-only catalog reader also populates endpoint pickers in
-Settings and Add host, independently of whether Credentials is mounted. Failed refreshes keep the last good list. Feed
-updates refresh an open credential editor's use metadata without replacing its secret draft.
+signals. A native file selection stages the Codex draft outside the text input. The editor presents the file's basename
+and the shared credential check's result. Save submits the staged text. Clear, an agent change or submission cancels an
+outstanding read, and an edit to the paste box takes precedence over the read. The metadata-only catalog reader also
+populates endpoint pickers in Settings and Add host, independently of whether Credentials is mounted. Failed refreshes
+keep the last good list. Feed updates refresh an open credential editor's use metadata without replacing its secret
+draft.
 
 ## Disposable environments
 

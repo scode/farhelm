@@ -10,7 +10,7 @@
 //! scroll with it, as the section list does (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
 
 use farhelm_helm_client::Method;
-use farhelm_proto::credentials::{Credential, CredentialKind};
+use farhelm_proto::credentials::{Credential, CredentialKind, check_secret};
 use gpui::{
     App, Context, EntityId, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, PathPromptOptions, Render, Role, StatefulInteractiveElement as _,
@@ -27,8 +27,8 @@ use crate::components::{
     Button, HoverHelp, RadioGroup, RadioOption, TextInput, TextInputEvent, TextInputState, Tier,
 };
 use crate::drafts::DraftInput;
-use crate::focus::Mark;
-use crate::host_text::HostText;
+use crate::focus::{self, Mark};
+use crate::host_text::{self, HostText};
 use crate::operations::{NotStarted, OpKey, Outcome};
 use crate::session;
 use crate::theme;
@@ -47,6 +47,31 @@ const AGENTS: [(CredentialKind, &str); 2] = [
     (CredentialKind::CodexLogin, "Codex"),
 ];
 
+/// A Codex login selected from disk. The editor paints only the basename and whether the login passes the helm's
+/// shape check. Save uses the same bytes that were checked, even if the file changes on disk.
+struct ChosenLogin {
+    filename: HostText,
+    contents: String,
+    validated: bool,
+}
+
+impl ChosenLogin {
+    /// Load once on the background executor. The shared check validates JSON shape without testing the account.
+    fn read(path: &std::path::Path) -> Result<Self, &'static str> {
+        let contents = read_login(path)?;
+        let filename = path
+            .file_name()
+            .ok_or("Could not read that login file.")?
+            .to_string_lossy();
+        let validated = check_secret(CredentialKind::CodexLogin, &contents).is_ok();
+        Ok(Self {
+            filename: HostText::from_host(filename.into_owned()),
+            contents,
+            validated,
+        })
+    }
+}
+
 /// One credential's editor (see the parent module's docs). A view of its own, dropped by Back, Cancel, a done save or
 /// delete, or the dialog closing; a save or delete it started goes on in the operation store without it.
 pub(in crate::settings) struct Editor {
@@ -56,9 +81,10 @@ pub(in crate::settings) struct Editor {
     /// The saved credential being replaced, or `None` for a new one.
     existing: Option<Credential>,
     name: TextInputState,
-    /// The write-only secret: a masked line for a token, a growing monospace box for Codex's `auth.json`. Made again
-    /// when a new agent login switches agents, which empties it, as the old editor did, and when a chosen file fills it.
+    /// Text the user enters: a masked line for a token or a growing monospace box for a Codex paste.
     secret: DraftInput,
+    /// Replaces the paste box until Clear. The contents never enter a text field or its undo history.
+    chosen_login: Option<ChosenLogin>,
     /// Why the last Save or Delete did not happen, or the last chosen file could not be read (the editor's own check or
     /// the helm's refusal), with the secret as it stood then. Shown while the secret is unchanged ([`Editor::error`]),
     /// so an edit of the secret drops it as the old editor's `oninput` did; an edit of the name drops it outright.
@@ -69,14 +95,12 @@ pub(in crate::settings) struct Editor {
     /// Whether the last Save or Delete sent nothing because work on this credential was already in flight.
     refused: Refused,
     /// The open file dialog and the read of the file chosen in it, for a Codex login; Choose file… is busy meanwhile.
-    /// Dropped, which abandons both, by a switch of agent, a Save or the editor closing, and its result is dropped if the
-    /// box's text differs from when the dialog opened. That value comparison stands in for SPEC_impl.md's "generation
-    /// check discards reads superseded by paste, agent selection or submission": an edit that restores the exact text
-    /// would let the file through, which is harmless.
+    /// Clear, an agent switch, Save and closing abandon the task. The paste box's edit revision fences the result, even
+    /// if the user returned to the original text.
     choosing: Option<Task<()>>,
     /// The name field's edits, which drop the last error. The secret field has no such watch of the editor's own: a
     /// text field's state takes one subscription (`TextInputState::subscribe`), which the draft holds, and a second one
-    /// would never see an edit. So the editor compares the draft's value instead.
+    /// would never see an edit. The editor uses the draft's edit revision for file selection and its value for errors.
     _name_edits: Subscription,
 }
 
@@ -106,7 +130,8 @@ impl Editor {
             parent,
             group,
             kind,
-            secret: Self::secret_input(kind, existing.is_some(), "", window, cx),
+            secret: Self::secret_input(kind, existing.is_some(), window, cx),
+            chosen_login: None,
             existing,
             name,
             error: None,
@@ -117,12 +142,10 @@ impl Editor {
         }
     }
 
-    /// The secret's field for `kind`, holding `text` (a chosen file's) as its untouched draft, with the old placeholder
-    /// for a new or a saved credential.
+    /// An empty entry field with a placeholder that explains what a blank replacement means.
     fn secret_input(
         kind: CredentialKind,
         replacing: bool,
-        text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> DraftInput {
@@ -150,7 +173,7 @@ impl Editor {
         // Enter saves nothing: the old editor's fields sat in no form, so Enter in its token field did nothing (and the
         // Codex box takes Enter as a line break).
         DraftInput::new(
-            text,
+            "",
             state,
             |editor: &mut Self| &mut editor.secret,
             |_, _, _| {},
@@ -159,16 +182,24 @@ impl Editor {
         )
     }
 
+    /// Save and its error line both use the active source of the draft, including when the paste box is hidden.
+    fn secret_value(&self) -> &str {
+        match &self.chosen_login {
+            Some(login) => &login.contents,
+            None => self.secret.draft().value(),
+        }
+    }
+
     /// Record `words` as why the last action did not happen, against the secret as it stands now.
     fn fail(&mut self, words: HostText) {
-        self.error = Some((words, self.secret.draft().value().clone()));
+        self.error = Some((words, self.secret_value().to_owned()));
     }
 
     /// The error to show: the last one, while the secret is still what it was when it came.
     fn error(&self) -> Option<&HostText> {
         self.error
             .as_ref()
-            .filter(|(_, secret)| secret == self.secret.draft().value())
+            .filter(|(_, secret)| secret == self.secret_value())
             .map(|(words, _)| words)
     }
 
@@ -182,13 +213,12 @@ impl Editor {
         }
     }
 
-    /// The secret field's text and what its draft holds, for tests: GPUI Kit's field reports no accessible value, and a
-    /// field showing text its draft does not hold is the bug a chosen file must not cause.
+    /// The entry field's text and the value Save would use. GPUI Kit's field reports no accessible value.
     #[cfg(test)]
     pub(in crate::settings) fn secret(&self, cx: &App) -> (String, String) {
         (
             self.secret.input().text(cx).to_string(),
-            self.secret.draft().value().clone(),
+            self.secret_value().to_owned(),
         )
     }
 
@@ -215,22 +245,23 @@ impl Editor {
             return;
         }
         self.kind = kind;
-        self.secret = Self::secret_input(kind, false, "", window, cx);
+        self.secret = Self::secret_input(kind, false, window, cx);
+        self.chosen_login = None;
         self.choosing = None;
         self.error = None;
         cx.notify();
     }
 
     /// Save: check the draft, then send it under the credential's key (the parent module's docs). Does nothing while
-    /// busy, or for a new credential with no secret typed, when Save is drawn busy or unavailable.
+    /// busy, or for a new credential with a blank draft, when Save is drawn busy or unavailable.
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let secret = self.secret.draft().value().clone();
         let replacing = self.replacing();
-        if self.busy() || (!replacing && secret.trim().is_empty()) {
+        if self.busy() || (!replacing && self.secret_value().trim().is_empty()) {
             return;
         }
-        // A file still being read must not land in the field once this value is on its way.
+        // Save fixes the draft being sent, including while the file picker is still waiting.
         self.choosing = None;
+        let secret = self.secret_value().to_owned();
         let name = self.name(cx);
         let kind = self.kind;
         if let Some(problem) = malformed(&name, kind, replacing, &secret) {
@@ -245,7 +276,8 @@ impl Editor {
             self,
             |editor| &mut editor.secret,
             &OpKey::credential(&name),
-            move |secret| save_command(&saving, kind, replacing, secret),
+            // Use the active value. The paste draft still owns the in-flight state for both sources.
+            move |_| save_command(&saving, kind, replacing, &secret),
             window,
             cx,
             move |editor, settled, cx| {
@@ -331,11 +363,10 @@ impl Editor {
         cx.notify();
     }
 
-    /// Choose file…: open the platform's file dialog for an `auth.json`, and fill the box with the chosen file's text,
-    /// which is a draft like a paste and saves nothing ([`Editor::choosing`] says what abandons it). A file over the 64
-    /// KiB cap, or one that cannot be read as text, says so and leaves the box as it was; the words never quote the file.
+    /// Choose file… stages a file without submitting it. A read failure leaves the active draft in place, and the
+    /// error is independent of the file's contents.
     fn choose_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy() {
+        if self.busy() || self.choosing.is_some() {
             return;
         }
         let chosen = cx.prompt_for_paths(PathPromptOptions {
@@ -345,9 +376,9 @@ impl Editor {
             prompt: None,
         });
         self.error = None;
-        let before = self.secret.draft().value().clone();
+        let before = self.secret.edit_revision();
         self.choosing = Some(cx.spawn_in(window, async move |editor, cx| {
-            // `None` for a cancelled dialog, one the platform could not open, or no file in it: the box stays as it was.
+            // A cancelled or unavailable dialog leaves the active draft in place.
             let path = match chosen.await {
                 Ok(Ok(Some(paths))) => paths.into_iter().next(),
                 _ => None,
@@ -355,7 +386,7 @@ impl Editor {
             let read = match path {
                 Some(path) => Some(
                     cx.background_executor()
-                        .spawn(async move { read_login(&path) })
+                        .spawn(async move { ChosenLogin::read(&path) })
                         .await,
                 ),
                 None => None,
@@ -367,23 +398,35 @@ impl Editor {
                     cx.notify();
                     return;
                 };
-                if *editor.secret.draft().value() != before {
+                if editor.secret.edit_revision() != before {
                     // Typed or pasted into while the file was chosen or read: the newer text wins.
                     cx.notify();
                     return;
                 }
                 match read {
-                    // A new field holding the text as its untouched draft: setting a field's text raises no change
-                    // event, so the draft would not learn it otherwise.
-                    Ok(text) => {
+                    Ok(login) => {
                         editor.secret =
-                            Self::secret_input(editor.kind, editor.replacing(), &text, window, cx);
+                            Self::secret_input(editor.kind, editor.replacing(), window, cx);
+                        editor.chosen_login = Some(login);
                     }
                     Err(problem) => editor.fail(HostText::from_host(problem)),
                 }
                 cx.notify();
             });
         }));
+        cx.notify();
+    }
+
+    /// Discard the selected file and restore the empty paste box, ready for keyboard input.
+    fn clear_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy() || self.chosen_login.take().is_none() {
+            return;
+        }
+        self.choosing = None;
+        self.error = None;
+        let mark = Mark::take(cx);
+        let target = self.secret.input().focus_handle(cx);
+        focus::focus_in_layer(&target, &mark, window, cx);
         cx.notify();
     }
 
@@ -494,26 +537,60 @@ impl Render for Editor {
             )
             .height(px(choices::FIELD_HEIGHT)),
         );
-        let secret_words = if codex { "auth.json" } else { "Token" };
-        let secret = TextInput::new(
-            "credential-secret",
-            self.secret.input(),
-            secret_words,
-            HoverHelp::tooltip(if replacing {
-                "Paste a new value to replace the saved one; leave it empty to keep it"
-            } else {
-                "Paste the value to save; Farhelm never shows it again"
-            }),
-        );
-        let secret = choices::labelled(
-            secret_words,
-            "credential-secret",
-            if codex {
-                secret.monospace()
-            } else {
-                secret.height(px(choices::FIELD_HEIGHT))
-            },
-        );
+        let secret = match &self.chosen_login {
+            Some(login) => {
+                let weak = weak.clone();
+                let validation = if login.validated {
+                    "Validated"
+                } else {
+                    "Invalid login file"
+                };
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .w_full()
+                    .min_w_0()
+                    .child(host_text::element(&login.filename).min_w_0().truncate())
+                    .child(choices::help(validation, cx))
+                    .child(
+                        Button::new(
+                            "credential-clear-file",
+                            "Clear",
+                            HoverHelp::tooltip("Discard this file and return to the paste box"),
+                            Role::Button,
+                        )
+                        .accessible_name("Clear chosen login file")
+                        .tier(Tier::Neutral)
+                        .busy(busy)
+                        .on_click(move |_, window, cx| {
+                            let _ = weak.update(cx, |editor, cx| editor.clear_file(window, cx));
+                        }),
+                    )
+            }
+            None => {
+                let label = if codex { "auth.json" } else { "Token" };
+                let secret = TextInput::new(
+                    "credential-secret",
+                    self.secret.input(),
+                    label,
+                    HoverHelp::tooltip(if replacing {
+                        "Paste a new value to replace the saved one; leave it empty to keep it"
+                    } else {
+                        "Paste the value to save; Farhelm never shows it again"
+                    }),
+                );
+                choices::labelled(
+                    label,
+                    "credential-secret",
+                    if codex {
+                        secret.monospace()
+                    } else {
+                        secret.height(px(choices::FIELD_HEIGHT))
+                    },
+                )
+            }
+        };
         let choose = codex.then(|| {
             let weak = weak.clone();
             div().flex().child(
@@ -521,7 +598,7 @@ impl Render for Editor {
                     "credential-choose-file",
                     "Choose file…",
                     HoverHelp::tooltip(
-                        "Choose an auth.json file to fill the box; nothing is saved until Save",
+                        "Choose an auth.json file. Save submits the selected login.",
                     ),
                     Role::Button,
                 )
@@ -582,7 +659,7 @@ impl Render for Editor {
             Role::Button,
         )
         .tier(Tier::Primary)
-        .disabled(!replacing && self.secret.draft().value().trim().is_empty())
+        .disabled(!replacing && self.secret_value().trim().is_empty())
         // Busy, not disabled, while saving, so a clicked Save keeps focus (SPEC_impl.md, "Drafts").
         .busy(busy)
         .on_click(move |_, window, cx| {
