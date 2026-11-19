@@ -16,9 +16,8 @@
 //!   one's ([`FileLinks::ready_for`]). A click pressed while checking, even one whose answer lands before the
 //!   release, or on a path the host refused, does nothing. One pressed over a ready answer the display has not painted
 //!   yet is refused as not visible: a fresh answer forgets where the display was drawn.
-//! - The display is the safeguard. A click whose display was not fully visible in the window is refused, with the old
-//!   app's explanation ([`FILE_REFUSAL`]). Refusing a click whose display another Farhelm surface covers waits for the
-//!   layer manager to say what covers a popover, as it does for web links.
+//! - The display is the safeguard. A click whose display was outside the window or covered by a pointer-blocking
+//!   surface is refused with the old app's explanation.
 //! - A printed path shows the pointing hand only once its check succeeded; a program's hyperlink shows it at once
 //!   (SPEC.md: "OSC hyperlinks may show a pointer earlier").
 //! - A staged run's host (agent builds with a pins file only) is never asked: the check is answered at once from the
@@ -53,17 +52,15 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 
-use super::disclosure::{self, Drawn};
+use super::disclosure::{self, Drawn, Hidden};
 use crate::assets::TERMINAL_FONT;
 use crate::components::{Role, Spinner, spinner_icon};
 use crate::host_text::{HostSentence, HostText};
 use crate::theme::{self, Palette, Token};
 use crate::ticker;
 
-/// What a click on a file link says when its display was not fully visible: the old `admitDisclosure`'s refusal for
-/// a file. Shown at the top of the terminal, in the line a refused web-link click uses.
-const FILE_REFUSAL: &str =
-    "cannot download: full file details are not visible; enlarge the window and hover again";
+#[cfg(test)]
+const FILE_REFUSAL: &str = Hidden::NotVisible.file_words();
 
 /// The display's element id, which tests and the bridge find it by.
 const PANEL_ID: &str = "terminal-file-disclosure";
@@ -205,7 +202,7 @@ impl FileLinks {
             Err(error) => Check::Failed(failure(&error)),
         };
         // Where the display was drawn was where it said "Checking…": until it has painted the answer, a click must
-        // not count as made over a visible answer, so it fails closed ([`disclosure::fully_visible`] of nothing).
+        // not count as made over a visible answer, so it fails closed ([`disclosure::visibility`] of nothing).
         hover.drawn.set(None);
         cx.notify();
     }
@@ -215,7 +212,7 @@ impl FileLinks {
     /// the same file and the same label (a program's hyperlink relabelled over the same cells and target is another
     /// link, whose text the user has not seen checked), so a partial redraw that changed the link's text withdraws the
     /// click even where the terminal kept its old target.
-    fn ready_for(&self, link: &TerminalLink) -> bool {
+    pub(super) fn ready_for(&self, link: &TerminalLink) -> bool {
         self.hover.as_ref().is_some_and(|hover| {
             matches!(&hover.check, Check::Answered(stat) if stat.info.status == DownloadFileStatus::Ready)
                 && link.same_range(&hover.link)
@@ -224,55 +221,48 @@ impl FileLinks {
         })
     }
 
-    /// Whether a press on file link `link` may become a click that transfers it: its destination display was `shown`
-    /// (open and fully visible, as the owner judged it) and its check is ready for this very link
-    /// ([`FileLinks::ready_for`]).
-    pub(crate) fn admits(&self, link: &TerminalLink, shown: bool) -> bool {
-        shown && self.ready_for(link)
-    }
-
     /// Whether `link` shows the pointing hand: a printed path once its check succeeded, every other link at once.
     pub(crate) fn shows_pointer(&self, link: &TerminalLink) -> bool {
         link.kind != LinkKind::Path || self.ready_for(link)
     }
 
-    /// A click on file link `link` (found again from the live text at the release, with nothing selected and no drag),
-    /// which the press found `admitted` (a ready check and a display open and fully visible) and `ready_at_press` (a
-    /// ready check, whatever the display), with the display now `visible` or not, and `modifiers` held, judged for the
-    /// platform the hover's hint named. An admitted click saves the checked file, the one the host resolved, and on
-    /// the opening modifier also opens the save ([`download`]). Returns the explanation to show when the click is
-    /// refused for a display that was not fully visible, which takes the status line's place.
+    /// A click on the same checked link saves the disclosed file, and with its opening modifier also opens the save
+    /// ([`download`]). The press must have seen the whole disclosure. At release an observed cover still refuses
+    /// the click, though a missing panel is normal after the press closes its popover.
     ///
     /// A click with no ready check, now or at its press, is silent, as the old app's was: the display already says
     /// why, and a check that answered between the press and the release was not one the user pressed over.
-    pub(crate) fn clicked(
+    pub(super) fn clicked(
         &mut self,
         link: &TerminalLink,
-        admitted: bool,
+        pressed: Result<(), Hidden>,
         ready_at_press: bool,
-        visible: bool,
+        released: Result<(), Hidden>,
         modifiers: Modifiers,
         cx: &mut Context<Self>,
     ) -> Option<&'static str> {
-        if !self.ready_for(link) || !(admitted || ready_at_press) {
+        if !ready_at_press || !self.ready_for(link) {
             return None;
         }
-        if admitted {
-            if let Some(hover) = &self.hover
-                && !hover.staged
-                && let Check::Answered(stat) = &hover.check
-            {
-                let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
-                let requested = download::opening(modifiers, hover.platform);
-                self.download(path, can_open, requested, cx);
+        let refusal = match (pressed, released) {
+            // The mouse-down frame remains authoritative even if pressing dismissed the cover.
+            (Err(Hidden::Covered), _) | (Ok(()), Err(Hidden::Covered)) => Hidden::Covered,
+            (Err(Hidden::NotVisible), Ok(())) => return None,
+            (Err(hidden), Err(_)) => hidden,
+            (Ok(()), _) => {
+                if let Some(hover) = &self.hover
+                    && !hover.staged
+                    && let Check::Answered(stat) = &hover.check
+                {
+                    let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
+                    let requested = download::opening(modifiers, hover.platform);
+                    self.download(path, can_open, requested, cx);
+                }
+                return None;
             }
-            return None;
-        }
-        if visible {
-            return None;
-        }
+        };
         self.clear_status(cx);
-        Some(FILE_REFUSAL)
+        Some(refusal.file_words())
     }
 }
 
@@ -491,12 +481,11 @@ fn panel(hover: &Hover, step: u8, window: &Window, cx: &App) -> AnyElement {
         ],
         Check::Answered(stat) => answer_lines(stat, hover.platform, tier, palette),
     };
-    disclosure::surface(PANEL_ID, window, cx)
+    let panel = disclosure::surface(PANEL_ID, window, cx)
         .border_l(px(3.))
         .border_color(theme::color(tier.stripe(palette)))
-        .children(lines)
-        .child(disclosure::recorder(hover.drawn.clone()))
-        .into_any_element()
+        .children(lines);
+    disclosure::witnessed(panel, hover.drawn.clone()).into_any_element()
 }
 
 /// Every kind of display, stacked, for the goldens' scene: checking, a small, medium and large ready file (the small

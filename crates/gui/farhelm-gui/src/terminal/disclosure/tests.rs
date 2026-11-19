@@ -1,4 +1,4 @@
-//! Tests of the destination display's own rules ([`super::fully_visible`]); the display's behavior in a terminal is
+//! Tests of the destination display's window-fit rule ([`super::fits`]); visibility in a terminal is
 //! tested with its owner (`attached/tests.rs`, `files/tests.rs`).
 
 use gpui::{point, size};
@@ -10,17 +10,11 @@ use super::*;
 /// title bar. A display that runs into them lies inside the window but not the page; checking against the whole
 /// window, as this did before, let a click on it through.
 /// Spec: with a content area inset at its top left, a display inside it, touching any of its edges included, is
-/// fully visible; one that crosses any edge by a pixel is not; an empty display (no width or no height), or one
-/// never drawn, is not.
+/// fully within the area. Crossing any edge by a pixel or having no width or height fails the fit check.
 #[test]
 fn a_display_reaching_past_the_content_area_is_not_fully_visible() {
     let area = Bounds::new(point(px(20.), px(52.)), size(px(600.), px(400.)));
     let display = size(px(200.), px(80.));
-    let drawn: Drawn = Rc::new(Cell::new(None));
-    assert!(
-        !fully_visible(&drawn),
-        "a display never drawn is not visible"
-    );
 
     // The area's corners are 20 and 52 at the top left, 620 and 452 at the bottom right.
     for (label, origin) in [
@@ -28,8 +22,10 @@ fn a_display_reaching_past_the_content_area_is_not_fully_visible() {
         ("at the top left corner", point(px(20.), px(52.))),
         ("at the bottom right corner", point(px(420.), px(372.))),
     ] {
-        drawn.set(Some((Bounds::new(origin, display), area)));
-        assert!(fully_visible(&drawn), "a display {label} is fully visible");
+        assert!(
+            fits(Bounds::new(origin, display), area),
+            "a display {label} fits"
+        );
     }
     for (label, origin) in [
         ("left", point(px(19.), px(100.))),
@@ -37,27 +33,24 @@ fn a_display_reaching_past_the_content_area_is_not_fully_visible() {
         ("right", point(px(421.), px(100.))),
         ("bottom", point(px(100.), px(373.))),
     ] {
-        drawn.set(Some((Bounds::new(origin, display), area)));
         assert!(
-            !fully_visible(&drawn),
+            !fits(Bounds::new(origin, display), area),
             "a display one pixel past the area's {label} edge is not fully visible"
         );
     }
 
-    drawn.set(Some((
-        Bounds::new(point(px(100.), px(100.)), size(px(0.), px(80.))),
-        area,
-    )));
     assert!(
-        !fully_visible(&drawn),
+        !fits(
+            Bounds::new(point(px(100.), px(100.)), size(px(0.), px(80.))),
+            area
+        ),
         "a display with no width is not visible"
     );
-    drawn.set(Some((
-        Bounds::new(point(px(100.), px(100.)), size(px(200.), px(0.))),
-        area,
-    )));
     assert!(
-        !fully_visible(&drawn),
+        !fits(
+            Bounds::new(point(px(100.), px(100.)), size(px(200.), px(0.))),
+            area
+        ),
         "a display with no height is not visible"
     );
 }

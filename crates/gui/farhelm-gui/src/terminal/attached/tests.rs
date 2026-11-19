@@ -60,6 +60,8 @@ struct Pane {
     second: Option<Entity<AttachedTerminal>>,
     size: Rc<Cell<(f32, f32)>>,
     deletes: Rc<Cell<usize>>,
+    /// An actual drawn anchor for coverage fixtures, so their popovers go through the ordinary layer manager.
+    cover_anchor: Option<layers::Anchor>,
     root: root::Attachment,
 }
 
@@ -76,6 +78,7 @@ impl Pane {
             second,
             size: Rc::new(Cell::new(PANE)),
             deletes: Rc::new(Cell::new(0)),
+            cover_anchor: None,
             root: root::attach(window, cx),
         }
     }
@@ -83,6 +86,10 @@ impl Pane {
 
 impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let anchor = layers::Anchor::for_element("terminal-test-pane-anchor", window, cx);
+        crate::approvals::region::set_pane(anchor.clone(), cx);
+        let cover_anchor = layers::Anchor::for_element("terminal-test-cover-anchor", window, cx);
+        self.cover_anchor = Some(cover_anchor.clone());
         let (width, height) = self.size.get();
         let deletes = self.deletes.clone();
         // The open-tunnels pill, as the session's top row places it, in a row of its own above the terminal while the
@@ -101,6 +108,7 @@ impl Render for Pane {
             });
         let content = div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .on_action(move |_: &DeleteSession, _, _| deletes.set(deletes.get() + 1))
@@ -118,7 +126,18 @@ impl Render for Pane {
                     .w(px(SECOND_PANE.0))
                     .h(px(SECOND_PANE.1))
                     .child(second)
-            }));
+            }))
+            .child(anchor.track())
+            // A press on a popover's own anchor is exempt from outside-press dismissal. Keep this fixture's
+            // anchor off the grid so a click on the link exercises capture before the cover closes.
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .size(px(1.))
+                    .child(cover_anchor.track()),
+            );
         root::wrap(content, &self.root, window, cx)
     }
 }
@@ -4447,6 +4466,45 @@ impl Harness<'_> {
                 .is_some(),
         )
     }
+
+    /// Open an ordinary or pass-through popover at a known window position. Its size is small enough to cover a
+    /// corner of the destination without covering the link underneath the pointer.
+    pub(in crate::terminal) fn cover_at(&mut self, origin: Point<Pixels>, passes_pointer: bool) {
+        struct Cover;
+        impl Render for Cover {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                use gpui::InteractiveElement as _;
+                div()
+                    .id("terminal-test-cover")
+                    .debug_selector(|| "terminal-test-cover".into())
+                    .w(px(16.))
+                    .h(px(16.))
+            }
+        }
+        let pane = self.pane.clone();
+        self.cx.update(|window, cx| {
+            let anchor = pane
+                .read(cx)
+                .cover_anchor
+                .clone()
+                .expect("the pane drew the anchor");
+            assert!(anchor.drawn_bounds().is_some());
+            let cover = cx.new(|_| Cover);
+            let mark = focus::Mark::take(cx);
+            let popover = layers::Popover::floating(
+                cover,
+                cx.focus_handle(),
+                anchor.placed_by(move |_, _, _| origin),
+            );
+            let popover = if passes_pointer {
+                popover.passes_pointer()
+            } else {
+                popover
+            };
+            assert!(layers::open_popover(popover, &mark, window, cx).is_some());
+        });
+        settle(self.cx);
+    }
 }
 
 /// A program's hyperlink can underline text that differs from where it goes, so resting the pointer on it shows its
@@ -4468,6 +4526,66 @@ fn a_program_hyperlink_shows_its_destination_and_opens_on_a_click(cx: &mut TestA
     );
     h.rest_on(off);
     assert_eq!(h.disclosure_shown(), (false, false), "moving off closes it");
+}
+
+/// The disclosed target authorizes an open only while all of it is visible. An approval card can cover some of
+/// the panel while the link and pointer remain outside the card, so hit testing the pointer cannot enforce this.
+#[gpui::test]
+fn a_real_approval_card_covering_the_link_panel_refuses_the_click(cx: &mut TestAppContext) {
+    use crate::approvals::region_tests::{push, stop, waiting};
+    let mut h = harness_connected(cx, false, vec![waiting(&[])]);
+    let uri = format!("https://example.com/{}", "a-long-path-".repeat(12));
+    h.attach_hyperlink("click here", &uri);
+    h.choose(&h.owner.clone());
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    h.cx.update(crate::approvals::region::install);
+    push(&mut h.helm, &[stop("cover-fixture", "build-box")], &[]);
+    settle(h.cx);
+    let panel = test_support::bounds(h.cx, "terminal-link-disclosure");
+    let card = test_support::bounds(h.cx, "approval-region");
+    assert!(
+        panel.intersects(&card),
+        "the approval card overlaps the panel"
+    );
+    assert!(!card.contains(&on), "the link itself is clickable");
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url(), None);
+    assert_eq!(
+        test_support::label(h.cx, "terminal-link-refusal").as_deref(),
+        Some(
+            "cannot open: full link details are covered by another Farhelm surface; move the pointer and hover again"
+        )
+    );
+}
+
+/// An adjacent card and a pass-through popover must leave the link usable even though both draw later than its
+/// panel. The overlap fixture distinguishes a pass-through surface from one that simply missed the panel.
+#[gpui::test]
+fn adjacent_and_pass_through_popovers_do_not_refuse_a_link(cx: &mut TestAppContext) {
+    for passes_pointer in [false, true] {
+        let mut h = harness(cx);
+        let uri = if passes_pointer {
+            "https://example.com/pass-through"
+        } else {
+            "https://example.com/adjacent"
+        };
+        h.attach_hyperlink("click here", uri);
+        h.choose(&h.owner.clone());
+        let on = h.at_cell(2, 0);
+        h.rest_on(on);
+        let panel = test_support::bounds(h.cx, "terminal-link-disclosure");
+        let origin = if passes_pointer {
+            panel.center()
+        } else {
+            point(panel.right().ceil(), panel.top())
+        };
+        h.cover_at(origin, passes_pointer);
+        let cover = test_support::bounds(h.cx, "terminal-test-cover");
+        assert_eq!(cover.intersects(&panel), passes_pointer);
+        h.click_at(on);
+        assert_eq!(h.cx.opened_url().as_deref(), Some(uri));
+    }
 }
 
 /// Why this matters: a program's hyperlink covers its whole label, often a long one (a path, a title), and a user who
@@ -4811,11 +4929,9 @@ fn a_click_whose_destination_is_not_fully_visible_is_refused(cx: &mut TestAppCon
     // As if the display had run past the bottom edge of the window's content area when it was last drawn.
     h.cx.update(|_, cx| {
         let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-        let (bounds, area) = shown.get().unwrap();
-        shown.set(Some((
-            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
-            area,
-        )));
+        let mut panel = shown.get().expect("the display was drawn");
+        panel.bounds.origin.y = panel.area.bottom() - px(4.);
+        shown.set(Some(panel));
     });
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
     h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
@@ -4915,11 +5031,9 @@ fn hovering_again_after_a_refusal_shows_the_display_and_a_click_opens(cx: &mut T
     h.rest_on(on);
     h.cx.update(|_, cx| {
         let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-        let (bounds, area) = shown.get().unwrap();
-        shown.set(Some((
-            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
-            area,
-        )));
+        let mut panel = shown.get().expect("the display was drawn");
+        panel.bounds.origin.y = panel.area.bottom() - px(4.);
+        shown.set(Some(panel));
     });
     h.click_at(on);
     assert_eq!(h.cx.opened_url(), None, "the premise: the click is refused");
@@ -5397,11 +5511,9 @@ fn a_hinted_address_whose_display_is_not_fully_visible_is_refused(cx: &mut TestA
         let owner = h.owner.clone();
         h.cx.update(|_, cx| {
             let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
-            let (bounds, area) = shown.get().unwrap();
-            shown.set(Some((
-                Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
-                area,
-            )));
+            let mut panel = shown.get().expect("the display was drawn");
+            panel.bounds.origin.y = panel.area.bottom() - px(4.);
+            shown.set(Some(panel));
         });
     };
     off_screen(&mut h);
@@ -5424,6 +5536,31 @@ fn a_hinted_address_whose_display_is_not_fully_visible_is_refused(cx: &mut TestA
         "and is refused, saying why"
     );
     assert_eq!(h.helm.commands(), [], "and sends nothing");
+}
+
+/// A modifier-click opens a remote loopback tunnel only with the same visible disclosure as an ordinary open.
+/// A blocking surface over the hint must refuse before sending a tunnel request or opening the browser.
+#[gpui::test]
+fn a_covered_tunnel_hint_refuses_the_modified_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let on = h.tunnel_offered();
+    let panel = test_support::bounds(h.cx, "terminal-link-disclosure");
+    h.cover_at(panel.center(), false);
+    let cover = test_support::bounds(h.cx, "terminal-test-cover");
+    assert!(panel.intersects(&cover) && !cover.contains(&on));
+    h.click_with(on, cmd());
+    let commands = h.helm.commands();
+    assert!(
+        commands.is_empty(),
+        "the click makes no request: {commands:?}"
+    );
+    assert_eq!(h.cx.opened_url(), None);
+    assert_eq!(
+        test_support::label(h.cx, "terminal-link-refusal").as_deref(),
+        Some(
+            "cannot open: full link details are covered by another Farhelm surface; move the pointer and hover again"
+        )
+    );
 }
 
 impl Harness<'_> {

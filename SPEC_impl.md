@@ -755,17 +755,18 @@ toggle) and focus recovers inside it, but it is not a trap: Tab's trap concerns 
 the focus invariant's "topmost modal" is the topmost dialog, which such a popover is not. Whether a click on a dialog's
 empty space (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list
 says; a dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's
-destination disclosure is covered is a hit test, never a hand-kept list of covering surfaces. A popover that lets the
-pointer through registers no hit area, so it is invisible to that hit test, and its owner must keep it off the
-disclosure: the drag-copy notice does not open while its terminal's disclosure is open. Things the user did not start
-never open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took
-when the user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the first batch of
-announcements when nothing is open ahead of it). Each takes its mark through its own constructor,
-`focus::Mark::at_ui_session_start`, when its owner first sees a new UI session, before that session's first snapshot is
-drawn. If the user types or clicks before the open, the layer manager refuses it and the dialog stays unseen until a
-later window start or reset, as the maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome
-card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken when the
-last of them closes, which always follows a press of the user's.
+destination disclosure is covered is a hit test. The layer manager asks GPUI whether any mouse-blocking hitbox drawn
+after the disclosure overlaps its rectangle, clipped to the covering hitbox's content mask. A pass-through popover
+contributes no blocker of its own. Display-only surfaces such as the quick-launch sequence pill contribute none either.
+The drag-copy notice stays off the disclosure by never opening while it is shown. Things the user did not start never
+open a layer over what they are doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took when the
+user acted. The one exception is SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements
+when nothing is open ahead of it). Each takes its mark through its own constructor, `focus::Mark::at_ui_session_start`,
+when its owner first sees a new UI session, before that session's first snapshot is drawn. If the user types or clicks
+before the open, the layer manager refuses it and the dialog stays unseen until a later window start or reset, as the
+maintainer decided on 2026-11-14. A batch that SPEC.md has wait behind the Welcome card (and, after Send feedback now,
+behind the feedback dialog) is not an exception: it opens with a mark taken when the last of them closes, which always
+follows a press of the user's.
 
 A submenu opened on hover starts without focus and records its parent at open, like a submenu opened by a key. The layer
 manager gives it keyboard ownership when the pointer or a key enters it, so Tab and focus recovery then see the child.
@@ -814,9 +815,8 @@ card; Tab from a card goes back into the dialog, while the dialog's own Tab neve
 going away sends focus into the topmost dialog, or home. Escape on a card does nothing, so it cannot close the dialog
 behind it, as the old app's keyboard safety net passed over the cards. A view that reads `drawn_bounds` picks its anchor
 from its own state, not from `None`: the bounds turn `None` only after the frame that stopped drawing the element, and
-nothing redraws then. Not built yet, for want of anything to build them against: counting a card as covering a terminal
-link's disclosure (an occluding card counts with no change if that hit test uses occlusion), and raising a refused
-link's explanation above the cards.
+nothing redraws then. A card's ordinary occluding hitbox counts as covering a terminal link's disclosure. Raising the
+refusal above the card is still pending.
 
 One layer's box is drawn above the approval region: SPEC.md's tunnel warning, whose opener raises it as it opens
 (`layers::above_approval_region`), however it was asked (a terminal Cmd-click, Settings' switch, a card's Tunnel and
@@ -3308,11 +3308,12 @@ A click sorts a program's hyperlink by its parsed target: `TerminalLink::file_pa
 `web_target` (`crates/gui/farhelm-grid-model/src/links.rs`) admits only http and https, whose parsed serialization goes
 to the opener (or, for a Mac Cmd-click the display offered a tunnel for, through that tunnel); every other scheme opens
 nothing and says nothing (`link_released` in `crates/gui/farhelm-gui/src/terminal/attached.rs`). The hover's display is
-the click's safeguard: a click whose display was not fully visible inside the window is refused with an explanation,
-before any transfer or opening. SPEC.md also counts a display another Farhelm surface covers (an approval card, the
-tunnel-error notice) as not visible. The desktop app does not build that cover check yet: it waits for the layer manager
-to report what covers a popover, together with raising a refused link's explanation above the cards ("Overlays: the
-layer manager"); the old app marked every such surface after a hand-kept list let its quick-launch pill go uncounted.
+the click's safeguard. A click is refused before an open or transfer if the display lies outside the content area or
+another Farhelm surface blocks pointer input over any part of it. The panel contributes a transparent hitbox after its
+own card's hitbox, so the layer manager can check the other surfaces in the rendered frame. Mouse down captures the
+result before it closes popovers. A file release uses the same query, preserving a cover found at mouse down even if the
+cover has gone. A release can still finish an admitted press after it closes its own panel. An out-of-view panel gets
+the resize explanation before any cover is considered.
 
 An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
 platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its

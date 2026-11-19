@@ -156,7 +156,7 @@
 //!   does not open either once the user has pressed a key or clicked anywhere in the window since the release (the
 //!   layer manager refuses the open), or while this terminal's link destination display is open: the notice lets the
 //!   pointer through, so drawn over the display it would hide the target a click on the link then opens, and the
-//!   display's cover check (a hit test, not built yet) could not see it.
+//!   display's coverage check counts only hitboxes that block the pointer.
 //! - **Where.** A non-focusing popover that lets the pointer through (`layers::Popover::passes_pointer`), on a
 //!   zero-size anchor this owner draws at the release point, placed by [`super::drag_notice::place`] from the pane's
 //!   bounds in this frame (read from an anchor the pane draws, as the layer manager places the notice) and the row
@@ -270,6 +270,7 @@ use gpui::{
 };
 
 use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
+use super::disclosure::{self, Hidden};
 use super::files::{FileLinks, StatusShown};
 use super::tunnels::{self, TunnelPill, Tunnels};
 use super::{CellMetrics, CursorPhase, TerminalView, style};
@@ -504,9 +505,9 @@ pub struct AttachedTerminal {
     /// The drag-copy notice: the drag that may raise it, its grace window and the notice shown (see "The drag-copy
     /// notice" in the module docs).
     drag_notice: DragNotice,
-    /// Whether a click starting with the press now being handled may open the link it is on, decided in the press's
-    /// capture phase ([`AttachedTerminal::click_admitted`]) and moved into its [`LinkPress`] as the press is handled.
-    press_admitted: bool,
+    /// The link panel's visibility at capture, before the press can put it away, handed to [`LinkPress`] in the
+    /// bubble phase. `None` means capture had no link to check.
+    press_visibility: Option<Result<(), Hidden>>,
     /// The explanation of a refused link click, shown at the top of the terminal until the next press there.
     refusal: Option<SharedString>,
     /// Set by a refused click and cleared once the pointer moves to another cell: while set, no destination display
@@ -708,7 +709,7 @@ impl AttachedTerminal {
             disclosure_anchor: None,
             disclosure_count: 0,
             drag_notice: DragNotice::default(),
-            press_admitted: false,
+            press_visibility: None,
             refusal: None,
             refusal_raised: false,
             tunnels,
@@ -2347,10 +2348,13 @@ impl Render for AttachedTerminal {
                 // Any press in the terminal puts the drag-copy notice away, the scrollbar's too, which the bar keeps
                 // from the bubble phase.
                 owner.drag_notice_pressed(window, cx);
-                owner.press_admitted = event.button == MouseButton::Left
-                    && owner
+                owner.press_visibility = if event.button == MouseButton::Left {
+                    owner
                         .pressed_link(event.position, cx)
-                        .is_some_and(|link| owner.click_admitted(&link, window, cx));
+                        .map(|link| owner.click_visibility(&link, window, cx))
+                } else {
+                    None
+                };
             }))
             .on_any_mouse_down(cx.listener(Self::press))
             // A link under the pointer shows the pointing hand, as the old app's hovered links did.
@@ -2554,9 +2558,8 @@ impl LinkClick {
 struct LinkPress {
     link: TerminalLink,
     at: Point<Pixels>,
-    /// Whether a click may open the link, decided before anything the press did could change it (closing popovers,
-    /// the destination display among them); see [`AttachedTerminal::click_admitted`].
-    admitted: bool,
+    /// The disposition of the disclosure at mouse down, before the layer manager can close the panel or the cover.
+    visibility: Result<(), Hidden>,
     /// Whether the link was offered a tunnel at the press, so a Cmd-click tunnels only an address whose display the
     /// admission checked (a tunnel read answering between press and release changes nothing).
     hinted: bool,
@@ -2728,11 +2731,17 @@ impl AttachedTerminal {
         // link's activation downloaded without reading the link choice (terminal.js:1050 and :1104), which only
         // `activateWeb` passed on (terminal.js:1012).
         if press.link.file_path().is_some() {
-            let visible = self.disclosure_fully_visible(&press.link);
+            let released = self.disclosure_visibility(&press.link, window);
             let modifiers = event.modifiers;
             let refusal = self.files.update(cx, |files, cx| {
-                let (admitted, ready) = (press.admitted, press.file_ready);
-                files.clicked(&press.link, admitted, ready, visible, modifiers, cx)
+                files.clicked(
+                    &press.link,
+                    press.visibility,
+                    press.file_ready,
+                    released,
+                    modifiers,
+                    cx,
+                )
             });
             if let Some(refusal) = refusal {
                 self.refusal = Some(refusal.into());
@@ -2749,8 +2758,8 @@ impl AttachedTerminal {
         let Some(target) = link_web_target(&press.link) else {
             return;
         };
-        if !press.admitted {
-            self.refusal = Some(DISCLOSURE_REFUSAL.into());
+        if let Err(hidden) = press.visibility {
+            self.refusal = Some(hidden.link_words().into());
             self.refusal_raised = true;
             // The refusal takes the file status line's place, as it took the old app's one message's.
             self.files.update(cx, |files, cx| files.clear_status(cx));
@@ -2777,11 +2786,6 @@ impl AttachedTerminal {
         cx.open_url(&target);
     }
 }
-
-/// What a click on a link with a destination display says when that display was not fully visible (the old app's
-/// refusal, `admitDisclosure` in terminal-files.js; the form for a display another surface covers is not built yet).
-const DISCLOSURE_REFUSAL: &str =
-    "cannot open: full link details are not visible; enlarge the window and hover again";
 
 /// Where the destination display's anchor sits against the pointer: its left edge 12 pixels right of it, spanning from
 /// 4 pixels above to 12 below. The layer manager puts a popover 4 pixels past its anchor, so the display's top lands 16
@@ -3169,29 +3173,33 @@ impl AttachedTerminal {
         )
     }
 
-    /// Whether a click on `link` that starts now may open it, decided at the press, before anything the press does
-    /// (closing popovers, among them this display) can change it: a printed web address with no tunnel hint always
-    /// may; a program's hyperlink, or a printed address whose display carries a tunnel hint, only while its destination
-    /// display, for this very link, is open and was fully visible (inside the window) when last drawn (SPEC.md: the
-    /// hover display counts as disclosing the target only while fully visible, and this applies to Cmd-click tunnel
-    /// opens too); a file link only on those terms and once its host check found a ready file.
-    fn click_admitted(&self, link: &TerminalLink, window: &Window, cx: &App) -> bool {
+    /// Authorize the panel side of a click before the press closes popovers. Printed web addresses without a tunnel
+    /// hint need no disclosure. All other links need an open panel for the exact link and an uncovered rendered
+    /// hitbox. File links also check the host's answer separately.
+    fn click_visibility(
+        &self,
+        link: &TerminalLink,
+        window: &Window,
+        cx: &App,
+    ) -> Result<(), Hidden> {
         let disclosed = match link.kind {
             LinkKind::Text => self.tunnel_hint(link, cx).is_some(),
             LinkKind::Osc { .. } | LinkKind::Path => true,
         };
-        let open = self.disclosure.as_ref().is_some_and(|shown| {
-            shown.link == *link
-                && shown
-                    .layer
-                    .is_some_and(|layer| layers::is_open(layer, window, cx))
-        });
-        let shown = !disclosed || (open && self.disclosure_fully_visible(link));
-        // A file link also needs its check to admit it ([`FileLinks::admits`]).
-        if link.file_path().is_some() {
-            return self.files.read(cx).admits(link, shown);
+        if !disclosed {
+            return Ok(());
         }
-        shown
+        let panel = self
+            .disclosure
+            .as_ref()
+            .filter(|shown| {
+                shown.link == *link
+                    && shown
+                        .layer
+                        .is_some_and(|layer| layers::is_open(layer, window, cx))
+            })
+            .ok_or(Hidden::NotVisible)?;
+        disclosure::visibility(&panel.drawn, window)
     }
 
     /// Whether the pointer rests on a link that shows the pointing hand, which the grid's area then draws: every link
@@ -3203,18 +3211,19 @@ impl AttachedTerminal {
             .is_some_and(|link| self.files.read(cx).shows_pointer(link))
     }
 
-    /// Whether the destination display for `link` was fully visible (inside the window) when last drawn: the press's
-    /// admission and a file link's release ask the same question. A display not drawn since it opened, or since its
-    /// file check answered, counts as not visible.
-    fn disclosure_fully_visible(&self, link: &TerminalLink) -> bool {
-        self.disclosure.as_ref().is_some_and(|shown| {
-            shown.link == *link && super::disclosure::fully_visible(&shown.drawn)
-        })
+    /// Recheck the rendered display for a file release. The layer manager can have closed it on mouse down, so
+    /// a missing display here does not by itself withdraw a press that saw the panel.
+    fn disclosure_visibility(&self, link: &TerminalLink, window: &Window) -> Result<(), Hidden> {
+        let panel = self
+            .disclosure
+            .as_ref()
+            .filter(|shown| shown.link == *link)
+            .ok_or(Hidden::NotVisible)?;
+        disclosure::visibility(&panel.drawn, window)
     }
 
     /// The refused click's explanation, drawn at the top of the grid's area until the next press there (the old app's
-    /// `.terminal-file-message`: a status line clear of the newest output at the bottom, at most three lines tall). The
-    /// display it is about is closed while it shows, so nothing covers it.
+    /// `.terminal-file-message`: a status line clear of the newest output at the bottom, at most three lines tall).
     fn refusal_line(&self, cx: &App) -> Option<AnyElement> {
         let text = self.refusal.clone()?;
         Some(super::disclosure::message_line(
@@ -3822,13 +3831,16 @@ impl AttachedTerminal {
         } else {
             None
         };
-        let admitted = std::mem::take(&mut self.press_admitted);
+        let visibility = self
+            .press_visibility
+            .take()
+            .unwrap_or(Err(Hidden::NotVisible));
         self.link_press = link.clone().map(|link| LinkPress {
             hinted: self.tunnel_hint(&link, cx).is_some(),
-            file_ready: link.file_path().is_some() && self.files.read(cx).admits(&link, true),
+            file_ready: link.file_path().is_some() && self.files.read(cx).ready_for(&link),
             link,
             at: event.position,
-            admitted,
+            visibility,
         });
         if tracking && !forced {
             // A press on a web link Farhelm opens is withheld from the program, in intercept mode, with its drag and
