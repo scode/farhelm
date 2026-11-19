@@ -25,6 +25,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+#[cfg(target_os = "linux")]
+mod podman;
+
 /// Upper bound on the wait between `SIGTERM` and the SIGSTOP-quiesce step
 /// in [`kill_process_tree`], and between `SIGTERM` and `SIGKILL` in
 /// [`kill_scope`]. An upper bound, not a duration: both waits poll their
@@ -1403,12 +1406,36 @@ pub(crate) async fn reap_process_tree(
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
 ) -> anyhow::Result<()> {
+    reap_process_tree_with_podman_deadline(
+        scopes,
+        units,
+        roots,
+        session_id,
+        target,
+        scope_kill_failure,
+        None,
+    )
+    .await
+}
+
+/// Startup supplies an earlier deadline for the optional Podman pass so it
+/// leaves time within startup's outer budget for ordinary process cleanup.
+pub(crate) async fn reap_process_tree_with_podman_deadline(
+    scopes: &crate::scope::ScopeManager,
+    units: ScopeUnits,
+    roots: impl IntoIterator<Item = (u32, u64)>,
+    session_id: &str,
+    target: &SweepTarget,
+    scope_kill_failure: ScopeKillFailure,
+    podman_deadline: Option<tokio::time::Instant>,
+) -> anyhow::Result<()> {
     reap_process_tree_with_sweep(
         scopes,
         units,
         roots,
         session_id,
         scope_kill_failure,
+        podman_deadline,
         |roots| kill_process_tree(roots, session_id, target),
     )
     .await
@@ -1423,6 +1450,7 @@ async fn reap_process_tree_with_sweep<F, Fut>(
     roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
     scope_kill_failure: ScopeKillFailure,
+    _podman_deadline: Option<tokio::time::Instant>,
     sweep: F,
 ) -> anyhow::Result<()>
 where
@@ -1500,6 +1528,11 @@ where
             }
             Vec::new()
         };
+    // Podman's own stop gives conmon time to update its records before the
+    // same scope is signalled. A failed stop leaves the usual reaper in charge.
+    #[cfg(target_os = "linux")]
+    podman::stop_before_signals(scopes, &units, session_id, _podman_deadline).await;
+
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
@@ -2736,6 +2769,8 @@ mod tests {
     /// merely leave an outside process unsignalled after scanning it. The
     /// callback is the only route to enumeration and fails on invocation.
     /// Multiple confirmed scopes model Delete's agent and tab combination.
+    /// Once the optional Podman deadline expires, the ordinary scope signals
+    /// must still run, as they do under the startup cleanup budget.
     #[farhelm_testtrace::test]
     async fn complete_confirmed_scopes_never_invoke_the_portable_sweep() {
         let session = uuid::Uuid::new_v4().to_string();
@@ -2752,6 +2787,7 @@ mod tests {
             None,
             &session,
             ScopeKillFailure::Refuse,
+            Some(tokio::time::Instant::now()),
             |_| async { panic!("confirmed containment must not read the process table") },
         )
         .await
@@ -2778,6 +2814,7 @@ mod tests {
             None,
             &session,
             ScopeKillFailure::Refuse,
+            None,
             |_| async { anyhow::bail!("portable fallback reached") },
         )
         .await
@@ -2816,6 +2853,7 @@ mod tests {
                 None,
                 &session,
                 ScopeKillFailure::Refuse,
+                None,
                 |_| async { anyhow::bail!("portable fallback reached") },
             )
             .await
@@ -2834,6 +2872,7 @@ mod tests {
             None,
             &session,
             ScopeKillFailure::Refuse,
+            None,
             |_| async { anyhow::bail!("portable fallback reached") },
         )
         .await
@@ -2858,6 +2897,7 @@ mod tests {
             Some(root),
             &session,
             ScopeKillFailure::Refuse,
+            None,
             |roots| async move {
                 assert_eq!(roots, vec![root]);
                 anyhow::bail!("portable fallback reached")

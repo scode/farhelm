@@ -200,6 +200,9 @@ test-state cleanup and the stop command) runs only with
 nextest. The same goes for that job's desktop supervisor record and stop tests and the stop's macOS process-exit check
 (`managed_supervisor::`, `procs::tests::finished_exiting`).
 
+The workspace nextest selection includes `scoped_podman` lifecycle coverage with a real systemd user manager and fake
+Podman and conmon. Read any `SKIPPED` output as missing scope coverage.
+
 The workspace nextest selection includes historical `containerized_sessions` compatibility and the real Linux
 `podman_environments` managed-checkout and lifecycle fixture. It covers credential delivery and ordinary tab, file,
 transfer and TCP-relay protocols with a stand-in agent. Its ignored SSH acceptance variant runs only when explicitly

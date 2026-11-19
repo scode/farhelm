@@ -244,13 +244,34 @@ async fn supervisor_with_scopes(
 /// the listing shows the warning resolved and one unresolved ended notice;
 /// after another start the notice is still the only one and unresolved;
 /// Restart then gives the session a host row whose agent starts.
+/// The job stands in for a Podman monitor. An engine that stalls during
+/// Stop must leave enough of the startup deadline for the scope reaper.
 #[farhelm_testtrace::test]
 async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host() {
     let test = "a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host";
     if farhelm_teststate::tmux::machine_tmux_or_skip(test).is_none() {
         return;
     }
-    let Some(scopes) = probed_scope_manager(test).await else {
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let monitor = work.path().join("conmon");
+    std::os::unix::fs::symlink(fixtures_bin(), &monitor).expect("conmon fixture");
+    let calls = work.path().join("podman-calls");
+    let podman = script(
+        work.path(),
+        "podman",
+        &format!(
+            "#!/bin/sh\ncase \"$2 $3\" in\n\
+             'stop --time') echo stop > {}; exec sleep 90;;\n\
+             'container inspect') echo running;;\n\
+             *) exit 2;;\n\
+             esac\n",
+            shell_words::quote(&calls.to_string_lossy())
+        ),
+    );
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&podman, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let scopes = farhelm_supervisor::scope::ScopeManager::systemd().with_podman(podman);
+    let Some(scopes) = probe_scope_manager(test, scopes).await else {
         return;
     };
     let h = harness_with_seams(
@@ -261,7 +282,6 @@ async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_hos
         },
     )
     .await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
     let template = create_resumable_session(
         &h,
         &work.path().to_string_lossy(),
@@ -278,11 +298,14 @@ async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_hos
     let _cleanup = MarkerCleanupGuard::new(id.clone());
     let unit = format!("farhelm-{id}-0.scope");
     let job_pid_file = work.path().join("job.pid");
+    let cid = "a".repeat(64);
     let job = script(
         work.path(),
         "job.sh",
         &format!(
-            "echo $$ > {}\nexec sleep 120\n",
+            "exec {} -c {cid} -n old-job --fixture-ready {} \
+             --exit-command-arg container --exit-command-arg cleanup --exit-command-arg {cid}\n",
+            shell_words::quote(&monitor.to_string_lossy()),
             shell_words::quote(&job_pid_file.to_string_lossy())
         ),
     );
@@ -341,6 +364,10 @@ async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_hos
         .restart_supervisor(|state| supervisor_with_scopes(state, scopes_again))
         .await;
 
+    assert_eq!(
+        std::fs::read_to_string(calls).expect("the startup reaper called Podman"),
+        "stop\n"
+    );
     wait_until_pid_gone(job_pid, 15).await;
     wait_until_pid_gone(server_pid, 15).await;
     assert!(!exists(&server.socket), "the old socket is removed");

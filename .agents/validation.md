@@ -67,6 +67,14 @@ systemd or SSH substrate ran.
   `cargo nextest run -p farhelm --test e2e -E 'test(containerized_sessions::)'`. Minimal cleanup/revocation unit tests,
   including missing-engine and unconfirmed-absence cases, use
   `cargo nextest run -p farhelm-supervisor --lib -E 'test(container::tests::)'`.
+- The Linux `scoped_podman` e2e module uses a real systemd user manager and stand-ins for conmon and Podman. It checks
+  that Stop, tab close and Delete call Podman for the right scopes while their monitors are still alive, including a tab
+  with an exec monitor that cleanup must leave to the process reaper. Select it with
+  `cargo nextest run -p farhelm --test e2e -E 'test(/^scoped_podman::/)'`. Read and report a runtime `SKIPPED` as
+  missing scope coverage. Parser and failed-stop state checks use
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(/^service::sweep::podman::tests::/)'`. The existing
+  `a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_host` test covers the startup deadline with a
+  stalled Podman command and a real scope that still must be reaped.
 - The real Linux `podman_environments` e2e module uses a throwaway helm, the production provider and the ordinary
   in-container supervisor/installer. One recipe build covers a public GitHub managed checkout, endpoint credential
   delivery, ordinary grid/tab/file/upload/download protocols, a nonce-proven loopback HTTP relay, pause/Resume process

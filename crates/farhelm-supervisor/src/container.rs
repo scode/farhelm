@@ -56,7 +56,25 @@ pub(crate) fn control_command(program: &Path) -> Command {
 /// Bound storage waits and diagnostics. An interrupted command or output over
 /// the cap cannot prove that the last owned container disappeared.
 async fn run_control(podman: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    run_control_until(
+        podman,
+        args,
+        tokio::time::Instant::now() + Duration::from_secs(30),
+    )
+    .await
+}
+
+/// Bound a local storage command by its caller's deadline. Scope cleanup
+/// shares a deadline across all stops and their state checks.
+pub(crate) async fn run_control_until(
+    podman: &Path,
+    args: &[impl AsRef<std::ffi::OsStr>],
+    deadline: tokio::time::Instant,
+) -> anyhow::Result<std::process::Output> {
     use crate::bounded_command::{Ended, GroupChild, OutputCaps};
+    if tokio::time::Instant::now() >= deadline {
+        bail!("container control command deadline elapsed");
+    }
     let mut command = tokio::process::Command::from(control_command(podman));
     command.args(args);
     let caps = OutputCaps {
@@ -64,10 +82,7 @@ async fn run_control(podman: &Path, args: &[&str]) -> anyhow::Result<std::proces
         stderr: Some(65536),
     };
     let mut child = GroupChild::spawn(&mut command, caps)?;
-    match child
-        .finish(tokio::time::Instant::now() + Duration::from_secs(30), caps)
-        .await?
-    {
+    match child.finish(deadline, caps).await? {
         Ended::Exited(output) => Ok(output),
         Ended::TimedOut => bail!("container control command timed out; state is unconfirmed"),
         Ended::OutputOverCap => {
