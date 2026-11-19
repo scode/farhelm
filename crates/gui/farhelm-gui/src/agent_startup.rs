@@ -114,6 +114,7 @@ pub fn install_from_env(cx: &mut App) -> anyhow::Result<()> {
     };
     let staged = read().with_context(|| format!("{SESSION_PINS_ENV} names {}", path.display()))?;
     cx.set_global(staged);
+    crate::demo_video::install(cx);
     // Only a run with staged values has staged files to hover, so only such a run handles the action; in any other
     // agent run the bridge's `action` finds its name (GPUI registers every action type compiled in) and nothing
     // happens.

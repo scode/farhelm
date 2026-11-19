@@ -54,6 +54,19 @@ const fn rgba_token(value: u32) -> Token {
 /// Fully transparent: the edge of a button tier that has none, kept so every tier is the same size.
 pub const TRANSPARENT: Token = rgba_token(0);
 
+/// The recording cues keep the sample's colors in either app appearance.
+#[cfg(feature = "agent")]
+pub(crate) mod video {
+    use super::{Token, rgb_token};
+
+    pub(crate) const ACCENT: Token = rgb_token(0xff5fa2);
+    pub(crate) const INK: Token = rgb_token(0xffffff);
+    pub(crate) const BOX: Token = rgb_token(0x111119);
+    pub(crate) const SHADE: Token = rgb_token(0x000000);
+    pub(crate) const CARD: Token = rgb_token(0x080a0e);
+    pub(crate) const SUBTITLE: Token = rgb_token(0xc9d1dc);
+}
+
 /// The color roles the GUI paints with.
 ///
 /// Roles, not colors: a floating surface asks for [`Palette::bg_2`], never "the lighter grey". Each doc names the CSS

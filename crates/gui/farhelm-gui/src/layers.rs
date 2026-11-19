@@ -2197,6 +2197,7 @@ impl LayerStack {
 
 /// Everything above the window's content, which the root view draws as its last child: rungs 2 to 9 of the module
 /// docs' z-order ladder, from the layers under the lowest raised one ([`above_approval_region`]) up to the tooltip.
+/// A staged recording can add paint above the ladder without creating a layer or taking focus or pointer input.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred (and of anchored, should it need it again)"
@@ -2204,12 +2205,17 @@ impl LayerStack {
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
     let stack = stack.read(cx);
+    #[cfg(feature = "agent")]
+    let recording = crate::demo_video::overlay(window, cx);
+    #[cfg(not(feature = "agent"))]
+    let recording = None::<AnyElement>;
     if stack.layers.is_empty()
         && stack.launch_pill.is_none()
         && stack.region.is_none()
         && stack.pill.is_none()
         && stack.terminal_refusal.is_none()
         && stack.tooltip.is_none()
+        && recording.is_none()
     {
         return None;
     }
@@ -2226,7 +2232,12 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     };
     let (pill_depth, tooltip_depth) = (above + 5, above + 6);
     let palette = theme::palette(cx);
-    let mut overlay = div().absolute().top_0().left_0().size_full();
+    let mut overlay = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .children(recording.map(|content| gpui::deferred(content).with_priority(usize::MAX)));
     for (index, layer) in stack.layers.iter().enumerate() {
         let depth = if index < raised { index + 1 } else { index + 5 };
         let id = layer.id;

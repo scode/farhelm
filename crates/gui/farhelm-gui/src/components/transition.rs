@@ -34,6 +34,12 @@
 //!   invisible one, and it is not skipped, because skipping it there and drawing it on activation would replay it: the
 //!   element would go from shown to transparent when the user came back.
 //!
+//! One exception, in agent builds only (the test build the docs media tooling drives): `recording_transition` serves
+//! the demo video's recording overlay, which no SPEC.md behavior asks for and no shipped build contains. It checks
+//! neither rule above about reduced motion: the recorder's private app process turns GPUI's reduced-motion flag off
+//! (`demo_video::install`, since GPUI's animation honours that flag itself), so the overlay always animates, and that
+//! also lets GPUI Kit's own motion play in that process.
+//!
 //! An entrance starts the first time its element is drawn under its id, and it plays again only after a frame that did
 //! not draw it, as a CSS animation plays again when its element is put back into the page.
 //!
@@ -141,10 +147,22 @@ pub fn outline_fade<E: IntoElement + Styled + 'static>(
     .into_any_element()
 }
 
+/// The staged video's paint-only overlay uses the same one-shot timing as the app. The recorder action configures
+/// GPUI's motion flag in its private app process.
+#[cfg(feature = "agent")]
+pub(crate) fn recording_transition(
+    id: impl Into<ElementId>,
+    element: gpui::Div,
+    duration: Duration,
+    animator: impl Fn(gpui::Div, f32) -> gpui::Div + 'static,
+) -> AnyElement {
+    one_shot(id.into(), element, duration, css_ease_out, animator).into_any_element()
+}
+
 /// The one call to GPUI's animation in the GUI crates' own code. It builds the animation itself, as `Animation::new`'s
 /// one-shot default, and takes no `Animation` from its caller, so nothing it is handed is told to repeat. Callers in
-/// this module decide reduced motion before calling it, from the ticker rather than GPUI's own flag (the module docs
-/// say why).
+/// this module decide reduced motion before calling it, from the ticker rather than GPUI's own flag, except the
+/// agent-only recording transition (the module docs say why for both).
 #[allow(
     clippy::disallowed_methods,
     reason = "the component layer's one owner of one-shot transitions (SPEC_impl.md, \"Animation time: the ticker\")"
