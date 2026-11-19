@@ -1703,10 +1703,6 @@ consequences.
   arriving faster than successful catalog replies can keep Credentials loading or stale. A quiet interval permits
   recovery; frequency is unmeasured.
 
-- [`claude-recreation-test-clears-old-stamp.md`](claude-recreation-test-clears-old-stamp.md) — The
-  recreated-Claude-login regression clears the old delivery stamp first, so it cannot protect the
-  same-name/same-revision incarnation check. Production currently includes that check.
-
 - [`release-shot-account-readiness.md`](release-shot-account-readiness.md) — A release capture's enabled-input check
   accepts an unloaded or failed account form. No existing published image is established to be wrong.
 
