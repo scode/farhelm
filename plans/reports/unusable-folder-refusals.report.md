@@ -88,3 +88,84 @@ Each draft passed its independent source review and cold commit-message read. I 
 saved-transcript verification, used a host-start counter in the folder tests, and made the zero-size test check a
 nondefault terminal size and the order of validation. The restored tests verify a paused stream, compare memory at
 accepted checkpoints, and measure upload priority against an already queued replay prefix.
+
+### Landing
+
+#### What landed with it
+
+It landed in a round of three plans: shift-drag-marking, model-family-shorthand and unusable-folder-refusals. Since its
+base, main gained earlier rounds' plans (session group dragging, model families, the covered-link refusal, the demo
+video recorder, the Replace with checkout hint and others) and bookkeeping. Its changes are on the supervisor side only,
+so they do not meet the two launcher and session list plans. Its refusal of a connection to a terminal with zero rows or
+columns is checked before a new connection can take the terminal over from its current viewer (which an earlier plan
+changed), so a refused connection disconnects nobody.
+
+At your request this landing was reviewed with extra skepticism, by me and by independent reviewers, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The six tests dropped when
+terminals moved into terminal hosts are back, each checking what it checked before, and the refusal wording is the form
+the launcher already recognizes to mark the folder field.
+
+#### Fixes made while landing
+
+- **The new folder check could refuse every launch inside some containers.** It asked the kernel with a flag that makes
+  the system library use a newer call (`faccessat2`), which some older container security profiles answer with "not
+  permitted" instead of "no such call". The check would read that as a permission problem and refuse every create,
+  restart and tab open with "working directory is not usable", and supervisors do run inside containers. The supervisor
+  never runs with raised privileges, so the flag bought nothing; without it the same question goes through the older
+  call. Nothing in this landing tested inside such a container; the change only drops a flag the supervisor does not
+  need, and the end-to-end runs above show the check still refuses what it should. Its comment, which still listed
+  permission problems as host failures, now says why a folder the user cannot enter is treated as their choice to fix.
+
+#### Things you should know that the report does not say
+
+- **The restored tests' explanations are much thinner than the originals.** The test checking that an upload's
+  acknowledgement is not stuck behind terminal output no longer explains why it measures priority rather than speed, and
+  its waits shrank from 5 to 2 seconds without a reason given. The test capping a terminal's memory no longer says why
+  it exists or how its 8 MiB limit was chosen. Possible follow-up: put the report's new measurements into those
+  comments. A reviewer checked the upload test's premise still holds.
+- The zero-size changelog fragment describes a request the desktop app never sends, so there is nothing in it for users;
+  release-time curation can mark it as having no user-facing effect or drop it.
+- Restarting a session whose folder cannot be entered now reports the folder problem before any problem with the saved
+  conversation. No test covers that case.
+
+#### Checks
+
+The three plans change the desktop app's session list and launcher, the helm, the shared protocol, the supervisor and
+its end-to-end tests. The landing ran the lints, the whole Rust workspace suite, the desktop process's tests, the app's
+end-to-end smoke and the reference screenshots (goldens). Builds ran locally; the workspace suite and the smoke ran on
+boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plans as delivered, stacked on main as it stood when the round started:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `python3 -B scripts/test-gui-e2e-smoke.py`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, and `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`
+  once without and once with `--features agent`: passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop`, from a locally built archive, split in three across boats:
+  2761, 2658 and 2636 tests, 8055 in all (`cc2d7e45-c34d-471b-9521-e292a5d3eabc`,
+  `ad12af75-4c3f-479f-9c87-e8df09421a5a`, `89433db2-2d08-49cc-a1af-a5b8696a6edb`). One failed: the macro
+  compile-contract test, which builds a small crate offline from this machine's cargo cache, which a boat does not have,
+  so it fails there every time. It did not run anywhere this round; nothing in this round touches it, and it passed
+  locally in an earlier round today. One test skipped itself at runtime because it needs a recreated file to get a new
+  inode number and the boat's filesystem reused the old one; it did not run anywhere else this round.
+- `cargo nextest run -p farhelm-desktop`, locally: 176 passed (`6610603b-7df3-43e5-ab7c-cf4756a7b544`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed and the clipboard
+  paste step was skipped, as always on Linux (`a05cf1f2-6da9-4972-988a-f814bff20a5e`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`1c6c16a9-9ed6-4d42-9ce3-0399f6a2bc61`).
+
+On the fixed tree (the Shift sweep's start threshold, the folder check's access call, comments and SPEC_impl.md):
+
+- `cargo fmt --all -- --check`, `dprint check` and
+  `cargo clippy --locked -p farhelm-gui -p farhelm-supervisor --all-targets -- -D warnings`: passed.
+- The session list's whole test module, locally: 516 passed (`69a3bcc4-c0af-480b-9732-b36393d20617`), the sweep and grip
+  drag tests included.
+- The supervisor's session lifecycle and terminal tab end-to-end modules, which exercise the folder check on create,
+  restart and tab open, locally: 96 passed (`a83797de-4468-4cb7-8c6d-df759c257c5b`).
+
+The boat suites, the smoke, the desktop tests and the goldens were reused for the fixed tree: after them only the two
+small code changes above and comments changed, and the focused runs above cover both.
+
+Skipped:
+
+- The Mac-only checks: no Mac-specific code changed.
