@@ -55,6 +55,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
             family: "luna".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
@@ -62,6 +63,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "claude-fable-5".into(),
             family: "claude-fable-5".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::High],
@@ -429,6 +431,7 @@ fn an_older_model_template_applies_its_inferred_agent_to_the_draft() {
         fixture.catalog.push(LaunchCatalogModel {
             id: id.into(),
             family: family.into(),
+            family_word: None,
             latest: false,
             harness,
             efforts: effort.into_iter().collect(),

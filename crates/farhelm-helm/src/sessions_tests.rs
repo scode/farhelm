@@ -567,6 +567,12 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
                 model["id"] == id
                     && model["family"] == "astra"
                     && model["latest"] == latest
+                    && model["family_word"]
+                        == if latest {
+                            "astra".into()
+                        } else {
+                            serde_json::Value::Null
+                        }
                     && model["harness"] == "codex"
                     && model["efforts"] == serde_json::json!(["low", "medium", "high"])
             }),

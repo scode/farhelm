@@ -28,6 +28,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "gpt-fast".into(),
             family: "gpt-fast".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
@@ -35,6 +36,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "medium-context".into(),
             family: "medium-context".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Medium],
@@ -42,6 +44,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "claude".into(),
             family: "claude".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::Medium, LaunchEffort::Max],
@@ -134,6 +137,78 @@ fn model(id: &str, harness: LaunchHarness) -> Row {
     }
 }
 
+/// A family word can prefer a later option without moving it in search. The first matching harness is intentional
+/// when none is selected, and Grok queries still take the ordinary harness or model path.
+#[test]
+fn exact_family_words_preselect_current_models_without_reordering() {
+    let row = |id: &str, harness, word: Option<&str>, latest| LaunchCatalogModel {
+        id: id.into(),
+        family: word.unwrap_or(id).into(),
+        family_word: word.map(str::to_owned),
+        latest,
+        harness,
+        efforts: Vec::new(),
+    };
+    let draft = Draft {
+        catalog: Some(vec![
+            row("gpt-6.1-sol", LaunchHarness::Codex, Some("sol"), false),
+            row("solstice", LaunchHarness::Codex, None, true),
+            row("gpt-6.2-sol", LaunchHarness::Codex, Some("sol"), true),
+            row("openai/gpt-6.2-sol", LaunchHarness::Pi, Some("sol"), true),
+            row("x-ai/grok-4.7", LaunchHarness::Pi, None, true),
+        ]),
+        ..Draft::agent(None)
+    };
+    let exact = draft.search("SoL");
+    assert_eq!(exact.rows[0], model("solstice", LaunchHarness::Codex));
+    assert_eq!(exact.default, 1);
+    assert_eq!(
+        exact.rows[exact.default],
+        model("gpt-6.2-sol", LaunchHarness::Codex)
+    );
+    assert_eq!(draft.search("so").default, 0);
+    let grok = draft.search("grok");
+    assert_eq!(grok.rows[grok.default], Row::Harness(LaunchHarness::Grok));
+    for query in ["grok-", "grok-4.7"] {
+        let result = draft.search(query);
+        assert_eq!(
+            result.rows[result.default],
+            model("x-ai/grok-4.7", LaunchHarness::Pi)
+        );
+    }
+}
+
+/// An exact family query still means that family before the catalog arrives. It must not preselect an older
+/// launch or set the session name. Other typed names still have their usual fallback.
+#[test]
+fn a_family_search_waits_for_the_release_catalog() {
+    let draft = Draft {
+        catalog: None,
+        catalog_pending: true,
+        ..with_history(
+            Some(LaunchHarness::Codex),
+            vec![launch("/a", LaunchHarness::Codex, Some("gpt-6.1-sol"))],
+            &[],
+        )
+    };
+    assert!(
+        draft
+            .rows("gpt-6.1-sol")
+            .contains(&history_model("gpt-6.1-sol", LaunchHarness::Codex)),
+        "the premise: the older Sol is still selectable by its ID"
+    );
+    let pending = draft.search("sol");
+    assert!(pending.rows.is_empty());
+    assert_eq!(
+        pending.message,
+        Some(Message {
+            text: "Loading models…",
+            warning: false
+        })
+    );
+    assert_eq!(draft.rows("scratch"), vec![Row::Name("scratch".to_owned())]);
+}
+
 /// Exact older IDs can be selected from model search. An earlier setup remains available as history even when
 /// the older catalog row is also present. The grouping is based on catalog generation, not table order.
 #[test]
@@ -141,6 +216,7 @@ fn older_model_search_groups_known_rows_and_keeps_past_launches() {
     let older = LaunchCatalogModel {
         id: "gpt-fast-classic".into(),
         family: "gpt-fast".into(),
+        family_word: None,
         latest: false,
         harness: LaunchHarness::Codex,
         efforts: vec![],
@@ -597,6 +673,7 @@ fn model_rows_follow_the_chosen_agent() {
     colon.catalog = Some(vec![LaunchCatalogModel {
         id: "vendor:model:v2".into(),
         family: "vendor:model:v2".into(),
+        family_word: None,
         latest: true,
         harness: LaunchHarness::Codex,
         efforts: vec![],
@@ -614,6 +691,7 @@ fn model_rows_follow_the_chosen_agent() {
         LaunchCatalogModel {
             id: "gpt-fast-x".into(),
             family: "gpt-fast-x".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -621,6 +699,7 @@ fn model_rows_follow_the_chosen_agent() {
         LaunchCatalogModel {
             id: "gpt-fast".into(),
             family: "gpt-fast".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -717,6 +796,7 @@ fn a_path_offers_use_this_path() {
         catalog: Some(vec![LaunchCatalogModel {
             id: "org/model".into(),
             family: "model".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -999,6 +1079,7 @@ fn past_models_follow_the_catalogs() {
                 .chain([LaunchCatalogModel {
                     id: "opencode/big".into(),
                     family: "big".into(),
+                    family_word: None,
                     latest: true,
                     harness: LaunchHarness::OpenCode,
                     efforts: vec![],

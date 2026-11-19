@@ -464,9 +464,9 @@ fn prepared(
     }
 }
 
-/// Read the release's model catalog for `launcher`. A failed read leaves it unread, which refuses no choice (the
-/// draft's rule for an unread catalog), and says why beside a Retry, which reads it again (the old launcher's
-/// "Model catalog unavailable", so a failed read never makes the user reopen the launcher and lose its draft).
+/// Read the release's model catalog for `launcher`. Explicit model IDs still work after a failed read. An exact
+/// family word needs the catalog to pick a concrete ID. The failure gives its reason and a Retry so the user
+/// can load the catalog again without losing the draft.
 ///
 /// Once it answers, either way, the template batches that waited for it are applied in the order they arrived, and
 /// then the launcher's [`Launcher::after_reads`] runs (a quick launch's preparation), if the account has answered too

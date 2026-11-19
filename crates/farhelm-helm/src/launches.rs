@@ -10,9 +10,9 @@
 use farhelm_proto::{
     SessionLaunch,
     launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
+    launcher::{LaunchCatalogModel, catalog_family_word},
     session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
 };
-use serde::Serialize;
 
 const MAX_MODEL_ID_BYTES: usize = 256;
 
@@ -20,7 +20,7 @@ const MAX_MODEL_ID_BYTES: usize = 256;
 ///
 /// A matching row supplies that harness's efforts. Only a current model
 /// reserves its ID against use as a custom model on another harness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CatalogModel {
     pub(crate) id: &'static str,
     /// Stable name for models in the same family within a harness.
@@ -448,12 +448,22 @@ const CATALOG: &[CatalogModel] = &[
     },
 ];
 
-/// Return the release-owned known-model catalog served to composer clients.
-///
-/// The list is static for one helm build, so a borrowed slice avoids a second
-/// mutable catalog that could drift from [`compile`]'s compatibility checks.
-pub(crate) fn catalog() -> &'static [CatalogModel] {
+/// Project the release-owned choices for the launcher and template application. The current model inherits
+/// its family's word, so replacing that model only changes which row is marked latest.
+pub(crate) fn launcher_catalog() -> Vec<LaunchCatalogModel> {
     CATALOG
+        .iter()
+        .map(|model| LaunchCatalogModel {
+            id: model.id.to_owned(),
+            family: model.family.to_owned(),
+            family_word: catalog_family_word(model.family)
+                .filter(|_| model.latest)
+                .map(str::to_owned),
+            latest: model.latest,
+            harness: model.harness,
+            efforts: model.efforts.to_vec(),
+        })
+        .collect()
 }
 
 /// The durable form of a submitted structured selection: what history,
@@ -1236,6 +1246,34 @@ mod tests {
         }
     }
 
+    /// A shortcut belongs to one family globally, even when several harnesses offer that family.
+    /// In particular GLM Flash remains searchable by its own ID.
+    #[test]
+    fn family_words_name_single_families() {
+        let mut words = BTreeMap::new();
+        let catalog = super::launcher_catalog();
+        for model in &catalog {
+            if let Some(word) = model.family_word.as_deref() {
+                assert!(model.latest, "family word on older model {model:?}");
+                if let Some(family) = words.insert(word, model.family.as_str()) {
+                    assert_eq!(family, model.family, "two families for {word}");
+                }
+            }
+        }
+        assert_eq!(
+            words,
+            BTreeMap::from([
+                ("astra", "astra"),
+                ("fable", "claude-fable-5"),
+                ("glm", "glm-5.3"),
+                ("luna", "luna"),
+                ("sol", "sol"),
+                ("spark", "muse-spark-1.3-contributor"),
+                ("terra", "terra"),
+            ])
+        );
+    }
+
     /// Registering an older name preserves the efforts 0.41.0 accepted on its
     /// original harness and preserves a deliberate custom selection on another one.
     #[test]
@@ -1827,7 +1865,7 @@ mod tests {
     /// override; choosing a model must not change either policy.
     #[test]
     fn opencode_suggestions_compile_without_implicit_options() {
-        let offered: Vec<_> = super::catalog()
+        let offered: Vec<_> = CATALOG
             .iter()
             .filter(|row| row.harness == LaunchHarness::OpenCode)
             .collect();
@@ -2212,7 +2250,7 @@ mod tests {
     /// permission labels remain refused.
     #[test]
     fn omp_vocabulary_is_closed_and_model_optional() {
-        for row in super::catalog()
+        for row in CATALOG
             .iter()
             .filter(|row| row.harness == LaunchHarness::Omp)
         {

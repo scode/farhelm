@@ -39,7 +39,9 @@
 //!   does. Ported from the old launcher's `SearchScope::Github` rows (`list/create_form.rs` at reference commit
 //!   `24bc0580`).
 
-use farhelm_proto::launcher::{EFFORT_ORDER, LaunchCatalogModel, compatible_efforts};
+use farhelm_proto::launcher::{
+    EFFORT_ORDER, LaunchCatalogModel, compatible_efforts, is_catalog_family_word,
+};
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission};
@@ -519,6 +521,15 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     let any = |wanted: Scope| scope == wanted || scope == Scope::All;
     let matches = |word: &str| lower.is_empty() || word.contains(&lower);
     let blank_all = scope == Scope::All && value.is_empty();
+    if any(Scope::Model) && inputs.catalog.is_none() && is_catalog_family_word(value) {
+        // An exact family word waits for the release catalog. A history or name row could consume it first.
+        return Results {
+            rows,
+            default: 0,
+            message: empty_message(Scope::Model, value, false, inputs.catalog_pending, false),
+            reason: None,
+        };
+    }
 
     if scope == Scope::Name && !value.is_empty() {
         rows.push(Row::Name(value.to_owned()));
@@ -570,7 +581,9 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .unwrap_or_default()
                 .iter()
                 .filter(|model| harness.is_none_or(|chosen| chosen == model.harness))
-                .filter(|model| matches(&model.id.to_ascii_lowercase()))
+                .filter(|model| {
+                    matches(&model.id.to_ascii_lowercase()) || model.matches_family_word(value)
+                })
                 .map(|model| Row::Model {
                     id: model.id.clone(),
                     harness: model.harness,
@@ -691,7 +704,10 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     // The rows above are already built in group order. The sort is a guard: whatever order a later kind of row is
     // added in, the rows still come out in group order, and the stable sort keeps each group's rows as built.
     rows.sort_by_key(|row| row.group() as u8);
-    let default = default_index(scope, &lower, &rows);
+    let family = inputs.catalog.unwrap_or_default().iter().find(|model| {
+        harness.is_none_or(|chosen| chosen == model.harness) && model.matches_family_word(value)
+    });
+    let default = default_index(scope, &lower, &rows, family);
     let message = if rows.is_empty() && reason.is_none() {
         empty_message(
             scope,
@@ -712,9 +728,14 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
 }
 
 /// The row preselected for an exact query: under a label, the first exact match in that label's own group; unlabelled,
-/// an exact effort, then permission, then model, then agent type (so `medium` lands on the effort, not a model named
-/// `medium-context`). Else the first row.
-fn default_index(scope: Scope, lower: &str, rows: &[Row]) -> usize {
+/// an exact effort, then permission, then model ID or family word, then agent type. Family words choose a current
+/// catalog row in display order. A past launch can match an ID but does not represent the latest of a family.
+fn default_index(
+    scope: Scope,
+    lower: &str,
+    rows: &[Row],
+    family: Option<&LaunchCatalogModel>,
+) -> usize {
     if lower.is_empty() {
         return 0;
     }
@@ -738,7 +759,10 @@ fn default_index(scope: Scope, lower: &str, rows: &[Row]) -> usize {
         .iter()
         .find_map(|group| {
             rows.iter().position(|row| {
-                row.group() == *group && row.exact_word().is_some_and(|word| word == lower)
+                row.group() == *group
+                    && (row.exact_word().is_some_and(|word| word == lower)
+                        || matches!(row, Row::Model { id, harness, latest: true } if
+                            family.is_some_and(|model| model.harness == *harness && model.id == *id)))
             })
         })
         .unwrap_or(0)

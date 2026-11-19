@@ -14,6 +14,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "codex-fast".into(),
             family: "codex-fast".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -21,6 +22,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "claude-fast".into(),
             family: "claude-fast".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![],
@@ -43,6 +45,7 @@ fn an_older_id_is_recognized_when_typed_without_reserving_its_spelling() {
     let older = LaunchCatalogModel {
         id: "codex-classic".into(),
         family: "codex-fast".into(),
+        family_word: None,
         latest: false,
         harness: LaunchHarness::Codex,
         efforts: vec![],
@@ -206,6 +209,7 @@ fn bare_opencode_names_stay_opencode_models() {
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
             family: "luna".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -213,6 +217,7 @@ fn bare_opencode_names_stay_opencode_models() {
         LaunchCatalogModel {
             id: "opencode/gpt-6-luna".into(),
             family: "luna".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::OpenCode,
             efforts: vec![],
@@ -261,6 +266,7 @@ fn a_bare_opencode_name_in_another_case_is_its_catalog_row() {
     let catalog = vec![LaunchCatalogModel {
         id: "opencode/gpt-6-luna".into(),
         family: "luna".into(),
+        family_word: None,
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: vec![],

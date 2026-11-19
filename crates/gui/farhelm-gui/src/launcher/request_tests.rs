@@ -46,6 +46,7 @@ fn catalog() -> Vec<LaunchCatalogModel> {
     vec![LaunchCatalogModel {
         id: "gpt-6-luna".into(),
         family: "luna".into(),
+        family_word: None,
         latest: true,
         harness: LaunchHarness::Codex,
         efforts: vec![LaunchEffort::Low],
@@ -336,6 +337,7 @@ fn each_agent_types_create_carries_only_what_it_takes() {
     let catalog = vec![LaunchCatalogModel {
         id: "x-ai/grok-4.6".into(),
         family: "grok-4.6".into(),
+        family_word: None,
         latest: true,
         harness: Omp,
         efforts: vec![Max],

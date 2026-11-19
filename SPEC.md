@@ -1057,6 +1057,11 @@ agent choice is independent of that destination:
   purpose. With no harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna` picks
   Codex). A custom model or an ID offered by several harnesses needs an explicit harness.
 
+  In the launcher's model field, an exact family word such as `sol`, ignoring ASCII case, highlights the family's latest
+  model for the chosen harness. Enter chooses its full model ID. Without a chosen harness, a family with one owner
+  supplies that harness. A family with several owners asks the user to choose one. Prefixes and full IDs keep their
+  usual model-text behavior. Model words in the template editor and CLI are literal IDs.
+
   The launcher and template editor offer the current models first and put earlier members of each family under **Older
   models**. Launcher search uses the same heading and still offers past-launch matches for older IDs.
 
@@ -1110,6 +1115,10 @@ agent choice is independent of that destination:
   model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field,
   Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before.
   A held Enter never launches.
+
+  An exact family word in launcher search preselects its latest model, using the first matching harness when none is
+  chosen. Existing search words such as `grok` keep their meaning.
+
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's

@@ -229,6 +229,7 @@ fn effort_choices_follow_a_read_catalog_only() {
     let catalog = vec![LaunchCatalogModel {
         id: "gpt-6-luna".into(),
         family: "luna".into(),
+        family_word: None,
         latest: true,
         harness: LaunchHarness::Codex,
         efforts: vec![LaunchEffort::Low],

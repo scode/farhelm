@@ -1908,6 +1908,91 @@ fn a_catalog_model_picked_first_chooses_its_agent(cx: &mut TestAppContext) {
     assert_eq!(model_text(cx), "gpt-5");
 }
 
+/// An exact family word supplies a highlight only when the owning harness is settled. Enter puts a concrete model
+/// in the draft. A prefix still offers rows without highlighting one.
+#[gpui::test]
+fn a_family_word_highlights_and_applies_only_the_current_model(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([
+            {"id":"gpt-6.1-sol", "family":"sol", "latest":false, "harness":"codex", "efforts":["high"]},
+            {"id":"openai/gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"pi", "efforts":["high"]},
+            {"id":"gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"codex", "efforts":["high"]},
+            {"id":"claude-fable-5", "family":"claude-fable-5", "family_word":"fable", "harness":"claude", "efforts":["high"]}
+        ])),
+    );
+    assert_eq!(draft(cx).agent.harness, None);
+    test_support::click(cx, "launcher-model-row");
+    assert!(has_node(cx, "launcher-model-list"));
+    let latest = "launcher-model-option-Codex-gpt-6.2-sol";
+    keys(cx, "s o");
+    assert_eq!(model_text(cx), "so");
+    assert_eq!(selected_state(cx, latest), Some(false));
+    keys(cx, "l enter");
+    assert_eq!(draft(cx).agent.model, None);
+    assert_eq!(
+        name_of(cx, "launcher-model-error").as_deref(),
+        Some("Choose a harness for this model family")
+    );
+
+    keys(cx, "backspace backspace backspace f a b l e enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("claude-fable-5"));
+
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-model-row");
+    keys(cx, "s o l");
+    assert_eq!(selected_state(cx, latest), Some(true));
+    assert_eq!(
+        selected_state(cx, "launcher-model-option-Codex-gpt-6.1-sol"),
+        Some(false)
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-6.2-sol"));
+}
+
+/// An Enter before the catalog returns leaves the family word in the field. Its late reply offers the real ID
+/// without committing a choice the user has not yet made. A row chosen with the arrows still acts while waiting.
+#[gpui::test]
+fn a_family_word_waits_for_the_release_catalog(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-model-row");
+    assert!(has_node(cx, "launcher-model-list"));
+    keys(cx, "s o l");
+    assert_eq!(
+        name_of(cx, "launcher-model-hint").as_deref(),
+        Some("Loading models…")
+    );
+    keys(cx, "enter");
+    assert_eq!(model_text(cx), "sol");
+    assert_eq!(draft(cx).agent.model, None);
+    keys(cx, "up");
+    assert_eq!(selected_state(cx, "launcher-model-show-all"), Some(true));
+    keys(cx, "enter");
+    assert_eq!(
+        name_of(cx, "launcher-model-show-all").as_deref(),
+        Some("Show chosen harness's models")
+    );
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([
+            {"id":"gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"codex", "efforts":["high"]}
+        ])),
+    );
+    assert_eq!(draft(cx).agent.model, None);
+    assert_eq!(
+        selected_state(cx, "launcher-model-option-Codex-gpt-6.2-sol"),
+        Some(true)
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-6.2-sol"));
+}
+
 /// Prompt and named-start controls follow the selected agent's capabilities, including the capture warning needed to
 /// explain why Restart cannot find some named starts later. Command mode exposes neither control (named-conversations
 /// specs' capability and reporting cases).

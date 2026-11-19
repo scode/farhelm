@@ -722,7 +722,7 @@ pub(crate) async fn delete_checkout_trash(
 /// of the helm build, while a later create remains guarded against the host
 /// connection that the user selected.
 pub(crate) async fn launch_catalog() -> impl IntoResponse {
-    axum::Json(launches::catalog())
+    axum::Json(launches::launcher_catalog())
 }
 
 /// GET /api/launch-history returns reusable successful-create history for a
