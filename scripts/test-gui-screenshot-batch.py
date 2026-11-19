@@ -456,8 +456,18 @@ class Pictures(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         filtered_png(path, 50, 46, framed_pixels(50, 46, 19, 1))
         self.assertIn("left 19, right 19, top 19, bottom 19", batch.crop_frame(path, 20, 1))
-        tiny_png(path, 50, 46)
-        self.assertIn("not an 8-bit RGBA PNG", batch.crop_frame(path, 20, 1) or "")
+        gray = struct.pack(">IIBBBBB", 50, 46, 8, 0, 0, 0, 0)
+        raw = b"".join(b"\x00" + b"\x00" * 50 for _ in range(46))
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", gray) + png_chunk(b"IDAT", zlib.compress(raw))
+                         + png_chunk(b"IEND", b""))
+        self.assertIn("not an 8-bit RGBA or RGB PNG", batch.crop_frame(path, 20, 1) or "")
+
+    def test_an_opaque_rgb_png_reads_as_rgba(self):
+        """librsvg writes an opaque picture as RGB, and the docs engine crops the annotated shot it renders; the reader
+        must give that picture's pixels back as RGBA with an opaque alpha, not refuse it or shift its channels."""
+        path = self.root / "rgb.png"
+        tiny_png(path, 3, 2)
+        self.assertEqual(batch.read_rgba(path), (3, 2, bytearray(b"\x00\x00\x00\xff" * 6)))
 
 
 # A stand-in for scripts/gui-agent.py. It appends every call to `calls.jsonl` in the runs directory (the run
