@@ -219,6 +219,21 @@ const LISTS: [List; 3] = [
     },
 ];
 
+/// The fixed names of the credential lists and their Add buttons. Saved names belong to the user.
+pub(super) fn search_lists() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    LISTS
+        .iter()
+        .map(|list| (list.add_id, list.heading, list.add))
+}
+
+pub(super) const INTRO: &str = "Secrets Farhelm hands to hosts for you. Recipes refer to them by name, so replacing \
+                               a token here never means editing a recipe.";
+pub(super) const STORAGE_LABEL: &str = "Not encrypted on disk";
+pub(super) const STORAGE_ID: &str = "credentials-storage-warning";
+pub(super) const STORAGE_HELP: &str = "Farhelm stores these, including the Tensorlake API key, in plain text in this \
+                                      helm's state, on the machine the helm runs on. Anyone who can read that folder \
+                                      can read them. Farhelm never shows a saved value again.";
+
 impl Group {
     /// The agent logins' list, the one with an agent choice.
     const AGENT_LOGINS: Group = Group(1);
@@ -286,6 +301,13 @@ impl Credentials {
     #[cfg(test)]
     pub(super) fn key(&self) -> Entity<TensorlakeKey> {
         self.key.clone()
+    }
+
+    /// An open editor replaces the overview and its key field. Preserve the draft when search visits this section.
+    pub(super) fn key_focus(&self, cx: &App) -> Option<gpui::FocusHandle> {
+        self.editor
+            .is_none()
+            .then(|| self.key.read(cx).search_focus(cx))
     }
 
     /// Read the catalog; its answer replaces the list (the module docs say why answers cannot cross). The dialog calls
@@ -542,24 +564,8 @@ impl Credentials {
                     .into_any_element()
             })
             .collect();
-        parts.push(
-            choices::help(
-                "Secrets Farhelm hands to hosts for you. Recipes refer to them by name, so replacing a token here never \
-                 means editing a recipe.",
-                cx,
-            )
-            .into_any_element(),
-        );
-        parts.push(
-            storage_warning(
-                "credentials-storage-warning",
-                "Farhelm stores these, including the Tensorlake API key, in plain text in this helm's state, on the \
-                 machine the helm runs on. Anyone who can read that folder can read them. Farhelm never shows a saved \
-                 value again.",
-                cx,
-            )
-            .into_any_element(),
-        );
+        parts.push(choices::help(INTRO, cx).into_any_element());
+        parts.push(storage_warning(STORAGE_ID, STORAGE_HELP, cx).into_any_element());
         parts.push(self.key.clone().into_any_element());
         if self.catalog.is_none() && self.unreadable.is_none() {
             parts.push(
@@ -645,7 +651,7 @@ pub(super) fn storage_warning(
         .id(id)
         .debug_selector(|| id.to_owned())
         .role(Role::Note)
-        .aria_label(SharedString::from(format!("Not encrypted on disk. {body}")))
+        .aria_label(SharedString::from(format!("{STORAGE_LABEL}. {body}")))
         .flex()
         .flex_col()
         .gap(px(6.))
@@ -661,7 +667,7 @@ pub(super) fn storage_warning(
                 .line_height(px(LABEL_LINE_HEIGHT))
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme::color(palette.danger))
-                .child("Not encrypted on disk"),
+                .child(STORAGE_LABEL),
         )
         .child(
             div()

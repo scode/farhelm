@@ -51,7 +51,7 @@ use crate::theme;
 const ROUTE: &str = "/api/tensorlake";
 /// The form's name for [`Refused`], and the prefix of its element ids: the field is `tensorlake-key`, its buttons
 /// `tensorlake-key-save`, `-test` and `-clear`, its lines `tensorlake-key-outcome`, `-working` and `-busy`.
-const ID: &str = "tensorlake-key";
+pub(super) const ID: &str = "tensorlake-key";
 
 /// `/api/tensorlake`, or with `tail` a route under it (Test's `test`, Create SSH key's `ssh-key`).
 pub(super) fn path(tail: &[&str]) -> Result<ApiPath, PathError> {
@@ -220,7 +220,7 @@ pub(super) enum Place {
 impl Place {
     /// The field's label, which is also its accessible name: Credentials names the product to tell this key from the
     /// named secrets around it, while the Tensorlake section's heading already names it.
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Place::Credentials => "Tensorlake API key",
             Place::Tensorlake => "API key",
@@ -228,7 +228,7 @@ impl Place {
     }
 
     /// The second help line, which points at the other place, in the old form's words.
-    fn elsewhere(self) -> &'static str {
+    pub(super) fn elsewhere(self) -> &'static str {
         match self {
             Place::Credentials => {
                 "The same key as in Settings → Tensorlake. Changing it here changes it there."
@@ -247,9 +247,13 @@ impl Place {
 }
 
 /// The Tensorlake section's storage warning, the old singular `StorageWarning` body.
-const STORAGE_WARNING: &str = "Farhelm stores this key in plain text in this helm's state, on the machine the helm \
+pub(super) const STORAGE_WARNING: &str = "Farhelm stores this key in plain text in this helm's state, on the machine the helm \
                                runs on. Anyone who can read that folder can read it. Farhelm never shows a saved \
                                value again.";
+pub(super) const KEY_HELP: &str = "Paste a Tensorlake API key";
+pub(super) const REPLACE_HELP: &str = "Paste a new Tensorlake API key to replace the saved one";
+pub(super) const DASHBOARD_HELP: &str = "Create a key in the Tensorlake dashboard, in the project you want sandboxes \
+                                        in. Test lists your sandboxes to check that the saved key works.";
 
 /// The key form, a view of its own over the opening's [`TensorlakeAccount`]. Settings makes one with Credentials and
 /// one with Tensorlake, and keeps each until the dialog closes, so its typed key survives section switches and the
@@ -275,6 +279,10 @@ pub(super) struct TensorlakeKey {
 }
 
 impl TensorlakeKey {
+    /// The key field is present even while waiting for the account read.
+    pub(super) fn search_focus(&self, cx: &App) -> gpui::FocusHandle {
+        self.key.input().focus_handle(cx)
+    }
     /// The form for `place` over `account`, with an empty field.
     pub(super) fn new(
         account: Entity<TensorlakeAccount>,
@@ -514,9 +522,9 @@ impl Render for TensorlakeKey {
                 self.key.input(),
                 self.place.label(),
                 HoverHelp::tooltip(if key_set == Some(true) {
-                    "Paste a new Tensorlake API key to replace the saved one"
+                    REPLACE_HELP
                 } else {
-                    "Paste a Tensorlake API key"
+                    KEY_HELP
                 }),
             )
             .height(px(choices::FIELD_HEIGHT)),
@@ -600,7 +608,11 @@ impl Render for TensorlakeKey {
             .gap(px(14.))
             .w_full()
             .min_w_0()
-            .children(unloaded.as_ref().map(|reason| choices::failure_outcome(format!("{ID}-load-error"), reason, cx)))
+            .children(
+                unloaded
+                    .as_ref()
+                    .map(|reason| choices::failure_outcome(format!("{ID}-load-error"), reason, cx)),
+            )
             .children(retry)
             // Under the load failure and above the field, as the old form drew its `StorageWarning`, so the user meets
             // it before pasting a key.
@@ -612,11 +624,7 @@ impl Render for TensorlakeKey {
                 )
             }))
             .child(field)
-            .child(choices::help(
-                "Create a key in the Tensorlake dashboard, in the project you want sandboxes in. Test lists your \
-                 sandboxes to check that the saved key works.",
-                cx,
-            ))
+            .child(choices::help(DASHBOARD_HELP, cx))
             .child(choices::help(self.place.elsewhere(), cx))
             // `.dialog-actions`: Test, Clear and Save at the form's end, in the old order.
             .child(
@@ -630,9 +638,13 @@ impl Render for TensorlakeKey {
                     .child(save),
             )
             .children(busy.then(|| {
-                choices::outcome_line(format!("{ID}-working"), Role::Status, theme::color(palette.fg_0))
-                    .aria_label("Working…")
-                    .child("Working…")
+                choices::outcome_line(
+                    format!("{ID}-working"),
+                    Role::Status,
+                    theme::color(palette.fg_0),
+                )
+                .aria_label("Working…")
+                .child("Working…")
             }))
             .children(outcome)
             .children(choices::busy_line(&self.refused, ID, cx))

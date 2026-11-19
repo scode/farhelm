@@ -31,8 +31,8 @@
 use farhelm_helm_client::{ApiPath, PathError};
 use farhelm_proto::{LaunchHarness, SessionInfo};
 use gpui::{
-    AnyElement, App, Div, FocusHandle, FontWeight, IntoElement, ParentElement as _, Role,
-    Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Div, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::Refused;
@@ -51,6 +51,22 @@ const BLOCK_RULE_PAD: f32 = 16.;
 const CAUTION_PAD: f32 = 12.;
 const CAUTION_LINE_HEIGHT: f32 = 18.;
 const CAUTION_GAP: f32 = 8.;
+
+pub(super) const CAUTION_ID: &str = "settings-claude-trust-caution";
+pub(super) const CAUTION_TITLE: &str = "How this works, and why it's off by default";
+pub(super) const CAUTION: [&str; 3] = [
+    "Claude has no supported way to do this. Farhelm edits Claude's own settings file directly \
+     (normally ~/.claude.json on the session's host), copying how Claude writes it. That file also \
+     holds sign-in, settings and per-folder state. Farhelm changes only the folder's trust key and \
+     replaces the file in one step, so it is never left half-written.",
+    "A Claude session exiting at the same instant can rarely undo Farhelm's edit or lose one of its \
+     own updates. Any Claude update can change the file or its locking without notice: the edit may \
+     stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every \
+     such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions.",
+    "As when you answer Yes yourself, the repository's Claude hooks and commands then run without \
+     Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, \
+     also best effort.",
+];
 
 /// An agent with a managed-checkout trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
 /// session view's trust hint band do differently per agent, which agent a session's trust question belongs to
@@ -123,7 +139,7 @@ impl TrustAgent {
 
     /// The switch's words, which name each agent's own mechanism rather than claiming every agent asks the same
     /// question (the old `choice_label`).
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             TrustAgent::Claude => "Answer Claude's \"trust this folder?\" for new checkouts",
             TrustAgent::Codex => "Answer Codex's folder-trust question for managed checkouts",
@@ -133,7 +149,7 @@ impl TrustAgent {
     }
 
     /// The switch's hover help, the old row's `data-tooltip`: Claude's own, and for the others their help's first part.
-    fn tooltip(self) -> &'static str {
+    pub(super) fn tooltip(self) -> &'static str {
         match self {
             TrustAgent::Claude => {
                 "Mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the \
@@ -174,7 +190,7 @@ impl TrustAgent {
     /// The paragraphs under the switch: Claude's help alone (its risks are in the caution box), and for the others
     /// their mechanism with which launches use it, then the risk (SPEC.md: "Their help states that the repository's
     /// hooks, settings and commands may then run as if the user had approved them").
-    fn help(self) -> Vec<String> {
+    pub(super) fn help(self) -> Vec<String> {
         match self {
             TrustAgent::Claude => vec![self.mechanism().to_owned()],
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => vec![
@@ -193,7 +209,7 @@ impl TrustAgent {
     /// Whether the block carries the caution box under its help: only Claude's, whose trust is an edit of Claude's own
     /// settings file, with the risks that brings (SPEC.md: "The caution explains ..."). The others pass a command-line
     /// option, whose risk their help states in one sentence.
-    fn has_caution(self) -> bool {
+    pub(super) fn has_caution(self) -> bool {
         match self {
             TrustAgent::Claude => true,
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => false,
@@ -388,10 +404,11 @@ pub(super) fn block(
 
 /// Claude's caution box (`.claude-trust-caution`): why the switch is off by default, in the amber of a warning, with
 /// the 3-pixel amber rule down its left edge.
-fn caution(cx: &App) -> Div {
+fn caution(cx: &App) -> impl IntoElement {
     let palette = theme::palette(cx);
     let paragraph = |text: &'static str| div().child(text);
     div()
+        .id(CAUTION_ID)
         .flex()
         .my(px(4.))
         .border_t_1()
@@ -411,27 +428,7 @@ fn caution(cx: &App) -> Div {
                 .text_size(metrics::TEXT_SM)
                 .line_height(px(CAUTION_LINE_HEIGHT))
                 .text_color(theme::color(palette.warn_bright))
-                .child(
-                    div()
-                        .font_weight(FontWeight::BOLD)
-                        .child("How this works, and why it's off by default"),
-                )
-                .child(paragraph(
-                    "Claude has no supported way to do this. Farhelm edits Claude's own settings file directly \
-                     (normally ~/.claude.json on the session's host), copying how Claude writes it. That file also \
-                     holds sign-in, settings and per-folder state. Farhelm changes only the folder's trust key and \
-                     replaces the file in one step, so it is never left half-written.",
-                ))
-                .child(paragraph(
-                    "A Claude session exiting at the same instant can rarely undo Farhelm's edit or lose one of its \
-                     own updates. Any Claude update can change the file or its locking without notice: the edit may \
-                     stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every \
-                     such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions.",
-                ))
-                .child(paragraph(
-                    "As when you answer Yes yourself, the repository's Claude hooks and commands then run without \
-                     Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, \
-                     also best effort.",
-                )),
+                .child(div().font_weight(FontWeight::BOLD).child(CAUTION_TITLE))
+                .children(CAUTION.map(paragraph)),
         )
 }

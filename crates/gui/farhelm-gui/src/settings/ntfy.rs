@@ -68,9 +68,20 @@ const REFUSED: &str = "ntfy";
 /// The route the form reads and saves, as a refusal without words names it.
 const ROUTE: &str = "/api/ntfy-alerts";
 /// The priority segments' hover help, the old buttons' `data-tooltip`, which the group repeats as its own.
-const PRIORITY_HELP: &str = "Priority used for session alerts; Save applies the selected priority";
+pub(super) const PRIORITY_HELP: &str =
+    "Priority used for session alerts; Save applies the selected priority";
+pub(super) const PRIORITY_LABEL: &str = "Priority";
+pub(super) const INTRO: &str = "Send a session's title and host when it waits for you. Applies to this helm. In the \
+                               desktop app, keep the window open.";
+pub(super) const TOPIC_HELP: &str =
+    "Anyone who knows an ntfy.sh topic can read its alerts. Choose a hard-to-guess topic.";
+pub(super) const TOKEN_HELP: &str =
+    "Optional server access token; leave blank to preserve the saved token";
+pub(super) const TOKEN_CLEAR_HELP: &str = "The saved access token will be cleared when you save";
+pub(super) const TOKEN_CHANGED_HELP: &str =
+    "Optional token for this server; leaving it blank clears the previous server's saved token";
 /// Every priority, in the order the old segments showed them.
-const PRIORITIES: [Priority; 5] = [
+pub(super) const PRIORITIES: [Priority; 5] = [
     Priority::Min,
     Priority::Low,
     Priority::Default,
@@ -159,22 +170,39 @@ fn server_changed(saved: &str, draft: &str) -> bool {
 }
 
 /// The form's three text fields, each bound to its part of the [`Form`].
-#[derive(Clone, Copy)]
-enum Field {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Field {
     Server,
     Topic,
     Token,
 }
 
 impl Field {
-    const ALL: [Field; 3] = [Field::Server, Field::Topic, Field::Token];
+    pub(super) const ALL: [Field; 3] = [Field::Server, Field::Topic, Field::Token];
 
     /// The text input drawn for this field.
-    fn input(self, alerts: &NtfyAlerts) -> &TextInputState {
+    pub(super) fn input(self, alerts: &NtfyAlerts) -> &TextInputState {
         match self {
             Field::Server => &alerts.server,
             Field::Topic => &alerts.topic,
             Field::Token => &alerts.token,
+        }
+    }
+
+    /// The id, label and ordinary help shared by the form and Settings search.
+    pub(super) fn words(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Server => (
+                "ntfy-server",
+                "Server URL",
+                "ntfy server that receives session alerts",
+            ),
+            Self::Topic => (
+                "ntfy-topic",
+                "Topic",
+                "Topic to publish alerts to; subscribe to the same topic in your ntfy client",
+            ),
+            Self::Token => ("ntfy-token", "Access token (optional)", TOKEN_HELP),
         }
     }
 
@@ -189,9 +217,36 @@ impl Field {
     }
 }
 
+/// The two ntfy switches need handles outside their paint pass when a search result opens the form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Switch {
+    Enabled,
+    ClearToken,
+}
+
+impl Switch {
+    /// The form and the catalog use the same id, label and help for a switch.
+    pub(super) fn words(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Enabled => (
+                "ntfy-enabled",
+                "Send ntfy alerts",
+                "Send alerts when a session waits for you; Save applies it to this helm",
+            ),
+            Self::ClearToken => (
+                "ntfy-clear-token",
+                "Clear saved token",
+                "Remove the saved access token when you Save",
+            ),
+        }
+    }
+}
+
 /// The ntfy alerts form, a view of its own that Settings makes the first time Notifications shows in an opening and
 /// keeps until the dialog closes (see the module docs).
 pub(super) struct NtfyAlerts {
+    enabled_focus: gpui::FocusHandle,
+    clear_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
     stored: Option<Settings>,
     /// Why the last read failed, until a read answers.
@@ -221,6 +276,8 @@ impl NtfyAlerts {
         let topic = TextInputState::new(window, cx);
         let token = TextInputState::new_masked(window, cx);
         let mut alerts = NtfyAlerts {
+            enabled_focus: cx.focus_handle().tab_stop(true),
+            clear_focus: cx.focus_handle().tab_stop(true),
             stored: None,
             unreadable: None,
             form: Draft::load(Form::over(&Settings::default())),
@@ -309,6 +366,18 @@ impl NtfyAlerts {
     /// Whether the controls take no input: before the read has answered, and while a save or Send test is out.
     fn locked(&self) -> bool {
         self.stored.is_none() || self.form.is_saving() || self.testing
+    }
+
+    /// The switch can take focus only while its form is loaded and unlocked.
+    pub(super) fn search_focus(&self, switch: Switch) -> Option<gpui::FocusHandle> {
+        (!self.locked()).then(|| self.switch_handle(switch).clone())
+    }
+
+    fn switch_handle(&self, switch: Switch) -> &gpui::FocusHandle {
+        match switch {
+            Switch::Enabled => &self.enabled_focus,
+            Switch::ClearToken => &self.clear_focus,
+        }
     }
 
     /// Hold the text fields read-only while the form is locked, and the token field also while Clear saved token is
@@ -463,15 +532,15 @@ impl NtfyAlerts {
     }
 
     /// One field with its words above it, as wide as the section (`.checkout-root-label`).
-    fn field(
-        &self,
-        field: Field,
-        id: &'static str,
-        label: &'static str,
-        help: &'static str,
-    ) -> Div {
-        let input = TextInput::new(id, field.input(self), label, HoverHelp::tooltip(help))
-            .height(px(choices::FIELD_HEIGHT));
+    fn field(&self, field: Field, help_override: Option<&'static str>) -> Div {
+        let (id, label, help) = field.words();
+        let input = TextInput::new(
+            id,
+            field.input(self),
+            label,
+            HoverHelp::tooltip(help_override.unwrap_or(help)),
+        )
+        .height(px(choices::FIELD_HEIGHT));
         let input = match field {
             Field::Server => input.monospace(),
             Field::Topic | Field::Token => input,
@@ -490,13 +559,12 @@ impl NtfyAlerts {
     /// A switch with its words, toggling through this form.
     fn switch(
         &self,
-        id: &'static str,
-        label: &'static str,
-        help: &'static str,
+        switch: Switch,
         on: bool,
         change: fn(&mut Form, bool),
         cx: &Context<Self>,
     ) -> Div {
+        let (id, label, help) = switch.words();
         let weak = cx.weak_entity();
         div()
             .text_size(px(LABEL_TEXT))
@@ -504,6 +572,7 @@ impl NtfyAlerts {
             .child(
                 Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
                     .switch()
+                    .focus(self.switch_handle(switch))
                     .checked(on)
                     .disabled(self.locked())
                     .on_toggle(move |on, window, cx| {
@@ -526,11 +595,11 @@ impl Render for NtfyAlerts {
             |id: SharedString, reason: &HostText| choices::failure_outcome(id, reason, cx);
 
         let token_help = if form.clear {
-            "The saved access token will be cleared when you save"
+            TOKEN_CLEAR_HELP
         } else if self.server_changed() && self.token_saved() {
-            "Optional token for this server; leaving it blank clears the previous server's saved token"
+            TOKEN_CHANGED_HELP
         } else {
-            "Optional server access token; leave blank to preserve the saved token"
+            TOKEN_HELP
         };
         let origin_hint =
             (self.token_saved() && self.server_changed() && form.token.is_empty() && !form.clear)
@@ -552,14 +621,14 @@ impl Render for NtfyAlerts {
             .gap(px(choices::LABEL_GAP))
             .w_full()
             .min_w_0()
-            .child(Self::label("Priority"))
+            .child(Self::label(PRIORITY_LABEL))
             .child(
                 PRIORITIES
                     .into_iter()
                     .fold(
                         RadioGroup::new(
                             "ntfy-priority",
-                            "Priority",
+                            PRIORITY_LABEL,
                             HoverHelp::tooltip(PRIORITY_HELP),
                             Role::Group,
                         ),
@@ -662,41 +731,20 @@ impl Render for NtfyAlerts {
                     .text_color(theme::color(palette.fg_0))
                     .child("ntfy alerts"),
             )
-            .child(choices::help(
-                "Send a session's title and host when it waits for you. Applies to this helm. In the desktop app, keep \
-                 the window open.",
-                cx,
-            ))
+            .child(choices::help(INTRO, cx))
             .child(self.switch(
-                "ntfy-enabled",
-                "Send ntfy alerts",
-                "Send alerts when a session waits for you; Save applies it to this helm",
+                Switch::Enabled,
                 form.enabled,
                 |form, on| form.enabled = on,
                 cx,
             ))
-            .child(self.field(
-                Field::Server,
-                "ntfy-server",
-                "Server URL",
-                "ntfy server that receives session alerts",
-            ))
-            .child(self.field(
-                Field::Topic,
-                "ntfy-topic",
-                "Topic",
-                "Topic to publish alerts to; subscribe to the same topic in your ntfy client",
-            ))
-            .child(choices::help(
-                "Anyone who knows an ntfy.sh topic can read its alerts. Choose a hard-to-guess topic.",
-                cx,
-            ))
-            .child(self.field(Field::Token, "ntfy-token", "Access token (optional)", token_help))
+            .child(self.field(Field::Server, None))
+            .child(self.field(Field::Topic, None))
+            .child(choices::help(TOPIC_HELP, cx))
+            .child(self.field(Field::Token, Some(token_help)))
             .children(origin_hint)
             .child(self.switch(
-                "ntfy-clear-token",
-                "Clear saved token",
-                "Remove the saved access token when you Save",
+                Switch::ClearToken,
                 form.clear,
                 |form, on| form.clear = on,
                 cx,

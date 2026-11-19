@@ -985,6 +985,18 @@ static SCENES: &[Scene] = &[
         setup: settings_app_setup,
     },
     Scene {
+        name: "settings-search",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_search_setup,
+    },
+    Scene {
+        name: "settings-search-empty",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_search_empty_setup,
+    },
+    Scene {
         name: "hosts-panel",
         size: (364., 418.),
         draw: hosts_panels,

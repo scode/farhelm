@@ -872,10 +872,18 @@ pub struct AnchoredDialog {
 }
 
 /// Where an open dialog sits and whether an outside press dismisses it, as its [`Dialog`] asked.
-#[derive(Clone, Copy)]
 struct DialogOptions {
     placement: DialogPlacement,
     dismiss_on_outside_press: bool,
+    shortcut: Option<DialogShortcut>,
+}
+
+/// A dialog-local action also has to work when the layer container holds fallback focus. Put its key context and
+/// handler there so the same binding covers the dialog and every control inside it.
+struct DialogShortcut {
+    context: &'static str,
+    action: Box<dyn gpui::Action>,
+    run: MainAction,
 }
 
 /// Where a dialog sits over its veil ([`Dialog::placement`]).
@@ -902,6 +910,34 @@ pub fn open_dialog(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    open_dialog_inner(dialog, None, mark, window, cx)
+}
+
+/// Open a dialog with an action in its own key context, available also from the layer container's fallback focus.
+pub(crate) fn open_dialog_with_shortcut(
+    dialog: Dialog,
+    context: &'static str,
+    action: impl gpui::Action,
+    run: MainAction,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let shortcut = DialogShortcut {
+        context,
+        action: Box::new(action),
+        run,
+    };
+    open_dialog_inner(dialog, Some(shortcut), mark, window, cx)
+}
+
+fn open_dialog_inner(
+    dialog: Dialog,
+    shortcut: Option<DialogShortcut>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     let Dialog {
         view,
         container,
@@ -918,6 +954,7 @@ pub fn open_dialog(
         Kind::Dialog(DialogOptions {
             placement,
             dismiss_on_outside_press,
+            shortcut,
         }),
         view,
         container,
@@ -2239,6 +2276,10 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         let depth = if index < raised { index + 1 } else { index + 5 };
         let id = layer.id;
         let main_action = layer.main_action.clone();
+        let shortcut = match &layer.kind {
+            Kind::Dialog(options) => options.shortcut.as_ref(),
+            Kind::Popover { .. } => None,
+        };
         let container = layer.container.clone();
         let content = div()
             .id(ElementId::Name(format!("layer-{}", id.0).into()))
@@ -2254,6 +2295,14 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             // press through the popover would leave focus where the same press without it would not.
             .when(!passes, |content| {
                 focus::track(content, &layer.container, layer.empty_press)
+            })
+            .when_some(shortcut, |content, shortcut| {
+                let run = shortcut.run.clone();
+                content
+                    .key_context(shortcut.context)
+                    .on_boxed_action(shortcut.action.as_ref(), move |_, window, cx| {
+                        run(window, cx)
+                    })
             })
             // Enter on the dialog itself presses its main action; a held or modified Enter does not.
             .on_key_down(move |event, window, cx| {

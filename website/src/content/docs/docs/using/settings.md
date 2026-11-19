@@ -10,6 +10,9 @@ sidebar, opens Settings at **Sessions**. Choose a section in its list to see its
 you change them. Fields you have not saved keep what you typed while you switch sections; closing Settings discards
 them, except that an edited recipe asks whether to save, discard or keep editing.
 
+Type part of a name or description in **Search** to look across Settings. Click a result to jump to it, or use the arrow
+keys and Enter from the search field. Cmd+F on Mac or Ctrl+F on Linux gets you to the field from a Settings switch.
+
 This page is a map: each section below says what it holds and links the page that explains it.
 
 ## Sessions

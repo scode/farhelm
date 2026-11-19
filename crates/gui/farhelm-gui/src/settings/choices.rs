@@ -101,6 +101,25 @@ impl Choice {
         Choice::SoundTurnFinished,
     ];
 
+    /// Search groups these preferences in the section that owns each control.
+    pub(super) fn section(self) -> super::Section {
+        use super::Section;
+        match self {
+            Self::SkipSessionConfirmations
+            | Self::NameSessionsOnQuickLaunch
+            | Self::ColorTerminalFrames => Section::Sessions,
+            Self::AutoUpdateRemoteHosts
+            | Self::SkipHostSetupConfirmation
+            | Self::SkipHostRemoveConfirmation => Section::Hosts,
+            Self::ShowClaudeTrustHint | Self::ShowCodexTrustHint | Self::ShowMuseTrustHint => {
+                Section::AgentTrust
+            }
+            Self::SoundWaiting | Self::SoundApproval | Self::SoundTurnFinished => {
+                Section::Notifications
+            }
+        }
+    }
+
     /// The preference row's field this switch saves, as the wire names it.
     fn field(self) -> &'static str {
         match self {
@@ -199,7 +218,7 @@ impl Choice {
         format!("{}-error", self.id())
     }
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Choice::SkipSessionConfirmations => "Skip session confirmations",
             Choice::NameSessionsOnQuickLaunch => "Name sessions on quick launch",
@@ -219,7 +238,7 @@ impl Choice {
     }
 
     /// The hover help, the old row's `data-tooltip`.
-    fn tooltip(self) -> &'static str {
+    pub(super) fn tooltip(self) -> &'static str {
         match self {
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click"
@@ -261,7 +280,7 @@ impl Choice {
     /// (SPEC.md: "Each switch explains the current behavior"). Empty for the trust hints' and the sounds' switches,
     /// which had none in the old app (the sounds share one paragraph under their sub-heading); [`group`] then draws no
     /// paragraph.
-    fn help(self, on: bool) -> &'static str {
+    pub(super) fn help(self, on: bool) -> &'static str {
         match self {
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash \

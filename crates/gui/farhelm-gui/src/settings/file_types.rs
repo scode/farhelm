@@ -49,18 +49,26 @@ const FIELD: &str = "open_extensions";
 const LABEL_MAC: &str = "File types to open with Cmd-click";
 const LABEL_OTHER: &str = "File types to open with Ctrl-click";
 
+/// Search uses the same modifier name as the field it opens.
+pub(super) fn label(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Mac => LABEL_MAC,
+        Platform::Linux => LABEL_OTHER,
+    }
+}
+
 /// The old words.
-const HELP: &str = "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening \
+pub(super) const HELP: &str = "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening \
                     downloaded files; downloads still save. This choice applies to this helm.";
 const SAVE_HELP: &str = "Save the file types this helm may open";
 const SAVED: &str = "File types saved";
-const HTML_HEADING: &str = "An agent-written page may run in your browser";
-const HTML_TEXT: &str = "An agent-written page can run scripts in your browser and open web addresses outside \
+pub(super) const HTML_HEADING: &str = "An agent-written page may run in your browser";
+pub(super) const HTML_TEXT: &str = "An agent-written page can run scripts in your browser and open web addresses outside \
                          Farhelm's link permissions. It can send cross-site requests to services on your computer, \
                          including localhost on other ports, and those requests may carry the service's cookies even \
                          though the page cannot read them directly.";
-const OTHER_HEADING: &str = "No protection from the default app";
-const OTHER_TEXT: &str = "Farhelm does not restrict what your default app does with this file. An agent can write this \
+pub(super) const OTHER_HEADING: &str = "No protection from the default app";
+pub(super) const OTHER_TEXT: &str = "Farhelm does not restrict what your default app does with this file. An agent can write this \
                           type of file, and opening it may run code on your computer.";
 
 /// The most warnings drawn: a valid list has at most 32 types, and a draft that is not valid is bounded the same way.
@@ -162,6 +170,11 @@ impl FileTypes {
     #[cfg(test)]
     pub(super) fn focused(&self, window: &Window, cx: &gpui::App) -> bool {
         self.input.input().focus_handle(cx).is_focused(window)
+    }
+
+    /// The focus target for a result about file-opening types.
+    pub(super) fn search_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        self.input.input().focus_handle(cx)
     }
 
     /// The stored list, `None` while unset (and while no preference row has been pushed).
@@ -291,10 +304,7 @@ impl Render for FileTypes {
         let palette = theme::palette(cx);
         let draft = self.input.draft();
         let saving = draft.is_saving();
-        let label = match self.platform {
-            Platform::Mac => LABEL_MAC,
-            Platform::Linux => LABEL_OTHER,
-        };
+        let label = label(self.platform);
         let input = TextInput::new(ID, self.input.input(), label, HoverHelp::tooltip(HELP))
             .height(px(choices::FIELD_HEIGHT));
         let warnings: Vec<_> = warnings(draft.value())

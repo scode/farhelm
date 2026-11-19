@@ -51,19 +51,19 @@ pub(super) const EXPERIMENTAL_WARNING: &str = "EXPERIMENTAL: Tensorlake support 
                                                when you don't want them to.";
 
 /// The warning's accessible name, the old note's `aria-label`.
-const EXPERIMENTAL_NAME: &str = "Tensorlake support is experimental";
+pub(super) const EXPERIMENTAL_NAME: &str = "Tensorlake support is experimental";
 
 /// The help under the warning, the old words.
-const INTRO: &str = "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them \
+pub(super) const INTRO: &str = "Tensorlake sandboxes are cloud machines Farhelm can create and use as hosts. Farhelm creates them \
                      in the Tensorlake project your API key belongs to.";
 
 /// The switch's element id; its failure line is `-error` after it.
 pub(super) const ASK_ID: &str = "tensorlake-create-without-asking";
 const ASK_ERROR_ID: &str = "tensorlake-create-without-asking-error";
-const ASK_LABEL: &str = "Create Tensorlake sandboxes without asking";
-const ASK_TOOLTIP: &str = "Skip the confirmation when adding a Tensorlake host, which creates a sandbox that bills \
+pub(super) const ASK_LABEL: &str = "Create Tensorlake sandboxes without asking";
+pub(super) const ASK_TOOLTIP: &str = "Skip the confirmation when adding a Tensorlake host, which creates a sandbox that bills \
                            while it runs";
-const ASK_HELP: &str = "Adding a Tensorlake host or launching a recipe session creates a sandbox, which bills while \
+pub(super) const ASK_HELP: &str = "Adding a Tensorlake host or launching a recipe session creates a sandbox, which bills while \
                         running, so Farhelm asks first. This skips that question. \"Set up new hosts without asking\" \
                         under Hosts never does.";
 
@@ -101,6 +101,7 @@ fn ask_save(create_without_asking: bool) -> SaveSettings {
 /// The Tensorlake section, a view of its own that Settings makes the first time Tensorlake shows in an opening and
 /// keeps until the dialog closes, so its key form's typed key and its switch's failure survive section switches.
 pub(super) struct Tensorlake {
+    ask_focus: gpui::FocusHandle,
     account: Entity<TensorlakeAccount>,
     /// The section's copy of the API key form.
     key: Entity<TensorlakeKey>,
@@ -129,6 +130,7 @@ impl Tensorlake {
         let ssh_key = cx.new(|cx| SshKey::new(account.clone(), window, cx));
         let sandboxes = cx.new(|cx| Sandboxes::new(account.clone(), cx));
         Tensorlake {
+            ask_focus: cx.focus_handle().tab_stop(true),
             account,
             key,
             ssh_key,
@@ -146,8 +148,7 @@ impl Tensorlake {
             .update(cx, |ssh_key, cx| ssh_key.shown_again(cx));
     }
 
-    /// The section's key form, for tests that read its typed key: the field is masked.
-    #[cfg(test)]
+    /// The section's key form, whose masked field can take focus from a search result.
     pub(super) fn key(&self) -> Entity<TensorlakeKey> {
         self.key.clone()
     }
@@ -158,6 +159,11 @@ impl Tensorlake {
             .read(cx)
             .settings()
             .map(|settings| settings.create_without_asking)
+    }
+
+    /// The switch has a position only after the account read makes it available.
+    pub(super) fn search_focus(&self, cx: &App) -> Option<gpui::FocusHandle> {
+        self.stored(cx).map(|_| self.ask_focus.clone())
     }
 
     /// The user turned the switch to `on`: save it (the module docs). Does nothing until the account is known, when
@@ -237,6 +243,7 @@ impl Tensorlake {
                     Role::Switch,
                 )
                 .switch()
+                .focus(&self.ask_focus)
                 .checked(stored == Some(true))
                 .disabled(stored.is_none())
                 .on_toggle(move |on, _, cx| {

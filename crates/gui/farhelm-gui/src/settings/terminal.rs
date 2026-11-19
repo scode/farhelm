@@ -52,6 +52,8 @@ use crate::operations::Command;
 
 /// The radio group's element id; each option is drawn under `settings-terminal-links-<its label>`.
 pub(super) const ID: &str = "settings-terminal-links";
+pub(super) const LABEL: &str = "Terminal web links";
+pub(super) const TOOLTIP: &str = "What a click on a web link in a terminal does, for this helm";
 
 /// The failure line's element id.
 pub(super) const ERROR_ID: &str = "settings-terminal-links-error";
@@ -60,7 +62,7 @@ pub(super) const ERROR_ID: &str = "settings-terminal-links-error";
 const FIELD: &str = "terminal_link_click";
 
 /// The help above the group: the old line, with "when they reload" made live (see the module docs).
-const HELP: &str = "Clicking a web link in a terminal: this choice applies to this helm. Changes from the command line \
+pub(super) const HELP: &str = "Clicking a web link in a terminal: this choice applies to this helm. Changes from the command line \
                     or an agent show here right away. This web-link choice does not change file downloads.";
 
 /// The line under the group after the helm refused a save, the old app's words.
@@ -95,7 +97,7 @@ impl LinkClick {
 /// The three choices in the old order: the value, its label, and the description line under it, which says what the
 /// choice does and, for the latter two, its risk (SPEC.md: "The latter two choices explain the risk of a second browser
 /// tab and that a program without mouse reporting cannot act on a click").
-const CHOICES: [(LinkClick, &str, &str); 3] = [
+pub(super) const CHOICES: [(LinkClick, &str, &str); 3] = [
     (
         LinkClick::Intercept,
         "Open in Farhelm, don't pass the click on",
@@ -147,13 +149,8 @@ pub(super) fn links(
         stored(preferences)
     };
     let group = CHOICES.iter().fold(
-        RadioGroup::new(
-            ID,
-            "Terminal web links",
-            HoverHelp::tooltip("What a click on a web link in a terminal does, for this helm"),
-            Role::RadioGroup,
-        )
-        .chosen(Some(shown)),
+        RadioGroup::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::RadioGroup)
+            .chosen(Some(shown)),
         |group, &(value, label, description)| {
             // The description line is the option's accessible description, so the hover help repeats it, as the old
             // label's tooltip did.
@@ -189,14 +186,14 @@ pub(super) const TUNNEL_ERROR_ID: &str = "settings-tunnels-error";
 const TUNNEL_FIELD: &str = "tunnel_consent";
 
 /// The switch's label, the old one's.
-const TUNNEL_LABEL: &str = "Allow tunnels from remote sessions";
+pub(super) const TUNNEL_LABEL: &str = "Allow tunnels from remote sessions";
 
 /// The switch's hover help. The old switch had none, only the help paragraph under it, which assistive technology read
 /// as its description; every control here has hover help, so it says the paragraph's first sentence.
-const TUNNEL_TOOLTIP: &str = "Open a remote session's localhost links through this Mac";
+pub(super) const TUNNEL_TOOLTIP: &str = "Open a remote session's localhost links through this Mac";
 
 /// The help under the switch, the old words.
-const TUNNEL_HELP: &str = "Open a remote session's localhost links through this Mac. Turning this off closes every \
+pub(super) const TUNNEL_HELP: &str = "Open a remote session's localhost links through this Mac. Turning this off closes every \
                            open tunnel. The next tunnel asks again. This choice applies to this helm.";
 
 /// The tunnel switch's state in the open dialog (see the module docs for its two directions).

@@ -272,6 +272,8 @@ actions!(
         FocusPreviousControl,
         /// Close the topmost layer (a dialog, a menu or a tooltip), returning focus to where it was before it opened.
         Dismiss,
+        /// Put focus in the search field in Settings.
+        SearchSettings,
         /// Delete the open session through its header Delete action, with that action's confirmation and busy rules
         /// (SPEC.md: Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux). Runs once per press (`ONCE_PER_PRESS`).
         DeleteSession,
@@ -404,6 +406,14 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("alt-tab", FocusNextControl, Some(CONTEXT)),
         KeyBinding::new("alt-shift-tab", FocusPreviousControl, Some(CONTEXT)),
         KeyBinding::new("escape", Dismiss, Some(CONTEXT)),
+        KeyBinding::new(
+            match THIS_PLATFORM {
+                Platform::Mac => "cmd-f",
+                Platform::Linux => "ctrl-f",
+            },
+            SearchSettings,
+            Some(crate::settings::SEARCH_CONTEXT),
+        ),
         KeyBinding::new("down", FocusNextControl, Some(MENU_CONTEXT)),
         KeyBinding::new("up", FocusPreviousControl, Some(MENU_CONTEXT)),
         // SPEC.md, "Desktop window chrome". The main view handles it for the open session; it works from a focused

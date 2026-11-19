@@ -75,13 +75,14 @@ const ROW_GAP: f32 = 10.;
 /// The browser's default margins around the old `h4` heading and `p` status lines (1.33em and 1em at 16 pixels), which
 /// set the leftovers section's spacing.
 const HEADING_MARGIN: f32 = 21.;
+pub(super) const LEFTOVERS_LABEL: &str = "Containers not on this helm";
 const STATUS_MARGIN: f32 = 16.;
 
 /// The section's help, the old words.
-const HELP: &str = "Containers run on your Linux hosts with rootless Podman, cgroup v2 and the systemd cgroup manager. \
+pub(super) const HELP: &str = "Containers run on your Linux hosts with rootless Podman, cgroup v2 and the systemd cgroup manager. \
                     Suspend keeps their memory in use.";
 /// The leftovers' help, the old words.
-const LEFTOVERS_HELP: &str = "These containers have no completed session on this helm. Interrupted launch resources \
+pub(super) const LEFTOVERS_HELP: &str = "These containers have no completed session on this helm. Interrupted launch resources \
                               remain here for explicit cleanup. Nothing is deleted automatically.";
 /// A container host's state before any check of its current address has passed or failed: the helm's own words for it
 /// (`places` in `crates/farhelm-helm/src/environment/podman.rs`), which the old section showed.
@@ -469,14 +470,14 @@ impl Render for Containers {
         let heading = div()
             .id("containers-leftovers-heading")
             .role(Role::Heading)
-            .aria_label("Containers not on this helm")
+            .aria_label(LEFTOVERS_LABEL)
             .mt(px(HEADING_MARGIN))
             .mb(px(HEADING_MARGIN))
             .text_size(px(LABEL_TEXT))
             .line_height(px(LABEL_LINE_HEIGHT))
             .font_weight(FontWeight::BOLD)
             .text_color(theme::color(palette.fg_0))
-            .child("Containers not on this helm");
+            .child(LEFTOVERS_LABEL);
         let leftovers = div()
             .id("containers-leftovers")
             .role(Role::Region)

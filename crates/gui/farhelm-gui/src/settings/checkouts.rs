@@ -32,6 +32,9 @@ pub(super) const FOLDER_NOTE: &str = "Used by hosts without their own folder, wh
 
 /// The switch's element id, which tests and the test bridge find it by.
 pub(super) const SPARE_ID: &str = "settings-checkout-spare";
+pub(super) const SPARE_LABEL: &str = "Keep a checkout ready for faster launches";
+pub(super) const SPARE_TOOLTIP: &str = "Prepare one extra checkout per repository and host so the next launch can \
+                                       update it instead of cloning again";
 /// Its failure line's.
 pub(super) const SPARE_ERROR_ID: &str = "settings-checkout-spare-error";
 /// The documentation link's.
@@ -43,7 +46,7 @@ const SPARE_DOCS: &str = "https://farhelm.io/docs/using/start-a-session/#prepare
 /// The switch's help, the old wording (SPEC.md: it "explains one extra checkout's disk space per repository and host,
 /// promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
 /// after 30 days unused; it links the full earlier-clone caveats").
-const SPARE_HELP: &str = "On by default. Keeps one extra checkout per repository and host, using extra disk space. \
+pub(super) const SPARE_HELP: &str = "On by default. Keeps one extra checkout per repository and host, using extra disk space. \
                           Farhelm prepares it through your login shell without prompting for credentials. The next \
                           launch updates that earlier clone: unchanged files keep older modification times, and Git \
                           hooks and checkout filters run ahead of time, then again only for the update. Turning this \
@@ -76,6 +79,7 @@ pub(super) fn read_spare(
 /// the section scrolls a little where the old one fit. Both are recorded in the parity file.
 pub(super) fn spare(
     spare: &Configured,
+    focus: &gpui::FocusHandle,
     refused: &Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -86,14 +90,12 @@ pub(super) fn spare(
         .child(
             Checkbox::new(
                 SPARE_ID,
-                "Keep a checkout ready for faster launches",
-                HoverHelp::tooltip(
-                    "Prepare one extra checkout per repository and host so the next launch can update it instead \
-                     of cloning again",
-                ),
+                SPARE_LABEL,
+                HoverHelp::tooltip(SPARE_TOOLTIP),
                 Role::Switch,
             )
             .switch()
+            .focus(focus)
             .checked(spare.shown())
             .disabled(!spare.available())
             .on_toggle(on_toggle),

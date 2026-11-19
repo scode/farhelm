@@ -69,6 +69,7 @@ use crate::ticker::{self, Deadline};
 /// The group's element id; its controls and lines are `-create`, `-command` (the command, whose Copy is
 /// `-command-copy`), `-copied`, `-unavailable`, `-error` and `-try-again` after it.
 pub(super) const ID: &str = "tensorlake-ssh-key";
+pub(super) const LABEL: &str = "SSH key";
 
 /// The lines saying why the group has no key to show, and why Create SSH key failed.
 const UNAVAILABLE_ID: &str = "tensorlake-ssh-key-unavailable";
@@ -92,7 +93,7 @@ const RECHECKS: [Duration; 3] = [
 ];
 
 /// The old words.
-const HELP: &str = "Farhelm reaches sandboxes over SSH with a key of its own, kept in this helm's state. Register it \
+pub(super) const HELP: &str = "Farhelm reaches sandboxes over SSH with a key of its own, kept in this helm's state. Register it \
                     once with your Tensorlake account by running the command below on any machine where Tensorlake's \
                     tl CLI is signed in.";
 const NOT_CREATED: &str = "This helm has no SSH key for Tensorlake yet.";
@@ -375,11 +376,11 @@ impl Render for SshKey {
                 div()
                     .id(SharedString::from(format!("{ID}-heading")))
                     .role(Role::Heading)
-                    .aria_label("SSH key")
+                    .aria_label(LABEL)
                     .text_size(px(TITLE_TEXT))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme::color(palette.fg_1))
-                    .child("SSH key"),
+                    .child(LABEL),
             )
             .child(choices::help(HELP, cx))
             .children(state)

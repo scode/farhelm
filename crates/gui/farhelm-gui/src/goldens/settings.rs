@@ -56,6 +56,8 @@ struct SettingsFixture {
     /// Answer the Tensorlake account read with a key saved whatever the section, as Recipes always does; Tensorlake
     /// then reads its list of sandboxes not on this helm, which [`settings_tensorlake_sandboxes`] answers.
     tensorlake_key: bool,
+    /// The query entered after opening, for results and empty search scenes.
+    search: Option<&'static str>,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -94,6 +96,7 @@ fn settings_scene_with(
         tunnels,
         recipe_editor,
         tensorlake_key,
+        search,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -137,6 +140,9 @@ fn settings_scene_with(
             crate::settings::open_at(section, &opener, &mark, window, cx);
             if recipe_editor {
                 crate::settings::open_new_recipe_for_opened(window, cx);
+            }
+            if let Some(query) = search {
+                crate::settings::search_for_opened(query, window, cx);
             }
         });
         if let Some(platform) = tunnels {
@@ -548,9 +554,43 @@ pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Wind
 /// button, and automatic updates on. Focus starts on the switch, whose ring shows only under keyboard focus, so the
 /// picture shows none.
 pub(super) fn settings_app_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    keep_updater(cx);
+    settings_scene(state, crate::settings::Section::App, window, cx);
+}
+
+fn keep_updater(cx: &mut App) {
     use crate::desktop::updates::fake::{Feed, Seen, fake_host};
     let (feed, seen) = (Rc::new(Feed::default()), Rc::new(Seen::default()));
     seen.automatic.set(true);
     crate::desktop::updates::keep(Some(fake_host(&feed, &seen, false)), cx);
-    settings_scene(state, crate::settings::Section::App, window, cx);
+}
+
+/// Match host and app updates in one result pane, with the first result selected.
+pub(super) fn settings_search_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    keep_updater(cx);
+    settings_scene_with(
+        state,
+        crate::settings::Section::Sessions,
+        SettingsFixture {
+            search: Some("update"),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
+/// The search field and result pane after a query that matches nothing.
+pub(super) fn settings_search_empty_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    keep_updater(cx);
+    settings_scene_with(
+        state,
+        crate::settings::Section::Sessions,
+        SettingsFixture {
+            search: Some("wallpaper"),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
 }
