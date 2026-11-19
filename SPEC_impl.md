@@ -3795,13 +3795,13 @@ available. The archive cue (`crates/gui/farhelm-gui/src/trash/cue.rs`) wiggles t
 reports that it archived a checkout, through ticker steps, and never under reduced motion; the row outline's flight into
 the can is not built yet, waiting for an overlay above the sidebar that only the layer manager may draw.
 
-The helm keeps shared non-session condition notices in one host-cascading table. Each notice has a non-reused integer
-ID, its host/kind/checkout key, first raise time, read and resolved flags, and a tagged content snapshot. The initial
-kind is stuck trash. A repeated failure updates its reason and time without changing its ID, raise time or read state;
-unknown disk usage preserves the last known size. A capable successful listing resolves only IDs absent from both its
-checkouts and diagnostic IDs, and a host-wide diagnostic prevents resolution. Queued Retry, an old host's listing,
-unreachability and a cleanup receipt establish no resolution. Resolution persists read as well as resolved, so reopening
-retained history never re-alerts it. Host removal cascades its notices.
+The helm keeps shared non-session condition notices in one table. Each notice has a non-reused integer ID, a condition
+key within its kind and optional host, first raise time, read and resolved flags, and a tagged content snapshot. A
+repeated trash failure updates its reason and time without changing its ID, raise time or read state. Unknown disk usage
+preserves the last known size. A capable successful listing resolves only IDs absent from both its checkouts and
+diagnostic IDs, and a host-wide diagnostic prevents resolution. Queued Retry, an old host's listing, unreachability and
+a cleanup receipt establish no resolution. Resolution persists read as well as resolved, so reopening retained history
+never re-alerts it. Host removal cascades its notices.
 
 `GET /api/notices` returns newest-first history; `POST /api/notices/marks` requires an explicit action and exact IDs,
 marking those read or deleting only their resolved rows. A per-host trash gate serializes forwarded reads and Deletes
@@ -3811,7 +3811,13 @@ checks the stored binding too. Started blocking work owns both gates and its cha
 commit even if the HTTP reader is cancelled. Successful nonempty cleanup receipts also invalidate the fleet, without
 resolving notices. An observation-save failure preserves the host's successful listing and returns a separate optional
 `notice_error`; it never fabricates a selectable trash issue or hides actual archives. No extra observer, timer or
-channel records these notices.
+channel records trash notices.
+
+The host session ceiling notice follows `hosts.cache_truncated` in the same transaction as a listing replacement, a
+create that evicts a row, or an identity reset. The app-wide notice uses the unfiltered session list's cache scope and
+live-only rows. One observer starts with the initial registry and reads that count on the fleet's existing
+invalidations, including deletes and host removal. A renewed condition keeps the retained row and its read mark. The
+usual notices collection delivers additions and resolutions to the rail.
 
 ### Runtime state
 

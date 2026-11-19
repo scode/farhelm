@@ -2582,7 +2582,8 @@ says so in the same place the count lives — "could not read to the end" means 
 something went wrong reading — rather than presenting a partial list as the whole one. No pagination, cursors, streaming
 or incremental listing, or per-order server-side indexing is wanted at any layer, and it is fine for the helm and every
 client to hold and sort the entire fleet in memory; a fleet that outgrows the cap is outside what this product is built
-for, and the notice is the whole of the answer to it.
+for, and the count's warning and a notice in the navigation rail's bell, which explains which list was cut and asks for
+feedback, are the whole of the answer to it.
 
 A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, a notification
 bell when the session has notifications (see Status), and last activity time; status and locality marks occupy aligned
@@ -2970,17 +2971,24 @@ items are quiet even if never opened, stay greyed in the panel, and can be remov
 cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable host
 keeps its last known notices.
 
-The initial kind reports trashed checkouts whose background cleanup failed. It names the host and checkout, shows how
-much space was last measured when known and a short reason, and explains that Farhelm tries again when that host's
-supervisor restarts. **Retry now** asks for one attempt through the existing cleanup checks; it is unavailable without a
-current connected host listing showing that same checkout stuck, or while another guarded operation prevents it. **Open
-Trash** opens the existing dialog, including while host management is visible or sessions are marked, and closing that
-dialog returns focus to the visible rail bell. A notice keeps its identity and read state while the failure recurs; an
-unresolved problem never re-alerts merely because Retry or a supervisor restart reports it again. A folder being removed
-stays unresolved. Only a successful listing from a host capable of reporting accepted cleanup can resolve a checkout it
-no longer contains; failed reads, older hosts and cleanup receipts cannot. Host setup/update attention, release
-announcements and session bells keep their existing separate presentation. No toast or new notification kind ships with
-this behavior.
+Trash cleanup notices report trashed checkouts whose background cleanup failed. A notice names the host and checkout,
+shows how much space was last measured when known and a short reason, and explains that Farhelm tries again when that
+host's supervisor restarts. **Retry now** asks for one attempt through the existing cleanup checks; it is unavailable
+without a current connected host listing showing that same checkout stuck, or while another guarded operation prevents
+it. **Open Trash** opens the existing dialog, including while host management is visible or sessions are marked, and
+closing that dialog returns focus to the visible rail bell. A notice keeps its identity and read state while the failure
+recurs; an unresolved problem never re-alerts merely because Retry or a supervisor restart reports it again. A folder
+being removed stays unresolved. Only a successful listing from a host capable of reporting accepted cleanup can resolve
+a checkout it no longer contains; failed reads, older hosts and cleanup receipts cannot. Host setup/update attention,
+release announcements and session bells keep their existing separate presentation.
+
+A host whose session list is cut at the limit gets a notice naming it. Farhelm also raises one app-wide notice when the
+unfiltered merged fleet holds more than 500 sessions and the list shows only 500. Both notices can appear at once. They
+explain the limit and offer **Send feedback**, which opens the usual feedback dialog and returns focus to the bell when
+it closes. A ceiling notice resolves when its list fits again. A retained notice that reopens keeps its identity and
+read state, so it stays quiet. If the user cleared it while resolved, the next occurrence raises a new notice. A host
+that does not identify its installation (an older supervisor) still counts toward the merged fleet, but its own cut
+raises no host notice and shows only in the list's count warning.
 
 An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
 supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.

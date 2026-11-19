@@ -41,6 +41,7 @@
 //! [`Expansion`]: crate::session_list::host_rail::expansion::Expansion
 
 use farhelm_helm_client::{ApiPath, Method};
+use farhelm_proto::LIST_SESSIONS_CAP;
 use farhelm_proto::notices::{Notice, NoticeContent};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
@@ -86,6 +87,7 @@ pub(crate) const CLEAR_REFUSAL_ID: &str = "rail-notices-clear-refusal";
 pub(crate) const ENTRY_ID_PREFIX: &str = "rail-notice-";
 pub(crate) const RETRY_ID_PREFIX: &str = "rail-notice-retry-";
 pub(crate) const OPEN_TRASH_ID_PREFIX: &str = "rail-notice-open-trash-";
+pub(crate) const SEND_FEEDBACK_ID_PREFIX: &str = "rail-notice-send-feedback-";
 
 /// `.rail-notices-toggle .bell-glyph`: the bell at the rail's 16-pixel size, the gear's and the `?`'s.
 const GLYPH: f32 = 16.;
@@ -307,9 +309,9 @@ impl Render for NoticesButton {
 /// The open panel: drawn from the store and the Trash every frame; what it keeps is only what its close and Clear
 /// resolved need.
 struct NoticesPanel {
-    /// The bell that opened it, which closes it for Close and Open Trash.
+    /// The bell that opened it, which closes it before opening another layer.
     button: WeakEntity<NoticesButton>,
-    /// The bell's focus handle, which the Trash dialog Open Trash opens names as where closing returns focus.
+    /// The control that receives focus when a dialog opened from the panel closes.
     bell: FocusHandle,
     trash: WeakEntity<TrashButton>,
     /// The panel's own focus handle, where focus starts.
@@ -425,8 +427,9 @@ impl Render for NoticesPanel {
                 newest_first(collections.ordered::<Notice>())
                     .into_iter()
                     .map(|notice| {
-                        let host = collections
-                            .get::<HostView>(&HostView::key(notice.host))
+                        let host = notice
+                            .host
+                            .and_then(|host| collections.get::<HostView>(&HostView::key(host)))
                             .map(|host| HostText::from_host(host.name.as_str()));
                         (notice.clone(), host)
                     })
@@ -477,11 +480,10 @@ impl Render for NoticesPanel {
             if at > 0 {
                 body = body.child(hairline(palette));
             }
-            let actions = Actions::of(&notice, trash.as_ref());
             body = body.child(entry(
                 &notice,
                 host,
-                actions,
+                trash.as_ref(),
                 &self.button,
                 &self.bell,
                 &self.trash,
@@ -548,9 +550,8 @@ struct Actions {
 impl Actions {
     /// The actions of `notice` with the Trash as `trash` shows it this frame; with no Trash (the window is going away)
     /// nothing is offered.
-    fn of(notice: &Notice, trash: Option<&listing::Snapshot>) -> Actions {
-        let NoticeContent::StuckTrash { checkout_id, .. } = &notice.content;
-        let Some(trash) = trash else {
+    fn of(notice: &Notice, checkout_id: &str, trash: Option<&listing::Snapshot>) -> Actions {
+        let Some((trash, host)) = trash.zip(notice.host) else {
             return Actions {
                 retry: false,
                 refused: None,
@@ -559,7 +560,7 @@ impl Actions {
         let refused = trash
             .hosts
             .iter()
-            .find(|host| host.id == notice.host)
+            .find(|entry| entry.id == host)
             .and_then(|host| {
                 host.notices
                     .iter()
@@ -567,17 +568,18 @@ impl Actions {
             })
             .map(|kept| kept.message.clone());
         Actions {
-            retry: !notice.resolved && trash.retry_target(notice.host, checkout_id).is_some(),
+            retry: !notice.resolved && trash.retry_target(host, checkout_id).is_some(),
             refused,
         }
     }
 }
 
-/// One trash cleanup notice (`.rail-notice`): the host and what happened, the checkout's repository and last measured
-/// size, the reason in red (greyed with the rest once resolved), when it last failed, and for an unresolved notice the
-/// promise of a retry at the host's supervisor restart with Retry now beside Open Trash. `host` is the registry's name
-/// for the notice's host, or `None` for a host the registry does not list ("Unknown host", as the old panel said). When
-/// it last failed is to the minute in `zone`, the viewer's local time.
+/// Draw one record and the actions appropriate to its condition. A trash cleanup notice (`.rail-notice`) shows the host
+/// and what happened, the checkout's repository and last measured size, the reason in red (greyed with the rest once
+/// resolved), when it last failed (to the minute, in the viewer's local time), and for an unresolved notice the promise
+/// of a retry at the host's supervisor restart with Retry now beside Open Trash. A session-limit notice says which list
+/// was cut and offers Send feedback. A host the registry does not list is named "Unknown host", as the old panel said;
+/// trash reports keep their original host name while the registry load is pending.
 #[allow(
     clippy::too_many_arguments,
     reason = "one notice's parts and the handles its actions reach, passed through once"
@@ -585,21 +587,27 @@ impl Actions {
 fn entry(
     notice: &Notice,
     host: Option<HostText>,
-    actions: Actions,
+    trash_snapshot: Option<&listing::Snapshot>,
     button: &WeakEntity<NoticesButton>,
     bell: &FocusHandle,
     trash: &WeakEntity<TrashButton>,
     zone: Zone,
     palette: &Palette,
-) -> impl IntoElement {
-    let NoticeContent::StuckTrash {
-        checkout_id,
-        name,
-        repository,
-        bytes,
-        reason,
-        at,
-    } = &notice.content;
+) -> gpui::Stateful<gpui::Div> {
+    let (checkout_id, name, repository, bytes, reason, at) = match &notice.content {
+        NoticeContent::StuckTrash {
+            checkout_id,
+            name,
+            repository,
+            bytes,
+            reason,
+            at,
+        } => (checkout_id, name, repository, bytes, reason, at),
+        NoticeContent::HostSessionLimit | NoticeContent::FleetSessionLimit => {
+            return session_limit_entry(notice, host, button, bell, palette);
+        }
+    };
+    let actions = Actions::of(notice, checkout_id, trash_snapshot);
     let id = notice.id;
     let quiet = |line: gpui::Div| {
         line.text_size(px(SMALL_TEXT))
@@ -675,6 +683,75 @@ fn entry(
     )
 }
 
+/// Explain which list was cut and take the user to the regular feedback
+/// dialog. Closing the panel also uses its usual read mark and return target.
+fn session_limit_entry(
+    notice: &Notice,
+    host: Option<HostText>,
+    button: &WeakEntity<NoticesButton>,
+    bell: &FocusHandle,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let id = notice.id;
+    let mut title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-title"));
+    let detail = if notice.content == NoticeContent::HostSessionLimit {
+        title = match host.as_ref() {
+            Some(host) => title.host(host),
+            None => title.text("Unknown host"),
+        }
+        .text(": session limit reached");
+        if notice.resolved {
+            format!(
+                "This host had more than {LIST_SESSIONS_CAP} sessions. Farhelm showed only its newest {LIST_SESSIONS_CAP}."
+            )
+        } else {
+            format!(
+                "This host has more than {LIST_SESSIONS_CAP} sessions. The list shows only its newest {LIST_SESSIONS_CAP}; Farhelm cannot reach the others."
+            )
+        }
+    } else {
+        title = title.text("Farhelm session limit reached");
+        if notice.resolved {
+            format!("The list across your hosts showed only {LIST_SESSIONS_CAP} sessions.")
+        } else {
+            format!("The list across your hosts shows only {LIST_SESSIONS_CAP} sessions.")
+        }
+    };
+    let (button, bell) = (button.clone(), bell.clone());
+    let feedback = Button::new(
+        format!("{SEND_FEEDBACK_ID_PREFIX}{id}"),
+        "Send feedback",
+        HoverHelp::tooltip("Open the Farhelm feedback dialog"),
+        Role::Button,
+    )
+    .tier(Tier::Neutral)
+    .on_click(move |_, window, cx| {
+        let mark = Mark::take(cx);
+        let _ = button.update(cx, |button, cx| button.close(window, cx));
+        crate::feedback::open_returning(ReturnTo::Control(bell.clone()), None, &mark, window, cx);
+    });
+    let content = div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .when(notice.resolved, |content| {
+            content.text_color(theme::color(palette.fg_1))
+        })
+        .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+        .when(notice.resolved, |content| {
+            content.child(div().font_weight(FontWeight::SEMIBOLD).child("Resolved"))
+        })
+        .child(detail)
+        .child("Farhelm is built for tens of sessions. Send feedback if you need this many or think a bug caused it.")
+        .child(div().flex().child(feedback));
+    entry_frame(
+        SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
+        is_unread(notice),
+        palette,
+        content,
+    )
+}
+
 /// A notice's actions (`.rail-notice-actions`): Retry now, while the notice is unresolved, and Open Trash.
 fn actions_row(
     notice: &Notice,
@@ -686,7 +763,7 @@ fn actions_row(
 ) -> impl IntoElement {
     let (host, checkout) = (notice.host, checkout_id.to_owned());
     let retry_trash = trash.clone();
-    let retry = (!notice.resolved).then(|| {
+    let retry = host.filter(|_| !notice.resolved).map(|host| {
         Button::new(
             format!("{RETRY_ID_PREFIX}{}", notice.id),
             "Retry now",

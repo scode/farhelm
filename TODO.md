@@ -80,11 +80,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   parallel (if they run one after another, the worst case is 20 seconds times the number of hosts), and improve this,
   for example by moving these routes to the accepted form, as provisioning already is.
 
-- **Revisit the 500-session cap per host.** A host with more than 500 sessions cuts its list, and the helm never sees
-  the cut sessions. Work out exactly what the limit is and the full set of implications when it is hit. One known one:
-  if the open session is among the cut ones, the app cannot tell that it was deleted. Plan:
-  `plans/queue/session-limit-notice.md`.
-
 - **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
   about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
   session. Frames are back to the old app's rate (3.0 changed frames a second, after the cursor blink was aligned with
