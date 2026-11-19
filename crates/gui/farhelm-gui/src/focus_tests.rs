@@ -1802,41 +1802,29 @@ fn moved_on(cx: &mut VisualTestContext, mark: &Mark) -> bool {
     cx.update(|_, cx| focus::has_moved_on(mark, cx))
 }
 
-/// Ask a question over the page and answer it with Enter, which closes it and returns focus to what held it before.
-/// Returns the mark taken right after the answer, as work that the answer starts takes its mark (a launch).
-fn answer_with_enter(cx: &mut VisualTestContext) -> Mark {
+/// Close a question with a key and take the input mark once focus has returned to the page.
+fn close_question_with(cx: &mut VisualTestContext, key: &str) -> Mark {
     let layer = cx.update(|window, cx| {
         let mark = Mark::take(cx);
         prompt::ask(question("alpha"), None, &mark, |_, _, _| {}, window, cx)
     });
     settle(cx);
     let layer = layer.expect("the question opened");
-    keys(cx, "enter");
+    keys(cx, key);
     assert!(
         !is_open(cx, layer),
-        "the premise: Enter answered the question and closed it"
+        "the premise: {key} closed the question"
     );
     cx.update(|_, cx| Mark::take(cx))
 }
 
-/// Why this matters: SPEC.md ("Creation", "Who may move focus") says an accidental repeated Enter on the launcher's own
-/// submit does not count as moving on. Submitting closes the launcher's dialog and returns focus to its opener, often
-/// the terminal, so without this the second Enter counted (the launch would not open its session) and reached the
-/// terminal's program as a second Enter. The old app hid the launcher and left focus on the page's body, where the
-/// second press went nowhere and, within its 500 ms submit-repeat interval, did not count (`nonblocking-launch.spec.ts`
-/// at `24bc0580`: "New opens after a repeated Enter submit retargets to the released page").
-///
-/// Specified: once Enter closes a layer and focus is back on the terminal, a held repeat of that Enter, a fresh Enter
-/// at once, a fresh Enter exactly 500 ms after it (the old app ended a repeat only once more than 500 ms had passed),
-/// and a held repeat after that are neither counted (a mark taken after the answer still holds) nor delivered to the
-/// terminal. A fresh Enter 501 ms after the closing one reaches the terminal and counts as usual, and so do its own
-/// held repeats.
+/// When Enter closes a question, a fresh tap reaches the focused terminal at once and counts as moving on, which matters
+/// if the answer started work that is still pending. The held repeat of the answering Enter is swallowed: auto-repeat is
+/// not a new press, and in a terminal it would submit whatever draft the agent's prompt holds.
 #[gpui::test]
-fn a_repeat_of_the_enter_that_closed_a_layer_neither_counts_nor_reaches_the_terminal(
-    cx: &mut TestAppContext,
-) {
+fn enter_after_answering_a_question_reaches_the_terminal(cx: &mut TestAppContext) {
     let (cx, terminal, typed) = open_recording_terminal(cx);
-    let answered = answer_with_enter(cx);
+    let answered = close_question_with(cx, "enter");
     assert!(
         focused(cx, &terminal),
         "the premise: closing the question returned focus to the terminal"
@@ -1847,51 +1835,37 @@ fn a_repeat_of_the_enter_that_closed_a_layer_neither_counts_nor_reaches_the_term
     );
 
     held(cx, "enter");
-    keys(cx, "enter");
-    advance(cx, Duration::from_millis(500));
-    keys(cx, "enter");
-    held(cx, "enter");
     assert!(
         !moved_on(cx, &answered),
-        "no repeat of the closing Enter counted as moving on"
-    );
-    assert!(
-        typed.borrow().is_empty(),
-        "no repeat of the closing Enter reached the terminal: {:?}",
-        typed.borrow()
+        "a held Enter does not count as moving on"
     );
 
-    advance(cx, Duration::from_millis(1));
     keys(cx, "enter");
-    held(cx, "enter");
     assert_eq!(
         *typed.borrow(),
-        ["enter", "enter held"],
-        "a fresh Enter after the interval, and its own repeat, reached the terminal"
+        ["enter"],
+        "only the fresh Enter reached the terminal, not the held repeat"
     );
     assert!(moved_on(cx, &answered), "and that Enter counted");
 }
 
-/// Why this matters: only the closing key's own repeats are swallowed, so typing goes on as usual the moment a layer
-/// closes. A different key is a new gesture, as in the old app, where any other press ended the submit's repeat.
-///
-/// Specified: after Enter closes a layer, a different key pressed at once reaches the terminal and counts as moving
-/// on, and an Enter pressed after it reaches the terminal too, although it falls within 500 ms of the closing Enter.
+/// A different key reaches the terminal and ends the Escape guard so the next Escape can reach the program.
 #[gpui::test]
-fn a_different_key_after_the_enter_that_closed_a_layer_is_delivered_and_ends_its_repeats(
-    cx: &mut TestAppContext,
-) {
-    let (cx, _, typed) = open_recording_terminal(cx);
-    let answered = answer_with_enter(cx);
+fn another_key_ends_the_escape_guard(cx: &mut TestAppContext) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let answered = close_question_with(cx, "escape");
+    assert!(focused(cx, &terminal));
+    keys(cx, "escape");
+    assert!(typed.borrow().is_empty(), "the Escape guard is active");
 
     keys(cx, "a");
     assert_eq!(*typed.borrow(), ["a"], "the other key reached the terminal");
     assert!(moved_on(cx, &answered), "and counted as moving on");
-    keys(cx, "enter");
+    keys(cx, "escape");
     assert_eq!(
         *typed.borrow(),
-        ["a", "enter"],
-        "an Enter after the other key is no longer a repeat of the closing one"
+        ["a", "escape"],
+        "the next Escape reaches the program"
     );
 }
 
@@ -1899,7 +1873,7 @@ fn a_different_key_after_the_enter_that_closed_a_layer_is_delivered_and_ends_its
 /// layer, not every layer below it and then reach the terminal's program as Escapes (SPEC.md: Escape closes the
 /// topmost layer). But Escape pressed twice in quick succession is how a user backs out of two layers, so while a layer
 /// holding focus is left open, a dismissal keeps its fresh presses for it. Once the last one has closed, a quick second
-/// Escape is a repeat like a repeated Enter, and reaches nothing.
+/// Escape reaches nothing.
 ///
 /// Specified: with a dialog open over another over the terminal, Escape closes the top one, and a held repeat of it
 /// leaves the lower one open; a fresh Escape at once closes that one, returning focus to the terminal, and neither a
@@ -1949,7 +1923,7 @@ fn a_held_escape_closes_one_layer_and_a_second_press_the_next(cx: &mut TestAppCo
 /// Why this matters: Escape is the key that interrupts an agent's turn in its terminal, and a user backing out of a
 /// dialog often taps it twice. When the dialog was the last layer, focus is back on the terminal by the second tap, so
 /// without this the second Escape would interrupt the agent the user never meant to touch. So a dismissal's quick
-/// second press is swallowed the way a repeated Enter is, while an Escape pressed deliberately later still reaches the
+/// second press is swallowed, while an Escape pressed deliberately later still reaches the
 /// program.
 ///
 /// Specified: Escape closes the one dialog over the terminal and focus is back on it; a held repeat of that Escape, a
@@ -2012,7 +1986,7 @@ fn a_fresh_enter_answers_a_layer_that_opened_after_the_enter_that_closed_one(
     cx: &mut TestAppContext,
 ) {
     let (cx, _, typed) = open_recording_terminal(cx);
-    answer_with_enter(cx);
+    close_question_with(cx, "enter");
     let answered = Rc::new(Cell::new(false));
     let record = answered.clone();
     let next = cx.update(|window, cx| {
@@ -2208,21 +2182,23 @@ fn a_fresh_enter_after_a_close_that_leaves_a_dialog_open_reaches_the_dialog(
 /// click ends it"), and a layer that a click closes was not closed by a key, so the key pressed before the click must
 /// not be taken as the closing press.
 ///
-/// Specified: after Enter closes a layer, a click on the terminal and then Enter at once delivers that Enter. With a
-/// question open, a key pressed in it and then a click on its Cancel close it; the same key pressed at once reaches the
-/// terminal.
+/// After Escape closes a layer, a click on the terminal lets the next Escape reach it. When a click closes a
+/// question after a key press, a held repeat of that key reaches the terminal too.
 #[gpui::test]
 fn a_click_ends_a_closing_press_and_a_layer_a_click_closes_swallows_nothing(
     cx: &mut TestAppContext,
 ) {
     let (cx, terminal, typed) = open_recording_terminal(cx);
-    answer_with_enter(cx);
+    close_question_with(cx, "escape");
+    assert!(focused(cx, &terminal));
+    keys(cx, "escape");
+    assert!(typed.borrow().is_empty(), "the Escape guard is active");
     click(cx, "terminal");
-    keys(cx, "enter");
+    keys(cx, "escape");
     assert_eq!(
         *typed.borrow(),
-        ["enter"],
-        "the Enter after the click reached the terminal"
+        ["escape"],
+        "the Escape after the click reached the terminal"
     );
 
     let layer = cx.update(|window, cx| {
@@ -2237,17 +2213,13 @@ fn a_click_ends_a_closing_press_and_a_layer_a_click_closes_swallows_nothing(
         !is_open(cx, layer) && focused(cx, &terminal),
         "the premise: the click closed the question and focus went back to the terminal"
     );
-    keys(cx, "x");
-    assert_eq!(
-        *typed.borrow(),
-        ["enter", "x"],
-        "the key after the click reached the terminal"
-    );
+    held(cx, "x");
+    assert_eq!(*typed.borrow(), ["escape", "x held"]);
 }
 
 /// Why this matters: a layer that closes on its own (a reply, its subject going) is taken as closed by the last key
-/// press, because GPUI says nothing about when a key's handling ends. The coordinator's docs bound what that costs: the
-/// window runs from the press, so it swallows only a key still held from that press. This pins the bound.
+/// press, because GPUI says nothing about when a key's handling ends. For an ordinary key like X, only a repeat
+/// of the held key is suppressed.
 ///
 /// Specified: a key pressed in a dialog over the terminal, then the dialog closed by its opener's code 501 ms later; a
 /// held repeat of that key does not reach the terminal, and a fresh press of it does.
@@ -2284,7 +2256,7 @@ fn a_layer_closed_without_a_key_swallows_only_a_key_still_held(cx: &mut TestAppC
 /// whatever focus went back to.
 ///
 /// Specified: with a dialog open over the terminal and a capture armed that closes the dialog on X, X closes it; a held
-/// repeat of X and a fresh X at once do not reach the terminal.
+/// repeat of X is swallowed. A fresh X goes through.
 #[gpui::test]
 fn a_layer_the_key_capture_closes_is_taken_as_closed_by_that_press(cx: &mut TestAppContext) {
     let (cx, terminal, typed) = open_recording_terminal(cx);
@@ -2313,11 +2285,7 @@ fn a_layer_the_key_capture_closes_is_taken_as_closed_by_that_press(cx: &mut Test
     );
     held(cx, "x");
     keys(cx, "x");
-    assert!(
-        typed.borrow().is_empty(),
-        "no repeat of X reached the terminal: {:?}",
-        typed.borrow()
-    );
+    assert_eq!(*typed.borrow(), ["x"]);
 }
 
 // ---- Scrolling the focused control into view -------------------------------------------------------------------------

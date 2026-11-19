@@ -3442,9 +3442,10 @@ A confirmation the user just opened starts on the action they asked for: focus s
 so a new Enter goes ahead (from a row's menu, Delete then Enter deletes). If that button is disabled, focus starts on
 Cancel instead. This covers session Stop, Delete, Replace, Restart and tab close, host setup, removal and uninstall, and
 permanent trash deletion. A risky action that cannot be undone starts on Cancel instead, as the YOLO confirmation does.
-The Restart with launcher also starts on Cancel. Repeated or composing Enter cannot answer the new question. After an
-Enter or Escape closes the last open dialog or menu, the same key held or pressed again within half a second goes
-nowhere, so a double tap cannot reach the terminal's program; a later press of either key reaches the terminal as usual.
+The Restart with launcher also starts on Cancel. Repeated or composing Enter cannot answer the new question. After
+Escape closes the last open dialog or menu, a held Escape or a second tap within half a second goes nowhere, so a double
+tap cannot interrupt an agent in its terminal. Enter after a close goes to whatever has focus.
+
 While another dialog or menu is still open, a second Escape closes that one. Escape cancels the header's Stop, Restart,
 Replace or Delete question and returns focus to the terminal. Questions that arrive later always start on their harmless
 answer, as above.

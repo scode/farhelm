@@ -2274,25 +2274,3 @@
   plain, and the Cancel-first rule is for prompts that warn of an unexpected risk (YOLO on a host that does not allow
   it, for example). No code change (about 2-3 lines). Remove the feedback file and its index entry in the same change.
 - Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
-
-## enter-falls-through-after-dismiss-or-approval.md
-
-- Outcome: `fix spec+code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed in source.
-  After Enter dismisses an empty quick-launch sequence or answers an approval card, focus is (or returns to) the
-  terminal, and the user's own held Enter or a second tap reaches the shell or agent. The pill and cards are outside the
-  after-close fence, which SPEC.md's focus rules give to dialogs and menus: "After an Enter or Escape closes the last
-  open dialog or menu, the same key held or pressed again within half a second goes nowhere". In both routes the surface
-  goes away because the user answered it. Bucket: high as filed.
-- Decision: the user said the case itself is fine ("(1) is fine", rounds 2-3: the user actually answered, nothing else
-  removed the surface) and picked "Keep this case as is, and narrow the fence to Escape" (2026-11-18 GUI UX triage page,
-  QE-1, round 5), applying the principle recorded with `sequence-following-enter-does-not-count-as-moving-on.md`:
-  outside Escape-spamming, presses after the user's own answer are ordinary input.
-- Completion criteria: no change for the sequence pill or approval cards. SPEC.md's after-close fence keeps the
-  half-second swallow for Escape only: after an Escape closes the last open dialog or menu, Escape held or pressed again
-  within half a second goes nowhere; an Enter after an Enter closed a dialog or menu reaches what has focus like any
-  press. The desktop app's focus code (crates/gui/farhelm-gui/src/focus.rs closing-press repeat handling) and its tests
-  follow. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
-  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
-  and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`

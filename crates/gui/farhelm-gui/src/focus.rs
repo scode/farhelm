@@ -11,8 +11,7 @@
 //!   [`note_press`] before anything else): a key that a binding handles, Farhelm's own Tab and Escape or GPUI Kit's
 //!   editing keys in a text input, never reaches an ordinary key listener, and SPEC.md counts every key press. The same
 //!   interceptor stops a repeat of a key press that closed a layer before any binding sees it, and it is not counted,
-//!   although focus has moved since ([`Closing`] says which presses repeat it): a repeated Enter on the launcher's
-//!   Launch neither keeps the launch from opening its session nor reaches the terminal that focus returned to. Work
+//!   although focus has moved since ([`Closing`] says which presses repeat it). Enter goes through as ordinary input. Work
 //!   that finishes later takes a [`Mark`] when the user starts it and asks [`has_moved_on`] before it moves focus or
 //!   opens anything. The layer manager refuses to open a layer for a mark the user has moved on from, which is how
 //!   "things the user did not start never open over what they are doing" is kept. The three public moves a feature
@@ -202,29 +201,18 @@ struct MovedOn {
 
 impl Global for MovedOn {}
 
-/// How long after a key press that closed a layer the same key pressed again is still a repeat of that press, the end
+/// How long after Escape closed a layer a fresh Escape still counts as a repeat, the end
 /// included. The old app's submit-repeat interval (`SUBMIT_REPEAT_MS` in `crates/farhelm-ui/assets/launch-activity.js`
 /// at `24bc0580`), which ended a repeat only once more than that had passed (`now - previous.at > SUBMIT_REPEAT_MS`).
 const CLOSING_REPEAT: Duration = Duration::from_millis(500);
 
-/// A key press that closed a layer that held focus, which returned focus elsewhere (often the terminal). Its repeats
-/// are covered by SPEC.md's after-close rule ("Opening and closing") and are
-/// swallowed: not counted as the user moving on, and not delivered to whatever focus went back to. Without this, a
-/// repeated Enter on the launcher's Launch counted as moving on, so the launch would not open its session, and it
-/// reached the terminal's program as a second Enter. The old app hid the launcher and left focus on the page's body,
-/// so the second press went nowhere.
+/// Escape gets a short guard after closing the last layer so tapping it twice cannot interrupt an agent in the
+/// terminal. The guard runs from the first tap ([`CLOSING_REPEAT`]). A fresh Enter goes straight to the new focus. For
+/// Enter and the remaining keys only a held repeat is swallowed, so the auto-repeat of the Enter that answered a question
+/// or pressed Launch never types into the terminal focus returns to. The following handoffs also keep only held repeats:
 ///
-/// The repeats are the same keystroke while still held from that press (auto-repeat), and the same keystroke pressed
-/// again within [`CLOSING_REPEAT`] of it, as the old app's interval measured from the first press (a swallowed press
-/// does not extend it). A dismissal through the layer manager (Escape, or a dialog's Close or Cancel pressed with Enter
-/// or Space, which go through the same dismissal) is no exception: Escape is what interrupts an agent's turn in its
-/// terminal, and a user backing out of a dialog often taps it twice, so once the last layer holding focus has closed, a
-/// second press of the same key within the interval reaches nothing either (SPEC_impl.md has the decision's history).
-/// Three kinds of close keep only the held repeats:
-///
-/// - A close that leaves a layer holding focus open, such as Enter choosing in a select's list inside the launcher,
-///   answering a question over a dialog, or Escape closing a dialog over another: focus goes back to a control the user
-///   is still working in, and the next press there (Enter on Launch, from the closed select) is a new one. This is what
+/// - A close that leaves a layer holding focus open, such as Escape closing a dialog over another: focus goes back to
+///   a control the user is still working in, and the next tap of Escape is a fresh press. This is what
 ///   keeps Escape pressed twice in quick succession backing out of two layers, while a held Escape closes one layer and
 ///   then reaches nothing, not every layer below and the terminal's program after them. The old app's window covered
 ///   only the case where focus fell to the page.
@@ -239,8 +227,7 @@ struct Closing {
     keystroke: Keystroke,
     /// When the press that closed the layer arrived, on the executor's clock (a test's fake clock).
     at: Instant,
-    /// Whether a fresh press within [`CLOSING_REPEAT`] is a repeat too: only when no layer holding focus was left open
-    /// and the key did not tab out of a caret menu, and no longer once a layer opens.
+    /// Whether a fresh Escape within [`CLOSING_REPEAT`] is a repeat, while the last layer stays closed.
     fresh_presses: bool,
 }
 
@@ -259,8 +246,7 @@ impl Closing {
 /// click. The layer manager's close calls this through [`return_to`], once per layer that held focus and returned it,
 /// after the closed layers have left the stack, so [`layers::focus_layer_open`] says whether a layer holding focus is
 /// still open. `held_only` is whether the closer asked to swallow only the press's held repeats (Tab out of a caret
-/// menu); that, or a layer holding focus left open, keeps only the held repeats ([`Closing`]). A dismissal, by Escape or
-/// by a dialog's Close or Cancel, is treated as any other close.
+/// menu). Only Escape gets fresh-press suppression. Enter goes directly to the new focus ([`Closing`]).
 ///
 /// The press is the last one, not one known to be in flight: GPUI has no hook at the end of a key's handling, and a
 /// close the key causes may run later in the same update (an event a control emits). A layer that closes on its own
@@ -273,6 +259,7 @@ pub(crate) fn note_closing(held_only: bool, window: &Window, cx: &mut App) {
     if let Some(moved) = installed_mut::<MovedOn>(cx)
         && let Some((keystroke, at)) = moved.last_press.clone()
     {
+        let fresh_presses = fresh_presses && keystroke.key == "escape";
         moved.closing = Some(Closing {
             keystroke,
             at,
@@ -1617,8 +1604,7 @@ pub(crate) fn menu_highlight_shown(window: &Window, cx: &App) -> bool {
 /// Nothing is scrolled into view: the layer has not been drawn yet, so its start has no position to scroll to.
 ///
 /// A key press that closed a layer stops swallowing fresh presses of its key here, keeping only its held repeats
-/// ([`Closing`]): the new layer starts on the control the user is meant to answer, so a new press goes ahead (SPEC.md,
-/// "Opening and closing": from a row's menu, Delete then Enter deletes), while a held Enter still cannot answer it.
+/// ([`Closing`]): another tap of Escape can dismiss the new layer. The layer's own controls handle held Enter.
 pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     if let Some(closing) = installed_mut::<MovedOn>(cx).and_then(|moved| moved.closing.as_mut()) {
         closing.fresh_presses = false;
@@ -1674,9 +1660,8 @@ pub enum ReturnTo {
 }
 
 /// Return focus where `target` says because a layer closed, `opener` being what held focus when it opened, or recover
-/// if that is gone (the layer manager calls this). The key press that closed the layer has its repeats swallowed from
-/// here on ([`Closing`]); with `held_only`, only its held ones, for a key that moves on from the layer rather than
-/// closing it (Tab out of a caret menu, [`layers::close_on_tab`]).
+/// if that is gone (the layer manager calls this). [`Closing`] guards the key that closed it. `held_only` limits
+/// suppression to held repeats for a handoff inside the layers, such as Tab out of a caret menu.
 pub(crate) fn return_to(
     target: ReturnTo,
     opener: Option<&WeakFocusHandle>,

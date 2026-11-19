@@ -226,10 +226,6 @@ consequences.
   Wayland file manager and pasting into Farhelm can paste its text representation or do nothing instead of attaching the
   file.
 
-- [`enter-falls-through-after-dismiss-or-approval.md`](enter-falls-through-after-dismiss-or-approval.md) — Holding Enter
-  to dismiss an empty quick-launch sequence or answer an approval can submit a line already sitting in the terminal. A
-  second quick Enter can also reach the terminal after an approval card disappears.
-
 - [`terminal-file-requests-can-wait-indefinitely.md`](terminal-file-requests-can-wait-indefinitely.md) — A terminal file
   link can stay at “Checking…” or “Downloading…” indefinitely while the host still appears connected and the rest of
   Farhelm works.

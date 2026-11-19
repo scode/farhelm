@@ -645,25 +645,16 @@ binary reads and the coordinator asks on every Tab and Shift+Tab press, so a cha
 Tab reaches text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every control); on Linux,
 every control. Key presses count toward "the user moved on" where GPUI shows every keystroke before any binding runs: a
 key a binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key
-listener. A key press that closes a layer hands focus to something else (the launcher's Launch returns it to the
-terminal), so its repeats would land there as new presses. The coordinator swallows them instead, at the same point: the
-same key, still held from that press, or pressed again within 500 ms of it, 500 ms included (the old app's submit-repeat
-interval), is neither counted nor delivered, so a repeated Enter on Launch neither stops the launch from opening its
-session nor reaches the terminal's program. A dismissal (Escape, or a dialog's Close or Cancel pressed with Enter or
-Space, which go through the same dismissal) is no exception: once it has closed the last layer holding focus, the same
-key pressed again within the interval is swallowed too, so a double-tapped Escape cannot interrupt the agent in the
-terminal (the maintainer decided this on 2026-11-16; until then a dismissal kept only its held repeats). Three kinds of
-close keep only their held repeats. A close that leaves a layer holding focus open (Enter choosing in a select's list
-inside the launcher, Escape closing a dialog over another) returns focus to a control the user is still working in,
-where the next press is a new one (Enter on Launch; Escape closing the dialog below, so pressing Escape twice still
-backs out of two layers, while a held Escape closes one). A close after which a layer opens (a menu item opening its
-question) keeps only its held repeats as well, since the new layer's start is where the next press is meant to go
-("Delete then Enter deletes"). And Tab or Shift+Tab out of a session header's caret menu, which closes it and returns
-focus to the caret (`layers::close_on_tab`), keeps only its held repeats, since the next Tab is meant to go on from the
-caret. Any other key press or a click ends the closing press's repeats. The press is recorded before anything acts on
-the key, so a layer the key capture closes (its handler runs inside the keystroke interceptor) is taken as closed by
-that press. GPUI shows no key release before bindings run, and needs none here: a held repeat is marked as one, and only
-a fresh press follows a release.
+listener. After closing the last layer with Escape, the interceptor swallows a second tap within 500 ms, including the
+endpoint, so a double tap cannot interrupt the agent in its terminal. A fresh Escape can dismiss the next layer if one
+stayed open or opened in the meantime. A fresh Enter goes to the new focus, where a control such as a confirmation
+button applies its own activation rules. For Enter and the other keys the coordinator keeps a held repeat from crossing
+the focus handoff (the answering Enter's auto-repeat must not submit a terminal's draft), including a held Tab when a
+caret menu closes. Any other fresh key press or a click ends the guard.
+
+The press is recorded before anything acts on the key, so a layer the key capture closes (its handler runs inside the
+keystroke interceptor) is taken as closed by that press. GPUI shows no key release before bindings run, and needs none
+here: a held repeat is marked as one, and only a fresh press follows a release.
 
 The focus ring, and the hover help focus shows, follow the old `:focus-visible`: they show while the user's latest press
 in the window was a key rather than a mouse button (`focus::last_input_was_keyboard`). A key press sets that and a press

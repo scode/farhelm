@@ -1368,9 +1368,7 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
 
 /// Close the menu `id` because Tab or Shift+Tab left it, for a menu whose own rule sends Tab back to its toggle rather
 /// than keeping it inside (SPEC.md for the session header's caret menus: "Escape or Tab closes the menu and returns
-/// focus to its caret"). As [`close`], except that the focus coordinator then swallows only the key's held repeats: a
-/// plain close would also swallow a second Tab pressed within the repeat interval, which the caret rule means to go on
-/// from the toggle to the next control.
+/// focus to its caret"). A held Tab stops at the caret. The next fresh Tab moves to the next control.
 pub fn close_on_tab(id: LayerId, window: &mut Window, cx: &mut App) {
     close_as(id, CloseCause::TabbedOut, window, cx);
 }
@@ -1395,8 +1393,8 @@ enum CloseCause {
 
 /// [`close`], saying why the layer closes ([`CloseCause`]). When focus is returned, the cause also decides which repeats
 /// of the key press that closed it the focus coordinator swallows (see [`focus::return_to`]): for `Closed` and
-/// `Dismissed`, the press's held repeats and its fresh ones within the repeat interval, unless a layer that holds focus
-/// is left open or one opens next (then the held ones only); for `TabbedOut`, its held repeats only. A close that
+/// `Dismissed`, the press's held repeats (except Enter) and a fresh Escape within the repeat interval if no layer
+/// remains open or opens next. For `TabbedOut`, only held repeats can be swallowed. A close that
 /// returns no focus swallows nothing, which is always so for `Left`.
 fn close_as(id: LayerId, why: CloseCause, window: &mut Window, cx: &mut App) {
     close_taking(why, window, cx, |layers| {
