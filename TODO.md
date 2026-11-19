@@ -50,7 +50,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the GPUI app. It needs a hit test in the layer manager, which today cannot see popovers that pass the pointer through
   (`layers::Popover::passes_pointer`; see `terminal/disclosure.rs`, `fully_visible`). Parity rows in
   `docs/gpui/parity/terminal.md`: terminal-files' covered-hover cases, terminal-links' covered-display refusal,
-  grid-attach 1099 and 1464.
+  grid-attach 1099 and 1464. Plan: `plans/queue/covered-link-refusal.md`.
 
 - **An exited session without a terminal keeps "reconnecting" forever.** When a session's terminal host has died (for
   example after a container was stopped and started from outside Farhelm), the session correctly reads "Exited", but its
@@ -60,12 +60,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   terminal" fact to the session row (protocol and supervisor), and have the pane show a no-terminal card with Restart
   and Replace instead of mounting a terminal, reusing the interrupted card's path. This widens SPEC's rule for sessions
   with no terminal after a reboot. Rejected: a new disconnect reason that stops the retrying, because the same refusal
-  may be transient while a Restart relaunches the terminal.
+  may be transient while a Restart relaunches the terminal. Plan: `plans/queue/exited-session-no-terminal.md`.
 
 - **Shift+drag across sidebar rows should mark them too.** Today only Shift+click marks a range (from the open session
   to the clicked row), and holding Shift while dragging the pointer over several sessions marks nothing. The maintainer
   has reached for Shift+drag several times expecting it to multi-select. Make a Shift+drag over the session list mark
-  the rows it sweeps, consistent with Shift+click's range rule, and update SPEC's marking gestures to match.
+  the rows it sweeps, consistent with Shift+click's range rule, and update SPEC's marking gestures to match. Plan:
+  `plans/queue/shift-drag-marking.md`.
 
 - **A maximized Mac window grows into place on launch.** When the desktop app was maximized (zoomed) at quit, the next
   launch restores that, but the window first appears at its ordinary size and then visibly animates to full size for
@@ -101,6 +102,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hero and docs-screenshot capture run on the GPUI screenshot tooling; the demo video (`scripts/readme-video.sh`,
   `docs/readme-video/`) still drives the deleted browser UI. Its `intent.md` is still the throwaway sample and needs a
   real design first. The rebuild then needs an in-app overlay for the pointer, captions and cards, and a frame recorder.
+  Plan: `plans/queue/demo-video-capture.md`.
 
 - **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
   the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
@@ -118,28 +120,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
   repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
   source's actual directory, while Clone starts on a managed checkout) and the current release does the same, but it
-  confuses users. Look into how to make it not confusing. Unrelated to the GPUI migration.
+  confuses users. Look into how to make it not confusing. Unrelated to the GPUI migration. Plan:
+  `plans/queue/replace-with-checkout-hint.md`.
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
   and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
   Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
   link, the tunnel pill, and the approval card's Tunnel and open, with the same consent and refusal rules as the Mac.
-
-- **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
-  narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
-  that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
-  it. The plan, with the blocked question and the decision, is
-  https://github.com/scode/farhelm/blob/d8f02862ce4014255d02d4383910999b61c85dbb/plans/queue/release-advisories.md.
-  Automatic replacement was blocked by what execution found about supervisor startup: a supervisor claims its state and
-  migrates its session database before it checks tmux and before it records its running version. If startup fails or
-  stops in that window, the database is newer than the record says (or there is no record), so an update check that
-  trusts the record could install an older release that then refuses the database. The ordering exists in shipped
-  releases (v0.28.2 included) and was reproduced with a migration from schema 30 to 31 followed by a tmux refusal while
-  the record still named 0.23.0. The follow-up: have a supervisor durably record the version it is about to run before
-  it can migrate any state, handle compatibility conservatively when it cannot be established (existing installations
-  and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
-  inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
-  with a focused review of supervisor startup and interruption before implementing.
 
 - **Recognize Muse Code questions and approvals.** Detect questions and approval dialogs during a conversation from real
   Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
@@ -180,14 +167,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     per container and covers only podman's default storage.
   - Farhelm manages a container session's own container. This entry covers containers an agent starts itself, in any
     session.
-
-- **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
-  stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
-  is cut from main and the tag-triggered workflow builds every target afresh, so stable binaries differ from the
-  approved RC's even when nothing changed. First find out what prevents reusing the RC builds: whether cargo-dist (the
-  generated `release.yml`, driven by `dist-workspace.toml`) can publish the RC's artifacts under the stable version, and
-  what the release commit, version settlement, curated notes and the maintainer's signing of the six payloads demand of
-  the build.
 
 - **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
   for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
@@ -242,20 +221,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
-- **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
-  The page already keeps the scrollback it shows and scrolling sends nothing
-  (`crates/farhelm-ui/assets/grid-terminal.js`, "Scrollback"), but that history arrives as `history` messages from the
-  supervisor's emulator, one message per line that scrolled off, each line at the width it was written
-  (`crates/farhelm-proto/src/grid.rs`, "History"), and a `history_reset` rebuilds it whenever the emulator resizes.
-  Consider dropping that half of the stream: the grid client appends the rows a `frame.shift` pushed off the top to a
-  back buffer of its own, keeping each line at the size it was shown at (the terminal's current size, not reflowed by a
-  later resize), so scrolling never depends on the supervisor re-reading its emulator. Two constraints decide whether
-  that works. Flow control skips screen frames while a client is behind but still sends every line that scrolled off as
-  history, which is how it never loses output (SPEC.md), so a buffer fed only by the frames the client saw would have
-  gaps; and a client attaching to a terminal that already has output has no local history to show. Both need an answer
-  before the shape is settled. Related to, but not the same as, the grid stream's binary encoding (grid-binary-stream,
-  landed 2026-11-09), which kept the split and changed how the same lines are encoded.
-
 - **Enforce that one helm owns each supervisor.** SPEC.md (Topology) says the helm that registers a host owns its
   supervisor and every session on it, and that neither moves between helms, but nothing enforces that: a supervisor
   treats every full-authority connection alike, so a second helm can register a host another helm owns and drive its
@@ -265,30 +230,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   helm still never strands a host; and the stored identity has to stay the same across everything that does not change
   the owner (restarts, updates, reconnects, and the desktop app and a standalone helm taking turns on one state
   directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
-  because the supervisor's routing was built on the assumption that several helms might share one supervisor.
-
-- **Look into the GPUI frame-source patch further.** The new desktop app carries a patch to its vendored GPUI that keeps
-  GPUI's older macOS frame source (`CVDisplayLink`) on macOS 14 and later, instead of the `CAMetalDisplayLink` GPUI uses
-  there by default. Without it, a key press took about 55 ms to reach the screen on the test Mac VM, against about 35 ms
-  in the old app and about 30 ms with the patch, because the newer source presents a frame about three refreshes after
-  it was drawn. The patch costs idle CPU (about 0.4% instead of 0.1%) and gives up macOS choosing the frame rate
-  (ProMotion displays, low-power mode). Kept on 2026-11-13; look into whether Apple or GPUI may eventually drop the
-  older path, whether the newer source can be made as fast (setting its frame latency to 1 made no difference on the
-  VM), and how it behaves on real hardware with a ProMotion display.
-
-- **Revisit drawing inactive windows at full frame rate.** The new desktop app draws a window at full rate even when
-  another app is in front, matching the old app, instead of GPUI's default cap of 30 frames a second. That keeps output
-  scrolling smoothly in a window you are watching but not using, at the cost of more drawing (and battery) while output
-  scrolls in a background window, which is common while agents work. Decided on 2026-11-13 to match today; revisit the
-  tradeoff.
-
-- **Revisit the KDE-blur dependency decision.** GPUI's Linux backend pulls in `wayland-protocols-plasma`, a crate
-  declared MIT that bundles KDE Wayland protocol XML files licensed LGPL-2.1-or-later, which are compiled into generated
-  bindings in the Linux desktop app. GPUI uses it only as a fallback for blurring a window's background on older KDE
-  Plasma, and Farhelm never asks for a blurred window. Decided on 2026-11-13: remove it with a small patch to the
-  vendored GPUI if that needs no horrible hacks, otherwise accept it as protocol definitions rather than code. Revisit
-  whichever was done, and whether the license check should catch GPL-family files bundled inside a crate whose declared
-  license is permissive.
+  because the supervisor's routing was built on the assumption that several helms might share one supervisor. Plan:
+  `plans/queue/one-helm-per-supervisor.md`.
 
 - **Cut the new desktop app's idle CPU with a large running fleet.** With the session list now drawing only the rows on
   screen, idle CPU no longer depends on how many sessions are listed, and typing stays at about 30 ms at any fleet size.
@@ -378,7 +321,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   should refuse both up front with a clear message, the SPEC_impl.md known-gaps entries go, and the three tests that
   were lost with tmux come back on terminal hosts. The same plan also lost, without porting, the check that memory stays
   flat while a slow viewer stalls and two file-upload tests beside a busy or deleted session; port those with this.
-  Recorded by the maintainer on 2026-11-18 from the plan's review.
+  Recorded by the maintainer on 2026-11-18 from the plan's review. Plan: `plans/queue/unusable-folder-refusals.md`.
 
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
@@ -420,7 +363,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
   field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete
   to a model at all. Asked for by the maintainer on 2026-11-18 while planning `model-families`, which records the latest
-  model of each family that this needs.
+  model of each family that this needs. Plan: `plans/queue/model-family-shorthand.md`.
 
 ### Tensorlake
 
@@ -515,6 +458,67 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
   the service does not present as localhost? TBD. Pinggy? TBD.
+
+- **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
+  narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
+  that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
+  it. The plan, with the blocked question and the decision, is
+  https://github.com/scode/farhelm/blob/d8f02862ce4014255d02d4383910999b61c85dbb/plans/queue/release-advisories.md.
+  Automatic replacement was blocked by what execution found about supervisor startup: a supervisor claims its state and
+  migrates its session database before it checks tmux and before it records its running version. If startup fails or
+  stops in that window, the database is newer than the record says (or there is no record), so an update check that
+  trusts the record could install an older release that then refuses the database. The ordering exists in shipped
+  releases (v0.28.2 included) and was reproduced with a migration from schema 30 to 31 followed by a tmux refusal while
+  the record still named 0.23.0. The follow-up: have a supervisor durably record the version it is about to run before
+  it can migrate any state, handle compatibility conservatively when it cannot be established (existing installations
+  and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
+  inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
+  with a focused review of supervisor startup and interruption before implementing.
+
+- **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
+  stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
+  is cut from main and the tag-triggered workflow builds every target afresh, so stable binaries differ from the
+  approved RC's even when nothing changed. First find out what prevents reusing the RC builds: whether cargo-dist (the
+  generated `release.yml`, driven by `dist-workspace.toml`) can publish the RC's artifacts under the stable version, and
+  what the release commit, version settlement, curated notes and the maintainer's signing of the six payloads demand of
+  the build.
+
+- **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
+  The page already keeps the scrollback it shows and scrolling sends nothing
+  (`crates/farhelm-ui/assets/grid-terminal.js`, "Scrollback"), but that history arrives as `history` messages from the
+  supervisor's emulator, one message per line that scrolled off, each line at the width it was written
+  (`crates/farhelm-proto/src/grid.rs`, "History"), and a `history_reset` rebuilds it whenever the emulator resizes.
+  Consider dropping that half of the stream: the grid client appends the rows a `frame.shift` pushed off the top to a
+  back buffer of its own, keeping each line at the size it was shown at (the terminal's current size, not reflowed by a
+  later resize), so scrolling never depends on the supervisor re-reading its emulator. Two constraints decide whether
+  that works. Flow control skips screen frames while a client is behind but still sends every line that scrolled off as
+  history, which is how it never loses output (SPEC.md), so a buffer fed only by the frames the client saw would have
+  gaps; and a client attaching to a terminal that already has output has no local history to show. Both need an answer
+  before the shape is settled. Related to, but not the same as, the grid stream's binary encoding (grid-binary-stream,
+  landed 2026-11-09), which kept the split and changed how the same lines are encoded.
+
+- **Look into the GPUI frame-source patch further.** The new desktop app carries a patch to its vendored GPUI that keeps
+  GPUI's older macOS frame source (`CVDisplayLink`) on macOS 14 and later, instead of the `CAMetalDisplayLink` GPUI uses
+  there by default. Without it, a key press took about 55 ms to reach the screen on the test Mac VM, against about 35 ms
+  in the old app and about 30 ms with the patch, because the newer source presents a frame about three refreshes after
+  it was drawn. The patch costs idle CPU (about 0.4% instead of 0.1%) and gives up macOS choosing the frame rate
+  (ProMotion displays, low-power mode). Kept on 2026-11-13; look into whether Apple or GPUI may eventually drop the
+  older path, whether the newer source can be made as fast (setting its frame latency to 1 made no difference on the
+  VM), and how it behaves on real hardware with a ProMotion display.
+
+- **Revisit drawing inactive windows at full frame rate.** The new desktop app draws a window at full rate even when
+  another app is in front, matching the old app, instead of GPUI's default cap of 30 frames a second. That keeps output
+  scrolling smoothly in a window you are watching but not using, at the cost of more drawing (and battery) while output
+  scrolls in a background window, which is common while agents work. Decided on 2026-11-13 to match today; revisit the
+  tradeoff.
+
+- **Revisit the KDE-blur dependency decision.** GPUI's Linux backend pulls in `wayland-protocols-plasma`, a crate
+  declared MIT that bundles KDE Wayland protocol XML files licensed LGPL-2.1-or-later, which are compiled into generated
+  bindings in the Linux desktop app. GPUI uses it only as a fallback for blurring a window's background on older KDE
+  Plasma, and Farhelm never asks for a blurred window. Decided on 2026-11-13: remove it with a small patch to the
+  vendored GPUI if that needs no horrible hacks, otherwise accept it as protocol definitions rather than code. Revisit
+  whichever was done, and whether the license check should catch GPL-family files bundled inside a crate whose declared
+  license is permissive.
 
 ### Tensorlake
 
