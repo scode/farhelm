@@ -528,7 +528,7 @@ impl Supervisor {
             container.revoke().map_err(TeardownError::Sweep)?;
             container.remove().await.map_err(TeardownError::Sweep)?;
         }
-        reap_process_tree(
+        let reaped = reap_process_tree(
             &self.seams.scopes,
             units,
             root_identity.into_iter().chain(host_roots),
@@ -624,10 +624,10 @@ impl Supervisor {
         // once the row removal has committed (see the
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
-        // Filled by the archive decisions below: notices for the reply, and
-        // the checkout rows Delete gave up archiving, which its final
-        // transaction releases instead of retiring.
-        let mut notices: Vec<String> = Vec::new();
+        // Podman's advisory failure rides the Delete reply because the
+        // session's notification history goes with its row. The archive
+        // decisions below add their own notices and checkout releases.
+        let mut notices: Vec<String> = reaped.podman_notice().into_iter().collect();
         let mut archived = false;
         let mut released: Vec<String> = Vec::new();
         // Archives a `Discard` Delete moved into the trash: the final

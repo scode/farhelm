@@ -42,6 +42,8 @@
 //!   old terminals (`super::core::old_terminals`), once for each session
 //!   whose agent it found in one, when the reload converts that agent to
 //!   interrupted.
+//! - [`NotificationKind::PodmanStopFailed`]: Stop, Restart and tab close,
+//!   when Podman cannot finish a container's cleanup before the process reap.
 //!
 //! # The wording rule
 //!
@@ -51,8 +53,9 @@
 //! ability to resume; a corrected selection explains which conversation
 //! an earlier Restart would have resumed instead.
 
-use super::core::Supervisor;
-use crate::store::StoredSessionNotification;
+use super::core::{SessionEntry, Supervisor};
+use super::sweep::Reaped;
+use crate::store::{NotificationAdmission, StoredSessionNotification};
 use farhelm_proto::{AgentKind, ReadinessWording};
 use tracing::warn;
 
@@ -99,10 +102,13 @@ pub(crate) enum NotificationKind {
     /// notice must stay unresolved until the user reads or clears it, across
     /// later starts. Nothing resolves it.
     OldTerminalEnded,
+    /// Podman's cleanup left a container behind while Farhelm was ending
+    /// the agent or a tab. Resuming a conversation does not settle it.
+    PodmanStopFailed,
 }
 
 impl NotificationKind {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
@@ -113,6 +119,7 @@ impl NotificationKind {
         Self::AntigravityPinCorrected,
         Self::OldTerminal,
         Self::OldTerminalEnded,
+        Self::PodmanStopFailed,
     ];
 
     /// Whether Resume becoming available ends this warning's condition.
@@ -130,7 +137,8 @@ impl NotificationKind {
             | Self::MusePinCorrected
             | Self::AntigravityPinCorrected
             | Self::OldTerminal
-            | Self::OldTerminalEnded => false,
+            | Self::OldTerminalEnded
+            | Self::PodmanStopFailed => false,
         }
     }
 
@@ -150,7 +158,8 @@ impl NotificationKind {
             | NotificationKind::MusePinCorrected
             | NotificationKind::AntigravityPinCorrected
             | NotificationKind::OldTerminal
-            | NotificationKind::OldTerminalEnded => false,
+            | NotificationKind::OldTerminalEnded
+            | NotificationKind::PodmanStopFailed => false,
         }
     }
 
@@ -168,6 +177,7 @@ impl NotificationKind {
             NotificationKind::AntigravityPinCorrected => "antigravity_pin_corrected",
             NotificationKind::OldTerminal => "old_terminal",
             NotificationKind::OldTerminalEnded => "old_terminal_ended",
+            NotificationKind::PodmanStopFailed => "podman_stop_failed",
         }
     }
 }
@@ -323,8 +333,28 @@ pub(crate) fn reporter_mismatch_text(cause: ReporterMismatch, captured: bool) ->
 }
 
 impl Supervisor {
+    /// Keep an unresolved warning on the launch the reaper just cleaned.
+    /// Restart records against the old generation before claiming the next.
+    pub(crate) async fn notify_podman_cleanup(
+        &self,
+        entry: &SessionEntry,
+        report: Option<&Reaped>,
+    ) {
+        if let Some(text) = report.and_then(Reaped::podman_notice) {
+            self.notify_session(
+                &entry.info.id,
+                entry.generation,
+                NotificationKind::PodmanStopFailed,
+                &text,
+            )
+            .await;
+        }
+    }
+
     /// Record a notification of `kind` for launch `generation` of session
-    /// `id`, unless that launch already has an unresolved one, and show it.
+    /// `id` and show it. An unresolved warning usually stays as first
+    /// recorded. Podman refreshes it when another cleanup reports different
+    /// containers.
     ///
     /// Best effort, like every diagnostic it replaces: a store failure is
     /// logged and the session carries on. A notification added or reopened
@@ -345,15 +375,22 @@ impl Supervisor {
         if !self.may_record() {
             return;
         }
+        let admission = if kind == NotificationKind::PodmanStopFailed {
+            NotificationAdmission::RefreshChanged
+        } else {
+            NotificationAdmission::Once {
+                unless_captured: kind.requires_no_identity(),
+            }
+        };
         let added = match self
             .store
-            .record_session_notification(
+            .record_notification_with_admission(
                 id,
                 generation,
                 kind.as_str(),
                 text,
                 crate::store::now_unix(),
-                kind.requires_no_identity(),
+                admission,
             )
             .await
         {

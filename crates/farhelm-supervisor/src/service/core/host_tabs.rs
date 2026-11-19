@@ -119,6 +119,7 @@ use crate::hosts::{
     HostTag, HostTerminal, HostTerminalOptions, LiveHost, Liveness, NamedHost, ScanOptions,
     SpawnError, Unavailability,
 };
+use crate::service::sweep::Reaped;
 use crate::service::terminals::{TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP};
 use crate::terminal_process::TerminalProbe;
 
@@ -983,14 +984,17 @@ impl Supervisor {
         } else {
             TabReapAnchor::PaneIfLive
         };
-        self.reap_tab_tree(session_id, &terminal, tab_id, tab.scoped, anchor)
-            .await
-            .map_err(|e| {
-                RequestError::new(
-                    ErrorKind::Internal,
-                    format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
-                )
-            })?;
+        let reaped = self
+            .reap_tab_tree(session_id, &terminal, tab_id, tab.scoped, anchor)
+            .await;
+        self.notify_podman_cleanup(entry, Reaped::from_result(&reaped))
+            .await;
+        reaped.map_err(|e| {
+            RequestError::new(
+                ErrorKind::Internal,
+                format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
+            )
+        })?;
         // The attachment goes before the host: a grid stream watches its host, and would end on its own
         // with "terminal ended" the moment the host does, racing the
         // truthful "tab closed". The tab is being closed whatever the end
@@ -1009,6 +1013,8 @@ impl Supervisor {
                 TabReapAnchor::MarkerOnly,
             )
             .await;
+        self.notify_podman_cleanup(entry, Reaped::from_result(&survivors))
+            .await;
         match ended {
             Ok(()) => {
                 remove_tab_record(&crate::launch::tab_host_record_path(
@@ -1018,7 +1024,7 @@ impl Supervisor {
                 ))
                 .await;
                 forget_host_tab(&entry.session.host_tabs, &tab.host);
-                super::tab_close_cleanup_result(tab_id, survivors)?;
+                super::tab_close_cleanup_result(tab_id, survivors.map(|_| ()))?;
                 info!(session = %session_id, tab = %tab_id, "terminal tab closed");
                 Ok(())
             }

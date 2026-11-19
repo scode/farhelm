@@ -1583,6 +1583,15 @@ pub(crate) struct StoredSessionNotification {
     pub(crate) kind: String,
 }
 
+/// Gate a notification at the same commit that assigns its sequence. Most
+/// kinds describe one condition for a launch. Podman can report a different
+/// container for each cleanup, even while the previous warning is unresolved.
+#[derive(Clone, Copy)]
+pub(crate) enum NotificationAdmission {
+    Once { unless_captured: bool },
+    RefreshChanged,
+}
+
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
 /// (`user_version` 0, SQLite's default for a database that has never set
 /// it) or migrating it forward one step at a time.
@@ -5641,7 +5650,10 @@ impl SessionStore {
                 rusqlite::params![id, generation, conversation, version, pin, replacement, replacement_pin, replacement_version],
             ).context("admitting a conversation and reporting-process pin")?;
             if changed > 0 && let Some((kind, text)) = correction_notification {
-                record_notification_within(&tx, &id, generation, &kind, &text, now_unix(), false)?;
+                record_notification_within(
+                    &tx, &id, generation, &kind, &text, now_unix(),
+                    NotificationAdmission::Once { unless_captured: false },
+                )?;
             }
             tx.commit().context("committing pinned admission and correction notification")?;
             Ok(changed > 0)
@@ -5750,6 +5762,29 @@ impl SessionStore {
         recorded_at: i64,
         unless_captured: bool,
     ) -> anyhow::Result<bool> {
+        self.record_notification_with_admission(
+            id,
+            generation,
+            kind,
+            text,
+            recorded_at,
+            NotificationAdmission::Once { unless_captured },
+        )
+        .await
+    }
+
+    /// A notification that reports distinct events can refresh its one row
+    /// when the text changes. The new sequence prevents the helm's marks on
+    /// the previous report from hiding this one.
+    pub(crate) async fn record_notification_with_admission(
+        &self,
+        id: &str,
+        generation: i64,
+        kind: &str,
+        text: &str,
+        recorded_at: i64,
+        admission: NotificationAdmission,
+    ) -> anyhow::Result<bool> {
         let id = id.to_string();
         let kind = kind.to_string();
         let text = text.to_string();
@@ -5765,7 +5800,7 @@ impl SessionStore {
                         &kind,
                         &text,
                         recorded_at,
-                        unless_captured,
+                        admission,
                     )?;
                     tx.commit()?;
                     Ok(changed)
@@ -6527,18 +6562,22 @@ fn record_notification_within(
     kind: &str,
     text: &str,
     recorded_at: i64,
-    unless_captured: bool,
+    admission: NotificationAdmission,
 ) -> anyhow::Result<bool> {
+    let (unless_captured, refresh_changed) = match admission {
+        NotificationAdmission::Once { unless_captured } => (unless_captured, false),
+        NotificationAdmission::RefreshChanged => (false, true),
+    };
     let reopened = tx.execute(
                         "UPDATE session_notifications SET \
                          seq = (SELECT MAX(seq) + 1 FROM session_notifications WHERE session_id = ?1), \
                          recorded_at = ?4, text = ?5, resolved_at = NULL \
                          WHERE session_id = ?1 AND generation = ?2 AND kind = ?3 \
-                         AND resolved_at IS NOT NULL \
+                         AND (resolved_at IS NOT NULL OR (?7 AND text <> ?5)) \
                          AND EXISTS (SELECT 1 FROM sessions WHERE id = ?1 AND generation = ?2 \
                                      AND (?6 = 0 OR captured_conversation IS NULL))",
-                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured],
-                    ).context("reopening a session notification")?;
+                        rusqlite::params![id, generation, kind, recorded_at, text, unless_captured, refresh_changed],
+                    ).context("refreshing a session notification")?;
     // Reopening adds no row, so it must not trim history.
     if reopened > 0 {
         return Ok(true);

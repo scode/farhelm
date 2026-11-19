@@ -76,8 +76,8 @@ use super::launch_artifacts::{
 };
 use super::session_hosts::SessionHosts;
 use super::sweep::{
-    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit,
-    reap_process_tree, stop_live_agent,
+    Reaped, ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor,
+    launch_scope_unit, reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, TerminalId, join_forwarder, resolve_terminal_for_close,
@@ -12504,7 +12504,7 @@ impl Supervisor {
             // shell that has been happily running across the restart.
             // The programs of earlier host starts the settle above found
             // running are rooted into the same sweep.
-            reap_process_tree(
+            let reaped = reap_process_tree(
                 &self.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
                 outstanding,
@@ -12514,8 +12514,10 @@ impl Supervisor {
                 // survivors is the "alongside" SPEC.md forbids.
                 ScopeKillFailure::Refuse,
             )
-            .await
-            .context("reaping the prior run's leftover descendants before relaunching")?;
+            .await;
+            self.notify_podman_cleanup(&entry, Reaped::from_result(&reaped))
+                .await;
+            reaped.context("reaping the prior run's leftover descendants before relaunching")?;
         }
 
         // A new host starts from the previous terminal's history, read here,
@@ -14158,7 +14160,7 @@ impl Supervisor {
         tab_id: &str,
         scoped: bool,
         anchor: TabReapAnchor,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Reaped> {
         let root_identity = match anchor {
             TabReapAnchor::PaneIfLive => match terminal
                 .probe()
@@ -14187,7 +14189,7 @@ impl Supervisor {
         tab_id: &str,
         scoped: bool,
         root_identity: Option<(u32, u64)>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Reaped> {
         // Which provenance the tab's scope name gets decides what a negative
         // "no user manager" verdict does to it. A tab that was opened scoped
         // gets the scope manager's one re-probe, and if the manager still

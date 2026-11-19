@@ -31,7 +31,9 @@ use super::launch_artifacts::{
 };
 use super::listing::list_all;
 use super::status::entry_info;
-use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent};
+use super::sweep::{
+    Reaped, ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent,
+};
 use super::teardown::TeardownError;
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
@@ -1113,7 +1115,7 @@ async fn handle_stop_session(
             //
             // Agent cleanup stays separate from tab closes below. The live
             // agent helper is shared with Restart, which must keep tabs.
-            if let Err(e) = reap_process_tree(
+            let reaped = reap_process_tree(
                 &sup.seams.scopes,
                 ScopeUnits::recorded(entry.scope.clone()),
                 None,
@@ -1125,8 +1127,10 @@ async fn handle_stop_session(
                 // "Lifecycle operations").
                 ScopeKillFailure::Refuse,
             )
-            .await
-            {
+            .await;
+            sup.notify_podman_cleanup(&entry, Reaped::from_result(&reaped))
+                .await;
+            if let Err(e) = reaped {
                 // The sweep itself failed (not just "nothing was
                 // found to kill") — this is not a false success.
                 // See `ControlMsg::StopSession`'s docs: a caller
