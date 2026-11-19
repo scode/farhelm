@@ -5,10 +5,17 @@ sidebar:
   order: 4
 ---
 
+import Screenshot from '../../../../components/Screenshot.astro';
+
 A session's terminal is the agent's own terminal: you type to the agent exactly as you would if you had started it in a
 terminal yourself, and everything it prints shows up here. Farhelm does not sit between you and the agent's prompts.
 
 ## Session details and actions
+
+<Screenshot
+  name="work-in-a-session/header"
+  alt="The slim bar under the terminal with the session's status, name, host, age, directory, and command, and the copy-on-click directory explained."
+/>
 
 The slim bar under the terminal shows the session's status, name and host, followed by its age, directory, and command.
 The host has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are
@@ -17,7 +24,7 @@ mark after its age, naming its repository; hover it to see where the checkout is
 last session using it.
 The **Sessions** section in Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to
 match its host.
-Click the directory or command to copy it; your home directory appears as `~`.
+The directory shows your home directory as `~`.
 
 The terminal tabs and action buttons share the row above the terminal. The buttons at its right end stop, restart, replace,
 clone, and delete the session; the arrows beside **Restart** and **Replace** open menus that also offer **Restart
@@ -27,7 +34,12 @@ button or Cmd+Q.
 
 ## Open a shell beside the agent
 
-The agent's own terminal is the first tab, **Agent**. Click **+** after the tabs to open a shell. Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
+<Screenshot
+  name="work-in-a-session/tabs"
+  alt="The tab strip with the Agent tab and the new-terminal button (+) after the tabs explained."
+/>
+
+Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
 Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
@@ -64,9 +76,14 @@ Some programs print a link under text of their own; hovering over one of
 those shows where it really goes, and Farhelm warns you when the text is itself a web address that names a different
 place.
 
-To bring a file back from the session's host, hover over its path in the terminal. The hover shows the host, the full
-path and the file's size; click the path to download it. Farhelm saves it into Downloads, chooses a new name if needed,
-and tells you where it went. A failed transfer leaves no partial file.
+To bring a file back from the session's host, hover over its path in the terminal.
+
+<Screenshot
+  name="work-in-a-session/download-hover"
+  alt="Hovering over a file path in the terminal, showing the host, full path, and size, with the hover explained."
+/>
+
+A click saves it into Downloads, chooses a new name if needed, and tells you where it went. A failed transfer leaves no partial file.
 
 **Cmd-click** on your Mac (**Ctrl-click** on Linux) also opens the saved copy in its default app.
 By default, Markdown, text and JSON files and common image types (PNG, JPEG, GIF, WebP, BMP, AVIF) open; other types

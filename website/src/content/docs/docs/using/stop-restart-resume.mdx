@@ -5,15 +5,21 @@ sidebar:
   order: 5
 ---
 
+import Screenshot from '../../../../components/Screenshot.astro';
+
 A session outlives its agent. Stopping the agent, or a reboot ending it, leaves the session in the list, ready to start
 again; after a stop its terminal stays readable too. Only deleting a session removes it.
 
 ## The header's actions
 
-The action buttons share the row above the terminal with its tabs: **Stop**, **Restart**, **Replace**, **Clone** and
-**Delete**, at its right end. The session's name, host, and other details are in the bar below the terminal.
-**Restart** and **Replace** each have an arrow beside them that opens a menu with the plain action and **Restart with…**
-or **Replace with…**.
+The action buttons share the row above the terminal with its tabs. The session's name, host, and other details are in
+the bar below the terminal. **Restart** and **Replace** each have an arrow beside them that opens a menu with the plain
+action and **Restart with…** or **Replace with…**.
+
+<Screenshot
+  name="stop-restart-resume/header-actions"
+  alt="The action buttons at the right of the row above the terminal, with stop, restart, replace, and clone explained."
+/>
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
 conversation it can resume, because the agent cannot report one or none was captured, **Restart** is greyed out and
@@ -65,6 +71,11 @@ launches; [Confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-la
 
 ## Stop or delete
 
+<Screenshot
+  name="stop-restart-resume/row-menu"
+  alt="A session's menu with stop and delete explained."
+/>
+
 Both are in a session's menu in the [session list](/docs/using/session-list/) and at the right of the row above the
 terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
 list, a session that has already ended and has no shell tabs open is deleted at once.
@@ -79,8 +90,8 @@ marked sessions works the same way, one session at a time. Their Suspend,
 Resume and Stop and suspend controls act on that environment. The earlier experimental containerized sessions support
 [Delete only](/docs/agents/containerized-sessions/#earlier-containerized-sessions).
 
-**Stop** ends the agent and closes all of the session's shell tabs. With tabs open, it
-asks you to confirm closing them. A tab Farhelm cannot close is named in a notice; the other tabs still close.
+With shell tabs open, **Stop** asks you to confirm closing them. A tab Farhelm cannot close is named in a notice; the
+other tabs still close.
 Jobs you run under your own tmux inside a session can keep running afterwards, as they would outside Farhelm; the tmux
 server itself ends.
 **Restart** leaves shell tabs running, as does an agent exiting on its own. You can open another tab after Stop.

@@ -5,14 +5,23 @@ sidebar:
   order: 2
 ---
 
+import Screenshot from '../../../../components/Screenshot.astro';
+
 A launch template is a set of [session launcher](/docs/using/start-a-session/) choices saved under a name. It holds
 only the choices you put in it, so templates combine: one can pick your usual agent and model, another the host and
 directory of a project, and applying both sets up the whole launch.
 
 ## Make a template
 
-Open **Templates** with its button beside **+** (New session) above the session list. The dialog lists your templates
-beside an editor: choose a template to edit it, or **+ New template** to start another.
+<Screenshot
+  name="launch-templates/templates-button"
+  alt="The Templates button beside + (New session) above the session list, which opens Templates."
+/>
+
+<Screenshot
+  name="launch-templates/panel"
+  alt="The Templates list: choose a template to edit it, or use + New template to start another."
+/>
 
 Choose **+ New template**, give it a unique name without spaces or other whitespace, then choose **Switches launcher to**: **Agent**, **Command**, or
 **Don't switch**. An agent or command template opens that tab when you apply it. **Don't switch** keeps the current tab
@@ -162,6 +171,11 @@ immediately from the session list without the prefix.
 When you have set up a launch in **New**, **Clone** or **Restart with**, choose **Save as template**, beside **Reset
 choices**.
 
+<Screenshot
+  name="launch-templates/save-as-template"
+  alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and Save explained."
+/>
+
 Agent, model and effort choices are checked when set, as are an initial prompt you typed and command choices. Approvals
 and a wrapper prefix are checked when you chose them; a host and directory only when you picked or typed them. A session
 name is checked after you type it or apply a template that sets it.
@@ -172,12 +186,16 @@ The session-name row offers **Base name** and **Fixed name** too. A name you typ
 a template keeps that template's choice. Saving a numbered base keeps the original name: `app-review-2` is saved as
 `app-review`, ready to find the next free checkout when you use it again.
 
-The template keeps the current **Agent** or **Command** tab and only the choices you check. Saving closes the launcher
-and opens the new template in **Templates**. **Cancel** or Escape returns to the setup without saving. **Save as
-template** is not offered in **Replace with**, for a session in a container or sandbox, or when **Runs on** is **New
-container** or **New sandbox**.
+The template keeps the current **Agent** or **Command** tab and only the choices you check. **Cancel** or Escape
+returns to the setup without saving. **Save as template** is not offered in **Replace with**, for a session in a
+container or sandbox, or when **Runs on** is **New container** or **New sandbox**.
 
 ## Edit a template
+
+<Screenshot
+  name="launch-templates/edit-form"
+  alt="codex-deep selected for editing, with its agent switch, Codex, model, effort, add and remove controls, and Save button."
+/>
 
 Choose a template's row to open its editor. **Duplicate** opens an unsaved copy with a new name. Changes are saved only
 when you choose **Save**, which is greyed out until there is something to save; leaving an edited template asks
@@ -201,9 +219,17 @@ template never changes a session that already started from it.
 
 ## Apply templates in the launcher
 
-In the session launcher, type `tl:` in the search box to list your templates, or `tl:` and part of a name to narrow
-them, then pick one to apply it. Templates apply in the order you choose them, and where two set the same choice, the
-later one wins. A template only fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
+<Screenshot
+  name="launch-templates/apply"
+  alt="The launcher's search box with tl: typed, listing the three templates."
+/>
+
+<Screenshot
+  name="launch-templates/applied"
+  alt="The launcher after applying codex-deep and then api-repo, launching Codex on build-box in ~/src/api."
+/>
+
+Templates apply in the order you choose them, and where two set the same choice, the later one wins. A template only fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
 by hand as usual.
 
 You can also press the **⚡** shortcut, a bound number key, or a completed launch sequence while New, Clone, Replace
