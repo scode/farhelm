@@ -916,10 +916,6 @@ consequences.
   An explicitly chosen local alias equal to this machine is rewritten on full-name surfaces even though its short label
   preserves it.
 
-- [`rail-tooltip-merges-direction-boundaries.md`](rail-tooltip-merges-direction-boundaries.md) — A composite rail
-  tooltip can group host and destination text differently from their separately isolated visible values; actual
-  right-to-left rendering remains unverified.
-
 - [`keyboard-overview-omits-in-sequence-number-action.md`](keyboard-overview-omits-in-sequence-number-action.md) — The
   keyboard overview calls number chords Launch without explaining that, in a typed sequence, they commit the unfinished
   word and queue the binding.

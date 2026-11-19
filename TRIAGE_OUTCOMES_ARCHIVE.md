@@ -23927,3 +23927,17 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `pstzrwmumrryvxqznsxkwvyzykvpyumu`, bookmark
   `plan/gui-ux-desktop-fixes/06-sentence-case-sweep-leaves-authored`,
   [PR #4247](https://github.com/scode/farhelm/pull/4247/changes).
+
+## rail-tooltip-merges-direction-boundaries.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Host tooltips join
+  host text with app words as plain text. SPEC_impl "Host-supplied text": host text is never concatenated with app words
+  outside a host sentence. Confirmed in three call sites. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: build them as host sentences (~30-50). Size gate: about 100 lines of diff (code, tests
+  and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks
+  and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `uzxuwxrkuunuzxtmlxmvrxktmozzyslo`, bookmark
+  `plan/gui-ux-desktop-fixes/07-rail-tooltip-merges-direction`,
+  [PR #4248](https://github.com/scode/farhelm/pull/4248/changes).

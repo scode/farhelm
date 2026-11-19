@@ -103,7 +103,7 @@ use super::menu::LAUNCH_PENDING;
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, IconButton, ListRow, Tier};
 use crate::focus::{self, Mark};
-use crate::host_text::{self, HostSentence, HostText};
+use crate::host_text::{self, HostText};
 use crate::hosts::identity::{host_mark, phase, short_name};
 use crate::hosts::offers::runs_newer_version;
 use crate::hosts::status::{self, HostStatus, Steps, Urgency, host_status};
@@ -686,10 +686,12 @@ fn row_element(
 ) -> AnyElement {
     let id = row.host.id;
     let current = row.steps.as_ref().and_then(|steps| steps.current.as_ref());
-    // The row's name and plain hover help, the old tooltip's words: "<identity>: <state> · <step>; open Hosts for
-    // details". The step is host text, escaped in both.
-    let mut sentence = HostSentence::new(SharedString::from(format!("host-attention-help-{id}")))
-        .text(format!("{}: {}", identity(&row.host), row.words));
+    // The identity and each host-supplied step keep their own direction within the app's status and help words.
+    let mut sentence = identity(
+        &row.host,
+        SharedString::from(format!("host-attention-help-{id}")),
+    )
+    .text(format!(": {}", row.words));
     if let Some(step) = current {
         sentence = sentence.text(" · ").host(step);
     }
