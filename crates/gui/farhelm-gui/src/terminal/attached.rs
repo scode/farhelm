@@ -654,8 +654,9 @@ impl AttachedTerminal {
         #[cfg(any(feature = "agent", test))]
         probe::enroll(cx.weak_entity(), cx);
         super::text_size::enroll(cx.weak_entity(), cx);
-        let tunnels =
-            tunnels.unwrap_or_else(|| cx.new(|cx| Tunnels::new(target.session.clone(), cx)));
+        let tunnels = tunnels
+            .or_else(|| Tunnels::while_closing(&target.session, cx))
+            .unwrap_or_else(|| cx.new(|cx| Tunnels::new(target.session.clone(), cx)));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         let transfers = session.read(cx).transfers().cloned();
         let files = cx.new(|_| FileLinks::new(target.session.clone(), transfers.clone()));

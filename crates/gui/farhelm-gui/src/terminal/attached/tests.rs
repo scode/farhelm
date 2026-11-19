@@ -6187,6 +6187,66 @@ fn close_all_closes_in_order_and_keeps_failures_with_their_reasons(cx: &mut Test
     );
 }
 
+/// Close all must attempt its captured listeners after navigation drops the original terminal. Returning while it
+/// closes the second listener shows the active batch and its refusal, so the view never presents an outdated list.
+#[gpui::test]
+fn close_all_finishes_after_the_terminal_leaves_the_pane(cx: &mut TestAppContext) {
+    use farhelm_helm_client::Method;
+
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173), ("t2", 54400, 8080)]);
+    click(h.cx, tunnels::PILL_ID);
+    click(h.cx, tunnels::CLOSE_ALL_ID);
+    let (first, _) =
+        test_support::one_command(&mut h.helm, Method::Delete, "/api/sessions/s1/tunnels/t1");
+    let old = h.owner.downgrade();
+    h.close_terminal();
+    let Harness {
+        cx,
+        mut helm,
+        owner: original,
+        connection,
+        pane,
+        ..
+    } = h;
+    drop(original);
+    settle(cx);
+    assert!(
+        cx.update(|_, _| old.upgrade().is_none()),
+        "navigation released the original terminal"
+    );
+
+    helm.reply(first, 204, None);
+    settle(cx);
+    let (second, _) =
+        test_support::one_command(&mut helm, Method::Delete, "/api/sessions/s1/tunnels/t2");
+    cx.update(|_, cx| {
+        let ui = connection.read(cx).session().cloned().unwrap();
+        let remounted = cx.new(|cx| owner(&ui, Rc::default(), cx));
+        pane.update(cx, |pane, cx| {
+            pane.owner = Some(remounted);
+            cx.notify();
+        });
+    });
+    settle(cx);
+    assert!(
+        helm.commands().is_empty(),
+        "the remounted view uses the batch's listing"
+    );
+    click(cx, tunnels::PILL_ID);
+    assert_eq!(
+        test_support::label(cx, tunnels::CLOSE_ALL_ID).as_deref(),
+        Some("Closing…")
+    );
+    helm.reply(second, 409, Some(serde_json::json!("the listener is busy")));
+    settle(cx);
+    assert!(
+        test_support::label(cx, tunnels::NOTICE_ID)
+            .is_some_and(|notice| notice.contains(":54400 → build-box:8080: the listener is busy"))
+    );
+}
+
 /// SPEC.md: "refreshing the list does not dismiss a close failure", and the notice must be readable while the list is
 /// open, which would otherwise cover it. Specified: after a Close all with one refused tunnel, a failed read of the
 /// listing shows its own reason first and keeps the close failure; while the list is open the notice is drawn inside
