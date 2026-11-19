@@ -2083,19 +2083,6 @@
   change.
 - Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
-## approval-scrollports-lack-keyboard-entry.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Keyboard users can't
-  scroll clipped approval facts. SPEC.md: every scrollable region gets a keyboard tab stop. Confirmed in desktop code.
-  Bucket: other.
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix code: tab stop on overflowing one-line facts (~40-80). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
-
 ## header-questions-follow-anchor-across-sessions.md
 
 - Outcome: `fix code`.

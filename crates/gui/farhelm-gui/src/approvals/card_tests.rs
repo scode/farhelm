@@ -489,7 +489,7 @@ fn a_refused_answer_shows_its_reason_as_an_alert(cx: &mut TestAppContext) {
 // ---- Layout ---------------------------------------------------------------------------------------------------------
 
 /// SPEC.md: labels may stack above values in a narrow pane. At the narrow width a fact's label sits above its value;
-/// in a wide card it sits to the value's left.
+/// in a wide card it sits to the value's left. A clipped value gets named keyboard entry so the user can read its end.
 #[gpui::test]
 fn a_narrow_card_stacks_labels_above_values(cx: &mut TestAppContext) {
     let drawn = Rc::new(RefCell::new(Drawn {
@@ -524,6 +524,21 @@ fn a_narrow_card_stacks_labels_above_values(cx: &mut TestAppContext) {
         value.y > label.y && (value.x - label.x).abs() < px(4.),
         "narrow: value under its label"
     );
+    let id = "approval-req-1-fact-1";
+    assert!(!node(&frame(cx), id).flags.focusable, "short folders fit");
+    if let ApprovalAction::Launch { cwd, .. } = &mut drawn.borrow_mut().approval.action {
+        *cwd = format!("/work/{}/last", "directory/".repeat(16));
+    }
+    let text = |cx: &mut VisualTestContext| texts_within(&frame(cx), id).remove(0);
+    let before = text(cx);
+    assert!(before.visible_bounds.right() < before.bounds.right());
+    assert_eq!(node(&frame(cx), id).label.as_deref(), Some("Folder"));
+    test_support::keys(cx, "tab tab");
+    assert_eq!(test_support::focused_id(cx).as_deref(), Some(id));
+    test_support::keys(cx, "end");
+    let after = text(cx);
+    assert!(after.bounds.left() < before.bounds.left());
+    assert_eq!(after.bounds.right(), after.visible_bounds.right());
 }
 
 /// SPEC.md: the compact From line shows "a quoted, ellipsized session title with its full text on hover". The old app

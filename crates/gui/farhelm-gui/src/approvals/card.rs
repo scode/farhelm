@@ -21,7 +21,7 @@ use std::rc::Rc;
 use farhelm_proto::approvals::ApprovalAnswer;
 use gpui::{
     AnyElement, App, ElementId, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
-    Role, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, Window, div, point,
     prelude::FluentBuilder as _, px, svg,
 };
 
@@ -31,7 +31,10 @@ use super::model::{
     TRUSTED_WORKSPACE, count, sentence_case,
 };
 use crate::assets;
-use crate::components::{Button, HoverHelp, ScrollBox, StatusMark, Tier, copy_button};
+use crate::components::{
+    Button, HoverHelp, Ring, ScrollBox, StatusMark, Tier, copy_button, focus_stop, scroll_handle,
+};
+use crate::focus;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, Palette, metrics};
 
@@ -406,9 +409,15 @@ fn row(card: &Card, index: usize, fact: &Fact, narrow: bool, palette: &Palette) 
 /// A fact's value, laid out as its shape says.
 fn value(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElement {
     let id = SharedString::from(format!("approval-{}-fact-{index}", card.id));
+    let line = |value| FactLine {
+        id: id.clone(),
+        label: fact.label().into(),
+        value,
+    };
+    let identity = |raw: &str| line(host_text::element(&HostText::identity(raw)));
     match fact {
         Fact::Value(_, text) => match fact.shape() {
-            Shape::OneLine => one_line(id, host_text::element(text)),
+            Shape::OneLine => line(host_text::element(text)).into_any_element(),
             Shape::WrappedMono => host_text::element(text)
                 .font_family(assets::TERMINAL_FONT)
                 .into_any_element(),
@@ -424,18 +433,13 @@ fn value(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElemen
                 div().child(sentence_case(words)).into_any_element()
             }
         },
-        Fact::Identity(_, raw) => {
-            one_line(id, host_text::element(&HostText::identity(raw.as_str())))
-        }
+        Fact::Identity(_, raw) => identity(raw).into_any_element(),
         Fact::CopyIdentity(_, raw) => div()
             .flex()
             .items_center()
             .gap(px(6.))
             .min_w_0()
-            .child(div().flex_1().min_w_0().child(one_line(
-                id.clone(),
-                host_text::element(&HostText::identity(raw.as_str())),
-            )))
+            .child(div().flex_1().min_w_0().child(identity(raw)))
             .child(
                 copy_button(
                     SharedString::from(format!("{id}-copy")),
@@ -452,16 +456,64 @@ fn value(card: &Card, index: usize, fact: &Fact, palette: &Palette) -> AnyElemen
     }
 }
 
-/// A value on one line in the monospace face that scrolls sideways within itself (`.approval-fact-scroll`).
-fn one_line(id: SharedString, value: gpui::Div) -> AnyElement {
-    div()
-        .id(ElementId::Name(id))
-        .min_w_0()
-        .overflow_x_scroll()
-        .whitespace_nowrap()
-        .font_family(assets::TERMINAL_FONT)
-        .child(value)
-        .into_any_element()
+/// A clipped approval value gets its own named tab stop. The frame keeps the focus ring outside the moving content.
+#[derive(IntoElement)]
+struct FactLine {
+    id: SharedString,
+    label: SharedString,
+    value: gpui::Div,
+}
+
+impl RenderOnce for FactLine {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let Self { id, label, value } = self;
+        let scroll = scroll_handle(format!("{id}-offset"), window, cx);
+        let clipped = scroll.max_offset().x > px(0.);
+        let measured = scroll.clone();
+        let frame = div()
+            .min_w_0()
+            .font_family(assets::TERMINAL_FONT)
+            .on_children_prepainted(move |_, window, cx| {
+                // The new extent is known after layout, and adding the stop leaves the layout unchanged.
+                if (measured.max_offset().x > px(0.)) != clipped {
+                    window.defer(cx, |window, _| window.refresh());
+                }
+            })
+            .id(ElementId::Name(id.clone()))
+            .child(
+                div()
+                    .id("value")
+                    .flex()
+                    .overflow_x_scroll()
+                    .whitespace_nowrap()
+                    .track_scroll(&scroll)
+                    // The full value has to contribute its width to the scroll extent.
+                    .child(value.flex_none()),
+            );
+        frame.when(clipped, |frame| {
+            let handle =
+                focus::control_handle(ElementId::Name(format!("{id}-focus").into()), window, cx);
+            let ring = Ring::default();
+            let frame = focus_stop(frame, &id, &handle, Role::Region, label, ring, window, cx);
+            frame.on_key_down(move |event, window, cx| {
+                if event.keystroke.modifiers.modified() {
+                    return;
+                }
+                let right = -scroll.max_offset().x;
+                let offset = scroll.offset();
+                let x = match event.keystroke.key.as_str() {
+                    "left" => offset.x + px(40.),
+                    "right" => offset.x - px(40.),
+                    "home" => px(0.),
+                    "end" => right,
+                    _ => return,
+                };
+                cx.stop_propagation();
+                scroll.set_offset(point(x.clamp(right, px(0.)), offset.y));
+                window.refresh();
+            })
+        })
+    }
 }
 
 /// A chip (`.approval-permission-chip`), warning-toned for YOLO and the agent's own setting.
