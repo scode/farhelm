@@ -40,32 +40,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   own. A first answer had allowed one draft of about 200 lines; the second attempt reached 265 lines and still had a
   race (a Suspend clicked while Farhelm records that the sandbox ran can reuse the first pause's time). The alternative
   was holding the six fixes for one larger pause draft.
-- **Revisit allowing gui-ux-enter-and-focus about 200 lines for Enter after a dialog closes.** Decided on the
-  maintainer's behalf by the landing monitor on 2026-11-19, when gui-ux-enter-and-focus blocked: the outcome that sends
-  a quick second Enter after the launcher closes to whatever has focus, instead of dropping it, may use about 200
-  changed lines (a two-line rule change plus its spec updates and replaced tests) instead of about 100. Escape keeps its
-  half-second protection. The alternative was deferring the outcome and keeping the current behavior.
-
-- **Revisit allowing drawn-frame-actions' launcher fix about 240 changed lines.** Decided on the maintainer's behalf by
-  the landing monitor on 2026-11-19, when drawn-frame-actions blocked a second time: the launcher's fix for warnings
-  that change while Restart with's or Replace with's YOLO question is open may use about 240 changed lines in one PR,
-  after a scope review found no way to fit both waits (the host setting's save and the checkout preview) and their tests
-  in about 140. The alternative was splitting the main button's fix from the follow-up answer's fix, each with its own
-  allowance.
-
-- **Revisit splitting drawn-frame-actions' lifecycle work and raising its line limit.** Decided on the maintainer's
-  behalf by the landing monitor on 2026-11-19, when drawn-frame-actions blocked: the remaining work on acting on the
-  session state the user saw is split into two PRs (the session menu and interrupted-session card, then the Restart with
-  and Replace with launcher's follow-up question), the warning stays live with each answer bound to the warning it
-  displayed, and the launcher PR may go to about 140 lines instead of 100 (the correct fix measured 118 to 129). The
-  alternatives were one PR with a higher limit, or freezing the warning while the follow-up is open to fit 100 lines.
 
 ## Near term
 
 - **Audit all the hover positioning in the app.** An example is the hover on the Help menu, which covers the menu: the
   tooltip for "Announcements" opens above that item and hides the "Keyboard shortcuts" entry above it. Fix these hover
   positioning issues across the entire app in one fell swoop, settle some standards, and identify all the hovers that
-  exist.
+  exist. Plan: `plans/queue/tooltip-placement-audit.md`.
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
   resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
@@ -157,7 +138,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     fallback is `podman ps` and checking each listed container's conmon for the session's markers, which costs one read
     per container and covers only podman's default storage.
   - Farhelm manages a container session's own container. This entry covers containers an agent starts itself, in any
-    session.
+    session. Plan: `plans/queue/stop-agent-podman-containers.md`.
 
 - **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
   for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
@@ -245,7 +226,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
     another path than the drawn Close button, also untested.
 
-- **Settings search.** support search in settings dialog.
+- **Settings search.** support search in settings dialog. Plan: `plans/queue/settings-search.md`.
 
 - **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
   preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
@@ -287,7 +268,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   can finish the destruction of a suspended sealed sandbox without waiting for a connection. This is helm-side state
   about a session's end, which SPEC_impl.md forbids; the maintainer wants it anyway, so the change also writes that
   exception into SPEC_impl.md. A process inside an environment writing the seal itself is not a trust boundary the
-  maintainer cares about (decided 2026-11-18). Recorded by the maintainer on 2026-11-18 from the plan's review.
+  maintainer cares about (decided 2026-11-18). Recorded by the maintainer on 2026-11-18 from the plan's review. Plan:
+  `plans/queue/persist-environment-seal.md`.
 
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
@@ -326,7 +308,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   template's summary mid-word ("Destinatic", "Agent launch · C") with no ellipsis; the browser app showed "Destina…".
   (3) A session row's host-and-directory line has no element id, so the Read the session list `row` shot's callout
   points at the row's bottom edge instead of the line; `session-row-<key>-place` on the row's meta line
-  (`session_list/row.rs`) would let it point there.
+  (`session_list/row.rs`) would let it point there. Plan: `plans/queue/docs-shot-desktop-fixes.md`.
 
 - **Support Antigravity.** add support for antigravity. Plan: `plans/queue/antigravity-support.md`.
 
@@ -372,7 +354,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ### Trivial
 
 - **Emacs C-f and C-b in text fields.** emacs c-f and c-b keyboard shortcuts dont work in text fields (c-a and c-e do
-  work). fix it. also consider other common ones like skipping words etc.
+  work). fix it. also consider other common ones like skipping words etc. Plan: `plans/queue/emacs-text-field-keys.md`.
 
 ## Mid term
 
