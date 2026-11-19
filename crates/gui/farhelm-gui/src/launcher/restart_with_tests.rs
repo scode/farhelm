@@ -802,8 +802,8 @@ fn a_command_restarts_yolo_question_speaks_of_the_assertion(cx: &mut TestAppCont
 
 /// The catalog's Retry reads the catalog again without seeding the draft again, so an edit made while the read had
 /// failed is kept and sent (restart-with.spec's "restart with retries the catalog without reseeding its draft").
-/// Specified: the first read fails and says so; Guarded is chosen; Retry's read answers with a's model; the failure
-/// line goes, Guarded stays, and the restart sends it with the stored model and effort.
+/// Retry adds a choice from the returned inventory while keeping the user's permission edit and the stored model
+/// and effort. Watching the error line alone would only show that pressing Retry cleared it.
 #[gpui::test]
 fn the_catalog_retry_keeps_an_edit(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -814,6 +814,12 @@ fn the_catalog_retry_keeps_an_edit(cx: &mut TestAppContext) {
         "the premise: the read failed"
     );
     test_support::click(cx, "launcher-permissions-Guarded");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
+    assert_eq!(
+        name_of(cx, "launcher-effort-Low"),
+        None,
+        "the saved High effort does not provide Low without the catalog"
+    );
     test_support::click(cx, "launcher-catalog-retry");
     super::view_tests::answer_catalog(
         &mut helm,
@@ -821,6 +827,11 @@ fn the_catalog_retry_keeps_an_edit(cx: &mut TestAppContext) {
         Some(json!([{ "id": "gpt-5", "harness": "codex", "efforts": ["high", "low"] }])),
     );
     assert_eq!(name_of(cx, "launcher-catalog-error"), None);
+    assert_eq!(
+        name_of(cx, "launcher-effort-Low").as_deref(),
+        Some("Low"),
+        "Retry's reply supplies Low for the stored model"
+    );
     assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
     let body = pressed(&mut helm, cx).body.expect("a body");
     assert_eq!(

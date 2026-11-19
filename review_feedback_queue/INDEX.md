@@ -835,9 +835,6 @@ consequences.
 - [`uuid-hold-intercepts-terminal-lease.md`](uuid-hold-intercepts-terminal-lease.md) — The destination-authority test's
   global UUID hold can catch late terminal startup instead of the intended launch key.
 
-- [`catalog-retry-test-does-not-witness-inventory.md`](catalog-retry-test-does-not-witness-inventory.md) — The catalog
-  retry regression can pass without proving that the retried catalog response was consumed.
-
 - [`checkout-refusal-conflicts-with-failed-save-rule.md`](checkout-refusal-conflicts-with-failed-save-rule.md) — The
   general failed-Save discard rule does not explain the explicit checkout-refusal exception that retains the draft.
 
