@@ -92,11 +92,9 @@
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it, and card
 //!   help ([`Help::card`]) draws a view of the caller's at a fixed width. The [`tooltip`] submodule holds it, and says
-//!   when it shows and goes. Ordinary help sits against its control, centered above it or else below, as the old
-//!   app placed it; help a control asks to have beside the sidebar
-//!   ([`Hint::beside`]: SPEC.md's session-row hovers and host progress card) sits 6 pixels past the edge the sidebar
-//!   draws ([`beside_edge`]), centered on its control, with a notch pointing back at it and a ring on it, or against
-//!   the control without either in a window too narrow for that. The [`beside`] submodule has the numbers.
+//!   when it shows and goes. [`beside`] places the card after the control and its containing surface record their
+//!   bounds. Menus can use either side of their panel, leaving any open submenu readable. A session row uses the
+//!   sidebar edge and keeps its accent ring. The ordinary above/below rule is the fallback.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
 //! - **Display-only pill slots** ([`show_pill`], [`show_launch_pill`], [`show_terminal_refusal`]). They let a feature draw
@@ -192,6 +190,7 @@ mod tooltip_tests;
 
 pub use beside::beside_edge;
 // The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
+pub(crate) use tooltip::HelpPlacement;
 pub use tooltip::{
     BesideCues, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner, TooltipSide,
     focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed, shown_tooltip,
@@ -241,8 +240,9 @@ pub struct LayerStack {
     focused: Option<EntityId>,
     /// Focus news waiting for the settle after this event, like `round` for the pointer's.
     focus_news: Option<tooltip::FocusNews>,
-    /// The edge help placed beside the sidebar sits against, as the sidebar last drew it ([`beside_edge`]).
-    beside_edge: Option<Anchor>,
+    /// Drawn containers with a right edge their controls can use for help. Popovers supply their surface bounds
+    /// separately because the layer manager already tracks them.
+    help_edges: Vec<Anchor>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
     tooltip_release: Option<Subscription>,
     /// The tooltip waiting out its hover delay: its owner, and the deadline that shows it. Dropping it cancels.
@@ -448,7 +448,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         by_focus: None,
         focused: None,
         focus_news: None,
-        beside_edge: None,
+        help_edges: Vec::new(),
         tooltip_release: None,
         pending_tooltip: None,
         warm: false,
@@ -2418,30 +2418,32 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     }
     if let Some(shown) = &stack.tooltip {
         let card = tooltip_card(shown, window, cx);
-        // An edge's bounds turn `None` only once a frame has ended without drawing it, so asking here gives the same
-        // answer as asking while the frame is laid out, but in the very first frame the sidebar is drawn, before any
-        // row in it can be hovered.
-        let edge = stack
-            .beside_edge
-            .clone()
-            .filter(|edge| edge.drawn_bounds().is_some());
         let focus = stack
             .by_focus
             .as_ref()
             .map(|by_focus| by_focus.focus.clone());
-        let placed = match (shown.beside, edge, focus) {
-            // Help beside the sidebar decides its place as the frame is laid out ([`beside::PlacedBeside`]).
-            (Some(cues), Some(edge), _) => {
-                beside::PlacedBeside::new(shown, cues, edge, card, palette).into_any_element()
+        let placed = match (shown.placement, focus) {
+            (HelpPlacement::Ordinary, Some(focus)) => {
+                beside::PlacedBeside::around(shown, focus, card)
             }
-            // Help keyboard focus owns sits against the focused control, as the old app placed all help.
-            (_, _, Some(focus)) => {
-                beside::PlacedBeside::around(shown, focus, card).into_any_element()
+            (HelpPlacement::Ordinary, None) => beside::PlacedBeside::ordinary(shown, card),
+            (placement, focus) => {
+                // Each surface is read when the tooltip is prepainted. At that point popovers have already set
+                // their bounds for this frame, including a submenu that just opened beside its trigger.
+                let panels = stack.layers.iter().filter_map(|layer| match &layer.kind {
+                    Kind::Popover {
+                        surface,
+                        passes_pointer: false,
+                        ..
+                    } => Some(surface.clone()),
+                    _ => None,
+                });
+                let edges = beside::HelpEdges {
+                    inline: stack.help_edges.clone(),
+                    panels: panels.collect(),
+                };
+                beside::PlacedBeside::new(shown, placement, edges, focus, card, palette)
             }
-            // Ordinary help sits against its control too, centered above it or else below. Help that asks for beside
-            // placement comes here while no sidebar edge is drawn, and help whose control has no recorded bounds (a
-            // test's or a golden's probe, or a control in a cached view) sits at the pointer instead.
-            _ => beside::PlacedBeside::ordinary(shown, card).into_any_element(),
         };
         overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }

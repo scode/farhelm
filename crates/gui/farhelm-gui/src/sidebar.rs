@@ -385,7 +385,7 @@ impl Render for Sidebar {
             .flex_none()
             .h_full()
             .child(column)
-            .child(layers::beside_edge(window, cx));
+            .child(layers::beside_edge("sidebar-help-edge", window, cx));
         // The column, then the divider's strip over the column's edge and reaching over the pane, its negative right
         // margin handing those pixels back so the pane starts at the column's edge.
         div()

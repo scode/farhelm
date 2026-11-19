@@ -8,6 +8,7 @@ use crate::session_list::tests::{TEST_NOW, preferences_state, session};
 use crate::theme;
 use crate::{session, test_support, ticker};
 use farhelm_helm_client::fake::FakeHelm;
+use farhelm_proto::announcements::{Announcement, AnnouncementLink, AnnouncementQueue};
 use farhelm_proto::ui_channel::{
     ANNOUNCEMENTS_KEY, Collection, CollectionState, KeyedEntry, Preferences,
 };
@@ -19,7 +20,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::{
-    SceneState, fleet, session_list_scene_holding, session_list_scene_opening, session_list_then,
+    SceneState, fleet, rest_pointer_at, session_list_scene_holding, session_list_scene_opening,
+    session_list_then,
 };
 
 /// The Help menu, open beside the host rail foot's `?` button with its first item highlighted (reference `help-menu`):
@@ -33,6 +35,75 @@ pub(super) fn help_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) 
         },
         cx,
     );
+}
+
+/// Show the reported Announcements hover with enough room outside the menu for the card. The menu adds the item
+/// only after the helm supplies a shown announcement.
+pub(super) fn help_menu_announcements_hover_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.set_driver_enabled(true);
+    let rows = fleet();
+    session_list_scene_holding(
+        state,
+        &rows,
+        Some(rows[0].key),
+        vec![announcement_history()],
+        cx,
+    );
+    state.after.set(Some(open_help_with_history));
+}
+
+/// Wait for the Help menu's own history oracle. The list may draw before the fake helm's snapshot arrives.
+fn open_help_with_history(
+    list: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !crate::announcements::has_history(cx) {
+        state.after.set(Some(open_help_with_history));
+        return;
+    }
+    let help = list.read(cx).help_button().clone();
+    help.update(cx, |help, cx| help.toggle(window, cx));
+    state.after.set(Some(hover_announcements_item));
+}
+
+/// Require a visible item before warming and dispatching its hover. The following frame verifies the scene's
+/// real help because two matching screenshots alone can accept a stable, empty tooltip.
+fn hover_announcements_item(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    let bounds = |id| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} is drawn before the hover"))
+            .bounds
+    };
+    let at = bounds("help-menu-announcements").center();
+    assert!(
+        bounds("help-menu").contains(&at),
+        "Announcements is visible in the menu"
+    );
+    rest_pointer_at(state, at, window, cx);
+    state.after.set(Some(|_, _, window, cx| {
+        let shown =
+            crate::layers::shown_tooltip(window, cx).expect("the Announcements tooltip shows");
+        assert!(
+            shown.text.starts_with("Announcements:"),
+            "the hovered item replaced the warming tooltip"
+        );
+        assert_eq!(shown.side(), crate::layers::TooltipSide::Beside);
+    }));
+    window.refresh();
 }
 
 /// The fleet of [`session_list_setup`] with `held` as the helm's notices, and the rail's notices panel open beside the
@@ -197,9 +268,32 @@ fn press_bell_b(_: &Entity<SessionList>, state: &SceneState, window: &mut Window
 /// detail line, two paragraphs and a labelled link, the second plain. The old app's announcements dialog was never
 /// captured as a reference scene, so SPEC.md and the old code are this picture's reference.
 pub(super) fn announcements_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    use farhelm_proto::announcements::{Announcement, AnnouncementLink, AnnouncementQueue};
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![announcement_history()]);
+    // The queue reaches the store after this setup returns. Open history once the connection has a UI session.
+    let handle = window.window_handle();
+    let opener = cx.focus_handle().tab_stop(true);
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let opener = opener.clone();
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::announcements::open_history(&opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// Both the conditional Help menu item and its history dialog need a previously shown announcement.
+fn announcement_history() -> CollectionState {
     let newest = Announcement {
         id: "2".to_owned(),
         title: "Sessions now restart in their own terminal".to_owned(),
@@ -219,7 +313,7 @@ pub(super) fn announcements_dialog_setup(state: &SceneState, window: &mut Window
         detail: None,
         link: None,
     };
-    helm.connect(vec![CollectionState {
+    CollectionState {
         collection: Collection::Announcements,
         meta: test_support::meta(&[ANNOUNCEMENTS_KEY]),
         entries: vec![KeyedEntry {
@@ -230,27 +324,7 @@ pub(super) fn announcements_dialog_setup(state: &SceneState, window: &mut Window
             })
             .unwrap(),
         }],
-    }]);
-    // As for Rename: the queue reaches the store after this setup returns, so the history opens once the connection
-    // has a UI session, and only once.
-    let handle = window.window_handle();
-    let opener = cx.focus_handle().tab_stop(true);
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
-        let opener = opener.clone();
-        let _ = handle.update(cx, |_, window, cx| {
-            let mark = Mark::take(cx);
-            crate::announcements::open_history(&opener, &mark, window, cx);
-        });
-    });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
+    }
 }
 
 /// The Welcome card (reference `welcome-dialog`): the title and its ×, the introduction, the two bordered pointers with

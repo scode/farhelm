@@ -17,7 +17,7 @@
 //!   because a browser cannot focus a disabled control and a menu whose only item went busy under the user's focus
 //!   would have nowhere for its keys to go. This item does the same: drawn at half opacity with no fill, still a tab
 //!   stop, and activation does nothing.
-//! - **Help.** Like every control, its constructor takes hover help, which shows as a tooltip. The visible description
+//! - **Help.** Its tooltip sits beside the menu panel when there is room, keeping the other choices visible. The visible description
 //!   line is its accessible description, as the old item's `aria-describedby` made it. SPEC.md lets an item that shows
 //!   a description go without hover text; the component layer has no form of [`HoverHelp`] that stands for a visible
 //!   description yet, so every item carries a tooltip too.
@@ -118,7 +118,7 @@ impl MenuItem {
             chosen: None,
             checked: None,
             submenu: None,
-            help,
+            help: help.beside_menu(),
             role,
             danger: false,
             disabled: false,

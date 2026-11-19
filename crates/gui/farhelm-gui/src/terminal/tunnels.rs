@@ -1036,7 +1036,7 @@ impl Render for TunnelList {
                             "Close tunnel from local port {} to remote port {}",
                             listener.local_port, listener.remote_port
                         ),
-                        HoverHelp::tooltip("Close tunnel"),
+                        HoverHelp::tooltip("Close tunnel").beside_menu(),
                         Role::Button,
                     )
                     .busy(closing)
@@ -1052,7 +1052,7 @@ impl Render for TunnelList {
             CLOSE_ALL_ID,
             Icon::Close,
             if closing { "Closing…" } else { "Close all" },
-            HoverHelp::tooltip("Close every tunnel listed here, one after another"),
+            HoverHelp::tooltip("Close every tunnel listed here, one after another").beside_menu(),
             // A button drawn as a menu command, as the old one was: the list is a group, not a menu.
             Role::Button,
         )

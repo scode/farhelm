@@ -1,51 +1,33 @@
-//! Hover help beside the sidebar: where a session row's help and the host progress card sit, and the two cues that
-//! tie the help to its control while it sits there (SPEC.md, "Session list": "just right of the sidebar, vertically
-//! centred on its target and shifted only to fit the window", with a left-edge notch and a thin accent ring, and
-//! "ordinary above/below placement without a notch or ring" when there is no room to the right).
+//! Hover help stays outside a menu or sidebar whenever the window leaves room. The parent layer manager passes the
+//! open popovers' surfaces and the edges drawn in the page. Prepaint decides placement after both surfaces and
+//! controls record their bounds, so a tooltip follows a moving menu or row in the same frame.
 //!
-//! A control asks for it through its hover help ([`crate::components::HoverHelp::beside`]), which makes the control
-//! draw a tracker of its own bounds; the sidebar draws the edge the help sits against ([`beside_edge`]). Every number
-//! here is the old app's, from `placeSessionCard` and `placeTooltip` in `crates/farhelm-ui/assets/tooltip.js` and the
-//! notch and ring rules in `app.css`, at reference commit `24bc0580` (cited by line below):
+//! The dimensions come from `placeSessionCard` and `placeTooltip` in `crates/farhelm-ui/assets/tooltip.js` at reference
+//! commit `24bc0580`, along with the notch and ring rules in `app.css`.
 //!
-//! - **Beside.** The help's left edge is 6 pixels past the edge's right side (`max(4, right + 6)`, tooltip.js line
-//!   172), whatever control asked; its top centers it on the control and keeps it 4 pixels inside the window's top and
-//!   bottom (lines 174-175). It never shifts sideways.
-//! - **Fallback.** Only when the help, measured at its own maximum width, would come within 4 pixels of the window's
-//!   right edge (line 173). It then sits as the old ordinary tooltip did against the control (lines 143-161): centered
-//!   across it and kept 4 pixels inside the window (pinned left when wider than it), above with a 6-pixel gap where
-//!   that fits 4 pixels from the top, else below with a 28-pixel gap where that fits, else on the side with more
-//!   room, clamped inside. No notch and no ring.
+//! - **Beside.** The card sits 6 pixels beyond the surface, vertically centered on the control and clamped 4 pixels
+//!   inside the content area. A menu can flip left and give way to an open submenu. The sidebar uses the right edge.
+//! - **Fallback.** A card that can't fit outside the surface at its measured width uses ordinary placement. Ordinary
+//!   help sits 6 pixels above the control, then tries 28 pixels below, then uses the roomier side and clamps to fit.
 //! - **Notch.** The visible half of the old 10 by 10 square turned 45 degrees (`.farhelm-tooltip-pointer`, app.css
 //!   lines 1884-1898): a triangle in the card's fill with the border color on its two outer edges, under the card, the
-//!   square's center on the card's left edge level with the control's center, but never nearer the card's top or
+//!   square's center on the near edge level with the control's center, but never nearer the card's top or
 //!   bottom than 12 pixels (half the card's height, for a short one), so it stays on the straight edge (lines 176-177).
 //! - **Ring.** A 1-pixel line just inside the control's bounds in the accent (on-fill in a selected row), with the
 //!   control's own corners (`.tooltip-target-ring`, app.css lines 1899-1917), drawn with the tooltip but clipped where
 //!   the control is clipped: app.css line 1900 drew it inset so that the sidebar's clipping kept it inside the list,
 //!   so a row half scrolled out of the list has its ring only on the half in view.
 //!
-//! The fallback's rule is also the old app's ordinary placement, and every other help is placed by it alone, with no
-//! notch or ring: ordinary help against its control ([`PlacedBeside::ordinary`]), beside help while no edge is drawn,
-//! and help keyboard focus owns against the focused control ([`PlacedBeside::around`]); [`super::overlay`] decides
-//! which. Help whose control has no recorded bounds, ordinary or beside, shows at the pointer instead ([`at_pointer`]):
-//! a probe a test or golden shows, or a control in a cached view (`cache.rs`, NOTE). The place is decided while each
-//! frame is laid out, after every tracker has recorded this frame's bounds, so help follows a control that
-//! moves (a re-sorted row) in the same frame, cues included.
+//! Ordinary placement draws the card alone. Help without tracked control bounds goes at the pointer
+//! ([`at_pointer`]), which the test probes use. Help shown by keyboard focus can use the focus coordinator's
+//! recorded stop bounds for ordinary placement.
 //!
 //! The old app's window was its page, so "the window" in these rules is the window's content area
 //! ([`crate::desktop::linux_title_bar::content_area`]).
 //!
 //! A control's bounds come from the tracker its hover help adds while the help waits or shows
 //! ([`super::TooltipOwner::track`]), which covers the box inside the control's border and records the clip in force
-//! there. The ring is drawn in that box, as the old inset-shadow
-//! ring sat inside the border. The old placement measured the border box instead, so for a control with a border the
-//! ordinary rule's gaps above and below are measured from inside it (a pixel further for a 1-pixel border); centering
-//! is the same either way.
-//!
-//! The old app placed help beside the sidebar only for a control inside the sidebar (`closest(".app-sidebar")`,
-//! tooltip.js lines 419-421 and 468-472); anything else got the ordinary placement. Here any control whose help asks
-//! for it is placed against the window's one edge, wherever it is drawn, so only controls inside the sidebar ask.
+//! there. The ring sits inside the border, and the clip keeps it inside the visible part of a scrolling control.
 //!
 //! NOTE: The old hover closed on any scroll of a container holding its control. Here it stays and follows the control
 //! while the pointer stays on it; a scroll that brings another control under the pointer hands the help to that one, as
@@ -66,9 +48,9 @@ use gpui::{
 };
 
 use super::tooltip::{
-    BesideCues, DrawnRing, HelpTarget, POINTER_OFFSET, ShownTooltip, TooltipSide,
+    Drawn, DrawnRing, HelpPlacement, HelpTarget, POINTER_OFFSET, ShownTooltip, TooltipSide,
 };
-use super::{Anchor, stack};
+use super::{Anchor, AnchorBounds, stack};
 use crate::theme;
 
 /// The nearest help comes to a window edge (`EDGE`, tooltip.js line 125).
@@ -88,31 +70,99 @@ const NOTCH_INSET: Pixels = px(12.);
 /// The side of the old notch's square, before it was turned 45 degrees.
 const NOTCH_SIDE: f32 = 10.;
 
-/// Draw the edge that help placed beside the sidebar sits against: a zero-cost child of the sidebar's outer column (its
-/// whole width, the host rail included), which records where the column is drawn in every frame, as [`Anchor::track`]
-/// does. The column must be positioned (`relative()`) so the tracker covers it. Draw it once per window, from the
-/// sidebar's render.
-///
-/// A tracker covers the box inside its element's border, while the old app measured the 6 pixels from outside the
-/// sidebar's 1-pixel `border-right`. So draw it in an element without a border of its own whose right edge is the
-/// border's outer edge: a wrapper around the bordered column, or the column itself when a child draws the border.
-///
-/// ```ignore
-/// div().relative().flex() // the sidebar's outer box: no border of its own
-///     .child(column)      // the rail and the list, with the 1-pixel border on the right
-///     .child(layers::beside_edge(window, cx))
-/// ```
-///
-/// The help uses the column's right edge, so every control whose help asks for beside placement must be drawn inside
-/// this column. While no edge is drawn, such help is placed as ordinary help is. Like an anchor, the edge is
-/// still known in the one frame that stops drawing it. A second edge drawn in the same window replaces the first.
-pub fn beside_edge(window: &mut Window, cx: &mut App) -> impl IntoElement {
-    let edge = Anchor::for_element("farhelm-beside-edge", window, cx);
+/// Track the right edge of an in-tree container. Its positioned wrapper must cover the outer border, because
+/// the 6-pixel gap starts outside it. Supply a stable key, distinct from the wrapper's own element id.
+pub fn beside_edge(
+    key: impl Into<ElementId>,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
+    let edge = Anchor::for_element(key, window, cx);
     if let Some(stack) = stack(window, cx) {
-        // No notify: the overlay reads the edge as each frame is drawn, and writing it changes nothing on screen.
-        stack.update(cx, |stack, _| stack.beside_edge = Some(edge.clone()));
+        // The overlay reads the bounds during prepaint, so registration needs no extra frame.
+        stack.update(cx, |stack, _| {
+            stack
+                .help_edges
+                .retain(|other| other.state.upgrade().is_some());
+            if !stack
+                .help_edges
+                .iter()
+                .any(|other| other.state == edge.state)
+            {
+                stack.help_edges.push(edge.clone());
+            }
+        });
     }
     edge.track()
+}
+
+/// Help edges for one frame. Popover surfaces are already tracked for outside presses. Their order is the order
+/// they are drawn in, so the visible top panel owns help where surfaces overlap.
+pub(super) struct HelpEdges {
+    pub(super) inline: Vec<Anchor>,
+    pub(super) panels: Vec<AnchorBounds>,
+}
+
+impl HelpEdges {
+    /// Select a surface using the visible center. A sidebar row belongs to its in-tree column even when
+    /// a popover covers part of that row. Menu controls look only among popover surfaces.
+    fn place(
+        &self,
+        placement: HelpPlacement,
+        target: Drawn,
+        size: Size<Pixels>,
+        area: Bounds<Pixels>,
+    ) -> Option<Placed> {
+        let ordinary = || around_target(target.bounds, size, area);
+        let visible = target.bounds.intersect(&target.clip);
+        if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
+            return Some(ordinary());
+        }
+        let center = visible.center();
+        match placement {
+            HelpPlacement::Menu => {
+                let panel = self
+                    .panels
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(index, panel)| {
+                        panel
+                            .get()
+                            .filter(|bounds| bounds.contains(&center))
+                            .map(|bounds| (index, bounds))
+                    });
+                let Some((index, panel)) = panel else {
+                    return Some(ordinary());
+                };
+                let lower = self.panels[..index]
+                    .iter()
+                    .filter_map(|surface| surface.get());
+                let higher = self.panels[index + 1..]
+                    .iter()
+                    .filter_map(|surface| surface.get());
+                place_menu(panel, target.bounds, size, area, lower, higher)
+            }
+            HelpPlacement::Beside(_) => {
+                let edge = self
+                    .inline
+                    .iter()
+                    .rev()
+                    .filter_map(Anchor::drawn_bounds)
+                    .filter(|bounds| bounds.contains(&center))
+                    .min_by(|a, b| {
+                        let area = |bounds: &Bounds<Pixels>| {
+                            f32::from(bounds.size.width) * f32::from(bounds.size.height)
+                        };
+                        area(a).total_cmp(&area(b))
+                    });
+                Some(edge.map_or_else(ordinary, |edge| {
+                    place(edge.right(), target.bounds, size, area)
+                }))
+            }
+            HelpPlacement::Ordinary => Some(ordinary()),
+        }
+    }
 }
 
 /// Where a tooltip goes: its card's origin, which side that is, and for beside placement the height of the notch's
@@ -133,23 +183,23 @@ pub(super) fn place(
     size: Size<Pixels>,
     area: Bounds<Pixels>,
 ) -> Placed {
-    beside_sidebar(edge_right, target, size, area)
+    let left = (edge_right + GAP).max(area.left() + EDGE);
+    beside_at(TooltipSide::Beside, left, target.center().y, size, area)
         .unwrap_or_else(|| around_target(target, size, area))
 }
 
-/// `placeSessionCard`: beside the edge whose right side is at `edge_right`, or `None` when the card would come within
-/// [`EDGE`] of `area`'s right edge there.
-fn beside_sidebar(
-    edge_right: Pixels,
-    target: Bounds<Pixels>,
+/// Place a card at its exact horizontal gap from the surface. A narrow window rejects the candidate instead of
+/// shifting it across the surface's controls.
+fn beside_at(
+    side: TooltipSide,
+    left: Pixels,
+    center: Pixels,
     size: Size<Pixels>,
     area: Bounds<Pixels>,
 ) -> Option<Placed> {
-    let left = (edge_right + GAP).max(area.left() + EDGE);
-    if left + size.width > area.right() - EDGE {
+    if left < area.left() + EDGE || left + size.width > area.right() - EDGE {
         return None;
     }
-    let center = target.center().y;
     let top = (center - size.height / 2.)
         .min(area.bottom() - EDGE - size.height)
         .max(area.top() + EDGE);
@@ -157,9 +207,47 @@ fn beside_sidebar(
     let notch_y = center.min(top + size.height - inset).max(top + inset);
     Some(Placed {
         origin: point(left, top),
-        side: TooltipSide::Beside,
+        side,
         notch_y: Some(notch_y),
     })
+}
+
+/// Menu help prefers the right side, then the left. A submenu already open on either side takes precedence over
+/// the trigger's help. If even the ordinary fallback would cover that panel, this frame leaves the help hidden.
+pub(super) fn place_menu(
+    edge: Bounds<Pixels>,
+    target: Bounds<Pixels>,
+    size: Size<Pixels>,
+    area: Bounds<Pixels>,
+    lower_panels: impl Iterator<Item = Bounds<Pixels>> + Clone,
+    higher_panels: impl Iterator<Item = Bounds<Pixels>> + Clone,
+) -> Option<Placed> {
+    let covers = |placed: &Placed, panel: Bounds<Pixels>| {
+        panel.intersects(&Bounds::new(placed.origin, size))
+    };
+    let clear = |placed: &Placed| {
+        !lower_panels
+            .clone()
+            .chain(higher_panels.clone())
+            .any(|panel| covers(placed, panel))
+    };
+    let center = target.center().y;
+    beside_at(TooltipSide::Beside, edge.right() + GAP, center, size, area)
+        .filter(clear)
+        .or_else(|| {
+            beside_at(
+                TooltipSide::BesideLeft,
+                edge.left() - GAP - size.width,
+                center,
+                size,
+                area,
+            )
+            .filter(clear)
+        })
+        .or_else(|| {
+            let ordinary = around_target(target, size, area);
+            (!higher_panels.clone().any(|panel| covers(&ordinary, panel))).then_some(ordinary)
+        })
 }
 
 /// `placeTooltip`: the old ordinary tooltip's place against `target` inside `area`: ordinary help's, focus help's, and
@@ -209,15 +297,9 @@ pub(super) fn at_pointer(at: Point<Pixels>, size: Size<Pixels>, area: Bounds<Pix
     }
 }
 
-/// The tooltip's card, placed as the frame is laid out (for the reason `PlacedPopover` is: trackers record this
-/// frame's bounds before overlays are prepared): for help beside the sidebar by [`place`], with the notch under it and
-/// the ring around its control while it sits beside the sidebar; for help keyboard focus owns away from the sidebar,
-/// against the focused control by the old ordinary rule ([`PlacedBeside::around`]); and for every other help, against
-/// its control by the same rule ([`PlacedBeside::ordinary`]); each inside the window's content area. Help whose control
-/// has no recorded bounds goes at the pointer instead, ordinary or beside: a probe a test or golden shows, or a control
-/// in a cached view ([`at_pointer`]). It writes the side it chose, and the ring it paints, to the shown tooltip
-/// ([`ShownTooltip::side`], [`ShownTooltip::ring`]). Nothing in it asks for the pointer, so a press goes through it as
-/// through any tooltip.
+/// The tooltip card and its optional cues share the top overlay's prepaint. At that point it can use the current
+/// frame's panel and control bounds. The measured placement and painted ring are available on [`ShownTooltip`].
+/// The card leaves pointer presses to whatever the user can reach underneath.
 pub(super) struct PlacedBeside {
     against: Against,
     side: Rc<Cell<TooltipSide>>,
@@ -229,13 +311,14 @@ pub(super) struct PlacedBeside {
 
 /// What a [`PlacedBeside`] places its card against.
 enum Against {
-    /// The sidebar's edge, centered on the control its tracker records (with the clip around it), with the notch and
-    /// the ring while it fits there.
+    /// The containing edge, found after the control and panels have recorded their bounds for this frame.
     Beside {
         target: HelpTarget,
-        edge: Anchor,
-        notch: AnyElement,
-        ring: AnyElement,
+        edges: HelpEdges,
+        focus: Option<FocusHandle>,
+        placement: HelpPlacement,
+        notches: [AnyElement; 2],
+        ring: Option<AnyElement>,
         /// Where the pointer was when the help began, for a control with no recorded bounds ([`at_pointer`]).
         at: Point<Pixels>,
     },
@@ -250,27 +333,35 @@ enum Against {
 }
 
 impl PlacedBeside {
-    /// The card of `shown`, whose control asked for beside help with `cues`, to be placed against `edge`.
+    /// Place help outside its surface when it fits, with ordinary help as the fallback for either input method.
     pub(super) fn new(
         shown: &ShownTooltip,
-        cues: BesideCues,
-        edge: Anchor,
+        placement: HelpPlacement,
+        edges: HelpEdges,
+        focus: Option<FocusHandle>,
         card: gpui::Div,
         palette: &theme::Palette,
     ) -> Self {
-        let notch = notch(theme::color(palette.bg_2), theme::color(palette.border));
-        let color = theme::color(if cues.on_fill {
-            palette.on_fill
+        let fill = theme::color(palette.bg_2);
+        let border = theme::color(palette.border);
+        let ring = if let HelpPlacement::Beside(cues) = placement {
+            let color = theme::color(if cues.on_fill {
+                palette.on_fill
+            } else {
+                palette.accent
+            });
+            Some(ring(color, cues.radius, shown.ring.clone()))
         } else {
-            palette.accent
-        });
-        let ring = ring(color, cues.radius, shown.ring.clone());
+            None
+        };
         PlacedBeside {
             against: Against::Beside {
                 target: shown.target.clone(),
                 at: shown.at,
-                edge,
-                notch,
+                edges,
+                focus,
+                placement,
+                notches: [notch(fill, border, false), notch(fill, border, true)],
                 ring,
             },
             side: shown.side.clone(),
@@ -310,13 +401,12 @@ impl PlacedBeside {
 
 /// What a frame of [`PlacedBeside`] paints, as its prepaint decided.
 pub(super) enum Painting {
-    /// Nothing: the sidebar's edge is no longer drawn, or the focus coordinator has no bounds for the focused stop,
-    /// so there is nowhere to put the help.
+    /// A focused stop has no bounds, or the card would obscure a higher menu panel.
     Nothing,
     /// The card alone: the fallback placement, ordinary help, or help keyboard focus owns.
     Card,
-    /// The card with its notch and its ring, the ring inside `clip`, the clip in force where the control is drawn.
-    Cues { clip: Bounds<Pixels> },
+    /// The card with its notch and, for the ringed variant, the control's own clip.
+    Cues { clip: Bounds<Pixels>, left: bool },
 }
 
 impl IntoElement for PlacedBeside {
@@ -370,16 +460,25 @@ impl Element for PlacedBeside {
         // The place, and for beside help the control as its tracker drew it, which the cues need.
         let (placed, tracked) = match &self.against {
             Against::Beside {
-                target, edge, at, ..
+                target,
+                edges,
+                focus,
+                placement,
+                at,
+                ..
             } => {
-                let Some(edge) = edge.drawn_bounds() else {
-                    return Painting::Nothing;
-                };
-                // A control that did not draw its tracker when its help showed (in a cached view, `cache.rs`) has
-                // no bounds: its card goes at the pointer, misplaced and without cues rather than invisible.
-                match target.drawn() {
-                    Some(target) => (place(edge.right(), target.bounds, size, area), Some(target)),
-                    None => (at_pointer(*at, size, area), None),
+                if let Some(target) = target.drawn() {
+                    let Some(placed) = edges.place(*placement, target, size, area) else {
+                        return Painting::Nothing;
+                    };
+                    (placed, Some(target))
+                } else if let Some(focus) = focus {
+                    let Some(bounds) = crate::focus::control_bounds(focus, window, cx) else {
+                        return Painting::Nothing;
+                    };
+                    (around_target(bounds, size, area), None)
+                } else {
+                    (at_pointer(*at, size, area), None)
                 }
             }
             Against::Focused(focus) => {
@@ -397,27 +496,37 @@ impl Element for PlacedBeside {
         let offset = placed.origin - bounds.origin;
         let offset = point(offset.x.round(), offset.y.round());
         window.with_element_offset(offset, |window| self.card.prepaint(window, cx));
-        let (Some(notch_y), Some(target), Against::Beside { notch, ring, .. }) =
+        let (Some(notch_y), Some(target), Against::Beside { notches, ring, .. }) =
             (placed.notch_y, tracked, &mut self.against)
         else {
             return Painting::Card;
         };
-        // The turned square's bounding box, centered on the card's left edge at the notch's height.
+        // Center the notch on the card edge facing the target. The card covers the half inside its box.
+        let left = placed.side == TooltipSide::BesideLeft;
+        let notch = &mut notches[usize::from(left)];
         let across = px(NOTCH_SIDE * SQRT_2);
-        let left = bounds.origin.x + offset.x;
+        let mut edge = bounds.origin.x + offset.x;
+        if left {
+            edge += size.width;
+        }
         let square = gpui::size(across, across).map(AvailableSpace::Definite);
         notch.layout_as_root(square, window, cx);
-        let corner = point(left - across / 2., notch_y.round() - across / 2.);
+        let corner = point(edge - across / 2., notch_y.round() - across / 2.);
         notch.prepaint_at(corner, window, cx);
-        let size = target.bounds.size.map(AvailableSpace::Definite);
-        ring.layout_as_root(size, window, cx);
-        let clip = Some(ContentMask {
-            bounds: target.clip,
-        });
-        window.with_content_mask(clip, |window| {
-            ring.prepaint_at(target.bounds.origin, window, cx)
-        });
-        Painting::Cues { clip: target.clip }
+        if let Some(ring) = ring {
+            let size = target.bounds.size.map(AvailableSpace::Definite);
+            ring.layout_as_root(size, window, cx);
+            let clip = Some(ContentMask {
+                bounds: target.clip,
+            });
+            window.with_content_mask(clip, |window| {
+                ring.prepaint_at(target.bounds.origin, window, cx)
+            });
+        }
+        Painting::Cues {
+            clip: target.clip,
+            left,
+        }
     }
 
     fn paint(
@@ -433,16 +542,16 @@ impl Element for PlacedBeside {
         match *painting {
             Painting::Nothing => {}
             Painting::Card => self.card.paint(window, cx),
-            Painting::Cues { clip } => {
-                let Against::Beside { notch, ring, .. } = &mut self.against else {
+            Painting::Cues { clip, left } => {
+                let Against::Beside { notches, ring, .. } = &mut self.against else {
                     return;
                 };
-                // The notch first, so the card covers its right half as the old box (z-index 50) covered the notch
-                // (49).
-                notch.paint(window, cx);
+                notches[usize::from(left)].paint(window, cx);
                 self.card.paint(window, cx);
-                let clip = Some(ContentMask { bounds: clip });
-                window.with_content_mask(clip, |window| ring.paint(window, cx));
+                if let Some(ring) = ring {
+                    let clip = Some(ContentMask { bounds: clip });
+                    window.with_content_mask(clip, |window| ring.paint(window, cx));
+                }
             }
         }
     }
@@ -473,14 +582,19 @@ fn ring(color: Hsla, radius: Pixels, painted: Rc<Cell<Option<DrawnRing>>>) -> An
 /// The notch: GPUI cannot turn a box, so the visible half of the turned square is drawn as two triangles in a box the
 /// size of the turned square, the outline's color and then the fill 1 pixel inside the two outer edges, where the old
 /// square's `border-left` and `border-bottom` ended up after the turn. The half under the card is never drawn.
-fn notch(fill: Hsla, line: Hsla) -> AnyElement {
+fn notch(fill: Hsla, line: Hsla, points_right: bool) -> AnyElement {
     let paint = move |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
         let center = bounds.center();
         let reach = bounds.size.width / 2.;
         // A 1-pixel band along each 45-degree edge meets the base √2 pixels further in.
         for (color, reach) in [(line, reach), (fill, reach - px(SQRT_2))] {
             let mut path = PathBuilder::fill();
-            path.move_to(point(center.x - reach, center.y));
+            let tip = if points_right {
+                center.x + reach
+            } else {
+                center.x - reach
+            };
+            path.move_to(point(tip, center.y));
             path.line_to(point(center.x, center.y - reach));
             path.line_to(point(center.x, center.y + reach));
             path.close();

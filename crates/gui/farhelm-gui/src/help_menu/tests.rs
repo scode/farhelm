@@ -385,8 +385,8 @@ fn open_source_notices_dispatches_the_app_menus_action_on_linux(cx: &mut TestApp
 /// and it opens the history, "returning focus to Help" when that closes. The item reads the pushed queue when the menu
 /// draws, so it appears as soon as the helm pushes a history. Specified: with nothing shown, the menu has no
 /// Announcements item; once the helm pushes a queue whose history holds one announcement, the menu draws Announcements
-/// directly after Release notes; choosing it closes the menu and opens the history showing that announcement; Escape
-/// closes it with focus back on the `?` button.
+/// directly after Release notes. Hover and Up place each item's help outside the menu so its neighbors stay visible.
+/// Choosing Announcements opens the history; Escape closes it with focus back on the `?` button.
 #[gpui::test]
 fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppContext) {
     use farhelm_proto::announcements::{Announcement, AnnouncementQueue};
@@ -428,6 +428,8 @@ fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppCon
         remove: vec![],
     });
     test_support::settle(cx);
+    cx.simulate_resize(size(px(1200.), px(700.)));
+    test_support::settle(cx);
     open_menu(cx);
     let drawn = drawn_items(cx);
     let at = |id: &str| {
@@ -441,6 +443,35 @@ fn announcements_appear_after_a_showing_and_open_the_history(cx: &mut TestAppCon
         at("help-menu-release-notes") + 1,
         "Announcements directly after Release notes: {drawn:?}"
     );
+    // With Announcements reachable, neither its pointer help nor the next item reached by Up may cover the panel.
+    let menu = test_support::bounds(cx, MENU);
+    let shows_beside = |cx: &mut VisualTestContext| {
+        let shown = cx
+            .update(|window, cx| layers::shown_tooltip(window, cx))
+            .expect("the focused or hovered item shows help");
+        assert_eq!(shown.side(), layers::TooltipSide::Beside);
+        assert!(
+            shown.ring().is_none(),
+            "the active menu item already has a highlight"
+        );
+        assert!(test_support::bounds(cx, "tooltip-card").left() > menu.right());
+    };
+    assert_eq!(
+        hover_help(cx, "help-menu-announcements").as_deref(),
+        Some(Item::Announcements.help()),
+    );
+    shows_beside(cx);
+    test_support::keys(cx, "up");
+    assert_eq!(focused_id(cx).as_deref(), Some("help-menu-release-notes"));
+    test_support::advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string())
+            .as_deref(),
+        Some(Item::ReleaseNotes.help()),
+    );
+    shows_beside(cx);
+
     test_support::click(cx, "help-menu-announcements");
     assert!(node(&frame(cx), MENU).is_none(), "the menu closed");
     assert!(any_open(cx), "the history opened");

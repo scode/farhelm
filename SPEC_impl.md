@@ -878,39 +878,43 @@ since only the move counts. Escape with no layer open, or a press, puts it away 
 same one included; with a layer open, Escape closes the layer. The pointer and focus share the one tooltip, and the
 latest call wins: focus landing on a control replaces the pointer's help, the pointer coming onto another control
 replaces focus help, the pointer leaving keeps focus help, and focus landing on the control whose help the pointer shows
-makes it focus-owned, as the old `tooltip.js` did. Help shown by focus is placed by the old ordinary rule against the
-control (centered across it, above with a 6-pixel gap, else below with 28), from the bounds the focus coordinator
-records for the control's stop, so it follows the control through a scroll or reflow. Two deviations: the old app landed
-focus quietly in a few host flows (the host add dialog's provisioning confirm and Cancel, the remembered first focus of
-host settings and the uninstall confirmation, the attention row's handoff to a host row's menu), keeping the ring but
-showing no help, where here every keyboard landing shows help until those flows bring a quiet landing; and pointer help
-stays up when the window loses focus, where the old app hid it (help focus owns goes, and does not come back when the
-window regains focus). Only the control's own focus stop counts, not one inside it. Ordinary help is placed against its
-control by the same old ordinary rule as focus help, as the old app placed it, from the bounds a tracker the control's
-help adds records as each frame is prepared. The control draws that tracker only while its help waits or shows, so an
-idle frame pays nothing for it; the frame that first draws the card re-renders the control (showing help notifies the
-layer stack, which the root view observes), so its bounds are recorded before the card is placed. A cached view is the
-exception: it does not re-render then, so its controls' help, ordinary or beside, is placed against bounds an earlier
-render recorded, or, with none, below and right of the pointer without the beside cues, as a test's or a golden's probe
-is; no cached view holds a control with help, and one that does must re-render when that help shows (`cache.rs`). A
-pointer moving inside a control while its help waits starts the 300 ms again, as the old app's did, so help shows only
-once the pointer comes to rest. Help a control asks to have beside the sidebar (SPEC.md's session-row hovers and host
-progress card) is placed against that control, from the same tracker, and against the edge the sidebar draws
-(`layers::beside_edge`), deciding the place as the frame is laid out so it follows a moved row in that frame. The
-numbers are the old app's `placeSessionCard` and `placeTooltip` (`tooltip.js` at `24bc0580`): left at the sidebar's
-outer right edge plus 6 pixels (at least 4), top centered on the control and kept 4 pixels inside the window, never
-shifted sideways; when the card, at its own maximum width, would come within 4 pixels of the window's right edge, the
-old ordinary placement against the control instead (centered across it, above with a 6-pixel gap, else below with a
-28-pixel one, else the roomier side, clamped 4 pixels inside). Only beside, a notch (the visible half of the old 10 by
-10 square turned 45 degrees, under the card, level with the control's center but at least 12 pixels, or half the card's
-height, from its top and bottom) and a 1-pixel ring just inside the control, in the accent or the on-fill color of a
-selected row, with the control's corners, clipped where the control is clipped, as the old inset-shadow ring was. With
-no edge drawn, such help is placed as ordinary help is. The old app placed help beside the sidebar only for a control
-inside it; here any control asking for it is placed against the edge, so only controls inside the sidebar ask. A
-control's bounds are taken inside its border, where the ring goes, so a bordered control's gaps above and below are that
-much wider than the old ones, which measured from the border box. One deviation: the old hover closed on any scroll of a
-container holding its control; here it stays and follows the control while the pointer stays on it, since the layer
-manager does not know which scrolling element holds a control.
+makes it focus-owned, as the old `tooltip.js` did. Focus and hover use the same placement policy. Ordinary keyboard help
+uses the focus stop's recorded bounds, so it follows the control through a scroll or reflow. Two deviations: the old app
+landed focus quietly in a few host flows (the host add dialog's provisioning confirm and Cancel, the remembered first
+focus of host settings and the uninstall confirmation, the attention row's handoff to a host row's menu), keeping the
+ring but showing no help, where here every keyboard landing shows help until those flows bring a quiet landing; and
+pointer help stays up when the window loses focus, where the old app hid it (help focus owns goes, and does not come
+back when the window regains focus). Only the control's own focus stop counts, not one inside it. Ordinary help is
+placed against its control by the same old ordinary rule as focus help, as the old app placed it, from the bounds a
+tracker the control's help adds records as each frame is prepared. The control draws that tracker only while its help
+waits or shows, so an idle frame pays nothing for it; the frame that first draws the card re-renders the control
+(showing help notifies the layer stack, which the root view observes), so its bounds are recorded before the card is
+placed. A cached view is the exception: it does not re-render then, so its controls' help, ordinary or beside, is placed
+against bounds an earlier render recorded, or, with none, below and right of the pointer without the beside cues, as a
+test's or a golden's probe is; no cached view holds a control with help, and one that does must re-render when that help
+shows (`cache.rs`). A pointer moving inside a control while its help waits starts the 300 ms again, as the old app's
+did, so help shows only once the pointer comes to rest.
+
+Beside placement finds a surface containing the center of the control's visible bounds. It reads panel and control
+bounds after they are recorded in the current frame, so help follows a moved row or a resized menu. Menu help uses the
+topmost containing popover. The sidebar and other in-tree containers register their edges with `layers::beside_edge`.
+For a control in the page, the smallest containing in-tree edge wins, even if a popover partly covers the control. A
+control outside any eligible surface uses ordinary placement.
+
+The card sits 6 pixels outside the surface, centered on its control and clamped 4 pixels inside the content area
+vertically. Its measured width determines whether it fits beside the surface while keeping the 4-pixel window margin.
+For session rows and host progress cards, only the right side is eligible. Menus, select choices and the notification
+and tunnels panels try the right and then the left. A beside candidate must clear the other open panels. If both sides
+fail, use ordinary placement against the control, centered above with 6 pixels of clearance, else below with 28, else on
+the roomier side clamped within the content area. If that fallback covers an open higher panel, the menu help is hidden
+for that frame.
+
+Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
+with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Session rows
+and host progress cards also draw a 1-pixel ring just inside the control, with its corner radius and clip, in the accent
+or the on-fill color of a selected row. Menu help uses the active item's own highlight. The control's bounds are taken
+inside its border, where the ring goes. The old app measured from the border box and closed help on scroll. Here help
+follows its control while the pointer stays on it.
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,

@@ -6,10 +6,9 @@
 //! [`super::overlay`] draws its card on the top rung of the parent module's z-order ladder. Everything public here is
 //! re-exported from [`crate::layers`], which is the path callers use.
 //!
-//! Help comes in three forms ([`Help`]: a line, paragraphs, a card holding a view) and in two placements: ordinary
-//! help against its control, centered above it or else below as the old app placed it, and help a control asks to have
-//! beside the sidebar ([`Hint::beside`]); [`super::beside`] places both, from the bounds the control's tracker records
-//! while its help waits or shows ([`TooltipOwner::track`], [`help_drawn`]). A card's view is either the caller's, made
+//! Help comes in three forms ([`Help`], a line, paragraphs, or a card holding a view). [`super::beside`] places each
+//! form from the bounds the control's tracker records while its help waits or shows ([`TooltipOwner::track`],
+//! [`help_drawn`]). The control supplies its [`HelpPlacement`]. A card's view is either the caller's, made
 //! with the help, or made by the tooltip only when it shows ([`Help::card_with`]) and dropped when it goes, for a view
 //! that costs something for as long as it lives.
 //!
@@ -23,9 +22,8 @@
 //!
 //! Keyboard focus calls for help too, on every control that can hold it, as the old app showed every focus-visible
 //! control's help: focus the keyboard moves onto a control shows its help after the same delay, and focus leaving
-//! takes it down ([`focus_drawn`] has how the pointer and focus share the one tooltip). Help shown by focus is placed
-//! against the control by the same ordinary rule, from the bounds the focus coordinator records for its stop, or beside
-//! the sidebar for help that asks for it.
+//! takes it down ([`focus_drawn`] has how the pointer and focus share the one tooltip). Focus follows the same
+//! placement policy as pointer hover. Ordinary focus help uses the focus coordinator's recorded bounds for the stop.
 //!
 //! NOTE: Known deviations from the old app's `tooltip.js`, which kept a dismissed control's help down until the pointer
 //! left it: after Escape, the next pointer move brings the help back after the delay; a key other than Escape takes
@@ -258,7 +256,7 @@ impl Help {
     }
 }
 
-/// What a control asks of help placed beside the sidebar ([`Hint::beside`]): the ring's color and its corners. The
+/// What a control asks of ringed help ([`HelpPlacement::Beside`]), including the ring's color and corners. The
 /// ring is the old `.tooltip-target-ring` (`app.css` lines 1899-1917): an accent line 1 pixel inside the control's
 /// bounds, or the on-fill color in a selected row, which already wears the accent fill. Its corners are the
 /// control's own (the old ring was an inset shadow, which follows the element's radius), so a round status dot
@@ -271,8 +269,18 @@ pub struct BesideCues {
     pub radius: Pixels,
 }
 
-/// Hover help as a control hands it to the layer manager: what it says, and for help that sits beside the sidebar, the
-/// cues it asks for. Ordinary help (a [`Help`] or a string, converted) sits against its control, centered above it or
+/// Where help sits relative to the control or the surface containing it. Menus already highlight their active item,
+/// so their beside placement can flip to the left and draws only the notch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HelpPlacement {
+    #[default]
+    Ordinary,
+    Beside(BesideCues),
+    Menu,
+}
+
+/// The words and placement a control hands to the layer manager. Ordinary help (a [`Help`] or a string, converted)
+/// sits against its control, centered above it or
 /// else below, as the old app placed it ([`super::beside`] has the numbers). Either is placed from where the control's
 /// owner token last saw it drawn ([`TooltipOwner::track`]). Help whose control has no recorded bounds, ordinary or
 /// beside, sits at the pointer instead: a probe tests and goldens show for an owner never drawn as a control
@@ -281,18 +289,13 @@ pub struct BesideCues {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hint {
     help: Help,
-    /// The cues of help placed beside the sidebar; `None` for ordinary help.
-    beside: Option<BesideCues>,
+    placement: HelpPlacement,
 }
 
 impl Hint {
-    /// Help placed beside the sidebar's edge, centered on its control. The module docs of [`super::beside`] give the
-    /// placement and when it falls back.
-    pub fn beside(help: Help, cues: BesideCues) -> Hint {
-        Hint {
-            help,
-            beside: Some(cues),
-        }
+    /// Carry the control's placement with its words through the hover delay and any handoff from pointer to focus.
+    pub(crate) fn placed(help: Help, placement: HelpPlacement) -> Hint {
+        Hint { help, placement }
     }
 }
 
@@ -352,7 +355,7 @@ impl HelpTarget {
 /// Ordinary help, placed against its control.
 impl From<Help> for Hint {
     fn from(help: Help) -> Self {
-        Hint { help, beside: None }
+        Hint::placed(help, HelpPlacement::Ordinary)
     }
 }
 
@@ -370,8 +373,10 @@ pub enum TooltipSide {
     /// Below and right of where the pointer was: help whose control has no recorded bounds, such as a probe a test or
     /// golden shows for an owner token no control drew ([`show_tooltip_at`]), or a control in a cached view.
     Pointer,
-    /// Beside the sidebar, with the notch and the ring (the old `"right"`).
+    /// Beside the right edge of the containing surface.
     Beside,
+    /// Beside the left edge of a menu panel.
+    BesideLeft,
     /// Centered above its control: ordinary help, help keyboard focus owns, and beside placement's fallback in a
     /// window too narrow for it, wherever there is room above.
     Above,
@@ -404,8 +409,7 @@ pub struct ShownTooltip {
     pub(super) help: Help,
     /// Where the owning control was last drawn, which the help is placed against ([`TooltipOwner::track`]).
     pub(super) target: HelpTarget,
-    /// The cues the control asked for, for help placed beside the sidebar; `None` for ordinary help.
-    pub(super) beside: Option<BesideCues>,
+    pub(super) placement: HelpPlacement,
     /// Where the overlay placed it in the last frame: written as that frame is laid out, so it is shared with every
     /// clone ([`ShownTooltip::side`]).
     pub(super) side: Rc<Cell<TooltipSide>>,
@@ -879,7 +883,7 @@ fn show_tooltip_from(
             at,
             help,
             target,
-            beside: hint.beside,
+            placement: hint.placement,
             side: Rc::new(Cell::new(TooltipSide::Pointer)),
             ring: Rc::new(Cell::new(None)),
         });
