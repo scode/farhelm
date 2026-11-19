@@ -58,6 +58,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{destination_label, permission_value, summary_before_permissions};
+use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::theme::{self, metrics};
 
@@ -230,9 +231,9 @@ impl Launcher {
                 Mode::ReplaceWith { .. } => "replace",
                 Mode::New | Mode::Clone | Mode::RestartWith(_) => "restart",
             };
-            return Some(format!(
+            return Some(capitalized(&format!(
                 "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
-            ));
+            )));
         }
         if self.draft.target.is_some()
             && let Some(words) = environment_refusal(row)
