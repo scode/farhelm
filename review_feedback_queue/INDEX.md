@@ -1305,10 +1305,6 @@ consequences.
   reserved-session preservation regression can blame correct startup cleanup for a fixture launcher exiting normally,
   because its readiness check can save that temporary launcher as the terminal-host process.
 
-- [`keeper-can-win-one-shot-interrupted-start-gate.md`](keeper-can-win-one-shot-interrupted-start-gate.md) — Two
-  startup-reclaim regression tests lack the ordering needed to hold their intended first launch; a keeper launch can
-  take the gate instead and fail setup before reclamation is tested.
-
 - [`restart-test-types-before-safe-prompt-barrier.md`](restart-test-types-before-safe-prompt-barrier.md) — The restart
   tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
   lost terminal contents.
