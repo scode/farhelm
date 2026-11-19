@@ -2705,10 +2705,6 @@ consequences.
   — Still-supported old-terminal recovery loses integration regression protection. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-converted-old-session-warning-retention-assertion-vacuous-all.md`](trailing-converted-old-session-warning-retention-assertion-vacuous-all.md)
-  — Require the converted session's resolved warning to remain present. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-pre-range-tmux-probe-fixture-process-oracles.md`](trailing-pre-range-tmux-probe-fixture-process-oracles.md)
   — Retained probe fixtures and process oracles are unchanged from the range base. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
