@@ -1601,6 +1601,16 @@ async fn handle_attach(
     lease: String,
     if_unowned: bool,
 ) {
+    if cols == 0 || rows == 0 {
+        reply_error(
+            tx,
+            req_id,
+            ErrorKind::InvalidRequest,
+            format!("terminal attach requires at least one column and one row (got {cols}x{rows})"),
+        )
+        .await;
+        return;
+    }
     if !channels.can_begin_stream(channel) || lease.len() > MAX_LEASE_BYTES {
         let message = if channel == 0 {
             "attachment channel 0 is reserved".to_string()
