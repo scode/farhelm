@@ -639,6 +639,14 @@ private leader still permits Grok's native subagents. Grok uses generic activity
 selected permission flags before `--resume <conversation-id>`, but it does not offer Resume until the capture
 integration has verified an exact conversation. See [Grok](website/src/content/docs/docs/agents/grok.md).
 
+Antigravity is an agent type for the `agy` CLI. Its launcher suggests `gemini-4-neon`, `gemini-4-argon`,
+`gemini-4-hydrogen`, and `gemini-3.8-flash`, and accepts literal custom model IDs. `--model` and `--effort` carry the
+choices. All four suggestions offer low, medium and high effort. Neon, Hydrogen and custom IDs also offer xhigh. Guarded
+is the default and adds `--mode auto`. Antigravity falls back to its default mode when auto is unavailable. YOLO adds
+`--dangerously-skip-permissions`, and Custom passes the user's permission flags. Antigravity uses generic activity
+status and has no managed-checkout trust choice. Initial prompts work for both fresh and named starts. See
+[Antigravity](website/src/content/docs/docs/agents/antigravity.md).
+
 Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO. Its screen
 reader recognizes Working and Thinking above the composer, the composer at rest, and the workspace-trust question. Other
 in-conversation questions and approval dialogs have not been verified; unfamiliar screens use generic activity status.
@@ -1018,42 +1026,43 @@ agent choice is independent of that destination:
   of one session both succeed, and the later write is the title that sticks.
 - Launch composer: New opens a dialog on the agent launch kind with no selected agent type. The two launch kinds are
   shown as two tabs, Agent and Command, each showing only its own fields; switching tabs keeps each tab's draft. Codex,
-  Claude, Muse, Cursor, Grok, Goose, Pi, OpenCode, and OMP agent launches carry an agent type plus model, effort, and
-  permission choices where that agent type supports them, and an optional wrapper prefix. The prefix is a shell-style
-  word list placed before both start and resume commands, including before Goose's `env` words. Each word retains its
-  quotes and escapes exactly as typed. At execution the words are joined with spaces, followed by Farhelm's composed
-  agent arguments as single-quoted literal words, and interpreted by non-login, non-interactive `bash -c` on the host or
-  inside the container. This gives the prefix full Bash expansion and operator meaning. Stored wrappers use the same
-  interpretation without migration. The editor refuses empty prefixes, NUL and Farhelm placeholder words; placeholders
-  are not substituted in a wrapper. Templates, remembered prefixes, approvals and fingerprints retain the raw words, and
-  editors display them joined with spaces. Farhelm does not inspect the wrapper's behavior: the user asserts that it
-  runs the selected agent with Farhelm's arguments and environment passed through. A launch that needs custom agent
-  arguments, a directory placeholder in the wrapper, or a separately written resume command is a command launch; visible
-  permission vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`, `Smart approve`, `Chat`, and `YOLO`.
-  Custom is offered for Claude, Codex, Grok, Muse, Cursor and OMP: the user supplies permission flags instead of
-  Farhelm's own. The launcher splits quotes and escapes into literal words and previews those words; it evaluates no
-  expansions. Empty words lists and incomplete quotes are refused. The user is responsible for keeping these flags
-  limited to permissions; Farhelm neither checks their effect nor infers a safety mode, and every custom session counts
-  as YOLO. Templates and recent setups retain the words, Clone, Replace with and Restart with allow editing them, and
-  plain Restart or Replace reuses the stored command. Changing agent type clears custom and its words; a later template
-  setting another permission clears them. Custom never becomes the remembered default permission. Guarded means an agent
-  can approve actions through a safety mechanism that can still refuse or escalate (a classifier, AI reviewer, sandbox
-  or asking the user), not that it asks about everything. YOLO means no such check. For every agent type that supports
-  Guarded, Guarded is the default permission when none is chosen. This does not change when defaults apply or override a
-  remembered choice. Claude and Grok use `--permission-mode auto`, Codex uses `-a on-request -s workspace-write`, Muse
-  uses `--permission-profile :auto-review`, and OMP uses `--approval-mode write`. Every supported resume retains those
-  flags. Cursor's omission stays under its own setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort
-  omissions still leave their flags out. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer
-  no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
-  agent-launch choice, so the GUI never turns a model identifier into an argv fragment. The catalog knows older and
-  current model IDs, with one latest model per family and agent type. Replacing a model keeps its ID and supported
-  efforts in the catalog. A clearly obsolete model leaves only by deliberate removal. Typing a model never changes a
-  selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
-  `opencode/<model>`). A latest model only other harnesses offer is refused with a message naming them. An older ID can
-  still be used as a custom model on an explicitly chosen harness that has no entry for it, preserving existing launches
-  that used the same spelling. Choosing another harness's model from the full model list switches the harness on
-  purpose. With no harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna` picks
-  Codex). A custom model or an ID offered by several harnesses needs an explicit harness.
+  Claude, Antigravity, Muse, Cursor, Grok, Goose, Pi, OpenCode, and OMP agent launches carry an agent type plus model,
+  effort, and permission choices where that agent type supports them, and an optional wrapper prefix. The prefix is a
+  shell-style word list placed before both start and resume commands, including before Goose's `env` words. Each word
+  retains its quotes and escapes exactly as typed. At execution the words are joined with spaces, followed by Farhelm's
+  composed agent arguments as single-quoted literal words, and interpreted by non-login, non-interactive `bash -c` on
+  the host or inside the container. This gives the prefix full Bash expansion and operator meaning. Stored wrappers use
+  the same interpretation without migration. The editor refuses empty prefixes, NUL and Farhelm placeholder words;
+  placeholders are not substituted in a wrapper. Templates, remembered prefixes, approvals and fingerprints retain the
+  raw words, and editors display them joined with spaces. Farhelm does not inspect the wrapper's behavior: the user
+  asserts that it runs the selected agent with Farhelm's arguments and environment passed through. A launch that needs
+  custom agent arguments, a directory placeholder in the wrapper, or a separately written resume command is a command
+  launch; visible permission vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`, `Smart approve`,
+  `Chat`, and `YOLO`. Custom is offered for Claude, Antigravity, Codex, Grok, Muse, Cursor and OMP: the user supplies
+  permission flags instead of Farhelm's own. The launcher splits quotes and escapes into literal words and previews
+  those words; it evaluates no expansions. Empty words lists and incomplete quotes are refused. The user is responsible
+  for keeping these flags limited to permissions; Farhelm neither checks their effect nor infers a safety mode, and
+  every custom session counts as YOLO. Templates and recent setups retain the words, Clone, Replace with and Restart
+  with allow editing them, and plain Restart or Replace reuses the stored command. Changing agent type clears custom and
+  its words; a later template setting another permission clears them. Custom never becomes the remembered default
+  permission. Guarded means an agent can approve actions through a safety mechanism that can still refuse or escalate (a
+  classifier, AI reviewer, sandbox or asking the user), not that it asks about everything. YOLO means no such check. For
+  every agent type that supports Guarded, Guarded is the default permission when none is chosen. This does not change
+  when defaults apply or override a remembered choice. Claude and Grok use `--permission-mode auto`, Codex uses
+  `-a on-request -s workspace-write`, Muse uses `--permission-profile :auto-review`, Antigravity uses `--mode auto`, and
+  OMP uses `--approval-mode write`. Every supported resume retains those flags. Cursor's omission stays under its own
+  setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort omissions still leave their flags out. Model
+  selection is optional for every harness; OpenCode, Cursor, and Grok offer no effort choice, and Grok accepts no model
+  choice. The helm owns the released model catalog and validates every agent-launch choice, so the GUI never turns a
+  model identifier into an argv fragment. The catalog knows older and current model IDs, with one latest model per
+  family and agent type. Replacing a model keeps its ID and supported efforts in the catalog. A clearly obsolete model
+  leaves only by deliberate removal. Typing a model never changes a selected harness: the typed id is read as that
+  harness spells it (for OpenCode, a bare Zen name means `opencode/<model>`). A latest model only other harnesses offer
+  is refused with a message naming them. An older ID can still be used as a custom model on an explicitly chosen harness
+  that has no entry for it, preserving existing launches that used the same spelling. Choosing another harness's model
+  from the full model list switches the harness on purpose. With no harness selected yet, a typed known model fills in
+  its owning harness (a bare `gpt-6-luna` picks Codex). A custom model or an ID offered by several harnesses needs an
+  explicit harness.
 
   In the launcher's model field, an exact family word such as `sol`, ignoring ASCII case, highlights the family's latest
   model for the chosen harness. Enter chooses its full model ID. Without a chosen harness, a family with one owner
@@ -1118,14 +1127,14 @@ agent choice is independent of that destination:
   chosen. Existing search words such as `grok` keep their meaning.
 
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
-  Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
-  Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
-  reusable launch, so a later Clone starts fresh. It is passed literally as one argument, without a shell or checking
-  that the conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes,
-  backslashes, control characters and oversized values are refused by the existing conversation-id checks. Session-file
-  paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
-  managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm
-  will not capture the named conversation and later Restart will be unavailable.
+  Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP
+  session file. Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or
+  the session's reusable launch, so a later Clone starts fresh. It is passed literally as one argument, without a shell
+  or checking that the conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces,
+  quotes, backslashes, control characters and oversized values are refused by the existing conversation-id checks.
+  Session-file paths may be absolute or relative to the session directory; a leading tilde is refused because it does
+  not expand. New managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show
+  that Farhelm will not capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
   scrolls, directly after the conversation selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s
   first message when it starts. Restart, Clone and Replace do not send it again." The summary adds `Prompt: N lines` for
@@ -1437,11 +1446,11 @@ including a pending confirmation, differing only where the GUI strictly requires
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
 confirmation. An agent launch counts as YOLO when its stored permission is custom or YOLO, including omitted permissions
-on Pi, OpenCode, OMP and Goose. A stored omission on Claude, Codex, Grok, Muse or Cursor is the agent's own setting, not
-guarded, and is conservatively treated as YOLO by the host guard. A command launch counts as YOLO when its YOLO
-assertion says so, and only then: Farhelm does not parse command lines to second-guess the assertion. Because an agent's
-assertion cannot be checked either, an agent may not start a command launch, or a YOLO launch, on such a host at all
-(see Agent-spawned sessions). The helm enforces the confirmation, so no client can skip it: every create, clone,
+on Pi, OpenCode, OMP and Goose. A stored omission on Claude, Antigravity, Codex, Grok, Muse or Cursor is the agent's own
+setting, not guarded, and is conservatively treated as YOLO by the host guard. A command launch counts as YOLO when its
+YOLO assertion says so, and only then: Farhelm does not parse command lines to second-guess the assertion. Because an
+agent's assertion cannot be checked either, an agent may not start a command launch, or a YOLO launch, on such a host at
+all (see Agent-spawned sessions). The helm enforces the confirmation, so no client can skip it: every create, clone,
 replace, replace with, and restart with that reaches it on such a host without the override is refused before any
 supervisor is contacted, and nothing is started. The GUI answers that refusal with a prominent confirmation, shown with
 the control or surface that started the launch and scrolled into view, that names the host, says what YOLO means and why
@@ -2911,10 +2920,10 @@ reach an unrecognized dialog; it never gates the user's own typing. Status also 
 ask before stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra
 confirmation. A recognized dialog also defers the missing-conversation warning's clock until an Enter outside that
 dialog, as described below; this does not delay delivering input. Farhelm-supplied integration must not make vendor
-configuration a condition of launching an agent. Grok is the explicit opt-in exception for conversation capture: users
-install its three documented hook entries themselves, while an unconfigured Grok still launches normally and cannot be
-restarted. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
-classification, never waiting — a settled scope decision, not a reader waiting to be written.
+configuration a condition of launching an agent. Users install the documented Grok and Antigravity hooks themselves to
+enable conversation capture. Both can launch before those hooks are installed. OMP, Grok and Antigravity use generic
+activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
+decision, not a reader waiting to be written.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering
@@ -2945,24 +2954,24 @@ report only after their first reply, which can take as long as the first turn, s
 not reported); a launch Farhelm could not add its conversation hook to, unless the user turned hooks off for that agent
 themselves; a Codex or Grok conversation record that Restart finds missing, which withdraws the resume offer; and an OMP
 launch whose conversation reporter does not match the running Farhelm, the one refused conversation report that
-notifies; and a Claude, Codex or Muse launch whose first conversation report came from a nested process of that agent,
-corrected when a recorded ancestor reports. That correction says which conversation a Restart before now would have
-resumed and that Farhelm now follows the conversation of the agent process that started it, without claiming no further
-ancestor can correct it. Every other refused report (from a subagent, from an agent process the session's agent started
-itself, overtaken by a relaunch or delete, or turned away by a passing error) is the system working and never notifies.
-A launch that still carries a conversation Farhelm captured earlier is never told Restart cannot resume it, because
-Restart can. After a supervisor restart, a launch that received the hook starts its silent-hook clock at the next
-qualifying Enter; launches stored before this behavior was introduced stay unchecked. Each notification says what
-happened and what the user can do about it, or, when nothing can be done, what they lose; it never points at a log. The
-silent-conversation-hook warning names the agent and when it normally reports its conversation, using the same timing as
-Restart's explanation. It says Restart cannot resume until that report arrives, and asks users of custom commands to
-check that they pass on `{farhelm_args}`; otherwise it invites feedback from the help (?) menu. There is at most one
-notification of each such problem per launch of the session's agent. The warning that the agent never reported its
-conversation and the warning that Restart stopped offering to resume are marked resolved when Restart can resume that
-launch's conversation again, including after a supervisor restart. The other session-tracking kinds and notifications
-from earlier launches stay as they are. If a resolved problem returns in the same launch, its existing notification
-reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains unresolved do
-not repeat it.
+notifies; and a Claude, Codex, Muse or Antigravity launch whose first conversation report came from a nested process of
+that agent, corrected when a recorded ancestor reports. That correction says which conversation a Restart before now
+would have resumed and that Farhelm now follows the conversation of the agent process that started it, without claiming
+no further ancestor can correct it. Every other refused report (from a subagent, from an agent process the session's
+agent started itself, overtaken by a relaunch or delete, or turned away by a passing error) is the system working and
+never notifies. A launch that still carries a conversation Farhelm captured earlier is never told Restart cannot resume
+it, because Restart can. The manual Grok and Antigravity hooks do not start the silent-hook timer. After a supervisor
+restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches stored
+before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do about
+it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning names
+the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says Restart
+cannot resume until that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`;
+otherwise it invites feedback from the help (?) menu. There is at most one notification of each such problem per launch
+of the session's agent. The warning that the agent never reported its conversation and the warning that Restart stopped
+offering to resume are marked resolved when Restart can resume that launch's conversation again, including after a
+supervisor restart. The other session-tracking kinds and notifications from earlier launches stay as they are. If a
+resolved problem returns in the same launch, its existing notification reopens at the top as new and unread, even if the
+user had cleared it; repeated checks while it remains unresolved do not repeat it.
 
 The other notifications are about old terminals (see Terminal experience). Earlier releases gave a session in which
 something still ran in an old terminal the old-terminal warning: it asked for the session to be restarted, replaced,
@@ -3727,38 +3736,38 @@ presume the original OS process survived the reboot.
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
-Pi, Muse, and Grok integrations at this level are required. Confirmed 2026-10-01: Farhelm identifies an agent's
-conversation only from the harness's own explicit report, through a hook, plugin, extension, or whatever reporting
-mechanism that harness needs. A selector entered in New, Clone, Replace with or Restart with is a one-time start
-argument, never a captured identity. Claude, Codex, Grok, Pi, Muse and OMP can report the resulting conversation through
-the ordinary path. A named Restart with keeps the old capture until that report replaces it; Codex and Muse report at
-the first prompt, so plain Restart before then still enters the old conversation. Goose cannot report on this resume, so
-a named Restart with clears its old capture in the relaunch transaction; a definitive pre-spawn abort restores it, an
-ambiguous failure does not. The same clearing applies when Farhelm's conversation hooks are turned off for the agent
-(`FARHELM_AGENT_HOOKS`) or when the conversation reporter's extension cannot be prepared, since no report can then
-replace the old capture; Grok's own callbacks are not affected by that switch. Cursor, OpenCode and named Goose starts
-do not gain later plain Restart from this choice. Heuristics that cannot be relied upon, such as correlating the
-vendor's files on disk with a launch, are not supported, because a wrong match resumes, and appends to, a conversation
-that is not the session's own. Checking the exact file a report names is verification of that report, not
-identification. A launch whose harness cannot report, or whose report never arrived, has no captured identity and cannot
-be restarted: Restart says why, and Replace starts the session over. What capture never does is write to the agent's own
-configuration or record directories. The opt-in managed-checkout Claude trust edit is a separate, narrowly scoped
-exception to the no-agent-configuration rule; it does not participate in capture. A hook passed on the command line for
-one launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no
-trust state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers
-is written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run
-leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from Status
-is protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is the
-documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
-them. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
-conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
-regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
-foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
-a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
-the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
-symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
-unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
-request.
+Pi, Muse, Grok and Antigravity integrations at this level are required, subject to the exceptions below. Confirmed
+2026-10-01: Farhelm identifies an agent's conversation only from the harness's own explicit report, through a hook,
+plugin, extension, or whatever reporting mechanism that harness needs. A selector entered in New, Clone, Replace with or
+Restart with is a one-time start argument, never a captured identity. Claude, Codex, Grok, Pi, Muse, OMP and Antigravity
+can report the resulting conversation through the ordinary path. A named Restart with keeps the old capture until that
+report replaces it; Codex, Muse and Antigravity report at the first prompt, so plain Restart before then still enters
+the old conversation. Goose cannot report on this resume, so a named Restart with clears its old capture in the relaunch
+transaction; a definitive pre-spawn abort restores it, an ambiguous failure does not. The same clearing applies when
+Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`) or when the conversation reporter's
+extension cannot be prepared, since no report can then replace the old capture; Grok and Antigravity's manual callbacks
+are independent of that switch. Cursor, OpenCode and named Goose starts do not gain later plain Restart from this
+choice. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not
+supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
+exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
+whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
+session over. What capture never does is write to the agent's own configuration or record directories. The opt-in
+managed-checkout Claude trust edit is a separate, narrowly scoped exception to the no-agent-configuration rule; it does
+not participate in capture. A hook passed on the command line for one launch is allowed because it writes nothing the
+vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch that carried
+it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state directory
+and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log. Vendor-owned
+state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own example — hooks
+written into the agent's configuration — still stands. Grok and Antigravity have documented opt-in hooks. The user owns
+the configuration entries. Every integrated agent type identifies conversations only through accepted reports; Farhelm
+never selects a conversation by scanning vendor state. Historical stored identities remain usable under the same
+per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
+conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
+it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
+file without following symlinks and requires its session ID to match. A failed check withdraws the durable resume offer,
+which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
+launches fresh under that request.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
 terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.
@@ -3808,8 +3817,8 @@ Sessions running across the upgrade start unpinned, so their first selecting rep
 an ancestor reports. Running launches retain their old command line without `Stop` until relaunch; no upgrade machinery
 compensates for that gap. Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed
 Claude Code 2.1.310, a native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's
-conversation. Any report naming a sub-agent is refused for every agent type. Claude requires no transcript check and
-takes no versioned ownership proof, so its existing captures stay resumable across the change.
+conversation. The hook refuses a report carrying a child marker its adapter recognizes. Claude requires no transcript
+check and takes no versioned ownership proof, so its existing captures stay resumable across the change.
 
 Muse uses the same process pin, ancestor correction, dead-pin release and relaunch rules, with a Muse notification once
 per launch when a recorded ancestor corrects the followed conversation. Its `SessionStart` and `Stop` both select the
@@ -3854,17 +3863,23 @@ discriminator naming the adapter that produced it — the injected hook command,
 and a report addressed to a session of another agent type is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Claude and Muse admission require the positional attribution and pin checks above
-but no versioned proof; Claude's resume rules are unchanged. Goose and Pi retain their existing admission and resume
-rules; for them the discriminator alone adds no foreground protection. Old senders that predate the discriminator fail
-closed rather than reporting untagged. A refused report changes nothing: no stored identity, no offer, no pending state.
-Resume is never silently turned into fresh, and historical captures are never rewritten to look proven.
+exception described in SPEC_impl.md. Claude, Muse and Antigravity admission require the positional attribution and pin
+checks above but no versioned proof; Claude's resume rules are unchanged. Goose and Pi retain their existing admission
+and resume rules; for them the discriminator alone adds no foreground protection. Old senders that predate the
+discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored identity, no
+offer, no pending state. Resume is never silently turned into fresh, and historical captures are never rewritten to look
+proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's
 foreground conversation, so such a run can replace the session's Resume target. Likewise, a child Pi that loads
 Farhelm's reporter (passed on to it by a third-party extension, say) can replace or withdraw the session's Resume
 target.
+
+Antigravity CLI 1.5.12 is another accepted exception. `SessionStart` after the first prompt and `Stop` each report a
+conversation ID. Antigravity uses the same process pin as Claude and Muse to distinguish separate processes. A subagent
+in the same Antigravity process sends those same events with its own ID and no child marker. Its report can replace the
+main conversation's Restart target. Choosing the main conversation by ID opens it directly.
 
 Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
 environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
@@ -3896,12 +3911,12 @@ conversation can be resumable at once instead of waiting for a first assistant m
 Farhelm composes an agent launch's resume command from the same choices as its start command: Claude adds
 `--resume <conversation-id>`, Codex and Muse `resume <conversation-id>`, Goose
 `session --resume --session-id <conversation-id>`, Pi `--session <verified-absolute-file>`, OMP
-`--resume <verified-absolute-file>`, and Grok `--no-leader --resume <verified-conversation-id>`. A command launch that
-opts into Resume supplies its own resume command, and Farhelm never derives one from its start command: it fills in
-`{conversation}`, `{cwd}`, and `{farhelm_args}` as single-quoted words and hands the rest unchanged to `bash -c`. For Pi
-and OMP, `{conversation}` means the verified file path, not Farhelm's internal durable locator; for Codex it means the
-verified persistent thread ID, not the runtime session ID or encoded locator; for Grok it means the verified UUID, not
-the `grok:` locator or either evidence path.
+`--resume <verified-absolute-file>`, Grok `--no-leader --resume <verified-conversation-id>`, and Antigravity
+`--conversation <conversation-id>`. A command launch that opts into Resume supplies its own resume command, and Farhelm
+never derives one from its start command: it fills in `{conversation}`, `{cwd}`, and `{farhelm_args}` as single-quoted
+words and hands the rest unchanged to `bash -c`. For Pi and OMP, `{conversation}` means the verified file path, not
+Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not the runtime session ID or
+encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either evidence path.
 
 Anything farhelm attaches to a launch — an agent launch, or a command launch that declares an agent type — must be
 invisible from inside the session when it works AND when it fails: no output on the agent's terminal, no non-zero exit,
@@ -3922,7 +3937,8 @@ for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment rem
 exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
 The instructions themselves are printed only when that command is run, so a session where the user never mentions
 farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
-stdout, so its integration delivers no instructions pointer.
+stdout, so its integration delivers no instructions pointer. Antigravity's manual callbacks always receive an empty JSON
+object and a newline on stdout, including when reporting fails. They receive no instructions pointer.
 
 Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
 observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure, so no vendor-output exception is
@@ -4358,11 +4374,11 @@ chosen. This works for current and older catalog models.
 budget, allows newline and tab, and refuses other control characters. It is sent once as literal command-line data at
 creation, including for a managed checkout, and stays separate from the stored launch: Restart, Clone, Replace and
 recent setups never send or remember it again. A template supplies its prompt on every create using it. Command launches
-and inherited spawns refuse prompt flags. Claude, Codex, Cursor, Grok, Muse, OMP and OpenCode support prompts; Goose and
-Pi do not. Muse refuses a named conversation plus a prompt. A create's approval card shows the full escaped message in a
-scrollable block, under a distinct card kind an older UI cannot decode. Template cards carry the prompt in their fields
-and likewise fail an older decoder. A completed keyed create still replays when its template's prompt changes; an
-interrupted ordinary agent create refuses a changed resolved prompt before relaunching.
+and inherited spawns refuse prompt flags. Claude, Antigravity, Codex, Cursor, Grok, Muse, OMP and OpenCode support
+prompts; Goose and Pi do not. Muse refuses a named conversation plus a prompt. A create's approval card shows the full
+escaped message in a scrollable block, under a distinct card kind an older UI cannot decode. Template cards carry the
+prompt in their fields and likewise fail an older decoder. A completed keyed create still replays when its template's
+prompt changes; an interrupted ordinary agent create refuses a changed resolved prompt before relaunching.
 
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
 helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd` or
