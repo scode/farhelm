@@ -360,7 +360,7 @@ pub(crate) fn status(
         | Work::Delete(_)
         | Work::Stop
         | Work::Replace
-        | Work::Seen
+        | Work::Seen { .. }
         | Work::Restart
         | Work::TunnelOpen
         | Work::TunnelClose

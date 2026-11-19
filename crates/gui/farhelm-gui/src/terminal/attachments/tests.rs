@@ -940,7 +940,7 @@ fn a_drop_on_an_inert_terminal_is_refused_until_the_veil_lifts(cx: &mut TestAppC
     settle(h.cx);
     h.drop_files(MAIN_PANE, vec![real_file()]);
     assert!(h.uploads().is_empty());
-    assert_eq!(h.lines(), [DETACHED_TEXT]);
+    assert_eq!(h.lines(), [INERT_TEXT]);
     owner.update(h.cx, |owner, cx| owner.set_inert(false, cx));
     settle(h.cx);
     assert_eq!(h.lines(), Vec::<String>::new());

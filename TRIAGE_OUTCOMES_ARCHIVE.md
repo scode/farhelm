@@ -23954,3 +23954,17 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `wzyntpsvknoxmnuxxvkzywynpxvlrlrl`, bookmark
   `plan/gui-ux-desktop-fixes/08-template-collision-refusal-mixes`,
   [PR #4249](https://github.com/scode/farhelm/pull/4249/changes).
+
+## gui-labels-and-refusals-name-different-actions.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Dialogs and messages
+  name the same action differently, a few wrongly. E.g. "Seen:" and "Sandbox:" prefixes, the model Retry tooltip, the
+  tab-limit placeholder. Confirmed at spot-checked sites. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: only the wrong-action/wrong-cause messages (~30-60). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: change `plvwnpkoytmrkknvkppxpnloywourusr`, bookmark `plan/gui-ux-desktop-fixes/09-gui-labels-and-refusals`,
+  [PR #4251](https://github.com/scode/farhelm/pull/4251/changes).

@@ -17,7 +17,7 @@
 //! - **One request, through the operation store,** under the session's key ([`Work::Seen`], which says what that
 //!   costs the session's other actions). Nothing is shown in advance: the dot changes when the helm pushes the row with
 //!   its new stamp, which it does before it replies.
-//! - **A refusal shows on the row** as "Seen: <the helm's words>", until the session's next operation starts
+//! - **A refusal shows on the row** under the action's name, until the session's next operation starts
 //!   ([`super::outcome`]). Unlike a failed automatic mark, which is only logged (SPEC.md, "Errors and diagnostics"), the
 //!   user asked for this one, so losing it silently would look like it worked.
 //! - **The item closes the menu; the dot is a pointer shortcut** ([`MarkToggle`] says how it keeps its click from the
@@ -78,6 +78,12 @@ impl Toggle {
         }
     }
 
+    /// Keep the action's name through a refusal, including when the bulk action cannot start.
+    pub(crate) fn work(self) -> Work {
+        let read = matches!(self, Self::Read(_));
+        Work::Seen { read }
+    }
+
     /// The route's body for this toggle: the stamp to record, or `null` to clear it.
     pub(crate) fn request(self) -> SessionSeenRequest {
         SessionSeenRequest {
@@ -111,7 +117,7 @@ pub(crate) fn dot_help(live: Live, toggle: Toggle) -> String {
 /// The session's manual seen toggle, `PUT /api/sessions/{id}/seen` with the route's own request type.
 pub(crate) fn command(session: &str, toggle: Toggle) -> Result<Command, PathError> {
     Ok(Command::new(
-        Work::Seen,
+        toggle.work(),
         Method::Put,
         ApiPath::api(&["sessions", session, "seen"])?,
         // An optional integer always encodes, so `json!` (which panics on a failed encode) cannot fail here.
@@ -218,7 +224,7 @@ mod tests {
             None
         );
         let built = command("a", Toggle::Unread).unwrap();
-        assert_eq!(built.work(), Work::Seen);
+        assert_eq!(built.work(), Work::Seen { read: false });
         assert_eq!(built.path().as_str(), "/api/sessions/a/seen");
     }
 }

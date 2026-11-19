@@ -1054,6 +1054,10 @@ fn host_cards_offer_allow_or_deny_only_and_say_why() {
     );
     assert_eq!(add.answers[0].label, AnswerLabel::Words("Open add dialog"));
     assert_eq!(
+        add.answers[0].help,
+        AnswerHelp::Words("Open add dialog: review the host before adding it")
+    );
+    assert_eq!(
         offered(&add),
         vec![ApprovalAnswer::Allow, ApprovalAnswer::Deny]
     );

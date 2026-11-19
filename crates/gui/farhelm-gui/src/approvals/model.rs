@@ -1129,7 +1129,7 @@ pub enum AnswerHelp {
     OwnHost(HostText),
 }
 
-/// The Allow button's help, which every Allow-like button (Open, Open add dialog) carries, as in the old app.
+/// Help for the answers that send Allow immediately. Adding a host first opens the Add host dialog.
 pub const ALLOW_HELP: &str = "Allow: let this one request go ahead";
 /// Deny's help, also on Dismiss.
 pub const DENY_HELP: &str = "Deny: refuse this request; the agent is told you declined";
@@ -1169,7 +1169,10 @@ fn answers(approval: &PendingApproval, tunnel_offered: bool) -> Vec<Answer> {
             _ if tunnel_offered || preapproved => "Open",
             _ => "Allow",
         }),
-        help: AnswerHelp::Words(ALLOW_HELP),
+        help: AnswerHelp::Words(match action {
+            ApprovalAction::HostAdd { .. } => "Open add dialog: review the host before adding it",
+            _ => ALLOW_HELP,
+        }),
         primary: !tunnel_offered,
     });
     if !preapproved && !tunnel_offered && !action.requires_direct_allow() {

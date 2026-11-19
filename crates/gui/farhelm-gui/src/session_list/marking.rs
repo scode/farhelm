@@ -902,7 +902,7 @@ impl SessionList {
                     Write::Mute => (Work::Mute, "Mute"),
                     Write::Unmute => (Work::Mute, "Unmute"),
                     Write::Group => continue,
-                    Write::Seen(_) => (Work::Seen, "Seen"),
+                    Write::Seen(toggle) => (toggle.work(), toggle.label()),
                 };
                 bulk::not_started(&target.key, work, label, cx);
                 continue;

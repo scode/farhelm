@@ -190,7 +190,7 @@ fn the_menu_item_follows_the_seen_state_and_sends_the_stamp_or_null(cx: &mut Tes
 /// Its menu closed at acceptance, and the refusal must not close or take focus from a menu the user opened meanwhile
 /// (the old `sidebar.spec.ts` case "a failed manual mark closes on acceptance and preserves a newer menu"). Specified:
 /// b's toggle closes b's menu at once; with it unanswered, a's menu is opened; a refusal with the helm's words leaves
-/// a's menu open with focus on its Rename, and shows "Seen: <words>" under b's row and in b's menu; it stays through an
+/// a's menu open on Rename and shows the Mark read refusal under b's row and in b's menu. It stays through an
 /// unrelated pushed change, and goes once b's next toggle is sent, before it is answered.
 #[gpui::test]
 fn a_refused_toggle_shows_on_the_row_until_the_next_operation(cx: &mut TestAppContext) {
@@ -214,7 +214,7 @@ fn a_refused_toggle_shows_on_the_row_until_the_next_operation(cx: &mut TestAppCo
     assert!(drawn(cx, "session-menu"), "a's menu stays open");
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
     test_support::keys(cx, "escape");
-    let shown = "Seen: seen-failure-sentinel";
+    let shown = "Mark read: seen-failure-sentinel";
     assert_eq!(label_of(cx, "session-outcome-b").as_deref(), Some(shown));
     test_support::click(cx, "session-menu-b");
     assert_eq!(

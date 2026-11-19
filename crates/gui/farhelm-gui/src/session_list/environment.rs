@@ -56,7 +56,7 @@
 //!   **Suspending…** or **Resuming…** from the pushed phase until it settles ([`pending`]), and the commands of every
 //!   session on that host, Delete and Clone included, stay refused while that phase shows the provider's change running
 //!   ([`held`]), as the old claim lasted for the whole change. Any other refusal stays on the session's key and shows on
-//!   the row and the header as a lifecycle refusal does (`super::outcome`, "Sandbox: " or "Stop: " before the helm's
+//!   the row and the header as a lifecycle refusal does (`super::outcome`, with the action name before the helm's
 //!   words). The changing phase is `HostStateView::TensorlakeChanging` for every provider, despite its name: a
 //!   container's pause and unpause go through the helm's shared `environment::lifecycle::perform`, just as a sandbox's
 //!   do. Other windows are pushed it while the change runs; the window that asked gets it only with its command's

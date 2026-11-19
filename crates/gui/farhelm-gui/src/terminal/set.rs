@@ -88,8 +88,12 @@ pub(crate) const AGENT_TAB_ID: &str = "session-terminal-tab-agent";
 /// The element id of the notice a tab past [`MAX_ATTACHED_TABS`] shows in place of a terminal.
 pub(crate) const NOT_ATTACHED_ID: &str = "terminal-not-attached";
 
-/// What a tab past [`MAX_ATTACHED_TABS`] shows (`.terminal-not-mounted`'s words at the reference commit).
-fn not_attached_text() -> String {
+/// An unattached tab within the cap failed to measure its font. Closing other tabs only helps outside the cap.
+fn not_attached_text(tabs: &[Tab], chosen: Option<&str>) -> String {
+    let mut within_cap = tabs.iter().take(MAX_ATTACHED_TABS);
+    if within_cap.any(|tab| Some(tab.id.as_str()) == chosen) {
+        return "Farhelm could not measure the terminal font for this tab.".to_owned();
+    }
     format!(
         "This session reports more than {MAX_ATTACHED_TABS} terminal tabs; this one is listed but not attached \
          (close some to attach it)."
@@ -385,7 +389,7 @@ impl TerminalSet {
     }
 
     /// The terminal drawn now: the chosen tab's, or the agent's; `None` while a tab past [`MAX_ATTACHED_TABS`] is
-    /// chosen.
+    /// chosen or the chosen tab's font could not be measured.
     pub fn shown(&self) -> Option<&Entity<AttachedTerminal>> {
         match &self.chosen {
             None => Some(&self.agent),
@@ -905,7 +909,7 @@ impl Render for TerminalSet {
                     .p(px(NOT_ATTACHED_PAD))
                     .text_size(px(NOT_ATTACHED_TEXT_SIZE))
                     .text_color(theme::color(palette.fg_dim))
-                    .child(not_attached_text()),
+                    .child(not_attached_text(&self.tabs, self.chosen.as_deref())),
             ),
         };
         div()

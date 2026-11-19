@@ -181,7 +181,7 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::Delete(_)
         | Work::Stop
         | Work::Replace
-        | Work::Seen
+        | Work::Seen { .. }
         | Work::Restart
         | Work::TunnelOpen
         | Work::TunnelClose
