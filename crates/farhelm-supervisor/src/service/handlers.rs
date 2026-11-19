@@ -617,9 +617,8 @@ async fn handle_list_sessions(
 
 /// The reply to `ListSessions`: the listing, or the error that ended it,
 /// except that a sealed supervisor always reports its seal (see the arm).
-/// Apart from the handler so the rule can be tested without a listing that
-/// really fails, which takes an unreadable launch sentinel or checkout
-/// registry.
+/// Separate from the handler so tests can exercise the reply rule without
+/// making the listing's checkout projection fail.
 fn list_reply(
     req_id: u64,
     listed: anyhow::Result<super::listing::ListReply>,
@@ -650,11 +649,9 @@ fn list_reply(
                 sealed: true,
             }
         }
-        // Every failure the listing can hit — an unreadable launch
-        // sentinel, an unreadable checkout registry — is an `Internal`
-        // carrying the original error verbatim: see `list_all`'s own
-        // docs for why each of them fails the whole request rather
-        // than degrading one entry.
+        // A listing failure, such as an unreadable checkout registry, is an
+        // `Internal` carrying the original error. The ticker reads launch
+        // artifacts independently of listing (see `list_all`).
         Err(e) => ControlMsg::Error {
             create_unaccepted: false,
             req_id,
