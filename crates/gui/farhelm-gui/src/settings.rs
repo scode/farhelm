@@ -1399,12 +1399,6 @@ impl SettingsDialog {
                     .collect()
             }
             Section::App => {
-                if !section.listed(cx) {
-                    return vec![
-                        choices::help("App updates are unavailable in this build.", cx)
-                            .into_any_element(),
-                    ];
-                }
                 let weak = cx.weak_entity();
                 app::section(
                     &self.app,
@@ -1466,10 +1460,14 @@ impl Render for SettingsDialog {
         let help_edge =
             layers::beside_edge("settings-navigation-help-edge", window, cx).into_any_element();
         let searching = self.search.active();
-        let listed = Section::ALL
-            .iter()
-            .copied()
-            .filter(|section| section.listed(cx));
+        let listed = Section::ALL.iter().copied().filter_map(|section| {
+            if searching {
+                let count = self.search.section_count(section);
+                (count > 0).then_some((section, Some(count)))
+            } else {
+                section.listed(cx).then_some((section, None))
+            }
+        });
         // `.app-settings-navigation`: the section buttons, 6 pixels apart, with a rule between them and the section.
         let navigation = div()
             .id("settings-sections")
@@ -1486,7 +1484,7 @@ impl Render for SettingsDialog {
             .border_color(theme::color(palette.border_dialog))
             .child(help_edge)
             .child(self.search.field(cx))
-            .children(listed.map(|section| {
+            .children(listed.map(|(section, count)| {
                 let weak = weak.clone();
                 Button::new(
                     format!("settings-section-{}", section.key()),
@@ -1497,7 +1495,30 @@ impl Render for SettingsDialog {
                 )
                 .tier(Tier::Nav)
                 .icon(section.icon())
-                .pressed(section == self.shown)
+                .pressed(!searching && section == self.shown)
+                .when_some(count, |button, count| {
+                    let name = if count == 1 {
+                        format!("{} (1 match)", section.label())
+                    } else {
+                        format!("{} ({count} matches)", section.label())
+                    };
+                    button.accessible_name(name).content(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(4.))
+                            .child(div().min_w_0().truncate().child(section.label()))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(theme::metrics::TEXT_SM)
+                                    .child(count.to_string()),
+                            ),
+                    )
+                })
                 .on_click(move |_, window, cx| {
                     let _ = weak.update(cx, |dialog, cx| {
                         dialog.search.clear(window, cx);

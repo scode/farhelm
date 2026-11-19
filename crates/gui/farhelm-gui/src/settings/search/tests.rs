@@ -150,10 +150,11 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
     }
 }
 
-/// A search can find a section this build does not list without loading it. Down and Up choose between rows while
-/// leaving the caret in the field, and Enter goes directly to the switch without toggling it.
+/// Search offers only what this build shows: with no updater, App's settings are not results (SPEC.md lists App only
+/// in a desktop app whose updater is active). Enter goes directly to the switch without toggling it, and nothing
+/// is read to search.
 #[gpui::test]
-fn search_resolves_hidden_sections_and_enters_the_selected_switch(cx: &mut TestAppContext) {
+fn search_skips_hidden_sections_and_enters_the_selected_switch(cx: &mut TestAppContext) {
     let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
     open_settings(cx);
     assert_eq!(
@@ -166,21 +167,13 @@ fn search_resolves_hidden_sections_and_enters_the_selected_switch(cx: &mut TestA
     let ids = result_ids(cx);
     assert_eq!(
         ids,
-        [
-            format!(
-                "settings-result-hosts-{}",
-                Choice::AutoUpdateRemoteHosts.id()
-            ),
-            format!("settings-result-app-{}", super::app::CHECK_ID),
-            format!("settings-result-app-{}", super::app::ID),
-        ],
+        [format!(
+            "settings-result-hosts-{}",
+            Choice::AutoUpdateRemoteHosts.id()
+        )],
+        "App's update settings are not offered without an updater",
     );
     assert!(sent(&mut helm).is_empty(), "search sends no reads");
-    assert_eq!(selected(cx).as_ref(), Some(&ids[0]));
-    keys(cx, "down");
-    assert!(search_focused(cx), "Down did not leave the input");
-    assert_eq!(selected(cx).as_ref(), Some(&ids[1]));
-    keys(cx, "up");
     assert_eq!(selected(cx).as_ref(), Some(&ids[0]));
     keys(cx, "enter");
     assert_eq!(heading(cx).as_deref(), Some("Hosts"));
@@ -274,6 +267,57 @@ fn escape_restores_the_prior_section_and_close_controls_close(cx: &mut TestAppCo
             "{close} dismisses the dialog even during search"
         );
     }
+}
+
+/// Filtering the navigation changes only which section buttons are listed, and a section this build hides is never
+/// one of them. Clearing the query restores the old list.
+#[gpui::test]
+fn settings_search_narrows_sections_and_reports_their_match_counts(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    let sections = |cx: &mut VisualTestContext| {
+        frame(cx)
+            .into_iter()
+            .filter(|node| {
+                node.element_id
+                    .as_ref()
+                    .is_some_and(|id| id.starts_with("settings-section-"))
+            })
+            .filter_map(|node| node.label.map(|label| label.to_string()))
+            .collect::<Vec<_>>()
+    };
+    let initial = sections(cx);
+    assert!(initial.iter().any(|name| name == "Hosts"));
+    assert!(
+        !initial.iter().any(|name| name == "App"),
+        "there is no updater"
+    );
+    focus_search(cx);
+    type_query(cx, "upgrade");
+    assert_eq!(sections(cx), ["Hosts (1 match)"], "no updater, so no App");
+    assert_eq!(result_ids(cx).len(), 1);
+    assert!(
+        sent(&mut helm).is_empty(),
+        "displaying counts does not read their sections"
+    );
+    type_query(cx, "wallpaper");
+    assert!(sections(cx).is_empty());
+    assert!(result_ids(cx).is_empty());
+    keys(cx, "escape");
+    assert_eq!(sections(cx), initial);
+    assert_eq!(heading(cx).as_deref(), Some("Sessions"));
+}
+
+/// The tunnel switch is drawn only on the Mac, so a Linux build's search must not offer it.
+#[gpui::test]
+fn the_tunnel_switch_is_searchable_only_where_it_is_drawn(_cx: &mut TestAppContext) {
+    let tunnels = |platform| {
+        super::catalog(platform)
+            .iter()
+            .any(|entry| entry.target == super::Target::Tunnels)
+    };
+    assert!(tunnels(Platform::Mac));
+    assert!(!tunnels(Platform::Linux));
 }
 
 /// A fresh Enter opens the post-clone command and a held repeat still belongs to search. In an already-loaded

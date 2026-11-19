@@ -214,10 +214,10 @@ linux/settings-recipes-places--dark.png 2b9249fa401b45d5a14b2d2a5c5b1c7bfb2a7374
 linux/settings-recipes-places--light.png 08eaa9609baf2735501cd74fdeec578db7b301ec
 linux/settings-recipes-rows--dark.png a6dd37bc05d1a50f6f1bb3777ed86b3a610449f7
 linux/settings-recipes-rows--light.png 54b4bcdc23139d5433c07a4276e822f7af263b28
-linux/settings-search--dark.png 1c4d67d1203d81eeabdbf28bd42c65e22303ed91
-linux/settings-search--light.png a7bb4e9cc1a3a5a088d4d55c4083a378941a919e
-linux/settings-search-empty--dark.png e430c2abb957d38036ff89fb4b8050e65fbf9fda
-linux/settings-search-empty--light.png dc80de0aacda35064e3f5ba0a108842ac046d138
+linux/settings-search--dark.png 4c783b0a72f6d53b14616cbdb6e5fd28337b00d3
+linux/settings-search--light.png 0a82557ce8455b3ab92cf277a99c27c97e9d8b0c
+linux/settings-search-empty--dark.png feafbe41fd321bac12ac0d102115449aad5c2ad5
+linux/settings-search-empty--light.png 1332d776fe97fd858dc85e7ed4b7bf75a160a7e2
 linux/settings-sessions--dark.png ec654ac87237f526167178fb27b4250233c564d4
 linux/settings-sessions--light.png b22b99f4fc312ad0d120b3196f4c37a83926aa7b
 linux/settings-tensorlake--dark.png 8e04f8aa292c1f59f60b696ee5c8435713591d18

@@ -2,4 +2,5 @@
 kind: added
 ---
 
-Settings now has a search field. Type part of a setting's name or description to find it, then pick a result to go straight to it.
+Settings now has a search field. It finds settings by name or description, shows how many matches are in each section,
+and takes you to the setting you pick.

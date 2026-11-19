@@ -186,8 +186,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
     another path than the drawn Close button, also untested.
 
-- **Settings search.** support search in settings dialog. Plan: `plans/queue/settings-search.md`.
-
 - **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
   preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
   job, while holding Farhelm's own exclusive cache lock (`clear_git_locks` in

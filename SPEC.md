@@ -2395,10 +2395,11 @@ rules. Switching sections preserves unsaved fields, outcome lines and pending sa
 open for the editor's leave question. Closing discards other unsaved fields. Escape and either close control return
 focus to the gear when Settings closes.
 
-The **Search** field above the section list finds settings by section, label or help text. Cmd+F on a Mac or Ctrl+F on
-Linux moves focus there from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or Enter
-opens a result and reveals its control, or the top of its section for a choice group or help entry. Escape in the search
-field clears the query before it closes the dialog.
+The **Search** field above the section list finds settings by section, label or help text. The list shows only sections
+with matches and gives each section's count while a query is active. Cmd+F on a Mac or Ctrl+F on Linux moves focus there
+from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or Enter opens a result and
+reveals its control, or the top of its section for a choice group or help entry. Escape in the search field clears the
+query before it closes the dialog.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
