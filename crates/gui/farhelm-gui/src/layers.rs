@@ -73,6 +73,9 @@
 //!   the terminal beside it) stays open, with focus inside, when it goes ([`close`]). Every rule above that names "the
 //!   topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer that holds
 //!   focus, which such a popover never is (and for Tab's trap, the topmost that also traps Tab: see the next rule).
+//! - **Hover can open a submenu before it takes focus.** It belongs to the parent menu from the first frame, so Escape
+//!   and outside presses see it immediately. The parent keeps the keyboard until the user enters the child. Hovering
+//!   a sibling item can dismiss that child while either menu has focus. Other overlays keep their usual ownership.
 //! - **A popover may let Tab through.** One opened with [`Popover::tab_through`] ([`Popover::traps_tab`] off) takes
 //!   focus when it opens and returns it on Escape like a menu, but traps no Tab: Tab and Shift+Tab walk its controls as
 //!   if they stood in the page right after its toggle (the control its [`Popover::returns_to`] names), and go on out of
@@ -271,7 +274,8 @@ struct Layer {
     /// the page or from an approval card.
     parent: Option<LayerId>,
     /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
-    /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
+    /// a start ([`Popover::start`]), and a submenu that hover opened, until the user enters it ([`enter_submenu`]).
+    /// Tab's trap, focus recovery and the focus return on close all pass over a layer without it.
     takes_focus: bool,
     /// Whether Tab stays inside it while it holds focus: every layer that takes focus but a popover opened with
     /// [`Popover::traps_tab`] off, whose Tab follows the page instead ([`tab_through`]).
@@ -329,6 +333,17 @@ enum Kind {
 }
 
 impl Kind {
+    /// Submenu placement identifies the child menus that participate in hover switching.
+    fn is_submenu(&self) -> bool {
+        matches!(
+            self,
+            Self::Popover {
+                placement: Placement::Submenu,
+                ..
+            }
+        )
+    }
+
     /// Whether this is a popover that lets the pointer through ([`Popover::passes_pointer`]): what drawing, Escape, a
     /// dismissible veil and the tooltip ask before treating the layer as one the user is pointing at or answering.
     fn passes_pointer(&self) -> bool {
@@ -694,6 +709,7 @@ pub struct Popover {
     /// own, only this popover). Escape closes it from a control that lets Escape go on (a text field), not from a
     /// focused terminal, whose program gets Escape. Nothing here closes it when focus leaves the control it floats
     /// beside (the old launcher closed its lists on Tab and on blur): that is its owner's to do.
+    /// A menu opened through [`open_submenu`] can defer its start until [`enter_submenu`] gives it focus ownership.
     pub start: Option<FocusHandle>,
     /// The element it is drawn below (or beside, [`Anchor::beside`]), following it as it moves; it closes when the
     /// element is no longer drawn.
@@ -1027,6 +1043,97 @@ pub fn open_popover(
     )
 }
 
+/// Open a child menu beside its trigger. A hover leaves the keyboard on the trigger until the user enters the child.
+/// Its parent is still recorded at open time, so a click in either menu follows the existing layer ancestry rules.
+pub(crate) fn open_submenu(
+    mut menu: Popover,
+    take_focus: bool,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    debug_assert!(matches!(menu.anchor.placement, Placement::Submenu));
+    if !take_focus {
+        menu.start = None;
+    }
+    open_popover(menu, mark, window, cx)
+}
+
+/// Give the top submenu keyboard ownership. The caller chooses the focused item, which can be the one under the
+/// pointer or the first keyboard choice. A stale event cannot enter a closed submenu or reach through another layer.
+pub(crate) fn enter_submenu(id: LayerId, window: &Window, cx: &mut App) -> bool {
+    let Some(stack) = stack(window, cx) else {
+        return false;
+    };
+    stack.update(cx, |stack, cx| {
+        let Some(top) = stack
+            .layers
+            .iter_mut()
+            .rev()
+            .find(|layer| !layer.passes_pointer())
+        else {
+            return false;
+        };
+        if top.id != id || !top.kind.is_submenu() || top.takes_focus {
+            return false;
+        }
+        top.takes_focus = true;
+        cx.notify();
+        true
+    })
+}
+
+/// Make the hovered item eligible for the menu's shared focus move. Crossing into a child grants it the keyboard.
+/// A sibling in the parent can close the child and take focus in the same pointer event. That exception applies
+/// only to the top submenu and its own parent, so a hover can never dismiss a question over the menu.
+pub(crate) fn prepare_menu_hover(item: &FocusHandle, window: &mut Window, cx: &mut App) -> bool {
+    let Some(stack) = stack(window, cx) else {
+        return false;
+    };
+    let layers = &stack.read(cx).layers;
+    let Some(top) = layers.iter().rev().find(|layer| !layer.passes_pointer()) else {
+        return false;
+    };
+    let top_id = top.id;
+    if top.container.contains(item, window) {
+        return top.takes_focus || enter_submenu(top_id, window, cx);
+    }
+    if !top.kind.is_submenu()
+        || matches!(&top.returns_to, focus::ReturnTo::Control(trigger) if trigger == item)
+        || !layers
+            .iter()
+            .any(|layer| Some(layer.id) == top.parent && layer.container.contains(item, window))
+    {
+        return false;
+    }
+    // The hover will focus the sibling. Returning to the old trigger first would register a second move.
+    close_as(top_id, CloseCause::Left, window, cx);
+    true
+}
+
+/// Keyboard navigation can leave the trigger while its child is still showing. At that point the new item is the
+/// parent menu's sole highlight, and the old child's choices no longer belong to it.
+pub(crate) fn close_unentered_submenu(window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let layers = &stack.read(cx).layers;
+    let Some(top) = layers.iter().rev().find(|layer| !layer.passes_pointer()) else {
+        return;
+    };
+    if !top.kind.is_submenu() || top.takes_focus {
+        return;
+    }
+    if let focus::ReturnTo::Control(trigger) = &top.returns_to
+        && !trigger.is_focused(window)
+        && layers.iter().any(|layer| {
+            Some(layer.id) == top.parent && layer.container.contains_focused(window, cx)
+        })
+    {
+        close(top.id, window, cx);
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the private join of the public open functions"
@@ -1272,10 +1379,9 @@ enum CloseCause {
     /// Tab or Shift+Tab left a menu whose rule returns focus to its toggle ([`close_on_tab`]): as `Closed`, except that
     /// the key is navigation that happens to close the menu, so only its held repeats are swallowed.
     TabbedOut,
-    /// Focus left a popover that lets Tab through, or a press landed outside it ([`Popover::traps_tab`]): no focus is
-    /// returned. Focus is already where the user put it, or, after a press that focused nothing (a macOS button, the
-    /// page's empty space), it is on a control the next frame no longer draws, and the focus coordinator's recovery
-    /// moves it on from there as from any control that vanished.
+    /// Focus moves independently of the close. A hover on a submenu sibling takes focus immediately afterward.
+    /// A popover that lets Tab through also closes this way when focus leaves or a press lands outside it. If that
+    /// press took no focus, recovery moves it on when the old control disappears.
     Left,
 }
 
@@ -1351,6 +1457,18 @@ fn close_taking(
     let Some(closed) = closed else {
         return;
     };
+    // A hover preview leaves focus on its trigger, so there is no focus return to remember the dismissal key.
+    // Record it here to keep a held Escape from going on to dismiss the parent.
+    if why == CloseCause::Dismissed
+        && closed.iter().any(|layer| {
+            !layer.takes_focus
+                && layer.kind.is_submenu()
+                && matches!(&layer.returns_to, focus::ReturnTo::Control(trigger)
+                    if trigger.is_focused(window))
+        })
+    {
+        focus::note_closing(true, window, cx);
+    }
     // A dismissal from a popover's place (Escape on the tunnel pill while its list is open, [`Popover::traps_tab`])
     // counts as from inside it: focus "returns" to the place it is already on, and the coordinator notes the Escape
     // as the closing press, so its repeats are swallowed rather than dismissing each layer below in turn. Only for a

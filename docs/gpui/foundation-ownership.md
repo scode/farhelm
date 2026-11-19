@@ -274,6 +274,10 @@ hover help (`HoverHelp::beside` in the component layer), which only SPEC.md's se
 do, and only for a control drawn inside the column that draws the edge: the help is placed against the edge wherever the
 control is, where the old app checked that the control was inside the sidebar.
 
+The shared submenu component uses `layers::open_submenu` and `layers::enter_submenu` to keep keyboard focus on the
+trigger until the user enters the child. The shared menu item uses `layers::prepare_menu_hover` to switch between
+siblings within that parent.
+
 Lint exceptions: 1: `deferred` in `layers::overlay` (which may also call `anchored`, though it no longer does: help at
 the pointer is placed by the layer manager's own element).
 
@@ -307,7 +311,10 @@ place (`Open::reword`).
 Lint exceptions: 1: GPUI's next-frame callback (`Window::on_next_frame`) in `prompt::when_shown`, which tells a reworded
 question when a frame showing its new words goes on screen, so that an answer given before then (a key GPUI handles with
 the new words drawn but not yet shown) cannot authorize them. It asks for one frame per reword and schedules nothing
-over time, which stays the ticker's (the component layer and lint rules' owner decided this on 2026-11-16).
+over time, which stays the ticker's (the component layer and lint rules' owner decided this on 2026-11-16). Since
+submenus-open-on-hover, the focus coordinator's `focus::highlight` also asks for one frame after each pointer-driven
+menu focus move, so Enter or Space on a menu command acts only once that highlight is on screen; it too schedules
+nothing over time.
 
 ### Actions and keymap
 

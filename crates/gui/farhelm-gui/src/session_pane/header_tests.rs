@@ -1502,6 +1502,7 @@ fn a_caret_menus_pointer_and_arrows_move_one_fill_and_enter_runs_the_hovered_cho
     test_support::settle(cx);
     assert_eq!(focused_id(cx).as_deref(), Some(with));
 
+    test_support::show_next_frame(cx);
     test_support::keys(cx, "enter");
     assert!(launcher_drawn(cx), "Enter ran the hovered choice");
     assert!(!drawn(cx, menu), "and closed the menu");

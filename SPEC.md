@@ -3417,11 +3417,16 @@ editing updates. If the new information makes the input invalid, the field shows
 not move.
 
 A menu has one highlight. Whichever moved last, the pointer or the keys, sets it, and Enter acts on the highlighted
-item. Keys typed before a menu finishes appearing apply in order, as if typed slowly.
+item. While a submenu is open, its parent item stays highlighted too; the keyboard focus ring stays on the focused item
+only. Keys typed before a menu finishes appearing apply in order, as if typed slowly.
 
-A menu item with a submenu opens it beside the parent item. Right or Enter on the parent item opens the submenu and
-moves focus into it. Left or Escape closes the submenu and returns focus to that item. The one-highlight rule applies
-across the open menus. Closing the parent menu also closes its submenu.
+Submenus open on hover, as a general rule for every menu. A menu item with a submenu opens it beside the item as soon as
+the pointer rests on it, with no delay. Focus stays on the parent item until the pointer moves into the submenu or Right
+or Enter on the parent moves focus into it; Right, Enter or a click on a parent whose submenu is closed opens it and
+moves focus in. A click on a parent whose submenu is already open leaves it open and focus where it was. Moving the
+pointer onto another item of the parent menu closes the submenu and opens that item's own, if it has one. Hovering a
+menu never closes a dialog or question opened from it. Left or Escape closes the submenu and returns focus to its parent
+item. Closing the parent menu also closes its submenu.
 
 Confirmed 2026-10-17: when the user moves between controls (menu items, buttons, switches) by different means within
 tens of milliseconds of each other, such as an arrow key and a pointer or screen reader at nearly the same instant, a

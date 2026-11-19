@@ -767,6 +767,13 @@ later window start or reset, as the maintainer decided on 2026-11-14. A batch th
 card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a mark taken when the
 last of them closes, which always follows a press of the user's.
 
+A submenu opened on hover starts without focus and records its parent at open, like a submenu opened by a key. The layer
+manager gives it keyboard ownership when the pointer or a key enters it, so Tab and focus recovery then see the child.
+Hover can replace a submenu only when its parent contains the hovered item and the submenu is the top layer the user can
+interact with. A key can activate a command under pointer-moved focus once the highlight is shown. The focus coordinator
+uses the same one-shot frame callback as a reworded prompt, since GPUI can route a key through a frame it has drawn but
+has yet to present.
+
 One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
 quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil while taking neither
 focus nor pointer input. It is display only, like the tooltip: its view has no listener, hover style, cursor, help or

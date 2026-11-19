@@ -496,14 +496,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`crates/farhelm-helm/src/release_announcements.json`, where it is the only entry). Recorded by the maintainer on
   2026-11-18 from the plan's review. Plan: `plans/queue/retire-old-terminal-announcement.md`.
 
-- **Open submenus on hover, as a general rule.** The shared submenu component
-  (`crates/gui/farhelm-gui/src/components/submenu.rs`, first used by mute-sessions and reused by session-groups for Mute
-  and Move to group) opens a submenu only on click, Enter or Right; while it is open its parent item loses its
-  highlight. Make submenus open on hover, as most desktop submenus do, keep the parent highlighted while its submenu is
-  open, and state hover-to-open as the general UI rule for submenus in SPEC.md, implemented once in the shared component
-  so every submenu follows it. Recorded by the maintainer on 2026-11-18 from the mute-sessions review. Plan:
-  `plans/queue/submenus-open-on-hover.md`.
-
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
