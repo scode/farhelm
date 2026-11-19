@@ -8,5 +8,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `shared-placement-picker.md` — Shared placement picker drops its no-op press and moves to a shared module, with the template editor test
 - [complete] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
 - [in-flight c71ba2] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
-- [pending] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
+- [in-flight af9ead] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
 - [pending] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
