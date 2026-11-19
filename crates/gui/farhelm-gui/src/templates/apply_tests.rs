@@ -54,11 +54,15 @@ fn catalog() -> Vec<LaunchCatalogModel> {
     vec![
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
+            family: "luna".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
         },
         LaunchCatalogModel {
             id: "claude-fable-5".into(),
+            family: "claude-fable-5".into(),
+            latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::High],
         },
@@ -408,22 +412,34 @@ fn a_model_picks_its_only_agent_and_a_custom_id_keeps_its_owner() {
     assert_eq!(draft.agent.model_owner, Some(LaunchHarness::Claude));
 }
 
-/// A saved model-only template for a retired ID must set both choices in the visible draft. The shared fold can
-/// infer the agent while replay still owns the edit that sets it, including ownership of the custom model.
+/// A model-only template for an older known ID sets both choices in the visible draft. Replay must use the
+/// inferred agent's catalog edit so it retains the original model and its supported effort.
 #[test]
-fn a_retired_model_template_applies_its_inferred_agent_to_the_draft() {
-    let fixture = Fixture::new();
-    for (id, harness) in [
-        ("gpt-6-astra", LaunchHarness::Codex),
-        ("opencode/gpt-6.1-sol", LaunchHarness::OpenCode),
+fn an_older_model_template_applies_its_inferred_agent_to_the_draft() {
+    let mut fixture = Fixture::new();
+    for (id, family, harness, effort) in [
+        (
+            "gpt-6-astra",
+            "astra",
+            LaunchHarness::Codex,
+            Some(LaunchEffort::Low),
+        ),
+        ("opencode/gpt-6.1-sol", "sol", LaunchHarness::OpenCode, None),
     ] {
+        fixture.catalog.push(LaunchCatalogModel {
+            id: id.into(),
+            family: family.into(),
+            latest: false,
+            harness,
+            efforts: effort.into_iter().collect(),
+        });
         let mut draft = new_draft();
         assert_eq!(draft.agent.harness, None);
-        assert!(fixture.catalog.iter().all(|model| model.id != id));
         let saved = template(
-            "retired-model",
+            "older model",
             TemplateFields {
                 model: Some(Some(id.into())),
+                effort: effort.map(Some),
                 ..TemplateFields::default()
             },
         );
@@ -431,6 +447,7 @@ fn a_retired_model_template_applies_its_inferred_agent_to_the_draft() {
         assert_eq!(draft.agent.harness, Some(harness), "{id}");
         assert_eq!(draft.agent.model.as_deref(), Some(id));
         assert_eq!(draft.agent.model_owner, Some(harness));
+        assert_eq!(draft.agent.effort, effort);
     }
 }
 

@@ -21,11 +21,15 @@ fn catalog() -> Vec<LaunchCatalogModel> {
     vec![
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
+            family: "luna".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
         },
         LaunchCatalogModel {
             id: "claude-fable-5".into(),
+            family: "claude-fable-5".into(),
+            latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::High],
         },
@@ -182,6 +186,8 @@ fn an_equally_safe_switch_raises_no_banner_but_reports_the_switch() {
 fn a_cross_agent_model_pick_can_raise_the_banner() {
     let catalog = vec![LaunchCatalogModel {
         id: "z-ai/glm-5.3".into(),
+        family: "glm-5.3".into(),
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: vec![],
     }];
@@ -313,12 +319,16 @@ fn an_agent_switch_lands_on_a_permission_the_new_agent_offers() {
     const REPLACED: &str = "The selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default";
     let pi_model = |id: &str| LaunchCatalogModel {
         id: id.into(),
+        family: id.into(),
+        latest: true,
         harness: Pi,
         efforts: vec![LaunchEffort::Minimal, LaunchEffort::Xhigh],
     };
     // Goose lists the same ids first, with an effort Pi's rows lack, so only a lookup by the owning agent finds Pi's.
     let goose_model = |id: &str| LaunchCatalogModel {
         id: id.into(),
+        family: id.into(),
+        latest: true,
         harness: Goose,
         efforts: vec![LaunchEffort::High],
     };
@@ -522,6 +532,26 @@ fn model_choices_follow_their_owning_agent() {
     );
 }
 
+/// A history pick can supply a custom model owned by its recorded agent. Recognition on the previous agent
+/// must not clear that incoming model and silently launch with the selected agent's configured default.
+#[test]
+fn a_history_pick_keeps_its_custom_model_after_an_older_id_becomes_known() {
+    let catalog = [LaunchCatalogModel {
+        id: "gpt-6.1-sol".into(),
+        family: "sol".into(),
+        latest: false,
+        harness: LaunchHarness::Codex,
+        efforts: vec![LaunchEffort::High],
+    }];
+    let mut draft = new_draft();
+    draft.choose_harness(LaunchHarness::Codex, Some(&catalog), None);
+    assert_eq!(draft.agent.harness, Some(LaunchHarness::Codex));
+    draft.choose_history_model(LaunchHarness::Cursor, "gpt-6.1-sol", Some(&catalog), None);
+    assert_eq!(draft.agent.harness, Some(LaunchHarness::Cursor));
+    assert_eq!(draft.agent.model.as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(draft.agent.model_owner, Some(LaunchHarness::Cursor));
+}
+
 /// Reset choices returns New's agent choices with the remembered permission, keeping the command tab, the one-time
 /// inputs and the destination.
 #[test]
@@ -677,6 +707,8 @@ fn restart_with_refuses_to_switch_agents() {
 fn undo_after_a_cross_agent_model_pick_restores_the_draft_exactly() {
     let catalog = vec![LaunchCatalogModel {
         id: "z-ai/glm-5.3".into(),
+        family: "glm-5.3".into(),
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: vec![],
     }];

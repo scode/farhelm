@@ -781,8 +781,8 @@ fn selection_fits_catalog(selection: &LaunchSelection, catalog: Catalog<'_>) -> 
 }
 
 /// The catalog-dependent half of [`selection_fits_catalog`]: flags that fit their permission, no model or effort on an
-/// agent without that choice, a known model owned by this agent, an effort the model (or the agent) offers, and a
-/// permission the agent offers.
+/// agent without that choice, an effort the model or agent offers, and a permission the agent offers. An older
+/// model's spelling can still be a custom ID on another agent. A current model's spelling needs one of its owners.
 fn selection_is_compatible(selection: &LaunchSelection, catalog: &[LaunchCatalogModel]) -> bool {
     if check_permission_flags(selection.permissions, selection.permission_flags.as_deref()).is_err()
     {
@@ -794,21 +794,16 @@ fn selection_is_compatible(selection: &LaunchSelection, catalog: &[LaunchCatalog
         return false;
     }
     // Read through the agent's own catalog spelling, as the helm does: a bare OpenCode name is OpenCode's model.
-    let known: Option<Vec<&LaunchCatalogModel>> = selection.model.as_ref().map(|model| {
+    let mut owned = None;
+    if let Some(model) = &selection.model {
         let id = selection.harness.catalog_model_id(model);
-        catalog
-            .iter()
-            .filter(|candidate| candidate.id == id)
-            .collect()
-    });
-    let owned = known.as_ref().and_then(|models| {
-        models
-            .iter()
-            .find(|model| model.harness == selection.harness)
-            .copied()
-    });
-    if known.as_ref().is_some_and(|models| !models.is_empty()) && owned.is_none() {
-        return false;
+        let mut known = catalog.iter().filter(|candidate| candidate.id == id);
+        owned = known
+            .clone()
+            .find(|model| model.harness == selection.harness);
+        if owned.is_none() && known.any(|model| model.latest) {
+            return false;
+        }
     }
     let effort_fits = selection.effort.is_none_or(|effort| match owned {
         Some(model) => model.efforts.contains(&effort),

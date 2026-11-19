@@ -23,7 +23,7 @@ use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 // The model catalog and agent-type reconciliation
 // ---------------------------------------------------------------------------
 
-/// One model the helm's release catalog offers, with the efforts it accepts.
+/// One model the helm's release catalog recognizes, with the efforts it accepts.
 ///
 /// What `GET /api/launch-catalog` answers with, one row per model. Custom
 /// model ids are not rows: they are whatever a user types, owned by the
@@ -31,8 +31,21 @@ use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchCatalogModel {
     pub id: String,
+    /// The family name within this harness. Defaults to empty so catalog JSON without it, such as test fixtures
+    /// written before model families, stays valid; the desktop app only ever reads its own build's helm.
+    #[serde(default)]
+    pub family: String,
+    /// The current model for this family on this harness. Defaults to true for the same JSON, which listed only
+    /// current models.
+    #[serde(default = "catalog_default_latest")]
+    pub latest: bool,
     pub harness: LaunchHarness,
     pub efforts: Vec<LaunchEffort>,
+}
+
+/// Read a catalog row without `latest` (JSON written before model families) as a current suggestion.
+const fn catalog_default_latest() -> bool {
+    true
 }
 
 /// Every effort in the order the launcher lists them.
@@ -127,15 +140,21 @@ pub fn reconcile_harness_selection(
     // source's spelling still recognizes a model the source harness owns,
     // so Claude's `claude-fable-5` moved to OpenCode (where it reads as an
     // unknown `opencode/claude-fable-5`) is cleared rather than kept as a
-    // custom OpenCode id.
+    // custom OpenCode id. A foreign older entry alone does not reserve a
+    // spelling the chosen harness could already use as a custom ID. A caller
+    // bringing a custom model from history names its new owner explicitly,
+    // so the previous selection cannot claim the incoming spelling.
     let known_owners = selection.model.as_ref().map(|model| {
         let in_destination = harness.catalog_model_id(model);
         let in_source = source.catalog_model_id(model);
         catalog
             .iter()
             .filter(|candidate| {
-                candidate.id == in_destination
-                    || (candidate.harness == source && candidate.id == in_source)
+                (candidate.id == in_destination
+                    && (candidate.latest || candidate.harness == harness))
+                    || (model_owner != Some(harness)
+                        && candidate.harness == source
+                        && candidate.id == in_source)
             })
             .map(|candidate| candidate.harness)
             .collect::<Vec<_>>()
@@ -651,8 +670,6 @@ fn harness_word(harness: LaunchHarness) -> String {
 /// result is a launcher state, not a launch: a field the launch needs and no
 /// template set is still the user's (or the CLI flags') to fill. Historical
 /// workspace-trust values decode but have no effect: trust comes from Settings.
-/// A saved template can still infer the former owner of a retired Sol or
-/// Astra ID when neither the template nor the launcher supplies an agent.
 /// A session name carries its template kind into the result; resolving a base
 /// against occupied checkout folders belongs to the caller's preview path.
 pub fn apply_template(
@@ -780,23 +797,6 @@ pub fn apply_template(
                 .collect();
             next.harness = match owners.as_slice() {
                 [owner] => Some(*owner),
-                // Older catalogs supplied these owners for model-only
-                // templates. Recover just the agent so that the saved model
-                // can use the normal custom-model path. CLI flag edits use
-                // an unnamed template and still require a chosen agent;
-                // saved templates never have an empty name
-                // (`check_template_shape`). When the helm's catalog
-                // (`launches.rs`, `CATALOG`) replaces a model, add the
-                // replaced ids here.
-                [] if !template.name.is_empty() && !context.catalog.is_empty() => {
-                    match model.as_str() {
-                        "gpt-6.1-sol" | "gpt-6-astra" => Some(LaunchHarness::Codex),
-                        "opencode/gpt-6.1-sol" | "opencode/gpt-6-astra" => {
-                            Some(LaunchHarness::OpenCode)
-                        }
-                        _ => None,
-                    }
-                }
                 _ => None,
             };
         }
@@ -818,13 +818,10 @@ pub fn apply_template(
                     // another type also lists is OpenCode's
                     // (`LaunchHarness::catalog_model_id`).
                     let spelled = harness.catalog_model_id(model);
-                    let owners: Vec<LaunchHarness> = context
-                        .catalog
-                        .iter()
-                        .filter(|entry| entry.id == spelled)
-                        .map(|entry| entry.harness)
-                        .collect();
-                    if !owners.is_empty() && !owners.contains(&harness) {
+                    let mut known = context.catalog.iter().filter(|entry| entry.id == spelled);
+                    if !known.clone().any(|entry| entry.harness == harness)
+                        && known.any(|entry| entry.latest)
+                    {
                         return Err(refuse(
                             "model",
                             format!("{model:?} is not offered by {label}"),
@@ -1517,11 +1514,15 @@ mod tests {
         vec![
             LaunchCatalogModel {
                 id: "claude-fable-5".into(),
+                family: "claude-fable-5".into(),
+                latest: true,
                 harness: LaunchHarness::Claude,
                 efforts: vec![LaunchEffort::High],
             },
             LaunchCatalogModel {
                 id: "gpt-6-luna".into(),
+                family: "luna".into(),
+                latest: true,
                 harness: LaunchHarness::Codex,
                 efforts: vec![LaunchEffort::Low, LaunchEffort::High],
             },
@@ -2006,6 +2007,8 @@ mod tests {
         let mut catalog = catalog();
         catalog.push(LaunchCatalogModel {
             id: "gpt-6-astra".into(),
+            family: "astra".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::High],
         });
@@ -2014,6 +2017,8 @@ mod tests {
         // name too. A Codex-only fixture cannot distinguish those contracts.
         catalog.push(LaunchCatalogModel {
             id: "opencode/gpt-6-luna".into(),
+            family: "luna".into(),
+            latest: true,
             harness: LaunchHarness::OpenCode,
             efforts: vec![],
         });
@@ -2104,39 +2109,67 @@ mod tests {
         assert_eq!(applied.model.as_deref(), Some("gpt-6-luna"));
     }
 
-    /// A model-only template that used to pick its agent from the catalog
-    /// still applies after the model leaves the suggestions. The inferred
-    /// agent restores the old behavior and the model ID stays literal.
+    /// Both a saved model-only template and a direct flag edit use the full
+    /// catalog. Moving an ID out of the current suggestions must preserve
+    /// inference and its previously accepted effort.
     #[test]
-    fn retired_models_still_pick_an_agent_for_saved_templates() {
-        let catalog = catalog();
+    fn older_catalog_models_pick_their_agent_for_templates_and_flags() {
+        let catalog = [
+            LaunchCatalogModel {
+                id: "gpt-6-astra".into(),
+                family: "astra".into(),
+                latest: false,
+                harness: LaunchHarness::Codex,
+                efforts: vec![LaunchEffort::Low],
+            },
+            LaunchCatalogModel {
+                id: "opencode/gpt-6-astra".into(),
+                family: "astra".into(),
+                latest: false,
+                harness: LaunchHarness::OpenCode,
+                efforts: vec![],
+            },
+        ];
         let ctx = context(&catalog, &[], false);
         let state = LauncherState::default();
-        for (id, harness) in [
-            ("gpt-6.1-sol", LaunchHarness::Codex),
-            ("gpt-6-astra", LaunchHarness::Codex),
-            ("opencode/gpt-6.1-sol", LaunchHarness::OpenCode),
-            ("opencode/gpt-6-astra", LaunchHarness::OpenCode),
-        ] {
+        for model in &catalog {
+            let effort = model.efforts.first().copied();
             let fields = TemplateFields {
-                model: Some(Some(id.into())),
+                model: Some(Some(model.id.clone())),
+                effort: effort.map(Some),
                 ..TemplateFields::default()
             };
-            let applied = apply_template(&state, &template("saved", fields.clone()), &ctx).unwrap();
-            assert_eq!(applied.harness, Some(harness), "{id}");
-            assert_eq!(applied.model.as_deref(), Some(id));
-            let refusal = apply_template(&state, &template("", fields), &ctx).unwrap_err();
-            assert_eq!(refusal.field, "model", "unnamed CLI edits using {id}");
+            for name in ["saved", ""] {
+                let applied =
+                    apply_template(&state, &template(name, fields.clone()), &ctx).unwrap();
+                assert_eq!(applied.harness, Some(model.harness), "{}", model.id);
+                assert_eq!(applied.model.as_deref(), Some(model.id.as_str()));
+                assert_eq!(applied.effort, effort);
+            }
+            let without_catalog = context(&[], &[], false);
+            let refusal =
+                apply_template(&state, &template("saved", fields), &without_catalog).unwrap_err();
+            assert_eq!(
+                refusal.field, "model",
+                "{} must come from the catalog",
+                model.id
+            );
         }
     }
 
-    /// An explicit agent outranks historical inference. OpenCode still
-    /// interprets the saved bare ID as a Zen model and keeps it as typed.
+    /// Catalog recognition of an older ID must preserve an existing explicit
+    /// custom-model template on another harness, including its original spelling.
     #[test]
-    fn a_saved_template_keeps_its_explicit_agent_and_retired_model() {
-        let catalog = catalog();
+    fn a_saved_template_keeps_an_older_id_as_an_explicit_custom_model() {
+        let catalog = [LaunchCatalogModel {
+            id: "gpt-6-astra".into(),
+            family: "astra".into(),
+            latest: false,
+            harness: LaunchHarness::Codex,
+            efforts: vec![LaunchEffort::Low],
+        }];
         let fields = TemplateFields {
-            agent: Some(LaunchHarness::OpenCode),
+            agent: Some(LaunchHarness::Cursor),
             model: Some(Some("gpt-6-astra".into())),
             ..TemplateFields::default()
         };
@@ -2146,8 +2179,9 @@ mod tests {
             &context(&catalog, &[], false),
         )
         .unwrap();
-        assert_eq!(applied.harness, Some(LaunchHarness::OpenCode));
+        assert_eq!(applied.harness, Some(LaunchHarness::Cursor));
         assert_eq!(applied.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(applied.model_owner, Some(LaunchHarness::Cursor));
     }
 
     /// Spec: a template's stored JSON distinguishes a field left out from a

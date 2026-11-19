@@ -228,6 +228,8 @@ fn explicit_permissions_stay_saveable_and_partial_templates_offer_all() {
 fn effort_choices_follow_a_read_catalog_only() {
     let catalog = vec![LaunchCatalogModel {
         id: "gpt-6-luna".into(),
+        family: "luna".into(),
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: vec![LaunchEffort::Low],
     }];

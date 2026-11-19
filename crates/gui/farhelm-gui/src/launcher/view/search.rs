@@ -347,7 +347,7 @@ impl Launcher {
                 }
                 self.chose(edit, window, cx);
             }
-            // A model from a past launch, owned as a custom id by the agent type it ran with.
+            // A model from a past launch, recognized or custom on the agent it ran with.
             Row::HistoryModel { id, harness } => {
                 // A switch made from the Command tab raises no banner, as the draft's own rule says
                 // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the

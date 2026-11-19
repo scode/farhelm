@@ -77,7 +77,9 @@ pub(crate) fn model_options(
             catalog
                 .iter()
                 .filter(|model| {
-                    model.harness == owner && model.id.to_ascii_lowercase().contains(&folded)
+                    model.latest
+                        && model.harness == owner
+                        && model.id.to_ascii_lowercase().contains(&folded)
                 })
                 .map(|model| ModelOption::Model {
                     id: model.id.clone(),
@@ -96,7 +98,7 @@ pub(crate) fn model_options(
 /// A row moved to wins over the text. Otherwise an empty draft does nothing. With an agent type chosen, the draft is
 /// looked up in that type's own catalog spelling ([`LaunchHarness::catalog_model_id`], so a bare OpenCode name is
 /// OpenCode's model): an exact match is that catalog row, canonical spelling included; the type's other spelling of a
-/// known model keeps the typed text; an id only other types offer is [`ModelEnterTarget::OwnedElsewhere`]; anything
+/// known model keeps the typed text; an id only other types currently suggest is [`ModelEnterTarget::OwnedElsewhere`]; anything
 /// else is a custom id, kept byte for byte. With none chosen, a known id names its one owner, and anything else needs
 /// an agent type first.
 pub(crate) fn model_enter_target(
@@ -140,9 +142,13 @@ pub(crate) fn model_enter_target(
                 id: known.id.clone(),
                 harness: current,
             }),
-            None if !owners.is_empty() => ModelEnterTarget::OwnedElsewhere {
+            None if owners.iter().any(|model| model.latest) => ModelEnterTarget::OwnedElsewhere {
                 id: draft.to_owned(),
-                owners: owners.iter().map(|model| model.harness).collect(),
+                owners: owners
+                    .iter()
+                    .filter(|model| model.latest)
+                    .map(|model| model.harness)
+                    .collect(),
             },
             None => ModelEnterTarget::Custom {
                 id: draft.to_owned(),

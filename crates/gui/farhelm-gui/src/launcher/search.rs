@@ -221,8 +221,7 @@ pub enum Row {
         id: String,
         harness: LaunchHarness,
     },
-    /// A model from a past launch that the catalog does not list, with the agent type it ran with: choosing it chooses
-    /// that agent type and the model as a custom one, as typing it would.
+    /// A model from a past launch outside the current suggestions. Keep the spelling and agent it ran with.
     HistoryModel {
         id: String,
         harness: LaunchHarness,
@@ -558,6 +557,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .catalog
                 .unwrap_or_default()
                 .iter()
+                .filter(|model| model.latest)
                 .filter(|model| harness.is_none_or(|chosen| chosen == model.harness))
                 .filter(|model| matches(&model.id.to_ascii_lowercase()))
                 .map(|model| Row::Model {
@@ -565,9 +565,8 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     harness: model.harness,
                 }),
         );
-        // Then models from past launches, in the recent setups' order, that the catalog does not list for their agent
-        // type under the catalog's spelling of the id, each once: the same test that makes a taken recent setup's model
-        // a custom one (`LaunchDraft::restore_recent`).
+        // Retain past-launch matches for models outside the current suggestions, including recognized older IDs.
+        // A current suggestion already covers its own history match (including an alternate spelling).
         if let Some(history) = inputs.history {
             let catalog = inputs.catalog.unwrap_or_default();
             for entry in ranked(history, &RecentFilter::default(), None) {
@@ -575,16 +574,16 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     continue;
                 };
                 let owner = entry.selection.harness;
-                let in_catalog = catalog
-                    .iter()
-                    .any(|model| model.harness == owner && model.id == owner.catalog_model_id(id));
+                let suggested = catalog.iter().any(|model| {
+                    model.latest && model.harness == owner && model.id == owner.catalog_model_id(id)
+                });
                 let row = Row::HistoryModel {
                     id: id.clone(),
                     harness: owner,
                 };
                 if harness.is_none_or(|chosen| chosen == owner)
                     && matches(&id.to_ascii_lowercase())
-                    && !in_catalog
+                    && !suggested
                     && !rows.contains(&row)
                 {
                     rows.push(row);
