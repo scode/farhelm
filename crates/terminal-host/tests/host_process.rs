@@ -64,6 +64,7 @@ fn the_terminal_settings_are_a_new_ptys_with_erase_and_iutf8() {
 /// the same defaults. Both ends are close-on-exec (the slave from its `open`,
 /// the master set after, since macOS's `posix_openpt` does not reliably take
 /// the flag), and the slave reaches `stty` only as its standard input.
+/// Both samples need the same `stty` because its saved-settings format depends on the implementation.
 fn reference_settings() -> String {
     use std::ffi::CStr;
     use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
@@ -126,6 +127,7 @@ fn reference_settings() -> String {
         last_error()
     );
     let out = std::process::Command::new("stty")
+        .env("PATH", TEST_CHILD_PATH)
         .arg("-g")
         .stdin(std::process::Stdio::from(slave))
         .output()

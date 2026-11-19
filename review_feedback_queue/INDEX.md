@@ -1627,10 +1627,6 @@ consequences.
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 
-- [`stty-tool-format-mismatch.md`](stty-tool-format-mismatch.md) — The terminal-settings test can fail on a Mac with GNU
-  command-line tools first on PATH even when the host's terminal settings are correct. Its reference and host samples
-  use different stty implementations, whose saved-settings strings cannot match.
-
 - [`resume-preview-readiness-witness.md`](resume-preview-readiness-witness.md) — The regression test never forces a
   ready checkout preview while the form still displays Connecting. A regression at that boundary can consume the single
   accepted launch press without eventually starting a session.

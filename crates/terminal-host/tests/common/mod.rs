@@ -29,13 +29,16 @@ pub const WAIT: Duration = Duration::from_secs(10);
 /// fails the wait rather than growing the test without bound.
 pub const MAX_RETAINED: usize = 16 << 20;
 
+/// Test children use system utilities even when the test runner has other versions installed ahead of them.
+pub const TEST_CHILD_PATH: &str = "/usr/bin:/bin";
+
 /// A child spec running `argv` in `/` with a small environment.
 pub fn spec(argv: &[&str]) -> Spawn {
     Spawn {
         argv: argv.iter().map(|arg| arg.as_bytes().to_vec()).collect(),
         cwd: b"/".to_vec(),
         env: vec![
-            b"PATH=/usr/bin:/bin".to_vec(),
+            format!("PATH={TEST_CHILD_PATH}").into_bytes(),
             b"TERM=xterm-256color".to_vec(),
             b"LC_ALL=C".to_vec(),
         ],
