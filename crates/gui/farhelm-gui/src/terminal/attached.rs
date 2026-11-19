@@ -1,14 +1,13 @@
 //! One attached session terminal: the owner between a helm client terminal stream and the renderer.
 //!
-//! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
-//! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
+//! The attachment shows the terminal's output, takes focus and sends the program its keys. It handles paste,
+//! committed text from the platform's text input, focus reports, scrollback, the local selection,
 //! mouse reporting with the drag-copy notice for a drag the program kept without copying ("The drag-copy notice"
 //! below), web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
 //! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status card
 //! stands over ([`AttachedTerminal::set_inert`]), the reconnect card with its phase and attempt line and its
 //! Reconnect now (below), and a pasted or dropped file or image, which is uploaded and its host path typed, with
-//! the attachments' strip over the bottom right ([`super::attachments`]), since. The session pane
+//! the attachments' strip over the bottom right ([`super::attachments`]). The session pane
 //! ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show

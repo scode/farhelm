@@ -2,8 +2,8 @@
 //!
 //! A real helm cannot serve a terminal here (that needs a supervisor and a running session), so this server checks
 //! the parts the helm checks (path, query and credential subprotocol) and plays the frames a helm would send. The
-//! tests run on real time but never wait on it: every step waits for the next socket or event, and the whole test is
-//! bounded so a regression fails instead of hanging.
+//! tests use socket and stream events for readiness. Bounded observation windows cover deliberate silence and
+//! watchdog deadlines, where waiting for the next event alone would miss the behavior under test.
 
 use super::*;
 use std::net::SocketAddr;

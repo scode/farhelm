@@ -55,7 +55,7 @@
 //! orchestrator on 2026-11-16): a session-lane Delete still unanswered at the bound does not offer the whole lane at
 //! once (the next click does, once the host reads not connected); a success after the bound shows no "stays" count;
 //! and a whole-lane failure after the bound reaches only the helm's log. While the environment stays connected but its
-//! Farhelm does not answer, Hosts' Delete sandbox is the way out, which settings-and-hosts has not ported yet.
+//! Farhelm does not answer, Hosts' Delete sandbox is the way out.
 //!
 //! NOTE: An "unasked" answer that arrives after the user moved on opens nothing: the helm's words stay on the row, as a
 //! refusal does, and the next click picks its lane from the hosts read again. Nothing remembers the answer, so if the

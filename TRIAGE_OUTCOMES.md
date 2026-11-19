@@ -1787,21 +1787,6 @@
   change.
 - Execution: planned in `plans/queue/gui-ux-wording.md`
 
-## gui-migration-comments-need-current-contracts.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Desktop code
-  comments still describe the migration as unfinished. Several contradict shipped behavior; 358 lines mention
-  coordinator/orchestrator overall. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix only the comments that are now false (~15 sites, ~60 lines), not a
-  wholesale sweep). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
-  removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
-  feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## layout-preference-save-failures-are-silent.md
 
 - Outcome: `fix spec`.

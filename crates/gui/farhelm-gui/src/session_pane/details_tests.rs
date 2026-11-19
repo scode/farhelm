@@ -318,7 +318,7 @@ fn each_parts_hover_help_is_its_whole_value(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md: "a stale session's status appears only in its stale notice, not again in the bottom bar", and its age
-/// belongs with that last-known status in one band (a later piece); the session's name and host stay in the bar, since
+/// belongs with that last-known status in one band. The session's name and host stay in the bar, since
 /// they are not last-known claims about the agent. Specified, as a decision and drawn: a stale running session has no
 /// badge and no age, and draws its title and host name; the same session on a connected host has both.
 #[gpui::test]

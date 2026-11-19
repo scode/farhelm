@@ -1050,10 +1050,9 @@ fn the_key_menu_names_holders_as_host_text(cx: &mut TestAppContext) {
 
 /// The key menu belongs to its row: when the template goes (deleted elsewhere, renamed by an agent), its row and the
 /// button the menu is anchored to go, and the menu closes with them rather than staying open for a template that no
-/// longer exists. This is the case the foundations parity row leaves to port for the old
-/// `popover-template-movement.spec.ts`, whose own cases (a menu closing or staying when another row's change moved its
-/// button) SPEC.md's "Things changing underneath" supersedes; no old case removed the menu's own template. Specified:
-/// with `my-codex`'s key menu open, a push removing `my-codex` closes the menu and leaves the dialog open.
+/// longer exists. The old `popover-template-movement.spec.ts` checked what happens when another row moves the anchor.
+/// SPEC.md's "Things changing underneath" supersedes those cases. Here a push removes `my-codex`, the menu's own
+/// template, and closes its menu while leaving the dialog open.
 #[gpui::test]
 fn the_key_menu_closes_when_its_template_is_gone(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);

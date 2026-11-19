@@ -146,9 +146,8 @@
 //! A retired containerized session supports Delete only, so its row, its menu and its open view withdraw everything
 //! else, and the marked bar's Stop leaves it out ([`retired`]).
 //!
-//! NOTE: Not ported yet, with the area that brings it: the row menu's other commands. New is not yet where focus rests
-//! when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that comes with the session pane's
-//! status-card work (M2.12), which decides home when no terminal is on screen.
+//! The session pane makes New the focus target when the helm confirms the fleet is empty (SPEC.md, "Where focus
+//! rests"). A blank filtered or unread list alone does not establish that.
 
 pub(crate) mod age;
 mod attention;

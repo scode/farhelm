@@ -81,8 +81,8 @@
 //! leads to Hosts, which shows the reason and Retry, with no Retry in the row. SPEC.md's wording is to be revised to
 //! say so.
 //!
-//! NOTE: Hosts' Resume is not ported yet (its menu's NOTE), so Details on a "Resume failed" or "Stopped" row reaches no
-//! Resume there for now; the session's own card in the session pane offers one.
+//! Details on a "Resume failed" or "Stopped" row takes the user to Hosts, whose menu offers Resume when the host's
+//! phase permits it. The open session's status card can offer Resume too.
 
 #[cfg(test)]
 mod tests;

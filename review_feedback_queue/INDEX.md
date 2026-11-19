@@ -2779,10 +2779,6 @@ consequences.
   each build similar fake sessions and set up dialogs independently. One scene also recreates the update text it is
   meant to show.
 
-- [`gui-migration-comments-need-current-contracts.md`](gui-migration-comments-need-current-contracts.md) — Comments
-  across the desktop and GUI still describe temporary assignments, milestones, and unfinished ports. Several now
-  contradict behavior already in the app.
-
 - [`desktop-supervisor-ownership-save-is-silent.md`](desktop-supervisor-ownership-save-is-silent.md) — Farhelm can start
   its supervisor and then silently fail to record it. Later launches can treat that supervisor as externally started.
 

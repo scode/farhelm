@@ -27,8 +27,8 @@
 //! old app refused a host change during a launch.
 //!
 //! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
-//! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
-//! lands); Add host opens it for the destination typed there.
+//! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?". Add host opens it for the destination
+//! typed there.
 //!
 //! The menu's Remove asks the removal confirmation, or with "Remove hosts without asking" on goes ahead at once
 //! ([`remove`]). A removal asked through the confirmation reports a refusal inside it, which stays up through the

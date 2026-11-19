@@ -19,9 +19,8 @@
 //! with the window when it closes, so the app does not hold it for its whole life.
 //!
 //! The menu item dispatches `actions::OpenSourceNotices`, which the menu module handles app-wide by calling [`open`].
-//! Linux has no menu bar: there the window is meant to open from an item in the in-window `?` menu, which the
-//! other-dialogs area draws and which will dispatch the same action; until it exists, `--licenses` is the Linux
-//! surface.
+//! On Linux, Open-Source Notices in the in-window `?` menu dispatches the same action. `--licenses`
+//! prints the notices from the command line.
 
 use std::rc::Rc;
 

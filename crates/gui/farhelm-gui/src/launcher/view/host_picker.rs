@@ -18,9 +18,9 @@
 //! Browsing never changes the draft: only a pick does, through [`LaunchDraft::choose_host`], which re-seeds a folder
 //! the user has not typed or picked.
 //!
-//! A pick re-seeds from New's per-host folder default (`entry::default_folder`: the open session's folder when it is on
-//! that host's install, else `~`). NOTE: the rest of SPEC.md's default, the newest recent setup's folder on that host,
-//! arrives with recent setups.
+//! New uses the open session's folder when it is on the chosen installation. Otherwise it uses the folder from
+//! the chosen host's latest ordinary folder launch, or `~` if none is recorded or the history read fails
+//! (`Launcher::settle_folder_default`).
 //!
 //! [`LaunchDraft::choose_host`]: crate::launcher::draft::LaunchDraft::choose_host
 

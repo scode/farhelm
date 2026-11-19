@@ -6,11 +6,9 @@
 //! notice center alone keeps what is showing; the surfaces read [`posted`] when they draw. A notice is never shown by
 //! its feature directly.
 //!
-//! Its surfaces are approval cards and banners, its own generic notices among them. Banners still to come, such as the
-//! version-mismatch and outage cards, arrive with the areas that port them: each adds a [`Notice`] variant and the
-//! surface that draws it. The session rows' bells with their lists, and the rail's notices panel when it comes, are
-//! not its surfaces: they draw the notification records the helm keeps and pushes, straight from the store. Nor are the
-//! status chimes, which the one sound owner decides. The migration's orchestrator drew that line on 2026-11-14.
+//! The center holds notices for the window's approval region and banners. Session row bells and the rail's
+//! Notifications panel draw the records that the helm pushes to the store. The sound owner decides when to play
+//! status chimes.
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 
