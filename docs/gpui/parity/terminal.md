@@ -125,10 +125,10 @@ over the text the clipboard also carries, and its host path typed as a paste) by
   crates/gui/farhelm-grid-model/tests/paths.rs `a_printed_path_extended_on_its_next_row_is_a_different_link` and
   files/tests.rs `ready_for_requires_the_same_cells_file_and_label`.
 - "a click whose file hover is covered is refused with an explanation" and "a web link or tunnel click whose target
-  display is covered is refused with an explanation": deferred, not built in the migration (decided by the migration's
-  orchestrator on 2026-11-16). Refusing a click whose display another Farhelm surface covers needs the layer manager to
-  say what covers a popover, which it cannot yet. A display that is cut off by the window's content area is refused
-  already (`a_click_whose_destination_is_not_fully_visible_is_refused`,
+  display is covered is refused with an explanation": `a_real_approval_card_covering_the_link_panel_refuses_the_click`,
+  `a_covered_tunnel_hint_refuses_the_modified_click` and files/tests.rs
+  `a_covered_file_panel_refuses_the_transfer_even_if_the_press_dismisses_the_cover`. A display cut off by the window's
+  content area is also refused (`a_click_whose_destination_is_not_fully_visible_is_refused`,
   `a_hinted_address_whose_display_is_not_fully_visible_is_refused`, files/tests.rs
   `a_click_whose_file_details_are_not_fully_visible_is_refused`).
 
@@ -523,14 +523,12 @@ earlier notice deadline and retires a failure" by `a_success_fades_and_a_failure
 (deviation: the success line vanishes at five seconds rather than fading out over the old 200 ms, which the ticker's ten
 ticks a second would draw as two frames), and a late outcome replacing a refusal, as the old message did, by
 `a_save_failing_behind_a_refusal_shows_its_failure` and `a_refusal_takes_the_status_lines_place`. "terminal disposal
-clears notices and rejects a late native save result": by `a_save_outlives_the_hover_but_not_the_terminal`. Deferred,
-not built in the migration (decided by the migration's orchestrator on 2026-11-16): "the cover check measures every
-rendered marked surface and nothing else" and the covered half of "live approval coverage", which need the layer manager
-to say what covers a popover, as grid-attach's covered clicks do. Superseded (no browser or DOM): the bounded Blob (the
-helm saves the desktop app's downloads), the browser timers' receiver, and construction without a terminal element.
-Deviation: the old path link was one span, so a cut path's head padding and tail indentation were underlined and
-hoverable; here only the path's own cells on each row are (pinned by
-`a_path_cut_near_the_right_edge_joins_through_a_soft_wrap_and_a_program_break`)
+clears notices and rejects a late native save result": by `a_save_outlives_the_hover_but_not_the_terminal`. The vendored
+`hitbox_occlusion` test measures the covering regions in the rendered frame. The grid-attach cases above exercise the
+actual approval card and click refusals. Superseded (no browser or DOM): the bounded Blob (the helm saves the desktop
+app's downloads), the browser timers' receiver, and construction without a terminal element. Deviation: the old path
+link was one span, so a cut path's head padding and tail indentation were underlined and hoverable; here only the path's
+own cells on each row are (pinned by `a_path_cut_near_the_right_edge_joins_through_a_soft_wrap_and_a_program_break`)
 
 ### `clipboard-name.test.js` (unit tests)
 
@@ -672,9 +670,8 @@ crates/gui/farhelm-grid-model/tests/links.rs `pinned_cell_links_and_label_join_o
 - "a replayed plain-text URL activates after a reload with no second gate": superseded (decided by the migration's
   orchestrator on 2026-11-16): the desktop app has no page reload, and a replay into a fresh terminal goes through the
   same link detection as live output.
-- Refusing a click whose display another Farhelm surface covers (a hover tooltip already draws above popovers; approval
-  cards will): deferred, not built in the migration (decided by the migration's orchestrator on 2026-11-16), as for
-  grid-attach's covered clicks; it needs a way to ask the layer manager what covers a popover.
+- Refusing a click whose display another Farhelm surface covers uses the layer manager's rendered hitboxes, as in the
+  grid-attach cases above. `adjacent_and_pass_through_popovers_do_not_refuse_a_link` checks both exceptions.
 
 ### `tests/terminal-multihost.spec.ts`
 

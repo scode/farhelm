@@ -16,8 +16,8 @@ use farhelm_helm_client::{OpenOutcome, SavedDownload};
 use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Point,
-    TestAppContext, point, px,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Point, TestAppContext,
+    point, px,
 };
 
 use super::*;
@@ -583,11 +583,9 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     h.cx.update(|_, cx| {
         let files = owner.read(cx).files().read(cx);
         let drawn = files.hover.as_ref().unwrap().drawn.clone();
-        let (bounds, area) = drawn.get().expect("the premise: the display was drawn");
-        drawn.set(Some((
-            Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
-            area,
-        )));
+        let mut panel = drawn.get().expect("the premise: the display was drawn");
+        panel.bounds.origin.y = panel.area.bottom() - px(4.);
+        drawn.set(Some(panel));
     });
     h.click(on);
     assert_eq!(h.admitted(), Vec::<String>::new(), "nothing is admitted");
@@ -604,6 +602,46 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     h.answer(answer, ready("/work/report.pdf", 2000));
     h.click(again);
     assert_eq!(h.admitted(), ["/work/report.pdf"]);
+}
+
+/// A successful host check makes a file eligible for download only while its disclosed path can be seen. A
+/// covering popover may disappear on mouse down. The release must preserve that frame's download refusal,
+/// even if the blocker overlaps only the card's stripe.
+#[gpui::test]
+fn a_covered_file_panel_refuses_the_transfer_even_if_the_press_dismisses_the_cover(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "report.pdf", false)], None);
+    let on = h.at_cell(3, 0);
+    h.checked(on, "report.pdf", 2000);
+    assert!(h.pointer(), "the host check found a ready file");
+    let panel = test_support::bounds(h.cx, "terminal-file-disclosure");
+    h.cover_at(
+        point(panel.left().ceil() - px(15.), panel.top().ceil()),
+        false,
+    );
+    let cover = test_support::bounds(h.cx, "terminal-test-cover");
+    assert!(panel.intersects(&cover) && !cover.contains(&on));
+    assert!(
+        cover.right() - panel.left() < px(3.),
+        "only the stripe is covered"
+    );
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds("terminal-test-cover").is_none(),
+        "the press closed the cover"
+    );
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.admitted(), Vec::<String>::new());
+    assert_eq!(
+        h.refusal().as_deref(),
+        Some(
+            "cannot download: full file details are covered by another Farhelm surface; move the pointer and hover again"
+        )
+    );
 }
 
 /// A drag across a link must never download it (SPEC.md: "Dragging across a terminal link never ... downloads a
@@ -1211,11 +1249,9 @@ impl Files<'_> {
                 .read(cx)
                 .disclosure_drawn()
                 .expect("the premise: a display is shown");
-            let (bounds, area) = drawn.get().expect("the premise: the display was drawn");
-            drawn.set(Some((
-                Bounds::new(point(bounds.origin.x, area.bottom() - px(4.)), bounds.size),
-                area,
-            )));
+            let mut panel = drawn.get().expect("the premise: the display was drawn");
+            panel.bounds.origin.y = panel.area.bottom() - px(4.);
+            drawn.set(Some(panel));
         });
     }
 }

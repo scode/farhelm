@@ -13,7 +13,7 @@
 //! tunnel ([`super::tunnels`]). A hyperlink's panel keeps its warning and adds the hint after it.
 //!
 //! The panel is the click's safeguard: a click opens the hyperlink only while the panel is fully visible. It records
-//! where it was drawn and the window's content area every frame ([`Drawn`]); its owner reads that at the click. It
+//! its hitbox and the window's content area every frame ([`Drawn`]); its owner reads that at the click. It
 //! takes no focus and holds nothing that does: it is a non-focusing popover the layer manager draws on top, anchored to
 //! a zero-width element the terminal draws by the pointer.
 
@@ -22,9 +22,9 @@ use std::rc::Rc;
 
 use farhelm_grid_model::LinkDisclosure;
 use gpui::{
-    App, Bounds, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Render, Stateful, StatefulInteractiveElement, Styled, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    App, Bounds, Context, Div, FontWeight, HitboxBehavior, HitboxId, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Render, Stateful, StatefulInteractiveElement, Styled,
+    Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::host_text::{self, HostSentence, HostText};
@@ -33,22 +33,68 @@ use crate::theme::{self, metrics};
 /// The warning's first line (the old app's words).
 const MISMATCH_WARNING: &str = "Link text does not match where it goes";
 
-/// Where the panel was last drawn and the window's content area then
-/// ([`crate::desktop::linux_title_bar::content_area`]): what a click checks the panel against. `None` until its first
-/// frame.
-pub(crate) type Drawn = Rc<Cell<Option<(Bounds<Pixels>, Bounds<Pixels>)>>>;
+/// What the panel recorded at paint. An unanswered file check can invalidate this record before the answer draws.
+pub(crate) type Drawn = Rc<Cell<Option<DrawnPanel>>>;
 
-/// Whether a panel drawn at `drawn` was fully visible: inside the window's content area when it was drawn (the old
-/// app's `disclosureFits`). SPEC.md wants the panel inside the page, and the content area is the old app's page: on
-/// Linux, when the window draws its own frame, it leaves out GPUI Kit's frame and the window's title bar, and otherwise
-/// it is the whole window. Its other half, refusing when another surface is drawn over the panel, is not built: a
-/// dialog or menu opened above the panel is not checked for. When it is built, as a hit test, a popover that lets the
-/// pointer through (`layers::Popover::passes_pointer`) registers no hit area and is invisible to it, so that popover's
-/// owner must keep it off the panel: the terminal's drag-copy notice does not open while the panel is open.
-pub(crate) fn fully_visible(drawn: &Drawn) -> bool {
-    let Some((bounds, area)) = drawn.get() else {
-        return false;
-    };
+/// The panel's geometry and its place in the frame's hitbox order. The hitbox lets the layer manager check that
+/// the panel still belongs to the rendered frame before it relies on any overlap result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DrawnPanel {
+    pub(super) bounds: Bounds<Pixels>,
+    pub(super) area: Bounds<Pixels>,
+    hitbox: HitboxId,
+}
+
+/// What blocked the click. An absent or clipped panel has the old "not visible" explanation, even when a cover
+/// also overlaps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Hidden {
+    NotVisible,
+    Covered,
+}
+
+impl Hidden {
+    /// The old app's `admitDisclosure` wording for a web or tunnel open.
+    pub(super) const fn link_words(self) -> &'static str {
+        match self {
+            Self::NotVisible => {
+                "cannot open: full link details are not visible; enlarge the window and hover again"
+            }
+            Self::Covered => {
+                "cannot open: full link details are covered by another Farhelm surface; move the pointer and hover again"
+            }
+        }
+    }
+
+    /// The same refusal with the old app's download wording.
+    pub(super) const fn file_words(self) -> &'static str {
+        match self {
+            Self::NotVisible => {
+                "cannot download: full file details are not visible; enlarge the window and hover again"
+            }
+            Self::Covered => {
+                "cannot download: full file details are covered by another Farhelm surface; move the pointer and hover again"
+            }
+        }
+    }
+}
+
+/// The disclosure must fit inside the window's content area and remain uncovered in the last rendered frame.
+/// Checking the hitbox itself keeps a retained record from an earlier frame from admitting a click.
+pub(super) fn visibility(drawn: &Drawn, window: &Window) -> Result<(), Hidden> {
+    let panel = drawn.get().ok_or(Hidden::NotVisible)?;
+    if !fits(panel.bounds, panel.area) {
+        return Err(Hidden::NotVisible);
+    }
+    match crate::layers::pointer_covers(panel.hitbox, window) {
+        Some(false) => Ok(()),
+        Some(true) => Err(Hidden::Covered),
+        None => Err(Hidden::NotVisible),
+    }
+}
+
+/// The content area omits Linux's client-side frame and title bar. Touching its edges is fine.
+fn fits(bounds: Bounds<Pixels>, area: Bounds<Pixels>) -> bool {
     bounds.size.width > px(0.)
         && bounds.size.height > px(0.)
         && bounds.left() >= area.left()
@@ -84,22 +130,24 @@ pub(super) fn surface(id: &'static str, window: &Window, cx: &App) -> Stateful<D
         .text_size(metrics::TEXT_SM)
 }
 
-/// Records, as the display holding it paints, the display's bounds and the window's content area into `drawn`: what
-/// a click checks the display against ([`fully_visible`]). It fills the display and draws nothing.
-pub(super) fn recorder(drawn: Drawn) -> impl IntoElement {
-    canvas(
-        |_, _, _| (),
-        move |bounds, (), window, _| {
-            drawn.set(Some((
+/// Witness the whole card, borders included. An absolute child of the card itself would start inside the border.
+/// The parent layer prepaints its blocker first, so the transparent probe only sees later blockers.
+pub(super) fn witnessed(panel: impl IntoElement, drawn: Drawn) -> impl IntoElement {
+    let recorder = canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+        move |bounds, hitbox, window, _| {
+            drawn.set(Some(DrawnPanel {
                 bounds,
-                crate::desktop::linux_title_bar::content_area(window),
-            )))
+                area: crate::desktop::linux_title_bar::content_area(window),
+                hitbox,
+            }))
         },
     )
     .absolute()
     .top_0()
     .left_0()
-    .size_full()
+    .size_full();
+    div().relative().child(panel).child(recorder)
 }
 
 /// The look the terminal's one message line has, whatever it says (the old `.terminal-file-message`): a status line
@@ -187,7 +235,7 @@ impl Render for DisclosureView {
                     .debug_selector(|| "terminal-link-disclosure-claimed".into()),
             )
         });
-        panel
+        let panel = panel
             .when(mismatch, |panel| {
                 panel.child(
                     div()
@@ -210,8 +258,8 @@ impl Render for DisclosureView {
                     .debug_selector(|| super::tunnels::HINT_ID.into())
                     .mt(px(4.))
                     .child(hint)
-            }))
-            .child(recorder(self.drawn.clone()))
+            }));
+        witnessed(panel, self.drawn.clone())
     }
 }
 

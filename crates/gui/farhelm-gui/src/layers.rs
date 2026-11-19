@@ -124,7 +124,8 @@
 //! which draws the overlay, while cached views below it replay. A whole-window refresh would instead re-render every
 //! cached view, which on a 200-row session list is every row each time the pointer crosses a control.
 //!
-//! NOTE: Still to come here: the covered-terminal-link hit test, which needs the terminal. Menu items are plain buttons
+//! Terminal destination panels ask [`pointer_covers`] whether a later surface blocks input over any of their bounds.
+//! Pass-through and display-only surfaces leave that hit test alone. Menu items are plain buttons
 //! until the session row's menu brings the menu item component, so the popover golden shows centered item labels,
 //! which the old menus did not have; it is captured again with that component. The tooltip's own deviations and gaps
 //! are in the [`tooltip`] submodule's NOTE.
@@ -167,7 +168,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, AvailableSpace, Bounds, BoxShadow,
-    Context, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId,
+    Context, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, HitboxId,
     InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point,
     Size, Style, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div,
     point, prelude::FluentBuilder as _, px,
@@ -1625,6 +1626,13 @@ pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))
 }
 
+/// Whether later surfaces block pointer input over any of a rendered panel's hitbox. GPUI supplies the order and
+/// clipping, so every occluding surface counts without having to register a second set of layer bounds. `None`
+/// means the panel's hitbox no longer belongs to the last rendered frame.
+pub(crate) fn pointer_covers(panel: HitboxId, window: &Window) -> Option<bool> {
+    panel.is_occluded(window)
+}
+
 /// Whether any dialog or popover is open in `window`. Neither pill ([`show_pill`], [`show_launch_pill`]) is a layer, and
 /// neither ever counts.
 pub fn any_open(window: &Window, cx: &App) -> bool {
@@ -2419,7 +2427,7 @@ const BESIDE_RISE: Pixels = px(4.);
 /// not the window, because on Linux the window holds GPUI Kit's frame and the window's own title bar, and a popover
 /// clamped to the window could end in the frame, outside the page. SPEC.md refuses a click on a terminal link whose
 /// destination display is not wholly inside the page, and a display ending in Kit's frame is not; the click check
-/// (`terminal::disclosure`'s `fully_visible`) measures against the same area. The layer manager's owner moved popovers
+/// (`terminal::disclosure`'s `visibility`) measures against the same area. The layer manager's owner moved popovers
 /// into the area on 2026-11-16. Under a compositor's decorations and on macOS the area is the whole window.
 ///
 /// Crate-visible, and a pure function of its inputs, for `layers_tests.rs`: no test window reports client decorations,
