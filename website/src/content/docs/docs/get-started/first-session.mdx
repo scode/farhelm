@@ -5,10 +5,16 @@ sidebar:
   order: 3
 ---
 
+import Screenshot from '../../../../components/Screenshot.astro';
+
 The first time you open Farhelm, a welcome card points at this guide and at sending private feedback. Close it with
-**Got it** to start; **Welcome** in the **?** menu brings it back whenever you want. The Mac you are on is already a
-host, ready to run sessions: its mark sits on the navigation rail, the column of icons down the left edge of the
-sidebar.
+**Got it** to start; **Welcome** in the **?** menu brings it back whenever you want. Your Mac's mark sits on the
+navigation rail, the column of icons down the left edge of the sidebar.
+
+<Screenshot
+  name="first-session/this-machine"
+  alt="The navigation rail with the Mac you are on marked as a host that is ready."
+/>
 
 Before you start a session, make sure the agent you want is installed on your Mac and starts when you type its command
 in a terminal (`claude` or `codex`, for example). Farhelm starts it the way your login shell would, with the same
@@ -17,15 +23,24 @@ in a terminal (`claude` or `codex`, for example). Farhelm starts it the way your
 ## Start it
 
 Select **+** (New session) at the top of the session list, choose the agent, and launch. [Start a
-session](/docs/using/start-a-session/) walks through the session launcher and its choices. The new session appears in
-the session list, with its agent's terminal beside it.
+session](/docs/using/start-a-session/) walks through the session launcher and its choices.
+
+<Screenshot
+  name="first-session/running-session"
+  alt="The new session in the session list, with its agent's terminal beside it."
+/>
 
 ## Keep an eye on it
 
 You do not have to watch the terminal to know when an agent needs you. The session list shows every session's status,
-and it updates as the agents work. A triangle means the session is waiting: the agent has stopped to ask you something
-and does nothing until you answer. A filled diamond means it is idle with output you have not looked at yet, and a ring
-means idle with nothing new. [Read the session list](/docs/using/session-list/) explains every status.
+and it updates as the agents work. A waiting agent does nothing until you answer it.
+
+<Screenshot
+  name="first-session/statuses"
+  alt="The session list with a waiting session, an idle unread session and an idle read session, each explained."
+/>
+
+[Read the session list](/docs/using/session-list/) explains every status.
 
 ## Close Farhelm and come back
 

@@ -5,6 +5,8 @@ sidebar:
   order: 6
 ---
 
+import Screenshot from '../../../../components/Screenshot.astro';
+
 The navigation rail, the column of icons down the left edge of the sidebar, shows your ordinary session hosts. It shows
 your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name, and a
 dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
@@ -28,10 +30,13 @@ host. The list disappears when nothing needs attention and while the full host l
 
 ## The host menu
 
-Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. On a remote SSH
-host it offers **Retry**, which tries the connection again now, **Update**, **Settings**, **Uninstall** and **Remove**.
-**Update** installs your Mac's version of Farhelm on the
-host; [Update a host](#update-a-host) has more. Other items appear only when a host needs attention, such as setting
+<Screenshot
+  name="manage-hosts/host-menu"
+  alt="A remote host's menu, opened from its three dots, with settings, uninstall, and remove explained."
+/>
+
+Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. **Update** installs
+your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items appear only when a host needs attention, such as setting
 Farhelm up on a host that does not have it yet. Your Mac's own row has no **Uninstall** or **Remove**. In the Farhelm
 app installed on your Mac, its **Update** checks for a new release of Farhelm and installs it, as
 [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In the Linux app, or in a copy of Farhelm
@@ -52,9 +57,13 @@ update notices without a permanent rail icon.
 
 ## Host settings
 
-Choose **Settings** in a host's menu to open its settings. **Connection** shows the destination and the alias, each with
-**Edit**; **Appearance**, **Checkouts** and **Permissions** follow. The destination and alias save with their field's
-**Save**, and the checkout folder with its own; everything else saves as you change it.
+<Screenshot
+  name="manage-hosts/host-settings"
+  alt="A host's settings dialog, with the destination and alias edit buttons, the icon choice, and its five permission switches explained."
+/>
+
+Choose **Settings** in a host's menu to open its settings. The destination and alias save with their field's **Save**,
+and the checkout folder with its own; everything else saves as you change it.
 
 The destination is what you would type after `ssh`, such as `dev@build-box` or a name from your ssh configuration. The
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
@@ -157,8 +166,12 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 
 ## Remove a host
 
-**Remove** in an SSH host's menu asks first. **Remove, don't ask again** removes it and turns on **Remove hosts without
-asking**, which skips the question from then on.
+<Screenshot
+  name="manage-hosts/remove-dialog"
+  alt="The remove host dialog, with the remove, don't ask again button explained."
+/>
+
+**Remove** in an SSH host's menu asks first.
 
 For an SSH host, removing it only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
@@ -186,10 +199,13 @@ the recipe's prepared snapshot remain available for new hosts.
 
 ## Turn the questions back on
 
-The gear at the foot of the navigation rail, below **Hosts**, opens Settings at **Sessions**. Choose **Hosts** in its
-section list for these two questions. Turning on **Set up new hosts without asking** or **Remove hosts without asking**
-skips that question for actions you start in the UI; turn it off to be asked again.
-[Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
+<Screenshot
+  name="manage-hosts/app-settings"
+  alt="The Settings dialog with Hosts selected, showing the section list and the switches for asking before setting up or removing hosts."
+/>
+
+The gear sits at the foot of the navigation rail, below **Hosts**. The switches cover only actions you start in the UI;
+[agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval. These two apply to
 SSH hosts, and a change takes effect at once. Tensorlake creation has its own
 **Create Tensorlake sandboxes without asking** switch under **Tensorlake**; deleting a sandbox always asks.
 
@@ -197,8 +213,12 @@ SSH hosts, and a change takes effect at once. Tensorlake creation has its own
 
 ## See more about each host
 
-Turn on **Details** at the top of the host list to see more under each host: for a connected host its Farhelm version and
-number of sessions, and the destination behind an alias. A host's row also opens by itself while a setup
+<Screenshot
+  name="manage-hosts/details"
+  alt="The host list with Details switched on: each host's Farhelm version and sessions, and the destination behind an alias."
+/>
+
+A host's row also opens by itself while a setup
 runs on it, or when its last setup or update failed.
 
 A Tensorlake host's details also show its sandbox name, recipe, CPU and memory, and tunnel mappings and status. A failed
