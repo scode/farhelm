@@ -763,7 +763,23 @@ mod tests {
                     let _ = release.recv_timeout(Duration::from_secs(30));
                 }
                 Listener::Host => {
-                    let (mut conn, _) = listener.accept().expect("a connection");
+                    listener.set_nonblocking(true).unwrap();
+                    // Startup may have timed out before this listener bound. In that case no cleanup will connect.
+                    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                    let mut conn = loop {
+                        match listener.accept() {
+                            Ok((conn, _)) => break conn,
+                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                            Err(error) => panic!("accepting cleanup at {socket:?}: {error}"),
+                        }
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "no cleanup at {socket:?}"
+                        );
+                        // sleep-ok: poll until cleanup connects or the listener's acceptance deadline expires.
+                        std::thread::sleep(Duration::from_millis(10));
+                    };
+                    conn.set_nonblocking(false).unwrap();
                     conn.set_read_timeout(Some(Duration::from_secs(10)))
                         .unwrap();
                     let mut buf = Vec::new();

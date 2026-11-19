@@ -1065,9 +1065,6 @@ consequences.
   replacement host can be ended; failed cleanup of processes the replacement started is another ambiguous path, leaving
   no displayed terminal.
 
-- [`late-listener-blocks-start-test-cleanup.md`](late-listener-blocks-start-test-cleanup.md) — A delayed test listener
-  can turn the cleanup regression into a five-minute runner timeout instead of a bounded fixture failure.
-
 - [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
   with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
   that host unreachable for future cleanup.
