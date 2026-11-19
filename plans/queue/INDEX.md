@@ -11,7 +11,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
 - [landing 374d1a] `update-survival-wording.md` — General survival statements stay general: SPEC.md records the principle and the old-terminal update note
 - [complete] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
-- [pending] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
+- [in-flight 80124b] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
 - [complete] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
 - [complete] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
 - [complete] `concealed-link-target.md` — Hidden terminal text cannot change where a printed link goes
