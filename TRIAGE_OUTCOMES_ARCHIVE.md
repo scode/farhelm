@@ -22992,6 +22992,21 @@ prior terminal output" (rebased revision)
   `plan/gui-ux-backend-test-gaps/14-recording-loader-rejects-valid`,
   [PR #4228](https://github.com/scode/farhelm/pull/4228/changes).
 
+## trailing-converted-old-session-warning-retention-assertion-vacuous-all.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Old-terminal test
+  passes even if the old warning vanished. `.all` on a possibly empty list. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert exactly one resolved warning (~3-5). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: complete in jj change `xlrwyptsoytysltsnkvwlupunlmrvwvm`, bookmark
+  `plan/gui-ux-backend-test-gaps/15-converted-old-session-warning`,
+  [PR #4229](https://github.com/scode/farhelm/pull/4229/changes).
+
 ## held-start-test-lacks-prelaunch-fencing-witness.md
 
 - Outcome: `discard`.

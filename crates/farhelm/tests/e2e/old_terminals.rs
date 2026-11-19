@@ -166,7 +166,7 @@ async fn row_of(state: &Path, session_id: &str) -> StoredSession {
 /// Record an unresolved old-terminal warning for `session_id`, as an
 /// earlier release's ticker did.
 async fn plant_old_warning(state: &Path, session_id: &str) {
-    SessionStore::open(&state.join("supervisor.db"), false)
+    let planted = SessionStore::open(&state.join("supervisor.db"), false)
         .await
         .expect("open the store")
         .record_session_notification(
@@ -179,6 +179,10 @@ async fn plant_old_warning(state: &Path, session_id: &str) {
         )
         .await
         .expect("record the old warning");
+    assert!(
+        planted,
+        "premise: the old warning was recorded for {session_id}"
+    );
 }
 
 /// The notifications the listing carries for `session_id`, as `(text,
@@ -352,12 +356,10 @@ async fn a_dead_old_agents_scoped_job_is_ended_and_the_session_restarts_in_a_hos
             .collect();
         assert_eq!(ended.len(), 1, "one ended notice: {listed:?}");
         assert!(!ended[0].1, "the ended notice stays unresolved: {listed:?}");
+        let mut old = listed.iter().filter(|(text, _)| text.contains(OLD_WARNING));
         assert!(
-            listed
-                .iter()
-                .filter(|(text, _)| text.contains(OLD_WARNING))
-                .all(|(_, resolved)| *resolved),
-            "every old warning is resolved: {listed:?}"
+            matches!(old.next(), Some((_, true))) && old.next().is_none(),
+            "the one old warning remains present and resolved: {listed:?}"
         );
     };
     check_notices(notifications(&h, &id).await);
