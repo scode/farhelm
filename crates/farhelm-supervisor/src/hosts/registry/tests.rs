@@ -773,24 +773,44 @@ async fn a_socket_a_process_names_is_never_removed() {
     let [gone] = registry.gone() else {
         panic!("expected one gone socket, got {:?}", registry.gone());
     };
-    // `sh -c <script> <$0> <$1>`: the shell keeps its whole argv, so its
-    // command line ends with `--socket <path>`, as a host's does. The `:`
-    // keeps the shell from replacing itself with `sleep`.
+    // `sh -c <script> <$0> <$1>` gives the shell the same trailing `--socket <path>` as a host. The shell's
+    // built-in read waits on the pipe its Child owns. The printed arguments establish readiness before the scan.
     let mut server = tokio::process::Command::new("/bin/sh")
         .arg("-c")
-        .arg("sleep 30; :")
+        .arg("printf '%s\\n' \"$0\" \"$1\"; read -r line")
         .arg("--socket")
         .arg(&gone.socket)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .unwrap();
     let pid = server.id().expect("the stand-in runs");
+    let path = gone.socket.as_os_str().as_encoded_bytes();
+    let expected = [b"--socket\n".as_slice(), path, b"\n"].concat();
+    let mut observed = vec![0; expected.len()];
+    let ready = tokio::time::timeout(
+        Duration::from_secs(10),
+        server.stdout.as_mut().unwrap().read_exact(&mut observed),
+    )
+    .await;
+    assert!(
+        matches!(ready, Ok(Ok(_))),
+        "the socket stand-in reports its arguments: {ready:?}, child: {:?}",
+        server.try_wait()
+    );
+    assert_eq!(observed, expected);
+    assert!(
+        server.try_wait().unwrap().is_none(),
+        "the stand-in is still running"
+    );
     let outcome = gone.remove_socket().await;
-    let _ = server.start_kill();
-    let _ = tokio::time::timeout(Duration::from_secs(10), server.wait()).await;
+    // Waiting closes the pipe that releases the shell's read. kill_on_drop covers a failed wait.
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("the socket stand-in exits")
+        .expect("reap the socket stand-in");
     match outcome {
         SocketRemoval::StillServed {
             peer: Some(process),

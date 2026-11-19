@@ -1163,9 +1163,6 @@ consequences.
   live socket was established. Independent review does not agree to drop that remaining uncertainty; deliberate
   private-directory interference is separately accepted.
 
-- [`process-presence-fixture-leaves-sleep-descendant.md`](process-presence-fixture-leaves-sleep-descendant.md) — Running
-  the process-presence unit test can leave its sleeping helper behind even when the test passes.
-
 - [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
   short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
   terminal.
