@@ -83,6 +83,7 @@ use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
+use crate::prompt::ActionFrame;
 use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::templates::checkout_name;
@@ -395,7 +396,7 @@ impl Launcher {
             cx.notify();
             return false;
         }
-        self.submit_or_wait_for_preview(mark, window, cx)
+        self.submit_or_wait_for_preview(SourceConsent::default(), mark, window, cx)
     }
 
     /// The chosen host's history answered: a quick launch waiting out of sight for New's folder default goes on, in
@@ -549,9 +550,17 @@ pub(crate) struct BatchApplied {
     pub(crate) escalation: Option<super::draft::Escalation>,
 }
 
+/// What the shown source warning permits each mode to stop. A create has no source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct SourceConsent {
+    stop_working: bool,
+    delete: Option<DeleteGuard>,
+}
+
 /// The open launcher. See the module docs.
 pub(crate) struct Launcher {
     pub(super) draft: LaunchDraft,
+    source_frame: ActionFrame<SourceConsent>,
     /// The store, read while drawing for the hosts, the source session and the preferences.
     store: Entity<HelmStore>,
     /// The model catalog once read; `None` until then, or after a failed read.
@@ -851,6 +860,7 @@ impl Launcher {
             catalog_error: None,
             notice: None,
             pressed: false,
+            source_frame: ActionFrame::default(),
             refused: None,
             folder,
             name,
@@ -991,12 +1001,12 @@ impl Launcher {
         // An open YOLO question answers for the launch a press sends. A template that leaves that launch as it was just
         // before the batch keeps the question, as the old launcher did ("while its completed request is unchanged");
         // one that changes it retires the question with every other edit (`changed`). The old launcher compared with
-        // the refused request instead; the two differ only when something outside the launcher (a source coming back
-        // alive, a re-read preview) changed it meanwhile, and the question's answer sends the current one either way.
+        // the refused request instead. Hold the live source constant across this comparison of the draft.
+        let source = self.source_consent(cx);
         let asked = self
             .yolo
             .is_some()
-            .then(|| self.request(false, cx))
+            .then(|| self.request(false, source, cx))
             .flatten();
         match edit(&mut self.draft, self.catalog.as_deref(), cx) {
             Ok(BatchApplied {
@@ -1009,7 +1019,7 @@ impl Launcher {
                     self.notice = notice;
                 }
                 self.sync_fields(window, cx);
-                let unchanged = asked.is_some() && asked == self.request(false, cx);
+                let unchanged = asked.is_some() && asked == self.request(false, source, cx);
                 let kept = if unchanged { self.yolo.take() } else { None };
                 self.changed(cx);
                 self.yolo = kept;
@@ -1203,6 +1213,15 @@ impl Launcher {
         Some(row.map_or((None, DeleteGuard::NothingAlive), replace::launcher_warning))
     }
 
+    /// Each live warning and its answer agree on whether the agent or tabs may be stopped. Different tab counts
+    /// can carry the same permission, which the supervisor checks against its current state.
+    fn source_consent(&self, cx: &App) -> SourceConsent {
+        SourceConsent {
+            stop_working: self.source_working(cx),
+            delete: self.replace_warning(cx).map(|(_, guard)| guard),
+        }
+    }
+
     /// What the main action stops of its source, as a line for the notices region, first in it as the old launcher's
     /// footer notices had it: Replace with's warning (`.launch-composer-replace-warning`), since the launch button is
     /// the confirmation of the source's delete, or Restart with's while its agent works. Either follows the source while
@@ -1242,13 +1261,26 @@ impl Launcher {
         if self.yolo_in_flight(cx) {
             return;
         }
-        self.submit(false, false, Mark::take(cx), window, cx);
+        let shown = self
+            .source_frame
+            .current()
+            .and_then(|frame| frame.shown().copied());
+        let source = match (&self.draft.mode, shown) {
+            (_, Some(source)) => source,
+            (Mode::ReplaceWith { .. } | Mode::RestartWith(_), None)
+                if self.refusal(cx).is_none() =>
+            {
+                return;
+            }
+            _ => SourceConsent::default(),
+        };
+        self.submit(false, false, source, Mark::take(cx), window, cx);
     }
 
     /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
     /// while the launcher refuses the press. Shared by the press ([`Self::submit`]) and by an applied template batch,
     /// which keeps an open YOLO question while this stays the same (`apply_now`).
-    fn request(&self, confirm_yolo: bool, cx: &App) -> Option<Request> {
+    fn request(&self, confirm_yolo: bool, source: SourceConsent, cx: &App) -> Option<Request> {
         let hosts = self.hosts(cx);
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
@@ -1273,28 +1305,20 @@ impl Launcher {
                     body.confirm_yolo = confirm_yolo;
                     Request::Create(body)
                 }),
-                // The guard matches the warning as the store stands at the press, which is what the last frame drew
-                // unless a push landed since; plain Replace's skipped confirmation reads its row the same way.
-                Mode::ReplaceWith { source } => self
-                    .replace_warning(cx)
-                    .and_then(|(_, guard)| self.draft.replace_body(target, guard))
+                Mode::ReplaceWith { source: key } => source
+                    .delete
+                    .and_then(|guard| self.draft.replace_body(target, guard))
                     .map(|mut body| {
                         // The helm counts either place; the shared body's rule is to set this one.
                         body.confirm_yolo = confirm_yolo;
                         Request::Replace {
-                            source: source.clone(),
+                            source: key.clone(),
                             body,
                         }
                     }),
-                // The press is the consent to stop a working agent exactly when the action read "Stop and restart",
-                // read from the same store state as the label.
                 Mode::RestartWith(restart) => self
                     .draft
-                    .restart_body(
-                        target,
-                        self.live_launch(cx).as_ref(),
-                        self.source_working(cx),
-                    )
+                    .restart_body(target, self.live_launch(cx).as_ref(), source.stop_working)
                     .map(|mut body| {
                         body.confirm_yolo = confirm_yolo;
                         Request::Restart {
@@ -1309,11 +1333,13 @@ impl Launcher {
     /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
     /// first (the YOLO question's answers, `yolo_question`), and `confirm_sandbox` whether they answered "Create a
     /// sandbox for this session?" with Create and launch (`sandbox_question`), each for this one submit; a plain press
-    /// never consents. `mark` is the answer the reply's moved-on check counts from ([`launch::start`]).
+    /// never consents. `source` carries the warning's permission across any wait. `mark` is the answer the reply's
+    /// moved-on check counts from ([`launch::start`]).
     fn submit(
         &mut self,
         confirm_yolo: bool,
         confirm_sandbox: bool,
+        source: SourceConsent,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1324,7 +1350,7 @@ impl Launcher {
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
         let hosts = self.hosts(cx);
-        let mut request = self.request(confirm_yolo, cx);
+        let mut request = self.request(confirm_yolo, source, cx);
         // A billed environment asks first ("Create a sandbox for this session?"), and its answer submits again.
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         if let Some(Request::Environment(body)) = request.as_mut()
@@ -2205,6 +2231,13 @@ impl Render for Launcher {
         // While the YOLO question's host write is out, the launcher holds still (`yolo_question`).
         let holding = self.yolo_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
+        if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
+            let source = self.source_consent(cx);
+            self.source_frame.capture(source, (), window);
+            if let Some(state) = &self.yolo {
+                state.show_source(source, cx);
+            }
+        }
 
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
         // (SPEC.md, "Restart with": held fields' "editing controls are hidden", and "The held agent type, host and

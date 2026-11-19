@@ -290,7 +290,8 @@ fn replace_with_of_an_unmanaged_source_has_no_checkout_hint(cx: &mut TestAppCont
 /// must authorize only that (SPEC.md, "Replace with"; the old `replace_with_warning`). Specified: with a running, the
 /// launcher shows Replace's warning ending "the session launched here takes its place.", and Launch sends one
 /// `POST /api/sessions/a/replace` whose create targets host9 in a's folder and whose guard is unconditional (neither
-/// precondition flag), the progress pill then saying "Replacing".
+/// precondition flag), the progress pill then saying "Replacing". If the helm asks about YOLO, the permanent answer
+/// takes the warning from that press so a later restart cannot broaden what the host-setting reply authorizes.
 #[gpui::test]
 fn replace_with_warns_about_a_running_source_and_sends_its_guard(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
@@ -320,6 +321,38 @@ fn replace_with_warns_about_a_running_source_and_sends_its_guard(cx: &mut TestAp
             crate::session_list::outcome::waited_seconds("a", crate::operations::Work::Replace, cx)
         }),
         Some(2)
+    );
+    helm.reply_marked(
+        replace.id,
+        409,
+        vec![crate::operations::HelmMarker::YoloConfirmation],
+        Some(json!("YOLO launches on host9 need --yolo")),
+    );
+    settle(cx);
+    a_exits(&mut helm, cx);
+    assert_eq!(name_of(cx, "launcher-source-warning"), None);
+    assert!(replaces(&mut helm, cx).is_empty());
+    test_support::click(cx, "prompt-alternative-1");
+    cx.run_until_parked();
+    let sent = helm.commands();
+    let [write] = &sent[..] else {
+        panic!("expected only the host setting, got {sent:?}");
+    };
+    assert_eq!(write.path, "/api/hosts/9/yolo-without-asking");
+    helm.push(change(
+        listing_meta(&["a", "b", "c", "d"], 5, false),
+        &[session("a").host(9)],
+        &[],
+    ));
+    settle(cx);
+    assert!(name_of(cx, "launcher-source-warning").is_some());
+    helm.reply(write.id, 200, Some(json!({})));
+    let [retry] = &replaces(&mut helm, cx)[..] else {
+        panic!("one retry")
+    };
+    assert_eq!(
+        retry.body.as_ref().unwrap()["only_if_nothing_alive"],
+        json!(true)
     );
 }
 
@@ -546,7 +579,11 @@ fn the_yolo_question_of_a_replace_with_leaves_no_failure_on_the_source(cx: &mut 
         cx.update(|_, cx| crate::session_list::outcome::current_line("a", cx))
     };
     assert_eq!(line(cx), None, "no failure on the source while asked");
+    a_exits(&mut helm, cx);
+    assert_eq!(name_of(cx, "launcher-source-warning"), None);
     test_support::click(cx, "prompt-cancel");
+    assert!(replaces(&mut helm, cx).is_empty(), "Cancel sends nothing");
+    assert!(name_of(cx, "prompt-cancel").is_none());
     assert_eq!(line(cx), None, "nor after Cancel");
 }
 

@@ -71,7 +71,8 @@ use gpui::{
 use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
 use super::{
-    LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, help_line_container, row,
+    LABEL_COLUMN, LABEL_GAP, Launcher, SourceConsent, choices::status_line, help_line,
+    help_line_container, row,
 };
 use crate::assets::Icon;
 use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
@@ -175,6 +176,8 @@ impl PreviewKey {
 /// due when it was armed, or, for a quick launch never shown whose base name was taken, its next candidate's
 /// ([`Launcher::settle_waiting_launch`]).
 struct Armed {
+    /// A later preview can supply the destination while the answer still owns the source permission.
+    source: SourceConsent,
     mark: Mark,
     key: PreviewKey,
     window: AnyWindowHandle,
@@ -507,6 +510,7 @@ impl Launcher {
     /// managed preview and starts directly").
     pub(in crate::launcher) fn submit_or_wait_for_preview(
         &mut self,
+        source: SourceConsent,
         mark: Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -519,6 +523,7 @@ impl Launcher {
             && let Some(key) = self.preview_key(cx)
         {
             self.checkout.armed = Some(Armed {
+                source,
                 mark,
                 key,
                 window: window.window_handle(),
@@ -527,7 +532,7 @@ impl Launcher {
             cx.notify();
             return true;
         }
-        self.submit(false, false, mark, window, cx);
+        self.submit(false, false, source, mark, window, cx);
         false
     }
 
@@ -587,7 +592,7 @@ impl Launcher {
         if start {
             let _ = cx.update_window(armed.window, |_, window, cx| {
                 entity.update(cx, |launcher, cx| {
-                    launcher.submit(false, false, armed.mark, window, cx)
+                    launcher.submit(false, false, armed.source, armed.mark, window, cx)
                 });
             });
         }
