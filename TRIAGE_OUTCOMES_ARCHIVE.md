@@ -21765,17 +21765,7 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Natural detach drops the old attachment's input side before releasing the lock, as detach_stalled
   does (about 5 lines, optional test). Size gate: about 100 lines of diff (code, tests and docs, not counting
   TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
-  to the user. Remove the feedback file and its index entry in the same change. <<<<<<< conflict 1 of 1 %%%%%%% diff
-  from: ukwxmxks 005bc344 "fix: cancel queued terminal input before admitting a new viewer" (parents of rebased
-  revision) \\\\\\\ to: ukwxmxks f1c95258 "fix: cancel queued terminal input before admitting a new viewer" (rebase
-  destination) -- Execution: change `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark
-- `plan/triage-misc-nov18/01-natural-detach-input-order`,
-  [PR #4156](https://github.com/scode/farhelm/pull/4156/changes). +- Execution: change
-  `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark `plan/triage-misc-nov18/01-natural-detach-input-order`,
-
-* [PR #4156](https://github.com/scode/farhelm/pull/4156/changes). +++++++ zxronrqs 7badc480 "fix: hide launching
-  containers from the leftovers list" (rebased revision)
-
+  to the user. Remove the feedback file and its index entry in the same change.
 - Execution: change `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark `plan/triage-misc-nov18/01-natural-detach-input-order`,
   [PR #4156](https://github.com/scode/farhelm/pull/4156/changes).
 
@@ -21791,19 +21781,9 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: containers whose first launch is still in progress are left out of the list (about 15-30 lines,
   with a test). Remove the feedback file and its index entry in the same change.
-- Execution: change `zxronrqsxmoqznsyytmwzwmlmomkutpm`, bookmark <<<<<<<<<<< conflict 1 of 1 %%%%%%%%%%% diff from:
-  zxronrqs 7badc480 "fix: hide launching containers from the leftovers list" (rebased revision) \\\\\\\\\\\ to: zxronrqs
-  21c14c56 "fix: hide launching containers from the leftovers list" (rebase destination)
-- `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
+- Execution: change `zxronrqsxmoqznsyytmwzwmlmomkutpm`, bookmark
+  `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
   [PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
-
-* `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
-* [PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
-*
-
-+>>>>>>> conflict 1 of 1 ends +++++++++++ kpmsllur ab74e065 "test: verify process ownership in agent admission teardown"
-(rebased revision) `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
-[PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
 
 ## trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md
 
@@ -21816,20 +21796,7 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
   group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
-  lines in the test code). Remove the feedback file and its index entry in the same change. <<<<<<<<<<<<<<< conflict 1
-  of 1 %%%%%%%%%%%%%%% diff from: kpmsllur ab74e065 "test: verify process ownership in agent admission teardown"
-  (rebased revision) \\\\\\\\\\\\\\\ to: kpmsllur 73da1a63 "test: verify process ownership in agent admission teardown"
-  (rebase destination) -- Execution: change `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark
-- `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
-  [PR #4163](https://github.com/scode/farhelm/pull/4163/changes). +- Execution: change
-  `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
-
-* [PR #4163](https://github.com/scode/farhelm/pull/4163/changes).
-*
-
-+>>>>>>>>>>> conflict 1 of 1 ends +++++++++++++++ ulurrwpu 293046a8 "docs: note that typed input can precede a Wayland
-paste" (rebased revision)
-
+  lines in the test code). Remove the feedback file and its index entry in the same change.
 - Execution: change `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
   [PR #4163](https://github.com/scode/farhelm/pull/4163/changes).
 
@@ -21846,20 +21813,7 @@ paste" (rebased revision)
   page, Q3): spec note for paste order.
 - Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
   still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
-  entry in the same change. <<<<<<<<<<<<<<<<<<< conflict 1 of 1 %%%%%%%%%%%%%%%%%%% diff from: ulurrwpu 293046a8 "docs:
-  note that typed input can precede a Wayland paste" (rebased revision) \\\\\\\\\\\\\\\\\\\ to: ulurrwpu 68592b43 "docs:
-  note that typed input can precede a Wayland paste" (rebase destination) -- Execution: change
-  `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark
-- `plan/triage-misc-nov18/04-wayland-paste-order-spec`, [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
-  +- Execution: change `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark
-  `plan/triage-misc-nov18/04-wayland-paste-order-spec`,
-
-* [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
-*
-
-+>>>>>>>>>>>>>>> conflict 1 of 1 ends +++++++++++++++++++ klusyqyo 23c3ed8e "docs: explain why restart errors can quote
-prior terminal output" (rebased revision)
-
+  entry in the same change.
 - Execution: change `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark `plan/triage-misc-nov18/04-wayland-paste-order-spec`,
   [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
 
@@ -21879,8 +21833,6 @@ prior terminal output" (rebased revision)
   behavior change. Remove the feedback file and its index entry in the same change.
 - Execution: change `klusyqyotxyzzszrlpkytrsttzyrszko`, bookmark `plan/triage-misc-nov18/05-restart-quote-spec`,
   [PR #4170](https://github.com/scode/farhelm/pull/4170/changes).
-
->>>>>>>>>>>>>>>>>>> conflict 1 of 1 ends
 
 ## fake-filesystem-cancellation-outlives-test-transaction.md
 
