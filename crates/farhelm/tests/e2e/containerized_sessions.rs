@@ -42,8 +42,12 @@ fn legacy_config() -> ContainerConfig {
 
 /// Seed an actual historical row, then load it through an ordinary supervisor
 /// restart. A current create is used only before its stored launch becomes old.
+///
+/// Both supervisors run without a user manager (`scopeless_seams`), so the
+/// tests' closing Delete does not depend on the restarted supervisor's
+/// systemd probe answering in time.
 async fn legacy_session() -> (Harness, SessionInfo, farhelm_teststate::TestDir) {
-    let h = harness().await;
+    let h = harness_with_seams(SupervisorTimeouts::default(), scopeless_seams()).await;
     let cwd = farhelm_teststate::tempdir().unwrap();
     let session = h
         .client
@@ -90,7 +94,16 @@ async fn legacy_session() -> (Harness, SessionInfo, farhelm_teststate::TestDir) 
         );
     }
     let h = h
-        .restart_supervisor(|state| async move { supervisor_on(&state).await.unwrap() })
+        .restart_supervisor(|state| async move {
+            Supervisor::new_with_seams(
+                &state,
+                farhelm_bin().into(),
+                SupervisorTimeouts::default(),
+                scopeless_seams(),
+            )
+            .await
+            .unwrap()
+        })
         .await;
     let listed = h.client.list_sessions().await.unwrap();
     let stored = listed

@@ -627,6 +627,11 @@ struct CrashScene {
 /// is the one thing that DIFFERS: the shared assertions below would pass
 /// even if two stages left identical state, which would mean the seam was
 /// not injecting where it claims to.
+///
+/// Both supervisors run without a user manager ([`scopeless_seams`]), so the
+/// retry's launch evidence comes from hosts and sentinels, and the closing
+/// Delete never waits on a fresh systemd probe. It refused under load when it
+/// did (FLAKES.md, 2026-11-09).
 async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let state_dir = state.path().to_path_buf();
@@ -640,7 +645,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
                 create_crash: Some(crash_at(stage)),
                 ..FaultHooks::default()
             },
-            ..SupervisorSeams::default()
+            ..scopeless_seams()
         },
     )
     .await
@@ -659,7 +664,8 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     // The retry arrives at a supervisor that never saw the first attempt
     // in memory — the only honest way to model a crash, and what makes
     // reload's own reconciliation load-bearing rather than incidental.
-    let sup2 = handoff_to_new_supervisor(state.path(), sup1, client1).await;
+    let sup2 =
+        handoff_to_new_supervisor_with_seams(state.path(), sup1, client1, scopeless_seams()).await;
     let reservation_after_reload = stored_reservation(state.path(), "intent-crash")
         .await
         .expect("the reservation outlives the crash");
