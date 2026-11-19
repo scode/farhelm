@@ -10640,7 +10640,7 @@ mod tests {
     /// outcome write and a separate pane write would resurrect the row as
     /// `Running` (empty pane) on the next reload. Pinned at the store level
     /// (not just via `Transition::apply`'s pure function, which never
-    /// touches SQLite) because `Transition::pane`'s wiring into the actual
+    /// touches SQLite) because `Transition::address`'s wiring into the actual
     /// `UPDATE` statement is exactly what a pure-function test cannot
     /// exercise.
     #[farhelm_testtrace::test]
