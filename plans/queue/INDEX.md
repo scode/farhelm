@@ -10,7 +10,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 71af18] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
 - [landing 4062dc] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
 - [landing 0b6916] `concealed-link-target.md` — Hidden terminal text cannot change where a printed link goes
-- [complete] `triage-misc-nov18.md` — natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
+- [landing 4375b1] `triage-misc-nov18.md` — natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
 - [complete] `triage-discards-nov18.md` — nine discards from the 2026-11-18 highest-bucket triage
 - [complete] `covered-link-refusal.md` — A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
 - [pending] `exited-session-no-terminal.md` — An exited session whose terminal is gone shows Restart and Replace instead of reconnecting forever (protocol bump)
