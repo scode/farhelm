@@ -362,7 +362,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `NumberOfPasswordPrompts=1`; the helper relays the prompt text to the helm, the GUI shows it as a text field, and the
   answer goes back. Every other ssh client keeps `BatchMode=yes`. Cancel in the UI should kill the ssh process rather
   than rely on the helper's exit code, because ssh turns a failed askpass into an empty answer, which counts as a failed
-  2FA attempt. `SSH_ASKPASS_REQUIRE` needs OpenSSH 8.4 or later.
+  2FA attempt. `SSH_ASKPASS_REQUIRE` needs OpenSSH 8.4 or later. Plan: `plans/queue/ssh-askpass-2fa.md`.
 
 ## Mid term
 
