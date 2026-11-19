@@ -5,5 +5,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `exited-session-no-terminal.md` — An exited session whose terminal is gone shows Restart and Replace instead of reconnecting forever (protocol bump)
 - [pending] `gui-ux-wording.md` — Comment, spec and docs corrections from the 2026-11-18 GUI UX triage, two spec acceptances and the user's-own-configuration principle
 - [complete] `gui-ux-desktop-fixes.md` — Header question anchors, Close all after navigation, selected-template contrast, host text in tooltips and refusals, wrong action names, approval keyboard tab stops
-- [blocked] `gui-ux-backend-fixes.md` — Bounded shell-tab requests, Tensorlake suspension attribution, late approval answers, tunnels for retired sessions, the Mac update wait, endpoint @ paths, braced command display
+- [pending] `gui-ux-backend-fixes.md` — Bounded shell-tab requests, Tensorlake suspension attribution, late approval answers, tunnels for retired sessions, the Mac update wait, endpoint @ paths, braced command display
 - [pending] `antigravity-support.md` — Support Google Antigravity (agy): structured launches, sidebar mark, user-installed hook conversation tracking, and docs (protocol bump)

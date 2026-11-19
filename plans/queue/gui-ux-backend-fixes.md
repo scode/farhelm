@@ -300,22 +300,40 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 
 No release note needed.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-19 (claim 84005f).
+### 2026-11-19: answer to a blocked question
 
-### A later Tensorlake pause can inherit the earlier time
+The question, as the executor put it:
 
-You approved clearing Farhelm's saved pause attribution when a Tensorlake host runs again. If you resume a host outside
-Farhelm and Tensorlake pauses it later, Hosts can still show the earlier “Suspended from Farhelm” label and time. The
-plan caps a single fix at about 100 changed lines, including tests.
+> Blocked on 2026-11-19 (claim 84005f).
+>
+> ### A later Tensorlake pause can inherit the earlier time
+>
+> You approved clearing Farhelm's saved pause attribution when a Tensorlake host runs again. If you resume a host
+> outside Farhelm and Tensorlake pauses it later, Hosts can still show the earlier “Suspended from Farhelm” label and
+> time. The plan caps a single fix at about 100 changed lines, including tests.
+>
+> The first attempt fit in 95 lines. Review found that Retry during reconnection and a Hosts read in progress can each
+> restore the old time. The full fix needs to clear the earlier pause from both places and let a new Farhelm Suspend
+> keep its own timestamp. Simplifying the Hosts display takes most of the original allowance before the reconnect and
+> Suspend changes.
+>
+> May this fix exceed the 100-line limit, or should it be split into two reviewed drafts that land together? I recommend
+> a single larger fix so the state Farhelm records and the state Hosts shows can be reviewed together. With a split, one
+> draft would make Hosts use the connection's current state and the other would clear the old pause safely. Users would
+> get the corrected attribution once both landed. The other six backend fixes are in the plan's draft stack.
 
-The first attempt fit in 95 lines. Review found that Retry during reconnection and a Hosts read in progress can each
-restore the old time. The full fix needs to clear the earlier pause from both places and let a new Farhelm Suspend keep
-its own timestamp. Simplifying the Hosts display takes most of the original allowance before the reconnect and Suspend
-changes.
+The maintainer's answer:
 
-May this fix exceed the 100-line limit, or should it be split into two reviewed drafts that land together? I recommend a
-single larger fix so the state Farhelm records and the state Hosts shows can be reviewed together. With a split, one
-draft would make Hosts use the connection's current state and the other would clear the old pause safely. Users would
-get the corrected attribution once both landed. The other six backend fixes are in the plan's draft stack.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks"; it is not a huge question.
+
+Decision: make the fix for a later Tensorlake pause showing the earlier "Suspended from Farhelm" label and time as one
+larger draft, as recommended, rather than two drafts that only make sense together. It may go over the 100-line size
+gate, up to about 200 changed lines including tests. It must still cover what review found: clear the earlier pause from
+both the record Farhelm keeps and what Hosts reads, so that Retry during reconnection and a Hosts read in progress
+cannot restore the old time, and keep a new Suspend from Farhelm stamped with its own time. If it would go well past
+about 200 lines, block again rather than widening the fix. The other six fixes stay as they are.
+
+If the maintainer later prefers the split, that is a follow-up, not a reason to stop the plan.
