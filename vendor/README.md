@@ -1251,8 +1251,9 @@ test-automation bridge that lets an agent drive the running app.
 
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
-frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur` and
-`hitbox-occlusion` layers, and one addition to the bridge layer (an element's selected state).
+frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur`,
+`wayland-drop-position` and `hitbox-occlusion` layers, and one addition to the bridge layer (an element's selected
+state).
 
 ### What is here
 
@@ -1306,20 +1307,21 @@ crates; every one of them declares Apache-2.0, which was checked on 2026-11-13.
 
 Here's what each layer changes and why, in application order. Sizes are `git apply --numstat` added / removed lines.
 
-| Layer                  | Trees (added / removed)                                                             | Why                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `bridge`               | gpui-pre 480 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101, gpui-agent 22 / 1 | Hooks the automation bridge reads; window screenshots      |
-| `capture-alpha`        | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces          |
-| `gpui-agent`           | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees       |
-| `native-key`           | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events |
-| `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                       | Image-before-text async clipboard reads for paste          |
-| `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token      |
-| `frame-source`         | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
-| `no-kde-blur`          | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
-| `modified-notices`     | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
-| `hitbox-occlusion`     | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
+| Layer                   | Trees (added / removed)                                                             | Why                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `bridge`                | gpui-pre 480 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101, gpui-agent 22 / 1 | Hooks the automation bridge reads; window screenshots      |
+| `capture-alpha`         | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces          |
+| `gpui-agent`            | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees       |
+| `native-key`            | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events |
+| `attachment-clipboard`  | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                       | Image-before-text async clipboard reads for paste          |
+| `activation-token`      | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token      |
+| `frame-source`          | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
+| `no-kde-blur`           | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
+| `wayland-drop-position` | gpui-pre-linux 57 / 21                                                              | Keep motion while Wayland reads the drag's file list       |
+| `modified-notices`      | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
+| `hitbox-occlusion`      | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,476 added and 177 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,533 added and 198 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1382,6 +1384,10 @@ included.
   workspace's `gpui/Cargo.lock`, so `cargo metadata --locked` on that workspace still succeeds. Removed by the
   maintainer's decision (2026-11-13); a TODO.md entry revisits it. Drop the layer if an upstream GPUI stops depending on
   the crate.
+- **wayland-drop-position.** A Wayland drop has no coordinates of its own and uses the last drag-motion position. The
+  URI list arrives asynchronously, so motion between entering the window and reading the list must still update the
+  position. Otherwise releasing outside the terminal can hit the terminal's upload target at the entry point. Releasing
+  before the list arrives still cancels that pending drop.
 - **hitbox-occlusion.** Farhelm needs to know whether a terminal link's destination panel was fully visible when the
   user clicked. GPUI's pointer query tests just one point. `HitboxId::is_occluded` uses the last rendered frame's hitbox
   order and content masks to check for any mouse-blocking overlap across the panel. A hitbox missing from that frame has
@@ -1428,6 +1434,7 @@ git apply --directory=vendor/gpui-pre-macos patches/gpui/frame-source/gpui-pre-m
 git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-lockfile.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/no-kde-blur/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/no-kde-blur/gpui-agent-lockfile.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/wayland-drop-position/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre patches/gpui/modified-notices/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/modified-notices/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-wgpu patches/gpui/modified-notices/gpui-pre-wgpu-0.3.12.patch
@@ -1441,9 +1448,10 @@ git apply --directory=vendor/gpui-pre patches/gpui/hitbox-occlusion/gpui-pre-0.3
 - `diff -r vendor/<tree> <checkout>/vendor/<tree>` prints nothing for each of the five trees (for `gpui-agent`, apart
   from a `target/` left by building its CLI in the checkout).
 
-The sequence through `modified-notices` was checked end to end on 2026-11-14. On 2026-11-13 it was also checked against
-the prototype. Its trees equal these with the notices, `frame-source`, `no-kde-blur`, `hitbox-occlusion` and the bridge
-layer's selected state omitted, and its two measurement layers added back for `gpui-pre`.
+The original sequence through `modified-notices` was checked end to end on 2026-11-14. The Linux tree was reproduced
+again with `wayland-drop-position` on 2026-11-19. The 2026-11-13 comparison with the prototype recovered its trees by
+dropping Farhelm's later layers and the bridge layer's selected state, and adding its two measurement layers back to
+`gpui-pre`.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.
