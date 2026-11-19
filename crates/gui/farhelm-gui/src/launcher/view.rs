@@ -2002,7 +2002,7 @@ impl Launcher {
                 Button::new(
                     "launcher-catalog-retry",
                     "Retry",
-                    HoverHelp::tooltip("Retry: ask the host for its model list again"),
+                    HoverHelp::tooltip("Retry: fetch Farhelm's model catalog again"),
                     Role::Button,
                 )
                 .tier(Tier::Neutral)

@@ -1673,16 +1673,15 @@ impl AttachedTerminal {
         }
     }
 
-    /// Files or an image the user pasted or dropped here: attached while the terminal is live, and otherwise refused
-    /// in the strip ([`attachments::DETACHED_TEXT`]) rather than uploaded, since nothing could take their path (the old
-    /// app's refusal). The refusal goes once the terminal is live again ([`AttachedTerminal::replay_complete`]).
+    /// Paste and drop can upload files only when the terminal can take their paths. A new replay or the veil lifting
+    /// from a live terminal clears a refusal.
     fn offer(&mut self, offered: Vec<Offered>, cx: &mut Context<Self>) {
         let live = self.is_live() && !self.inert;
         self.attachments.update(cx, |attachments, cx| {
             if live {
                 attachments.attach(offered, cx);
             } else {
-                attachments.refuse(cx);
+                attachments.refuse(self.inert, cx);
             }
         });
     }

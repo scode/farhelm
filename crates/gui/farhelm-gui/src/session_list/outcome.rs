@@ -61,15 +61,16 @@ pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
 // ---- The words -------------------------------------------------------------------------------------------------------
 
 /// The name a line about `work` carries in front of the host's words on the row, as the old app's error slot did:
-/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike, "Seen: " for a refused Mark read or Mark
-/// unread (the old app's `seen_toggle_report`), and "Pin: " and "Move pin: " for a refused pin and move. A Rename or a
+/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike. Other prefixes also name the action
+/// the user took, including Mark read and Mark unread. A Rename or a
 /// Delete refusal (an environment Delete's included) shows the words alone, as it did before Stop and Replace came, and
 /// a save belongs to an editor, which shows its own refusal. Exhaustive, so a new kind of work decides.
 pub(super) fn prefix(work: Work) -> Option<&'static str> {
     match work {
         Work::Stop => Some("Stop: "),
         Work::Replace => Some("Replace: "),
-        Work::Seen => Some("Seen: "),
+        Work::Seen { read: true } => Some("Mark read: "),
+        Work::Seen { read: false } => Some("Mark unread: "),
         Work::Restart => Some("Restart: "),
         // The old app's tab error line ("Open tab: " and the supervisor's words: a vanished folder, a shell that died
         // at once). A new tab is the session's own work, so its refusal shows where the session's others do.
@@ -80,10 +81,9 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         Work::Mute => Some("Mute: "),
         Work::MovePin => Some("Move pin: "),
         Work::SessionGroup => Some("Move to group: "),
-        // The old list's error slot for an environment's Suspend and Resume ("Sandbox: " for either provider, as the
-        // old `HeaderAction::Sandbox` wrote it), and Stop's for Stop and suspend, which the old list ran as a Stop
-        // with its suspend flag set.
-        Work::Suspend | Work::Resume => Some("Sandbox: "),
+        // Suspend and Resume apply to both providers.
+        Work::Suspend => Some("Suspend: "),
+        Work::Resume => Some("Resume: "),
         Work::StopAndSuspend => Some("Stop: "),
         // A probe, a setup, a host's removal, Update and uninstall are host work, never on a session's key, so no row
         // line ever names them; tunnel work has a key of its own, a launch is the launcher's, on a launch key, and an
@@ -203,7 +203,7 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::Delete(_)
         | Work::Save
         | Work::Stop
-        | Work::Seen
+        | Work::Seen { .. }
         | Work::Probe
         | Work::Setup
         | Work::TunnelOpen
@@ -457,15 +457,13 @@ mod tests {
         }
     }
 
-    /// The old app's error slot named the operation for Stop, Replace, Restart, a manual seen toggle, a pin and a move
-    /// ("Stop: …", "Replace: …", "Restart: …", "Seen: …", "Pin: …", "Move pin: …"), and the ported Delete and Rename
-    /// refusals have always shown the helm's words alone. Specified: those six carry their name and a colon, the others
-    /// nothing.
+    /// A refusal names the pressed action even when several share a route. Delete and Rename keep the helm's words.
     #[test]
-    fn only_stop_replace_restart_seen_and_pin_lines_carry_their_name() {
+    fn a_refusal_names_the_pressed_action() {
         assert_eq!(prefix(Work::Stop), Some("Stop: "));
         assert_eq!(prefix(Work::Replace), Some("Replace: "));
-        assert_eq!(prefix(Work::Seen), Some("Seen: "));
+        assert_eq!(prefix(Work::Seen { read: false }), Some("Mark unread: "));
+        assert_eq!(prefix(Work::Suspend), Some("Suspend: "));
         assert_eq!(prefix(Work::Restart), Some("Restart: "));
         assert_eq!(prefix(Work::Pin), Some("Pin: "));
         assert_eq!(prefix(Work::MovePin), Some("Move pin: "));

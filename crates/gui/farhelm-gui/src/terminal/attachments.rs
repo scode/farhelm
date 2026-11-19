@@ -239,10 +239,15 @@ const NO_PATH_TEXT: &str = "The upload reply carried no usable path";
 /// none, which the app never makes; tests that serve no transfers do.
 const NO_HELM_CLIENT: &str = "this window has no helm client to attach files through";
 
-/// Files or an image offered to a terminal that is not live, or is inert: refused before anything is uploaded, since
+/// Files or an image offered to a disconnected terminal: refused before anything is uploaded, since
 /// no path could be typed (the old `DETACHED_TEXT`). It goes once the terminal is live again ([`Attachments::live`]).
 pub(crate) const DETACHED_TEXT: &str =
     "This terminal is not connected, so nothing was attached — reconnect and try again";
+
+/// A veil keeps a terminal from taking a drop even while its stream is still live. The veil is the "Session
+/// unavailable" card, which shows exactly while the terminals are inert, so the line names that state in the card's
+/// own word rather than leaving the user to guess why the drop did nothing.
+const INERT_TEXT: &str = "This session is unavailable, so nothing was attached";
 
 /// Between the name and the host path of a finished upload whose path could not be typed (the old `LANDED_TEXT`'s
 /// start). The file is published, so the line names the path.
@@ -540,10 +545,11 @@ impl Attachments {
 
     /// Files or an image were offered to a terminal that could not take their path: say so instead, replacing the
     /// lines before it, as the old app's refusal did. Nothing is uploaded.
-    pub(crate) fn refuse(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refuse(&mut self, inert: bool, cx: &mut Context<Self>) {
+        let reason = if inert { INERT_TEXT } else { DETACHED_TEXT };
         self.lines.clear();
         self.lines.push(Line {
-            sentence: HostSentence::new(line_id()).text(DETACHED_TEXT),
+            sentence: HostSentence::new(line_id()).text(reason),
             refusal: true,
         });
         cx.notify();

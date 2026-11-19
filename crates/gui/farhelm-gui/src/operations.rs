@@ -109,7 +109,7 @@ pub enum Work {
     /// Not supersedable. It takes the session's key like any request, so while it is in flight the session's other
     /// actions are unavailable, as SPEC.md has every pending request refuse the session's competing ones. The
     /// automatic seen mark is not work here: it is a best-effort write nobody waits for.
-    Seen,
+    Seen { read: bool },
     /// The session's plain Restart from the open session's header, which resumes its own conversation, with the consent
     /// to stop a working agent that its question (or a skipped one) gave (`session_list::restart`). Not supersedable:
     /// Restart makes no promise that a second press is harmless (SPEC.md, "Lifecycle operations").
@@ -247,7 +247,7 @@ impl Work {
             Work::Save => false,
             Work::Stop => false,
             Work::Replace => true,
-            Work::Seen => false,
+            Work::Seen { .. } => false,
             Work::Restart => true,
             Work::Probe => false,
             Work::Setup => false,
@@ -289,7 +289,7 @@ impl Work {
             Work::Save => false,
             Work::Stop => false,
             Work::Replace => false,
-            Work::Seen => false,
+            Work::Seen { .. } => false,
             Work::Restart => false,
             Work::Probe => true,
             Work::Setup => true,

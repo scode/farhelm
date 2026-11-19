@@ -2858,10 +2858,6 @@ consequences.
 - [`launcher-stale-search-selection-fails-silently.md`](launcher-stale-search-selection-fails-silently.md) — Choosing a
   vanished host or stale recent setup can clear the search or do nothing without saying why.
 
-- [`gui-labels-and-refusals-name-different-actions.md`](gui-labels-and-refusals-name-different-actions.md) — Several
-  dialogs, menus and accessible labels describe the same action differently. A few messages name the wrong operation or
-  cause.
-
 - [`session-list-actions-repeat-admission-and-progress.md`](session-list-actions-repeat-admission-and-progress.md) —
   Session actions repeat their request setup, current-work lookup, and progress rendering. Compact and full rows also
   repeat part of the status display.

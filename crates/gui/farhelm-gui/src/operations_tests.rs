@@ -1739,7 +1739,7 @@ const CLASSIFIED: &[(Work, bool, bool)] = &[
     (Work::Save, false, false),
     (Work::Stop, false, false),
     (Work::Replace, true, false),
-    (Work::Seen, false, false),
+    (Work::Seen { read: true }, false, false),
     (Work::Restart, true, false),
     (Work::Probe, false, true),
     (Work::Setup, false, true),

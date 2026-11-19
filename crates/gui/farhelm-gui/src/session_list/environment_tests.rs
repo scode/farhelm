@@ -778,7 +778,7 @@ fn an_environment_sessions_stop_question_offers_stop_and_suspend(cx: &mut TestAp
 /// Specified: Resume from a suspended sandbox's menu sends `POST /api/hosts/2/resume` at once, reading nothing; the row
 /// shows "Resuming…"; the helm's 504 leaves no line on the row, and with the host pushed resuming the row still says
 /// "Resuming…"; once the host is connected it says nothing more; a later Resume refused with a 409 shows on the row as
-/// "Sandbox: <its words>".
+/// "Resume: <its words>".
 #[gpui::test]
 fn a_resume_past_the_bound_stays_pending_and_a_refusal_shows(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, suspended_at(0));
@@ -826,7 +826,7 @@ fn a_resume_past_the_bound_stays_pending_and_a_refusal_shows(cx: &mut TestAppCon
     test_support::settle(cx);
     assert_eq!(
         label_of(cx, "session-outcome-a").as_deref(),
-        Some("Sandbox: Tensorlake refused the resume")
+        Some("Resume: Tensorlake refused the resume")
     );
 }
 
