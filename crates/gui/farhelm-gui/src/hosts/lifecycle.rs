@@ -112,7 +112,7 @@ pub(super) fn button(
     let button = Button::new(
         SharedString::from(format!("host-resume-{id}")),
         "Resume",
-        HoverHelp::tooltip(help),
+        HoverHelp::tooltip(help).ring_radius(crate::theme::metrics::RADIUS_SM - gpui::px(1.)),
         Role::Button,
     )
     .tier(Tier::Neutral)

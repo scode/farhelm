@@ -763,7 +763,7 @@ fn unavailable(palette: &Palette) -> AnyElement {
             StatusMark::new(
                 "host-rail-unavailable",
                 WORDS,
-                HoverHelp::tooltip(WORDS),
+                HoverHelp::tooltip(WORDS).beside_rail(),
                 Role::Status,
                 "?",
             )

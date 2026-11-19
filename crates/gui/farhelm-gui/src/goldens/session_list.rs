@@ -230,7 +230,42 @@ pub(super) fn session_list_marked_setup(state: &SceneState, _: &mut Window, cx: 
     );
 }
 
-// ---- Session-row hovers beside the sidebar --------------------------------------------------------------------------
+// ---- Help beside the rail and sidebar -------------------------------------------------------------------------------
+
+/// The selected All hosts entry has its own notch and inverse ring. Leaving the session rows in the picture
+/// makes it clear the card follows the rail edge inside the wider sidebar.
+pub(super) fn host_rail_hover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    session_list_then(state, rest_on_all_hosts, cx);
+}
+
+/// Warm up hover help once the All hosts entry has drawn.
+fn rest_on_all_hosts(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if rest_pointer_on(
+        state,
+        "host-rail-all",
+        gpui::Bounds::center,
+        rest_on_all_hosts,
+        window,
+        cx,
+    ) {
+        state.after.set(Some(|_, _, window, cx| {
+            let shown = layers::shown_tooltip(window, cx).expect("All hosts shows help");
+            assert_eq!(
+                shown.text.as_ref(),
+                "All hosts: show sessions from every host"
+            );
+            assert_eq!(shown.side(), layers::TooltipSide::Beside);
+            assert!(shown.ring().is_some(), "the rail entry carries its ring");
+        }));
+        window.refresh();
+    }
+}
 
 /// The width of the session-row hover scenes' content: the sidebar's column, then room for the 310-pixel summary card 6
 /// pixels past the column's edge and 4 inside the window's, which beside placement needs or it falls back above the row.
@@ -329,8 +364,8 @@ fn rest_on_idle_row(
 }
 
 /// [`rest_pointer_at`] `at` of the bounds of the element the last frame drew under `id`, so its hover help shows
-/// through the row's own wiring. Until a frame has drawn the element (the store's first snapshot reaches the list a
-/// frame or more after the list first draws, see [`press_bell_b`]), this waits for the next frame as `retry`.
+/// through the row's own wiring. Returns whether it dispatched the hover. If the store has yet to draw the
+/// element, the next frame calls `retry` for it.
 fn rest_pointer_on(
     state: &SceneState,
     id: &str,
@@ -338,7 +373,7 @@ fn rest_pointer_on(
     retry: AfterDrawn,
     window: &mut Window,
     cx: &mut App,
-) {
+) -> bool {
     let Some(target) = window
         .driver_nodes()
         .iter()
@@ -346,9 +381,10 @@ fn rest_pointer_on(
         .map(|node| at(&node.bounds))
     else {
         state.after.set(Some(retry));
-        return;
+        return false;
     };
     rest_pointer_at(state, target, window, cx);
+    true
 }
 
 /// The waiting row's actions menu, open beside its button with Rename, its first command, highlighted (reference

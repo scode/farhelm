@@ -372,7 +372,7 @@ pub(crate) fn button(
     let button = Button::new(
         SharedString::from(format!("host-update-{id}")),
         "Update",
-        HoverHelp::sentence(help),
+        HoverHelp::sentence(help).ring_radius(crate::theme::metrics::RADIUS_SM - gpui::px(1.)),
         Role::Button,
     )
     .tier(Tier::HostUpdate {

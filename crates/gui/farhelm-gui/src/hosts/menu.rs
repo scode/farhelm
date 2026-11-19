@@ -103,7 +103,7 @@ pub(super) fn toggle(
         format!("host-menu-toggle-{id}"),
         Icon::More,
         actions_label(name),
-        HoverHelp::tooltip(TOGGLE_HELP),
+        HoverHelp::tooltip(TOGGLE_HELP).ring_radius(crate::theme::metrics::RADIUS_SM - px(1.)),
         Role::Button,
     )
     .tier(Tier::RowMenu { on_fill: false })

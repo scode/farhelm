@@ -276,6 +276,8 @@ pub(crate) enum HelpPlacement {
     #[default]
     Ordinary,
     Beside(BesideCues),
+    /// The rail's own edge. A popover opened there keeps its choices clear of the rail button's help.
+    Rail(BesideCues),
     Menu,
 }
 

@@ -1280,8 +1280,19 @@ impl RenderOnce for Button {
                 on_secondary(event, window, cx);
             });
         }
+        // Rail controls share their column's narrower help edge even when the labels are expanded. Use inverse
+        // ink for the tooltip ring only when the button itself uses it on an accent fill.
+        let help = if self.tier == Tier::Rail {
+            let mut help = self.help.ring_radius(metrics::RADIUS_SM - px(1.));
+            if text == palette.on_fill {
+                help = help.ring_on_fill();
+            }
+            help.beside_rail()
+        } else {
+            self.help
+        };
         let button =
-            super::with_hover_help(button, &self.id, &self.help, true, Some(&focus), window, cx);
+            super::with_hover_help(button, &self.id, &help, true, Some(&focus), window, cx);
         let button = if enabled {
             let on_press = if self.keeps_focus {
                 focus::OnPress::Keep

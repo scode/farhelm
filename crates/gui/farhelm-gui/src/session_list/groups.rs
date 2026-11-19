@@ -247,26 +247,31 @@ pub(super) fn draw_header(
         } else {
             0.
         })));
-    let toggle = Button::new(label, name_label, toggle_help, Role::Button)
-        .tier(Tier::Ghost)
-        .compact()
-        .discloses(!header.collapsed)
-        .disabled(!header.live)
-        .focus(&toggle_focus)
-        .content(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.))
-                .child(caret)
-                .child(host_text::element(&name).min_w_0().truncate()),
-        )
-        .on_click({
-            let list = list.clone();
-            move |_, _, cx| {
-                let _ = list.update(cx, |list, cx| list.toggle_group(id, cx));
-            }
-        });
+    let toggle = Button::new(
+        label,
+        name_label,
+        toggle_help.ring_radius(theme::metrics::RADIUS_SM - px(1.)),
+        Role::Button,
+    )
+    .tier(Tier::Ghost)
+    .compact()
+    .discloses(!header.collapsed)
+    .disabled(!header.live)
+    .focus(&toggle_focus)
+    .content(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .child(caret)
+            .child(host_text::element(&name).min_w_0().truncate()),
+    )
+    .on_click({
+        let list = list.clone();
+        move |_, _, cx| {
+            let _ = list.update(cx, |list, cx| list.toggle_group(id, cx));
+        }
+    });
     let dot = header.attention.as_ref().map(|attention| {
         let hover = HostSentence::new(format!("session-group-{id}-attention-help"))
             .host(&attention.title)
@@ -275,7 +280,7 @@ pub(super) fn draw_header(
         StatusMark::new(
             format!("session-group-{id}-attention"),
             hover.accessible_name(),
-            HoverHelp::sentence(hover),
+            HoverHelp::sentence(hover).beside(),
             Role::Status,
             "",
         )

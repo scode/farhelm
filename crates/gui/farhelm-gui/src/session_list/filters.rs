@@ -762,7 +762,7 @@ pub(crate) fn empty_state(
         Button::new(
             "filter-show-all-hosts",
             "Show all hosts",
-            HoverHelp::tooltip("Show all hosts: remove the host filter"),
+            HoverHelp::tooltip("Show all hosts: remove the host filter").beside(),
             Role::Button,
         )
         .tier(Tier::Link)
@@ -772,7 +772,7 @@ pub(crate) fn empty_state(
         Button::new(
             "filter-show-all-statuses",
             "Show all statuses",
-            HoverHelp::tooltip("Show all statuses: remove the status filter"),
+            HoverHelp::tooltip("Show all statuses: remove the status filter").beside(),
             Role::Button,
         )
         .tier(Tier::Link)

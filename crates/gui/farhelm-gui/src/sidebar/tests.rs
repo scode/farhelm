@@ -658,10 +658,8 @@ fn divider_focused(window: &mut VisualTestContext) -> bool {
 
 // ---- Help beside the sidebar ---------------------------------------------------------------------------------------
 
-/// The real main view with one button laid over the sidebar's list whose hover help asks to sit beside the sidebar. No
-/// control of the main view asks for that yet (the session rows' hovers and the host progress card will), so the test
-/// brings its own. Laying it over the column rather than inside it changes nothing that is tested: help beside the
-/// sidebar is placed against the edge the sidebar draws, wherever its control is (`layers/beside.rs`).
+/// The real main view with a test control over the sidebar's list. Its placement exercises the list edge
+/// without depending on the text or geometry of any particular session row.
 struct BesideProbe {
     main: Entity<MainView>,
 }
