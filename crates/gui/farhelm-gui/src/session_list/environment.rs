@@ -415,20 +415,6 @@ impl Environment<'_> {
     }
 }
 
-/// The row menu's entry point. The actual request runs through the same snapshot as the header's toggle.
-pub(crate) fn begin(
-    key: &str,
-    stop: bool,
-    window: AnyWindowHandle,
-    cx: &mut App,
-    ask: impl FnOnce(Asked, ProviderUi, &mut Window, &mut App) + 'static,
-) {
-    let Some(target) = menu::actionable(key, cx) else {
-        return;
-    };
-    begin_shown(&target, stop, window, cx, ask);
-}
-
 /// Suspend or Resume the environment as the activated control showed it. A changed phase can refuse the operation.
 /// Resume goes at once. Suspend and Stop and suspend still read live host activity, which can require an additional
 /// warning and leaves the original Stop guards intact.
