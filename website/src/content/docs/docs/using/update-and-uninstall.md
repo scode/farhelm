@@ -31,11 +31,11 @@ reopen it or your Mac reboots.
 ## Check for an update now
 
 To check right away, select the version number at the top of the sidebar, unless an update is already waiting. You can
-also select the **?** button at the foot of the [navigation rail](/docs/using/manage-hosts/) and choose **Check for
-updates**, or choose **Update** in the menu of your Mac's own row in the host list. Each one installs a new release if
-there is one. Beside the version number the app shows **Checking…**, then **Installing…**, **Up to date**, or **Check
-failed**. **Up to date** stays for about five seconds; **Check failed** stays until you dismiss it or check again, and
-hovering over it gives the reason.
+also choose **Check for updates** in **Settings → App** or from the **?** button at the foot of the
+[navigation rail](/docs/using/manage-hosts/), or choose **Update** in the menu of your Mac's own row in the host list.
+Each one installs a new release if there is one. Beside the version number the app shows **Checking…**, then
+**Installing…**, **Up to date**, or **Check failed**. **Up to date** stays for about five seconds; **Check failed**
+stays until you dismiss it or check again, and hovering over it gives the reason.
 
 A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number turns
 red. If downloading or installing an update fails, **Check failed** appears right away. If Farhelm cannot reach the
@@ -53,9 +53,10 @@ interrupted works the same way: run it again to finish removing Farhelm, or run 
 ## Turn automatic updates off
 
 Select the gear at the foot of the navigation rail, choose **App**, and turn off **Install updates automatically**.
-Farhelm then stops checking by itself. **Check for updates** and your Mac's **Update** still work, and you can still
-update by running the installer again, as in [Install Farhelm](/docs/get-started/install/). The red version number still
-appears when a newer version is installed, however it got there.
+Farhelm then stops checking by itself. You can
+[check for an update now](/docs/using/update-and-uninstall/#check-for-an-update-now) or run the installer again, as in
+[Install Farhelm](/docs/get-started/install/). The red version number still appears when a newer version is installed,
+however it got there.
 
 ## How updates are checked
 

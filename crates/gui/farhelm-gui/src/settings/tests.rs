@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use super::choices::Choice;
 use super::{Section, TrustAgent};
 use crate::components::{Button, HoverHelp, Role};
+use crate::desktop::updates::fake::{Feed, Seen, fake_host};
 use crate::focus::{self, Mark};
 use crate::main_view::MainView;
 use crate::operations::{OpKey, Work};
@@ -97,13 +98,13 @@ pub(super) fn section_button(section: Section) -> &'static str {
 /// Keep a fake desktop updater as the app's, as the desktop app does at startup when its updater runs, with automatic
 /// updates starting at `automatic`. Its automatic-updates write succeeds unless `refuse` is set when it is called, and
 /// every value it is asked to write, saved or not, lands in `writes`, so a test sees each press reach the updater.
+/// The feed and command count let the App tests drive progress without starting an actual update.
 fn keep_updater(
     cx: &mut VisualTestContext,
     automatic: bool,
     refuse: &Rc<Cell<bool>>,
     writes: &Rc<RefCell<Vec<bool>>>,
-) {
-    use crate::desktop::updates::fake::{Feed, Seen, fake_host};
+) -> (Rc<Feed>, Rc<Seen>) {
     let (feed, seen) = (Rc::new(Feed::default()), Rc::new(Seen::default()));
     seen.automatic.set(automatic);
     let mut host = fake_host(&feed, &seen, false);
@@ -118,6 +119,7 @@ fn keep_updater(
     });
     cx.update(|_, cx| crate::desktop::updates::keep(Some(host), cx));
     settle(cx);
+    (feed, seen)
 }
 
 /// The preferences collection holding `preferences`.
@@ -349,14 +351,77 @@ fn app_is_listed_last_while_the_desktop_updater_runs(cx: &mut TestAppContext) {
     assert_eq!(focused_id(cx).as_deref(), Some("settings-section-app"));
 }
 
+/// A publishing updater redraws the version row in an already-open App section. The check retains focus during
+/// progress, so a repeat keypress neither starts another check nor presses the automatic-updates switch.
+#[gpui::test]
+fn app_version_checks_once_and_follows_the_updaters_busy_state(cx: &mut TestAppContext) {
+    use super::app::{CHECK_ID, VERSION_ID};
+    use crate::desktop::updates::fake::readout_saying;
+    use crate::update_readout::Activity;
+
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let writes = Rc::default();
+    let (feed, seen) = keep_updater(cx, true, &Rc::default(), &writes);
+    open_settings(cx);
+    click(cx, section_button(Section::App));
+    assert_eq!(
+        label(cx, VERSION_ID).as_deref(),
+        Some(farhelm_proto::BUILD_VERSION)
+    );
+    assert_eq!(label(cx, CHECK_ID).as_deref(), Some("Check for updates"));
+    click(cx, CHECK_ID);
+    assert_eq!(seen.checks.get(), 1);
+    reach(cx, CHECK_ID);
+
+    // Read the last painted frame. The shared label helper would refresh it and mask a missed updater notification.
+    let check_in_frame = |cx: &mut VisualTestContext| {
+        cx.update(|window, _| {
+            window
+                .driver_nodes()
+                .iter()
+                .find(|node| node.element_id.as_deref() == Some(CHECK_ID))
+                .map(|node| (node.label.clone(), node.flags.focused, node.flags.click))
+        })
+    };
+
+    for (activity, expected) in [
+        (Activity::Checking, "Checking…"),
+        (Activity::Installing("1.2.3".into()), "Installing…"),
+    ] {
+        let mut readout = readout_saying("progress");
+        readout.activity = activity;
+        feed.publish(Some(readout));
+        settle(cx);
+        assert_eq!(
+            check_in_frame(cx),
+            Some((Some(expected.into()), true, false))
+        );
+        keys(cx, "space");
+        click(cx, CHECK_ID);
+        assert_eq!(seen.checks.get(), 1, "{expected} refuses another check");
+    }
+    assert!(writes.borrow().is_empty());
+
+    let mut readout = readout_saying("finished");
+    readout.activity = Activity::UpToDate("1.2.3".into());
+    feed.publish(Some(readout));
+    settle(cx);
+    assert_eq!(
+        check_in_frame(cx),
+        Some((Some("Check for updates".into()), true, true))
+    );
+    click(cx, CHECK_ID);
+    assert_eq!(seen.checks.get(), 2);
+}
+
 /// SPEC.md: the App switch installs updates automatically, "on by default", and "unlike the host choices it is a
 /// setting of that app installation, kept with the app rather than by the helm"; a refused write must not show as
 /// saved, since the user would then believe updates install on their own (the old switch: "Only a saved choice is shown
 /// as the choice"). Specified: over an updater whose setting is on, the section shows the old note and the switch on
 /// with the on help. A press writes off through the updater, sends the helm nothing and holds no preference save; the
-/// switch shows off with the off help naming the ? menu and this machine's update item. A press the updater refuses
-/// shows the switch still off, with the updater's reason under it, which a section switch keeps. The next press, saved,
-/// turns it on and takes the reason away.
+/// switch shows off with help naming the ways to update by hand. A press the updater refuses shows the switch still
+/// off, with the updater's reason under it, which a section switch keeps. The next press, saved, turns it on and takes
+/// the reason away.
 #[gpui::test]
 fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
     cx: &mut TestAppContext,
@@ -384,8 +449,8 @@ fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
     );
     assert_eq!(switch_on(cx, super::app::ID), Some(false));
     assert!(painted(cx).contains(
-        "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update \
-         item, or run the installer yourself."
+        "Farhelm installs a new release only when you check for updates (above, from the version in the sidebar, the ? \
+         menu or this machine's update item) or run the installer yourself."
     ));
     assert!(!drawn(cx, super::app::ERROR_ID));
 

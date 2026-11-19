@@ -78,6 +78,9 @@ shows when an agent asks ([Trust in managed checkouts](/docs/using/start-a-sessi
 
 ## App
 
+When Farhelm can update itself, the **Version** row in **App** shows the release you're running. Use **Check for
+updates** beside it to [check for an update now](/docs/using/update-and-uninstall/#check-for-an-update-now).
+
 In the installed Farhelm app on your Mac, **Install updates automatically** is about updating Farhelm itself
 ([Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off)).
 

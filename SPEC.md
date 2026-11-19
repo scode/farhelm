@@ -792,15 +792,17 @@ and turn the glyph a quarter. The reinstall warning keeps its mark and the same 
 build from main, say), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
-[Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
-checks now and installs a newer unwithdrawn release if there is one, even while an earlier unwithdrawn update already
-waits for a restart. A check started this way, or an automatic check a user's request joins, spins the refresh glyph
-with **Checking…** beside the version readout, then **Installing…** while a newer release installs. When an update waits
-and the readout has no refresh glyph, a separate spinner carries the same progress. **Up to date** stays there for about
-five seconds; **Check failed** carries a warning look and stays until the next check starts or the user clicks it, with
-the reason kept in the hover. An automatically shown failure, and a user's failed check that took its place, instead
-stays until a check succeeds, a newer version is installed by any route, or the user dismisses it; later unsuccessful
-work does not silently clear it. A user's check takes precedence with its progress and outcome. After dismissal, a later
+[Session list](#session-list)), or by choosing **Check for updates** in Settings → App or in the `?` menu (see
+[Feedback](#feedback)). The result appears beside the version in the sidebar. Each route checks now and installs a newer
+unwithdrawn release if there is one, even while an earlier unwithdrawn update already waits for a restart. A check
+started this way, or an automatic check a user's request joins, spins the refresh glyph with **Checking…** beside the
+version readout, then **Installing…** while a newer release installs. When an update waits and the readout has no
+refresh glyph, a separate spinner carries the same progress. The Settings button shows **Checking…** or **Installing…**
+while that progress is reported and cannot be activated until it ends. **Up to date** stays there for about five
+seconds; **Check failed** carries a warning look and stays until the next check starts or the user clicks it, with the
+reason kept in the hover. An automatically shown failure, and a user's failed check that took its place, instead stays
+until a check succeeds, a newer version is installed by any route, or the user dismisses it; later unsuccessful work
+does not silently clear it. A user's check takes precedence with its progress and outcome. After dismissal, a later
 automatic failure shows again only if it qualifies under the same rules. Selecting the version retries. An installed
 update takes over with the red update-ready readout. An up-to-date answer while an update already waits shows nothing
 beside that red readout. A failure to restart into an update stays in the hover only. The inline progress and outcome
@@ -2456,19 +2458,20 @@ earlier file times and Git hooks/filters, and discard on the next create or afte
 earlier-clone caveats. The folder's help explains expansion on each host, first-use folder creation, and that the
 default applies to hosts without their own folder, set in each host's settings. The command's help explains that it runs
 in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
-and that command-line host overrides keep their command. The installed desktop app's dialog also has an **App** section
-with a switch for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
-the host choices it is a setting of that app installation, kept with the app rather than by the helm. The two host
-confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
-stay there. No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever
-they change, and the window writes one on change, so a window opens in the same order and on the same session after a
-reconnect as before it. Per-client persistence — a desktop state file, anything that lets two clients remember different
-answers — is not wanted for these shared preferences, including welcome-card and announcement dismissal and the host
-rail's expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they
-are helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
-creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
-does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+and that command-line host overrides keep their command. When the updater is active, the desktop app's dialog also has
+an **App** section. It shows the running version and a **Check for updates** button above the switch for installing
+updates automatically (see [Installation and updates](#installation-and-updates)). The switch is a setting of that app
+installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host and
+client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy: the
+helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
+change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
+persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including welcome-card and announcement dismissal and the host rail's expansion. The sound switches
+are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather than
+per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
+hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
+implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
+`farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or

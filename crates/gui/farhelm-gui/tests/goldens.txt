@@ -180,8 +180,8 @@ linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-agent-trust--dark.png 40cb854bfa52c9218b43570d94a73b86b5ade122
 linux/settings-agent-trust--light.png 15734d63cf66a139926aa40eb896c0af3feb9b63
-linux/settings-app--dark.png 9427862fd83c251c0041c898f5edcd3a6e70c13c
-linux/settings-app--light.png f34edb1c5372b1ba89f15e0b295c49d86188014b
+linux/settings-app--dark.png 6c6b8abd4b0d6e06eef04cd6370ea14c083b9758
+linux/settings-app--light.png f2c292cc9fa31f86336bdd8038b7a1fd3e5f6872
 linux/settings-appearance--dark.png 0333165475f779643c1b3cee3340a9f01b6d0449
 linux/settings-appearance--light.png 81b76b5e30aedcda5e09c5ba4aa25dde570007fa
 linux/settings-checkouts--dark.png ccd1ce76840982a097fda1d0a16912a1fd5b1be0

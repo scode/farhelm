@@ -585,6 +585,8 @@ pub(crate) struct SettingsDialog {
     containers: Option<Entity<containers::Containers>>,
     /// App's automatic-updates switch: its focus handle and the reason its last press was not saved ([`app`]).
     app: app::AppUpdates,
+    /// Redraw App's check button as the shared updater publishes progress from any of its entry points.
+    _updater: Option<Subscription>,
     /// The Credentials section, made the first time it is shown in this opening; it reads the catalog then and each
     /// time it is shown again.
     credentials: Option<Entity<credentials::Credentials>>,
@@ -675,6 +677,8 @@ impl SettingsDialog {
             file_types: None,
             containers: None,
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
+            _updater: crate::desktop::updates::entity(cx)
+                .map(|updater| cx.observe(&updater, |_, _, cx| cx.notify())),
             credentials: None,
             tensorlake: None,
             tensorlake_section: None,

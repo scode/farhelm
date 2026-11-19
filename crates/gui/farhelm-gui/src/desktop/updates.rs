@@ -10,8 +10,8 @@
 //! why no updater runs, so no platform or build check is repeated on this side.
 //!
 //! The entry points other areas call are the plain functions below: [`runs`] for whether to draw a control at all,
-//! [`check_now`] for every on-demand route (the `?` menu's Check for updates, the local host row's Update; each checks
-//! and installs a newer release), and [`automatic_updates`] with [`set_automatic_updates`] for Settings → App. The
+//! [`check_now`] for every on-demand route (the version readout, Settings → App, the `?` menu's Check for updates and
+//! the local host row's Update), and [`automatic_updates`] with [`set_automatic_updates`] for Settings → App. The
 //! version readout (`update_readout::view`) holds the [`entity`], reads its [`Updater::readout`] and redraws when it
 //! notifies; what it shows for a while after a result (Up to date's
 //! five seconds, a dismissed failure) is its own presentation state, timed by the ticker, never kept here.
