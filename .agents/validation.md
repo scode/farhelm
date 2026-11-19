@@ -795,6 +795,11 @@ systemd or SSH substrate ran.
   when the engine, `scripts/docs_callouts.py` or its page modules change. The shell checks listed with the README hero
   also cover its capture command. Run `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and
   the complete capture record. Inspect the images it prints. Use `--only <page>` for a focused live run.
+- `python3 scripts/record-test-run.py --kind development --selection 'demo video recorder' --concurrency 'one unittest process' -- python3 -B scripts/test-readme-video.py`
+  — checks segment timing, mark selection, complete frames, encode arguments and output ownership. For the capture
+  overlay, run `cargo nextest run -p farhelm-gui --features agent --lib -E 'test(/^demo_video::/)'` through the
+  recorder. A live `scripts/readme-video.sh` run on Linux also needs Mutter, lavapipe and ffmpeg with libx264. Inspect
+  every marked still. Publishing the video is a manual step.
 - `python3 -B scripts/test-gui-e2e-smoke.py` — the end-to-end smoke's refusal to start while a `test_` function sits
   anywhere but directly in its `Smoke` class, where unittest would never run it (a jj automatic merge once hid two steps
   inside a module-level function that way), or while two steps share a number (areas merging steps under one number run
@@ -1052,8 +1057,8 @@ systemd or SSH substrate ran.
   rewritten to the pushed commit together or not at all, that a dry run touches nothing, and that reading the scenario
   through the loader leaves no bytecode in `scripts/`. Run it, with `shellcheck`, when the script or
   `scripts/scenario_json5.py` changes; seconds, no network, needs ImageMagick's `convert` and `identify`.
-- `shellcheck scripts/readme-screenshot.sh scripts/docs-screenshots.sh` and `bash -n` on each of those files — the two
-  capture commands. Run these when either changes. To exercise the README hero's Mac transport itself, run
+- `shellcheck scripts/readme-screenshot.sh scripts/docs-screenshots.sh scripts/readme-video.sh` and `bash -n` on each
+  capture command that changes. To exercise the README hero's Mac transport itself, run
   `scripts/readme-screenshot.sh --mac <destination>` on the test Mac.
 - `python3 -I scripts/test-scenario-json5.py` — the docs-media scenario loader (`scripts/scenario_json5.py`), which
   reads the subset of JSON5 the three `scenario.json5` files under `docs/` use: each of them parses into its viewport,
