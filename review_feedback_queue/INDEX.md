@@ -2427,10 +2427,6 @@ consequences.
   — Host-terminal test module preserves the missing/stale hold-mark oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-late-activity-test-doc-retains-removed-screen-read-await.md`](trailing-late-activity-test-doc-retains-removed-screen-read-await.md)
-  — Late-activity test documents a screen-read await removed by the host migration. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-migration-missing-terminal-lifecycle-docs.md`](trailing-migration-missing-terminal-lifecycle-docs.md) —
   Migration commit has stale lifecycle docs, corrected by later removal. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
