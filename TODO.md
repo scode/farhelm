@@ -26,6 +26,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit allowing gui-ux-enter-and-focus about 200 lines for Enter after a dialog closes.** Decided on the
+  maintainer's behalf by the landing monitor on 2026-11-19, when gui-ux-enter-and-focus blocked: the outcome that sends
+  a quick second Enter after the launcher closes to whatever has focus, instead of dropping it, may use about 200
+  changed lines (a two-line rule change plus its spec updates and replaced tests) instead of about 100. Escape keeps its
+  half-second protection. The alternative was deferring the outcome and keeping the current behavior.
+
 - **Revisit allowing drawn-frame-actions' launcher fix about 240 changed lines.** Decided on the maintainer's behalf by
   the landing monitor on 2026-11-19, when drawn-frame-actions blocked a second time: the launcher's fix for warnings
   that change while Restart with's or Replace with's YOLO question is open may use about 240 changed lines in one PR,
