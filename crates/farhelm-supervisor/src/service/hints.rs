@@ -37,8 +37,7 @@
 //! # Where hints go
 //!
 //! To every registered [`super::agent_relay::HelmLink`], which means every
-//! connection whose hello declared it the owning helm's
-//! (`ControlMsg::Hello::owning_helm`, protocol 73): normally one, the
+//! host connection admitted for the owner. Normally there is one, the
 //! helm's host connection, and briefly two while it reconnects. Other
 //! full-authority connections (a provisioning probe, a test client) register
 //! no link and get no hints, which loses nothing, since none of them shows

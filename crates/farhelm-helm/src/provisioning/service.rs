@@ -548,8 +548,13 @@ impl ProductionProvisioning {
                 let cwd =
                     std::env::current_dir().context("reading the current working directory")?;
                 (
-                    Arc::new(SystemBackend::new(state_dir.to_path_buf())),
-                    Arc::new(SystemBackend::one_shot(state_dir.to_path_buf())),
+                    Arc::new(
+                        SystemBackend::new(state_dir.to_path_buf()).with_helm_store(store.clone()),
+                    ),
+                    Arc::new(
+                        SystemBackend::one_shot(state_dir.to_path_buf())
+                            .with_helm_store(store.clone()),
+                    ),
                     production_payloads(selection, state_dir, release_build, &cwd)?,
                 )
             }

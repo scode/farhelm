@@ -89,7 +89,16 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 35;
+pub const SCHEMA_VERSION: i64 = 36;
+
+/// The supervisor remembers its owner even with no live helm connection.
+pub(crate) struct StoredHelmOwner {
+    pub(crate) id: String,
+    pub(crate) tag: String,
+    /// A new value every time a different helm takes ownership.
+    pub(crate) revision: String,
+    pub(crate) last_connected_at: i64,
+}
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1762,7 +1771,14 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  boot_id       TEXT,
                  host_identity TEXT,
                  last_creation_seq INTEGER NOT NULL DEFAULT 0,
-                 sealed        INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1))
+                 sealed        INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)),
+                 helm_owner_id TEXT,
+                 helm_owner_tag TEXT,
+                 helm_owner_revision TEXT,
+                 helm_last_connected_at INTEGER
+                     CHECK ((helm_owner_id IS NULL) = (helm_owner_tag IS NULL)
+                        AND (helm_owner_id IS NULL) = (helm_owner_revision IS NULL)
+                        AND (helm_owner_id IS NULL) = (helm_last_connected_at IS NULL))
              ) STRICT;
              CREATE TABLE create_reservations (
                  intent_key   TEXT PRIMARY KEY,
@@ -1814,7 +1830,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 35;
+             PRAGMA user_version = 36;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2560,6 +2576,36 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         ))
         .context("migrating schema from version 34 to 35")?;
         version = 35;
+    }
+    if version == 35 {
+        // Like the seal migration, this tolerates current-schema fixtures
+        // that rewind the version without rebuilding supervisor_meta.
+        let has_owner_columns: bool = conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('supervisor_meta') WHERE name = 'helm_owner_id'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        let add = if has_owner_columns {
+            ""
+        } else {
+            "ALTER TABLE supervisor_meta ADD COLUMN helm_owner_id TEXT;
+             ALTER TABLE supervisor_meta ADD COLUMN helm_owner_tag TEXT;
+             ALTER TABLE supervisor_meta ADD COLUMN helm_owner_revision TEXT;
+             ALTER TABLE supervisor_meta ADD COLUMN helm_last_connected_at INTEGER
+                 CHECK ((helm_owner_id IS NULL) = (helm_owner_tag IS NULL)
+                    AND (helm_owner_id IS NULL) = (helm_owner_revision IS NULL)
+                    AND (helm_owner_id IS NULL) = (helm_last_connected_at IS NULL));"
+        };
+        conn.execute_batch(&format!(
+            "BEGIN;
+             {add}
+             PRAGMA user_version = 36;
+             COMMIT;"
+        ))
+        .context("migrating schema from version 35 to 36")?;
+        version = 36;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -6128,6 +6174,80 @@ impl SessionStore {
             .await
     }
 
+    /// Read the ownership record without claiming an unowned host.
+    pub(crate) async fn read_helm_owner(&self) -> anyhow::Result<Option<StoredHelmOwner>> {
+        self.conn
+            .call("helm owner read task panicked", |conn: &mut Connection| {
+                conn.query_row(
+                    "SELECT helm_owner_id, helm_owner_tag, helm_owner_revision, helm_last_connected_at
+                     FROM supervisor_meta WHERE id = ?1 AND helm_owner_id IS NOT NULL",
+                    [META_ROW_ID],
+                    |row| {
+                        Ok(StoredHelmOwner {
+                            id: row.get(0)?,
+                            tag: row.get(1)?,
+                            revision: row.get(2)?,
+                            last_connected_at: row.get(3)?,
+                        })
+                    },
+                )
+                .optional()
+                .context("reading stored helm owner")
+            })
+            .await
+    }
+
+    /// Record an admitted host connection. The caller serializes admission
+    /// with the live links so changing the record and displacing the former
+    /// owner are one decision. A new owner is durable before it is admitted.
+    pub(crate) async fn record_helm_connection(
+        &self,
+        owner: farhelm_proto::HelmIdentity,
+        revision: String,
+        changes_owner: bool,
+    ) -> anyhow::Result<()> {
+        self.conn
+            .call(
+                "helm owner write task panicked",
+                move |conn: &mut Connection| {
+                    let write = |conn: &Connection| {
+                        conn.execute(
+                            "INSERT INTO supervisor_meta
+                             (id, helm_owner_id, helm_owner_tag, helm_owner_revision, helm_last_connected_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(id) DO UPDATE SET
+                             helm_owner_id = excluded.helm_owner_id,
+                             helm_owner_tag = excluded.helm_owner_tag,
+                             helm_owner_revision = excluded.helm_owner_revision,
+                             helm_last_connected_at = excluded.helm_last_connected_at",
+                        rusqlite::params![META_ROW_ID, owner.id, owner.tag, revision, now_unix()],
+                        )
+                        .context("recording helm connection")?;
+                        Ok(())
+                    };
+                    if changes_owner {
+                    let mut committed = false;
+                    let result = crate::db::with_full_sync(conn, |conn| {
+                        write(conn)?;
+                        committed = true;
+                        Ok(())
+                    });
+                    // A failure restoring the connection's previous SQLite
+                    // setting leaves the owner write committed. Admission
+                    // must still retire the old links in that case.
+                    if committed && let Err(error) = &result {
+                        tracing::warn!(%error, "helm owner committed with SQLite sync still raised");
+                        return Ok(());
+                    }
+                    result
+                    } else {
+                        write(conn)
+                    }
+                },
+            )
+            .await
+    }
+
     /// Store `boot_id` and — when `interrupt_live` — convert every session
     /// that was still live (launching, running, or with a stop in flight)
     /// to [`LastOutcome::Interrupted`], in ONE transaction.
@@ -7872,6 +7992,67 @@ mod tests {
         drop(store);
         let reopened = SessionStore::open(&path, true).await.expect("reopen");
         assert!(reopened.is_sealed().await.unwrap(), "the seal is durable");
+    }
+
+    /// An upgrade leaves ownership unset while preserving the host
+    /// identity and the seal. An upgraded host can then accept its first
+    /// owner without rewriting the other fields in the singleton row.
+    #[farhelm_testtrace::test]
+    async fn schema_36_leaves_upgraded_host_unclaimed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&path, true).await.unwrap();
+        let host = store.ensure_host_identity().await.unwrap();
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE supervisor_meta DROP COLUMN helm_last_connected_at;
+                 ALTER TABLE supervisor_meta DROP COLUMN helm_owner_revision;
+                 ALTER TABLE supervisor_meta DROP COLUMN helm_owner_tag;
+                 ALTER TABLE supervisor_meta DROP COLUMN helm_owner_id;
+                 UPDATE supervisor_meta SET sealed = 1;
+                 PRAGMA user_version = 35;",
+            )
+            .unwrap();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('supervisor_meta')
+                     WHERE name LIKE 'helm_%'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+                0,
+            );
+        }
+        let migrated = SessionStore::open(&path, true).await.unwrap();
+        assert!(migrated.read_helm_owner().await.unwrap().is_none());
+        assert_eq!(
+            migrated.read_host_identity().await.unwrap().as_ref(),
+            Some(&host)
+        );
+        assert!(migrated.is_sealed().await.unwrap());
+        migrated
+            .record_helm_connection(
+                farhelm_proto::HelmIdentity {
+                    id: "a".repeat(64),
+                    tag: "ab12".into(),
+                },
+                "owner-1".into(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            migrated.read_helm_owner().await.unwrap().unwrap().tag,
+            "ab12"
+        );
+        assert_eq!(
+            migrated.read_host_identity().await.unwrap().as_ref(),
+            Some(&host)
+        );
+        assert!(migrated.is_sealed().await.unwrap());
     }
 
     /// A migrated database and a freshly created one must end up with the

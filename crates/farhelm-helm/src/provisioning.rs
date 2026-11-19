@@ -371,6 +371,7 @@ mod tests {
             launcher: Arc::new(SystemLauncher),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         }
     }
@@ -7227,7 +7228,8 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: None,
             auth: None,
-            owning_helm: false,
+            helm: None,
+            helm_owner_refusal: None,
         });
         let cases = [
             (
@@ -7264,6 +7266,7 @@ mod tests {
                 launcher,
                 runtime_units: false,
                 one_shot: false,
+                helm_store: None,
                 fail_before_rename: false,
             };
             let result = backend.probe(&target).await;
@@ -7305,7 +7308,8 @@ mod tests {
                 role: "supervisor".to_string(),
                 host_identity: Some("identity-the-refusal-never-conveys".to_string()),
                 auth: None,
-                owning_helm: false,
+                helm: None,
+                helm_owner_refusal: None,
             })
         };
 
@@ -7356,6 +7360,7 @@ mod tests {
             launcher: ScriptLauncher::new([script]),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         match remote_backend.probe(&remote_target).await {
@@ -7402,7 +7407,8 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: Some("fixture-identity".to_string()),
             auth: None,
-            owning_helm: false,
+            helm: None,
+            helm_owner_refusal: None,
         });
         // `cat` consumes the helm's hello and returns at the end of input;
         // the loop then keeps the remote, and so its stderr, alive until the
@@ -7425,6 +7431,7 @@ mod tests {
             launcher: launcher.clone(),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProbeTarget {
@@ -7485,7 +7492,8 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: None,
             auth: None,
-            owning_helm: false,
+            helm: None,
+            helm_owner_refusal: None,
         });
         let script_path = root.path().join("fake-farhelm");
         std::fs::write(
@@ -7749,6 +7757,7 @@ mod tests {
             launcher: launcher.clone(),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let destination = root.path().join("farhelm");
@@ -7835,6 +7844,7 @@ mod tests {
             launcher: launcher.clone(),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let task_temporary = temporary.clone();
@@ -8285,6 +8295,7 @@ mod tests {
                 }),
                 runtime_units: false,
                 one_shot: false,
+                helm_store: None,
                 fail_before_rename: false,
             };
             let shared_existing = root.path().join("home");
@@ -8401,6 +8412,7 @@ mod tests {
             }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProbeTarget {
@@ -8597,6 +8609,7 @@ mod tests {
             }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -8735,6 +8748,7 @@ mod tests {
             launcher: Arc::new(FixtureHomeLauncher { home, bin }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -9041,6 +9055,7 @@ mod tests {
             launcher: Arc::new(FixtureHomeLauncher { home, bin }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -9153,6 +9168,7 @@ mod tests {
                 }),
                 runtime_units: false,
                 one_shot: false,
+                helm_store: None,
                 fail_before_rename: false,
             });
             Self {
@@ -9715,6 +9731,7 @@ mod tests {
             }),
             runtime_units,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         // The stop step's state directory is the fixture root, which has no
@@ -10182,6 +10199,7 @@ mod tests {
                 }),
                 runtime_units: false,
                 one_shot: false,
+                helm_store: None,
                 fail_before_rename: false,
             };
             let remote = ProvisioningTarget::ssh("scripted.example");
@@ -11369,6 +11387,7 @@ mod tests {
             launcher: Arc::clone(&launcher) as Arc<dyn CommandLauncher>,
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let error = backend
@@ -11433,6 +11452,7 @@ mod tests {
                 }),
                 runtime_units: false,
                 one_shot: false,
+                helm_store: None,
                 fail_before_rename: false,
             };
             let error = backend
@@ -11484,6 +11504,7 @@ mod tests {
             }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
@@ -11537,6 +11558,7 @@ mod tests {
             }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");

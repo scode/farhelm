@@ -4520,11 +4520,21 @@ impl HostActor {
         // agent on this host has to the helm, and it carries the host's own
         // id because the helm cannot otherwise tell which fleet member an
         // upcall came from (see `crate::agent_requests`).
+        let identity = match self.store.helm_identity().await {
+            Ok(identity) => identity,
+            Err(error) => return failure(row, error.context("reading the helm's identity")),
+        };
         let hello = SupervisorClient::start_for_host_with_heartbeat(
             reader,
             writer,
             Arc::clone(&self.agent_requests),
             self.id,
+            farhelm_proto::HelmHello {
+                identity,
+                answers_agent_requests: true,
+                expected_host_identity: row.host_identity.clone(),
+                take_over: None,
+            },
             row.kind.environment_provider().is_some(),
         );
         tokio::pin!(hello);
@@ -4542,6 +4552,24 @@ impl HostActor {
         let client = match hello_result {
             Ok(client) => client,
             Err(error) => {
+                if let Some(refusal) = error.downcast_ref::<crate::client::HelmOwnershipRefused>()
+                    && let Some(recorded) = &row.host_identity
+                {
+                    match &refusal.host_identity {
+                        Some(reported) if reported != recorded => {
+                            return AttemptOutcome::Mismatch {
+                                recorded: recorded.clone(),
+                                reported: reported.clone(),
+                            };
+                        }
+                        None => {
+                            return AttemptOutcome::Unverified {
+                                recorded: recorded.clone(),
+                            };
+                        }
+                        Some(_) => {}
+                    }
+                }
                 // The skew refusal reaches this side as an io::Error
                 // payload on the handshake failure; recovering it as a
                 // TYPE rather than by matching prose is what makes both
@@ -7513,7 +7541,8 @@ mod tests {
             role: "supervisor".to_string(),
             host_identity: hello.identity.clone(),
             auth: None,
-            owning_helm: false,
+            helm: None,
+            helm_owner_refusal: None,
         };
         if writer.write_control(&greeting).await.is_err() {
             return;
