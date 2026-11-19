@@ -26,6 +26,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit splitting drawn-frame-actions' lifecycle work and raising its line limit.** Decided on the maintainer's
+  behalf by the landing monitor on 2026-11-19, when drawn-frame-actions blocked: the remaining work on acting on the
+  session state the user saw is split into two PRs (the session menu and interrupted-session card, then the Restart with
+  and Replace with launcher's follow-up question), the warning stays live with each answer bound to the warning it
+  displayed, and the launcher PR may go to about 140 lines instead of 100 (the correct fix measured 118 to 129). The
+  alternatives were one PR with a higher limit, or freezing the warning while the follow-up is open to fit 100 lines.
+
 ## Near term
 
 - **Audit all the hover positioning in the app.** An example is the hover on the Help menu, which covers the menu: the
