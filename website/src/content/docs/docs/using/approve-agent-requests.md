@@ -166,9 +166,9 @@ other hosts, template changes, [host changes](/docs/using/approve-agent-requests
 this permission. Sending messages to agents in existing sessions is unavailable.
 
 It starts off on every host, including Tensorlake sandboxes. Turn it on in host settings or choose **Always allow on
-&lt;host&gt; only** on a qualifying card. The
-[helm, the program that shows all your hosts' sessions and serves the UI](/docs/how-it-works/the-pieces/), must still be
-reachable to handle these requests.
+&lt;host&gt; only** on a qualifying card. Farhelm must still be open to handle these requests, because the
+[helm, the program that shows all your hosts' sessions and serves the UI](/docs/how-it-works/the-pieces/), runs inside
+the app.
 
 **Run farhelm commands without asking** is broader: agents in that host's sessions can act on sessions on any of your
 hosts and change or delete templates without asking. It starts off too. Turn it on only for a host whose agents you

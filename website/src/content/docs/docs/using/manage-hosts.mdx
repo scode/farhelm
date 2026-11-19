@@ -40,7 +40,7 @@ why.
 
 A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) has **Delete sandbox** in place of **Remove**, and no
 **Uninstall**: Farhelm owns that machine, so deleting it loses its files and sessions.
-[Delete a Tensorlake sandbox](#delete-a-tensorlake-sandbox) covers it. A
+[Suspend or delete a Tensorlake sandbox](#suspend-or-delete-a-tensorlake-sandbox) covers it. A
 [container session](/docs/agents/containerized-sessions/#stopping-and-deleting)'s host has **Delete container**,
 which removes its whole environment and files. The menu of a sandbox or a container also has **Suspend**, or **Resume**
 once it is suspended, and a suspended one shows **Resume** on its row too;
@@ -65,8 +65,9 @@ YOLO confirmation offers when you [start a session](/docs/using/start-a-session/
 **Manage sessions on this host without asking** lets agents in this host's sessions create, spawn, copy, rename, stop,
 restart and delete sessions on this same host. A copy's source must be here too. It starts off on every host, including
 Tensorlake sandboxes. Requests for other hosts, template changes, host changes and
-links are outside this permission. The helm, the program that shows all your hosts' sessions and serves the UI, must
-still be reachable ([The pieces](/docs/how-it-works/the-pieces/)).
+links are outside this permission. Farhelm must still be open, because the helm, the program that shows all your hosts'
+sessions and serves the UI, runs inside the app and handles these requests
+([The pieces](/docs/how-it-works/the-pieces/)).
 
 **Run farhelm commands without asking** also covers session actions on every other host and changes to your launch
 templates. Changing one switch does not change the other; you can change either while the broader permission is on.
@@ -125,7 +126,7 @@ until it reconnects or Farhelm restarts; the host keeps its up-arrow, so you can
 
 ## Uninstall Farhelm from a remote host
 
-This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#delete-a-tensorlake-sandbox) instead.
+This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#suspend-or-delete-a-tensorlake-sandbox) instead.
 
 **Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. On a remote Mac this removes its background job and the job's
@@ -169,7 +170,7 @@ there first. A refusal names what needs cleanup.
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
 a refusal shows under the host's row in the host list instead.
 
-## Delete a Tensorlake sandbox
+## Suspend or delete a Tensorlake sandbox
 
 Choose **Suspend** in a sandbox host's menu to suspend it, which stops its CPU and memory billing while keeping its
 files and processes. Tensorlake can also suspend a sandbox host itself, for example on the Usage Credits plan after 24
@@ -192,27 +193,7 @@ skips that question for actions you start in the UI; turn it off to be asked aga
 SSH hosts, and a change takes effect at once. Tensorlake creation has its own
 **Create Tensorlake sandboxes without asking** switch under **Tensorlake**; deleting a sandbox always asks.
 
-Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
-discards those drafts, except that an edited recipe asks whether to save, discard or keep editing.
-
-**Sessions** holds **Color terminal frames by host**, **Name sessions on quick launch** (covered in
-[Launch templates](/docs/using/launch-templates/#quick-launch)), and **Skip session confirmations**, which covers
-[session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
-choices or YOLO and trash questions. **Terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
-and file types to open with a modifier-click, and in the Mac app,
-[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Default checkout folder**, **Post-clone command** and
-[**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
-[Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout). **Credentials** holds the GitHub tokens,
-agent logins and API endpoint tokens that [shared recipes](/docs/using/tensorlake-sandboxes/#save-named-credentials)
-can use. **Recipes** holds the shared catalog, with each recipe's Tensorlake snapshot and its build status on each container
-host. **Tensorlake** keeps its cloud account settings and sandbox leftovers. **Containers** shows
-[Podman readiness and container leftovers](/docs/agents/containerized-sessions/).
-
-**Appearance** chooses **System**, **Dark** or **Light**; **System** follows your device's own setting, and the terminal
-stays dark either way. Your helm keeps this choice. **Notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
-[ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **App** holds **Install
-updates automatically**, which is about updating Farhelm itself; see
-[Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
+[Settings](/docs/using/settings/) describes its other sections.
 
 ## See more about each host
 
