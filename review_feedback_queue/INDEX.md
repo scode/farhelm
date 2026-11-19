@@ -2724,10 +2724,6 @@ consequences.
   over a terminal before the file manager has returned its list can do nothing. Farhelm gives no indication that it
   missed the drop.
 
-- [`approval-answer-acknowledged-after-expiry.md`](approval-answer-acknowledged-after-expiry.md) — If you answer as an
-  approval expires, Farhelm can remove the card without telling you that the agent's request expired. An Always allow
-  setting can still have been saved.
-
 - [`checkout-status-bypasses-host-text.md`](checkout-status-bypasses-host-text.md) — A launcher status line can show
   repository-search errors without Farhelm’s usual treatment of invisible or right-to-left characters.
 

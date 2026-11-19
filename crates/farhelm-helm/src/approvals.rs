@@ -92,16 +92,17 @@ pub(crate) const ORIGIN_GONE_REFUSAL: &str = "the requesting host's connection w
 /// wake-up could leave a dead connection's card up.
 const ORIGIN_RECHECK: Duration = Duration::from_secs(5);
 
-/// How an entry left the table, as its parked handler learns it.
+/// A waiting handler acknowledges an ordinary answer when it takes it.
+/// Host Add carries the receipt through its final origin check.
 #[derive(Debug)]
 enum Verdict {
-    Allow,
+    Allow(oneshot::Sender<()>),
     HostAdd {
         destination: String,
         receipt: oneshot::Sender<()>,
     },
-    TunnelAndOpen,
-    Deny,
+    TunnelAndOpen(oneshot::Sender<()>),
+    Deny(oneshot::Sender<()>),
     /// The asking session is being deleted.
     SessionDeleted,
 }
@@ -550,7 +551,10 @@ pub(crate) async fn ask_with_answer(
     };
     tracing::info!(approval = seq, outcome = ?ending, "an agent approval request ended");
     match ending {
-        Ending::Answered(Some(Verdict::Allow)) => Ok(Allowed::Raw),
+        Ending::Answered(Some(Verdict::Allow(receipt))) => {
+            let _ = receipt.send(());
+            Ok(Allowed::Raw)
+        }
         Ending::Answered(Some(Verdict::HostAdd {
             destination,
             receipt,
@@ -558,11 +562,17 @@ pub(crate) async fn ask_with_answer(
             destination,
             receipt,
         }),
-        Ending::Answered(Some(Verdict::TunnelAndOpen)) => Ok(Allowed::Tunnel),
-        Ending::Answered(Some(Verdict::Deny)) => Err(refusal(
-            ErrorKind::Unauthorized,
-            "the user declined this request in Farhelm; nothing was done".to_string(),
-        )),
+        Ending::Answered(Some(Verdict::TunnelAndOpen(receipt))) => {
+            let _ = receipt.send(());
+            Ok(Allowed::Tunnel)
+        }
+        Ending::Answered(Some(Verdict::Deny(receipt))) => {
+            let _ = receipt.send(());
+            Err(refusal(
+                ErrorKind::Unauthorized,
+                "the user declined this request in Farhelm; nothing was done".to_string(),
+            ))
+        }
         Ending::Answered(Some(Verdict::SessionDeleted)) => Err(refusal(
             ErrorKind::Unauthorized,
             DELETING_REFUSAL.to_string(),
@@ -685,11 +695,9 @@ pub(crate) async fn list_approvals(
 
 /// `POST /api/approvals/{id}` — the user's answer to one card.
 ///
-/// 204 when the answer reached a waiting request (for HostAdd Allow, only
-/// after its handler's final positive receipt); 410 Gone when the request
-/// is no longer waiting (answered elsewhere, expired, or withdrawn), which a
-/// client answers by dropping the card. Gone has its own status so it cannot
-/// be confused with a refusal the client must show.
+/// A 204 means the waiter took the answer. For Host Add Allow, the receipt
+/// also confirms the final origin check. A 410 tells the client to drop the
+/// card because the request was answered elsewhere, expired or was withdrawn.
 ///
 /// Each "Always allow" choice first stores its selected host permission, then
 /// approves this request. It is refused (409, the card keeps waiting with
@@ -736,9 +744,9 @@ pub(crate) async fn answer_approval(
                 destination: edited.destination,
                 receipt: receipt_tx,
             },
-            None => Verdict::Allow,
+            None => Verdict::Allow(receipt_tx),
         },
-        ApprovalAnswer::Deny => Verdict::Deny,
+        ApprovalAnswer::Deny => Verdict::Deny(receipt_tx),
         ApprovalAnswer::TunnelAndOpen => {
             let Some(WaitingOrigin {
                 origin,
@@ -792,7 +800,7 @@ pub(crate) async fn answer_approval(
                 }
                 Err(error) => return http_error(error),
             }
-            Verdict::TunnelAndOpen
+            Verdict::TunnelAndOpen(receipt_tx)
         }
         ApprovalAnswer::AlwaysAllow | ApprovalAnswer::AlwaysAllowOwnHost => {
             let Some(WaitingOrigin {
@@ -876,23 +884,16 @@ pub(crate) async fn answer_approval(
                 }
                 Err(error) => return http_error(error),
             }
-            Verdict::Allow
+            Verdict::Allow(receipt_tx)
         }
     };
     match state.approvals.take(&id) {
         Some(entry) => {
-            if host_add_allow {
-                // Taking the ordinary entry elects one window. Delivery alone
-                // is insufficient: expiry or the handler's final origin veto
-                // can still refuse. A dropped receipt makes those paths Gone.
-                if entry.answer.send(verdict).is_err() || receipt_rx.await.is_err() {
-                    return gone(&id);
-                }
-                return axum::http::StatusCode::NO_CONTENT.into_response();
+            // Expiry can win after the entry leaves the table. A receipt
+            // confirms the actual outcome even if the answer was enqueued.
+            if entry.answer.send(verdict).is_err() || receipt_rx.await.is_err() {
+                return gone(&id);
             }
-            // A failed send means the parked handler is already gone; its
-            // guard announces the removal.
-            let _ = entry.answer.send(verdict);
             axum::http::StatusCode::NO_CONTENT.into_response()
         }
         None => gone(&id),
@@ -2305,6 +2306,39 @@ pub(crate) mod tests {
         ended(task).await.expect("allowed");
         assert!(local_row(&harness).await.commands_without_asking);
         assert!(!local_row(&harness).await.own_sessions_without_asking);
+    }
+
+    /// Delivering a verdict before expiry does not ensure the waiter takes
+    /// it. The reply reports Gone and keeps the separately saved permission.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn an_ordinary_answer_losing_to_expiry_is_gone() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.ui_seat().hold();
+        let origin = local_origin(&harness).await;
+        let (task, id) = waiting(&harness, origin, "asker").await;
+        assert!(!local_row(&harness).await.commands_without_asking);
+
+        // Hold the delivered verdict while the actual waiter reaches expiry.
+        let (send, delivery) = oneshot::channel();
+        let waiter = {
+            let mut inner = harness.state.approvals.lock();
+            let entry = inner
+                .pending
+                .values_mut()
+                .find(|entry| entry.view.id == id)
+                .unwrap();
+            std::mem::replace(&mut entry.answer, send)
+        };
+        let expire = async {
+            let verdict = tokio::time::timeout(STEP, delivery).await.unwrap().unwrap();
+            tokio::time::advance(harness.state.approvals.wait).await;
+            let expired = refusal_of(ended(task).await);
+            assert!(expired.message.contains("nobody answered"));
+            drop((waiter, verdict));
+        };
+        let ((status, body), ()) = tokio::join!(answer(&harness, &id, "always_allow"), expire);
+        assert_eq!(status, axum::http::StatusCode::GONE, "{body}");
+        assert!(local_row(&harness).await.commands_without_asking);
     }
 
     /// Spec: when the requesting host's connection goes away while a card
