@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing ed32b0] `submenus-open-on-hover.md` — Submenus open on hover, keeping their parent item highlighted
 - [landing 401f78] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
 - [landing ef3312] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
-- [complete] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
+- [landing aefa52] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
 - [complete] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
 - [complete] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
 - [complete] `update-survival-wording.md` — General survival statements stay general: SPEC.md records the principle and the old-terminal update note
