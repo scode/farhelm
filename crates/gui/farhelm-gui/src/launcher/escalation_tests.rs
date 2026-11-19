@@ -59,6 +59,11 @@ fn escalated(
     assert_eq!(banner(cx), None, "the premise: a direct choice raises none");
     search(cx, "opencode");
     assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::OpenCode));
+    assert_eq!(
+        banner(cx).as_deref(),
+        Some(OPENCODE_FROM_GUARDED),
+        "the switch must show a banner before later actions can clear it"
+    );
     (helm, cx)
 }
 
@@ -70,7 +75,6 @@ fn escalated(
 #[gpui::test]
 fn an_escalating_switch_shows_the_banner_and_undo_restores_the_draft(cx: &mut TestAppContext) {
     let (_helm, cx) = escalated(cx);
-    assert_eq!(banner(cx).as_deref(), Some(OPENCODE_FROM_GUARDED));
     search(cx, "name:after the switch");
     assert_eq!(draft(cx).name.value(), "after the switch", "the premise");
     assert_eq!(
