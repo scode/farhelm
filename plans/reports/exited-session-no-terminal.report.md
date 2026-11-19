@@ -73,3 +73,103 @@ in Create replay and missing assertions for held listings and replay. Those were
 Restart cases and a missing explanation in the copy. The card now asks for consent when the cached status is Running, a
 later reply can clear the earlier success mark, and the text includes the case where the host could not find the
 terminal.
+
+### Landing
+
+#### What landed with it
+
+It landed alone in its round. Since its base, main gained round 258's plans: gui-ux-enter-and-focus (keyboard focus
+after dialogs, confirmations and bulk actions, including a step that moves focus off a control that is focused but no
+longer drawn) and settings-app-version (a Version row in Settings → App), plus a repair of the triage archive. That
+focus step covers this plan's card too: when the card replaces a terminal or a shell tab that had focus, focus moves to
+the card. The independent reviewer found no other interaction, and nothing else on main uses protocol 79.
+
+At your request this landing was reviewed with extra skepticism, by me and by an independent reviewer, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The protocol and supervisor
+side is proportionate: one field, set from whether the supervisor holds the session's terminal, in the places that build
+a session reply. The card reuses the interrupted card's layout and code, with a second reason for showing it. What the
+review found on the desktop side is fixed below.
+
+#### Fixes made while landing
+
+- **Two end-to-end tests failed.** The tests for a session whose terminal is gone after a supervisor restart compare the
+  whole listed session with the one that was created, and the listing now says the terminal is missing. The plan never
+  ran that test file; the workspace run on the boats caught it. The tests now expect the missing-terminal report, which
+  also checks the new field on the real path, while the session that kept its terminal is still checked not to report
+  it.
+- **The card's Restart asked a false question.** Farhelm keeps a session's last definite status when its terminal
+  disappears, so the card can show for a session that still reads Running. There, the card's Restart opened "Still
+  running — restarting stops the agent and its whole process tree first" and waited for Confirm restart. But with no
+  terminal no agent is running, and the supervisor never asks for consent to restart a session that has no terminal. The
+  plan's own reviewer had asked for the question, and the plan added a second question path to the card for it. I
+  removed it: the card's Restart is one click again, as the interrupted card's is and as SPEC_impl.md describes. If an
+  agent were somehow running after all (a terminal brought back since the card was drawn), the supervisor would refuse
+  that Restart and the card would show the refusal, so nothing is stopped by mistake.
+- **The card's opening sentence was reworded.** It read "This session's terminal is gone, which can happen if it ends
+  outside Farhelm (for example when its container stops), never starts, or cannot be found on this host", which read as
+  a general hypothetical, and "this host" can sound like the user's own Mac. It now reads "This session's terminal is
+  gone: it ended outside Farhelm (for example when its container was stopped), never started, or could not be found on
+  its host." I published the two re-rendered reference screenshots and looked at both.
+- **Smaller fixes.** A misleading code comment was corrected, and the changelog entry now says the session's other
+  terminal tabs are hidden while the card shows.
+
+#### Things you should know that the report does not say
+
+- Two sentences of the report are no longer true: under "Things you should know", "the card asks for the usual consent
+  before a Restart that could stop a running agent", and under "Review gate", "The card now asks for consent when the
+  cached status is Running". See the second fix above.
+- Any session on a reachable host whose terminal the supervisor no longer holds gets this card, not only exited ones.
+  That includes a session whose launch failed (it reads Error) and one that was still starting when its supervisor
+  restarted and came back without a terminal. Both used to sit on "Session unavailable — reconnecting"; they now show
+  the card with its "This session's terminal is gone" sentence. That follows from the plan's rule, not from the landing.
+- A rare flicker: when the app retries a session create whose first attempt actually succeeded, the answer can say the
+  terminal is missing while the new session's terminal is still being set up. The new session then shows the recovery
+  card until the next session list from its host, normally a few seconds. I do not think it needs a follow-up unless you
+  see it.
+
+#### Checks
+
+The plan changes the protocol, the supervisor, the helm, the command line's end-to-end tests and the desktop app's GUI
+crate, so the landing ran the whole Rust workspace suite, the desktop app's own tests, the app's end-to-end smoke and
+the reference screenshots (goldens). Builds ran locally; the workspace suite and the smoke ran on boat sandboxes (cloud
+VMs), from binaries built locally.
+
+On the plan as delivered, rebased onto main without conflicts:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo clippy --locked -p farhelm-gui --all-targets --features agent -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`: passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop`, from a locally built archive, split in three across boats
+  (`20c05e4a-f2f3-4d06-ae70-d0dfba6c00ee`, `d0e0a75d-a057-4210-95b7-553b585bf1db`,
+  `ad84d079-63d8-4a92-9348-af9f8f8a2b5e`): 8075 of 8078 passed, with no runtime skips. Two end-to-end tests failed
+  because of the plan (the first fix above). The third failure was the macro compile-contract test, which always fails
+  on a boat because it resolves crates from the local cargo cache. It passed locally
+  (`cargo nextest run -p farhelm-testtrace-macros`, `125a5d99-306f-4d8b-8c90-8c188f16df8e`).
+- `cargo nextest run -p farhelm-desktop`, locally: 176 passed (`386177ac-4d19-4eeb-9708-8631cc6f3a21`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed, and the clipboard
+  paste step was skipped, as always on Linux (`26a2eab6-bf15-4584-b0bc-7cd554be2ec5`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`1fdee873-fd9f-4102-8718-d759be9e3e99`).
+
+On the fixed tree (the two end-to-end tests, the card's Restart and opening sentence, comments and the changelog entry):
+
+- `cargo fmt --all -- --check`, the sleep check, `dprint check`, the changelog check,
+  `cargo clippy --all-targets -- -D warnings` and the GUI clippy run with `--features agent`: passed.
+- The restart-gap and host-terminal end-to-end tests,
+  `cargo nextest run -p farhelm --test e2e -E 'test(/restart_gap/) | test(/^host_terminals::/)'`, locally: 14 passed,
+  with no runtime skips (`10a001f8-d63a-4583-9f43-28921f732725`).
+- The session pane, Restart, row menu and focus tests,
+  `cargo nextest run -p farhelm-gui --lib -E 'test(/^session_pane::/) | test(/^session_list::restart/) | test(/^session_list::menu/) | test(/^focus_tests::/)'`,
+  locally: 302 passed (`cf1099b0-4a11-4347-9f3f-41d161bf70f5`).
+- `python3 scripts/check-gui-goldens.py --update`, locally (`2faac9be-7389-4b30-b288-6a6f59a3ffc3`): every capture but
+  the two recovery-card pictures matched its reference byte for byte. I published those two, and the goldens then passed
+  against the published references (`dcf8e413-9e3a-4bcc-a6b5-598f3382a2ab`).
+
+The rest of the workspace suite, the desktop app's tests and the smoke were reused for the fixed tree. After them, only
+three things changed: the card's Restart click and its text, which the focused GUI tests and the goldens cover; the two
+end-to-end tests' expectations, which ran again; and comments and the changelog entry.
+
+Skipped:
+
+- The Mac-only checks: no Mac-specific code changed.
