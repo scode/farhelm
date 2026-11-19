@@ -1907,10 +1907,6 @@ consequences.
   — Report-discard contract does not match gone host terminals. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-spec-automatic-tab-reap-omits-failed-close-retry.md`](trailing-spec-automatic-tab-reap-omits-failed-close-retry.md)
-  — Automatic-tab cleanup contract omits failed-close retries. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
