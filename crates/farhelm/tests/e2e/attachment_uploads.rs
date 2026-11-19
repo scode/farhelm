@@ -886,6 +886,151 @@ async fn a_successful_delete_cancels_an_in_flight_upload_before_removal() {
     );
 }
 
+/// A Delete refused by the live-agent guard must leave the in-flight upload
+/// usable. Aborting before the guard would strand the sender even though the
+/// session and its attachment directory are still present.
+#[farhelm_testtrace::test]
+async fn a_refused_delete_preserves_an_in_flight_upload() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    assert!(matches!(
+        peer.begin(1, &session.id, 1, "kept.txt", 4).await,
+        ControlMsg::UploadStarted { channel: 1, .. }
+    ));
+    peer.chunk(1, b"ke".to_vec()).await;
+    assert!(matches!(
+        peer.next_control(20).await,
+        ControlMsg::UploadAck {
+            channel: 1,
+            received: 2,
+        }
+    ));
+
+    let refusal = h
+        .client
+        .delete_session_with(&session.id, farhelm_proto::DeleteGuard::AgentEnded)
+        .await
+        .expect_err("the live agent must refuse guarded Delete");
+    let refusal = refusal.downcast_ref::<SupervisorError>().unwrap();
+    assert_eq!(refusal.kind(), ErrorKind::Conflict);
+    assert!(
+        refusal.message().contains("agent is still running"),
+        "{refusal:#}"
+    );
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|row| row.id == session.id)
+    );
+
+    peer.chunk(1, b"pt".to_vec()).await;
+    peer.control(&ControlMsg::CommitUpload {
+        req_id: 2,
+        channel: 1,
+    })
+    .await;
+    assert!(matches!(
+        peer.next_outcome(20).await,
+        ControlMsg::UploadCommitted { req_id: 2, .. }
+    ));
+    let dir = farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id);
+    assert_eq!(std::fs::read(dir.join("kept.txt")).unwrap(), b"kept");
+}
+
+/// A priority upload ack can pass queued terminal history on the same
+/// connection, but cannot preempt a frame already in flight. Seed real host
+/// history, then hold a raw viewer's small pipe during catch-up. Pausing
+/// before sending the upload chunk freezes the queued prefix, so later
+/// replay cannot make an ack at the end of the queue look early.
+#[farhelm_testtrace::test]
+async fn an_ack_arrives_ahead_of_a_backlog_of_terminal_output() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let (channel, mut seen, mut stream) = h.client.attach_live(&session.id, 80, 24).await.unwrap();
+    wait_for_after(&mut stream, &mut seen, "FAKE-AGENT READY", ">", 20).await;
+    h.client.send_keys(channel, b"spam 10000\r".to_vec()).await;
+    wait_for_after(&mut stream, &mut seen, "spam-line-10000", ">", 30).await;
+
+    let mut peer = RawPeer::connect_with_buffer(&h.sup, 1024).await;
+    assert!(matches!(
+        peer.begin(1, &session.id, 2, "credit.txt", 4).await,
+        ControlMsg::UploadStarted { channel: 2, .. }
+    ));
+    peer.control(&ControlMsg::Attach {
+        req_id: 2,
+        session_id: session.id.clone(),
+        channel: 1,
+        cols: 80,
+        rows: 24,
+        terminal: TerminalSelector::Agent,
+        lease: String::new(),
+        if_unowned: false,
+    })
+    .await;
+    assert!(matches!(
+        peer.next_control(20).await,
+        ControlMsg::Attached {
+            req_id: 2,
+            channel: 1
+        }
+    ));
+
+    // sleep-ok: hold the pipe unread while the grid writer builds a backlog; the wire-byte floor below checks the frozen prefix.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    peer.control(&ControlMsg::PauseOutput { channel: 1 }).await;
+    // This connection handles PauseOutput before it reads the chunk. One
+    // frame past the pause check can still join the prefix.
+    peer.chunk(2, b"data".to_vec()).await;
+    // sleep-ok: let the upload complete its disk write before draining the measured queue; observing an ack in-band would already drain it.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut replay_bytes = 0;
+    let mut ack_at = None;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Ok(frame) =
+            tokio::time::timeout(Duration::from_secs(1), peer.reader.read_frame()).await
+        {
+            let frame = frame.unwrap().expect("peer stays open");
+            if frame.kind == FrameKind::Data {
+                if frame.channel == 1 {
+                    replay_bytes += frame.body.len();
+                }
+                continue;
+            }
+            match parse_control(&frame).unwrap() {
+                ControlMsg::UploadAck {
+                    channel: 2,
+                    received: 4,
+                } => ack_at = Some(replay_bytes),
+                ControlMsg::Error { .. }
+                | ControlMsg::Detached { .. }
+                | ControlMsg::UploadAborted { .. } => {
+                    panic!("the transfer and replay must both remain live: {frame:?}");
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("paused replay did not drain: {replay_bytes} bytes, ack at {ack_at:?}")
+    });
+    let ack_at = ack_at.expect("the upload must be acknowledged while replay stays paused");
+    assert!(
+        replay_bytes >= 128 * 1024,
+        "too little replay to measure priority: {replay_bytes} bytes"
+    );
+    assert!(
+        ack_at * 4 <= replay_bytes,
+        "ack arrived after {ack_at} of {replay_bytes} queued replay bytes"
+    );
+}
+
 /// A delete racing an in-flight upload leaves no file and no directory —
 /// whether it lands while the transfer is streaming or exactly at its
 /// commit.

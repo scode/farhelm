@@ -33,6 +33,10 @@ pub enum Script {
     /// more bytes than every bound on it combined. See `flood_gated`'s own
     /// docs for the record shape tests key on and why it waits for a byte.
     FloodGated,
+    /// A warm-up burst and a sustained producer, gated separately for RSS sampling.
+    FloodMemory,
+    /// The output-only child of `flood-memory`, with progress reported out of band.
+    FloodMemoryProducer,
     /// Enables mouse reporting on cue (`legacy` for DECSET 1000 alone,
     /// `sgr` to add DECSET 1006 on top), while hex-echoing every input
     /// byte. The reattach-restoration fixture for `PaneModes`' mouse fields
@@ -295,6 +299,8 @@ pub fn run(
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
         Script::FloodGated => flood_gated(),
+        Script::FloodMemory => flood_memory(),
+        Script::FloodMemoryProducer => flood_memory_producer(),
         Script::MouseModes => mouse_modes(),
         // The trailing command prevents shells such as bash from replacing
         // themselves with sleep; tests require an intermediate shell.
@@ -1851,17 +1857,173 @@ fn flood_gated() -> anyhow::Result<()> {
     let mut gate = [0u8; 1];
     std::io::stdin().lock().read_exact(&mut gate)?;
 
-    emit_flood_records(&mut out)?;
+    emit_flood_records(&mut out, "FLOOD-DONE")?;
 
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
     Ok(())
 }
 
-/// Emit [`FLOOD_RECORDS`] numbered records at full speed, followed by the
-/// `FLOOD-DONE` marker [`flood_gated`]'s tests key on. What follows the burst
-/// (its idle wait) is the caller's.
-fn emit_flood_records(out: &mut impl Write) -> anyhow::Result<()> {
+/// Emit two separately gated phases around a stable-memory baseline.
+///
+/// The stalled-viewer RSS test cannot use one burst honestly. Starting its
+/// baseline too early charges the terminal for allocating its history and journal
+/// before they reach their caps. Starting after the burst ends makes the test pass without a
+/// producer. This fixture makes both phases observable: the first gate fills
+/// history and ends at `FLOOD-WARMED`, then the second gate starts a child
+/// producer only after the viewer is paused. The child acknowledges through
+/// `flood-memory-started`, outside the paused terminal path. A third gate
+/// lets the test end production after sampling; a controller deadline still
+/// kills and reaps the child if the test dies before cleanup.
+fn flood_memory() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    set_raw_mode()?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let mut gate = [0_u8; 1];
+    std::io::stdin().lock().read_exact(&mut gate)?;
+    emit_flood_records(&mut out, "FLOOD-WARMED")?;
+
+    std::io::stdin().lock().read_exact(&mut gate)?;
+    drop(out);
+
+    let exe = std::env::current_exe().context("locating the flood producer executable")?;
+    let mut producer = std::process::Command::new(&exe)
+        .args(["fake-agent", "--script", "flood-memory-producer"])
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("spawning the flood producer {}", exe.display()))?;
+
+    // The controller must remain able to consume the stop gate even if
+    // the producer blocks in a PTY write. Keeping stdin out of the child
+    // is the fixture equivalent of the product's separate input client.
+    let (gate_tx, gate_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut gate = [0_u8; 1];
+        let result = std::io::stdin().lock().read_exact(&mut gate);
+        let _ = gate_tx.send(result);
+    });
+
+    const MAX_RUNTIME: std::time::Duration = std::time::Duration::from_secs(60);
+    let started = std::time::Instant::now();
+    let outcome = loop {
+        match gate_rx.try_recv() {
+            Ok(result) => {
+                break result
+                    .context("reading the flood producer stop gate")
+                    .map(|()| true);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                break Err(anyhow::anyhow!(
+                    "the flood producer stop-gate reader disappeared"
+                ));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        match producer.try_wait().context("polling the flood producer") {
+            Ok(Some(status)) => {
+                break Err(anyhow::anyhow!(
+                    "the flood producer exited before its stop gate: {status}"
+                ));
+            }
+            Err(error) => break Err(error),
+            Ok(None) => {}
+        }
+        if started.elapsed() >= MAX_RUNTIME {
+            break Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+
+    if producer
+        .try_wait()
+        .context("checking the flood producer before cleanup")?
+        .is_none()
+    {
+        if let Err(kill_error) = producer.kill() {
+            // A child may exit between `try_wait` and `kill`; that race is
+            // already complete. Any other kill failure must not flow into
+            // an unbounded wait on a producer still blocked in a PTY write.
+            if producer
+                .try_wait()
+                .context("checking the flood producer after kill failed")?
+                .is_none()
+            {
+                return Err(kill_error).context("killing the flood producer");
+            }
+        } else {
+            producer.wait().context("reaping the flood producer")?;
+        }
+    }
+    let released = outcome?;
+    let (acknowledgement, terminal_marker) = if released {
+        (b"released".as_slice(), "FLOOD-DONE")
+    } else {
+        (b"expired".as_slice(), "FLOOD-EXPIRED")
+    };
+    publish_fixture_state("flood-memory-stopped", acknowledgement)
+        .context("acknowledging that the flood producer stopped")?;
+
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "{terminal_marker}\r")?;
+    out.flush()?;
+
+    std::io::stdin().lock().read_line(&mut String::new())?;
+    Ok(())
+}
+
+/// Sustain checkpointable output for [`flood_memory`]'s RSS window.
+///
+/// `flood-memory-started` is deliberately published before stdout is touched:
+/// it proves the child reached the production phase while terminal delivery
+/// was paused. `flood-memory-progress` advances only after a complete output
+/// batch reaches the PTY, which separately proves that the session sink keeps
+/// draining while the viewer is stalled. The controller owns the runtime
+/// bound and can kill this child even when a later PTY write blocks.
+fn flood_memory_producer() -> anyhow::Result<()> {
+    publish_fixture_state("flood-memory-started", b"started")?;
+    let mut out = std::io::stdout().lock();
+    let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, &mut out);
+    let mut sequence = 0_u64;
+    loop {
+        // One MiB-ish batch keeps the progress file cheap while still
+        // turning a blocked PTY into a prompt, observable stall. Publishing
+        // before `flush` would only prove records entered this process's
+        // userspace buffer, not that the terminal path accepted them.
+        for _ in 0..64 * 1024 {
+            writeln!(buffered, "FLOOD-{sequence:08}\r")?;
+            sequence = sequence.wrapping_add(1);
+        }
+        buffered.flush()?;
+        publish_fixture_state("flood-memory-progress", sequence.to_string().as_bytes())?;
+        // Keep pressure on the stalled viewer while giving the supervisor
+        // time to checkpoint. An unpaced producer can outrun the entire
+        // journal, so successive snapshots reach it after their tails fell out.
+        std::thread::sleep(std::time::Duration::from_millis(750));
+    }
+}
+
+/// Publish a complete fixture acknowledgement without an observable partial
+/// value.
+///
+/// The integration test runs in another process and polls these paths. A
+/// direct `write` exposes the destination after truncation but before its
+/// contents are complete. Staging beside the destination and renaming means
+/// readers see either the previous complete value or its complete replacement
+/// on the supported Unix hosts. Existence acknowledges a first publication;
+/// repeatedly updated progress requires observing the numeric value advance.
+fn publish_fixture_state(path: &str, value: &[u8]) -> anyhow::Result<()> {
+    let staging = format!("{path}.tmp");
+    std::fs::write(&staging, value)
+        .with_context(|| format!("staging fixture acknowledgement {staging}"))?;
+    std::fs::rename(&staging, path)
+        .with_context(|| format!("publishing fixture acknowledgement {path}"))
+}
+
+/// Emit [`FLOOD_RECORDS`] numbered records at full speed, followed by
+/// the caller's completion marker so both flood fixtures share the warm-up.
+fn emit_flood_records(out: &mut impl Write, completion: &str) -> anyhow::Result<()> {
     // One buffered writer, flushed once at the end, deliberately: this
     // fixture wants throughput, not per-record write boundaries. Records
     // split across PTY writes are fine — every consumer on this path is
@@ -1873,7 +2035,7 @@ fn emit_flood_records(out: &mut impl Write) -> anyhow::Result<()> {
     }
     buffered.flush()?;
     drop(buffered);
-    writeln!(out, "FLOOD-DONE\r")?;
+    writeln!(out, "{completion}\r")?;
     out.flush()?;
     Ok(())
 }
