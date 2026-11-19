@@ -23,3 +23,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`shift-drag-marking`](reports/shift-drag-marking.report.md) landed 2026-11-19 in #4199: Shift+drag across the session list marks the rows it sweeps
 - [`model-family-shorthand`](reports/model-family-shorthand.report.md) landed 2026-11-19 in #4198: Typing a model family word in the launcher picks that family's latest model
 - [`unusable-folder-refusals`](reports/unusable-folder-refusals.report.md) landed 2026-11-19 in #4188, #4190, #4194: A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
+- [`drawn-frame-actions`](reports/drawn-frame-actions.report.md) landed 2026-11-19 in #4176, #4193, #4204, #4181, #4183: Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
