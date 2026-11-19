@@ -500,6 +500,7 @@ pub(crate) fn cause(lookup: HostLookup<'_>) -> &'static str {
         }
         HostStateView::VersionSkew { .. } => "Host needs update",
         HostStateView::IdentityMismatch { .. } => "Host identity mismatch",
+        HostStateView::OwnedElsewhere { .. } => "Host managed by another Farhelm",
         HostStateView::IdentityUnverified { .. } => "Host identity unverified",
         HostStateView::Duplicate { .. } => "Duplicate host",
         HostStateView::Suspended { .. } => "Host suspended",

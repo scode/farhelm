@@ -1021,6 +1021,13 @@ pub enum HostStateView {
     /// connected and nothing is written while this holds.
     #[serde(rename = "identity-mismatch")]
     IdentityMismatch { recorded: String, reported: String },
+    /// Frozen at an ownership refusal. The identity scopes a Take over
+    /// answer to this supervisor even if the host is reached by an alias.
+    #[serde(rename = "owned-elsewhere")]
+    OwnedElsewhere {
+        host_identity: String,
+        owner: crate::HelmOwnerRefusal,
+    },
     /// Frozen because the destination answered without an identity at all
     /// while this entry has one on record — so there is nothing to compare
     /// and, deliberately, nothing to adopt.
@@ -1101,6 +1108,7 @@ impl HostStateView {
             HostStateView::Connected { .. } => "connected",
             HostStateView::VersionSkew { .. } => "version-skew",
             HostStateView::IdentityMismatch { .. } => "identity-mismatch",
+            HostStateView::OwnedElsewhere { .. } => "owned-elsewhere",
             HostStateView::IdentityUnverified { .. } => "identity-unverified",
             HostStateView::Duplicate { .. } => "duplicate",
             HostStateView::TensorlakeChanging { .. } => "tensorlake-changing",

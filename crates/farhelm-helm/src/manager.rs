@@ -495,6 +495,12 @@ pub enum HostState {
         /// The identity the destination just reported.
         reported: String,
     },
+    /// The supervisor recognizes this installation but is managed by a
+    /// different Farhelm. Only explicit Take over can change its owner.
+    OwnedElsewhere {
+        host_identity: String,
+        owner: farhelm_proto::HelmOwnerRefusal,
+    },
     /// FROZEN: the destination answered without an identity at all, while
     /// this entry has one on record.
     ///
@@ -661,6 +667,7 @@ impl HostState {
             HostState::Connected { .. } => "connected",
             HostState::VersionSkew { .. } => "version-skew",
             HostState::IdentityMismatch { .. } => "identity-mismatch",
+            HostState::OwnedElsewhere { .. } => "owned-elsewhere",
             HostState::IdentityUnverified { .. } => "identity-unverified",
             HostState::Duplicate { .. } => "duplicate",
             HostState::TensorlakeChanging { .. } => "tensorlake-changing",
@@ -953,6 +960,8 @@ impl Drop for ProvisionLockGuard {
 struct ActorStatus {
     state: HostState,
     client: Option<Arc<SupervisorClient>>,
+    /// Consent belongs to this actor and disappears on removal or restart.
+    takeover: Option<Takeover>,
     /// The last successful drain of a host that reports NO identity, kept
     /// here because there is nowhere durable to keep it.
     ///
@@ -1046,6 +1055,15 @@ struct ActorStatus {
     /// [`ConnectionManager::hold_connection`] knows no attempt of its is
     /// still running.
     parked: Option<u64>,
+}
+
+/// Scope consent to the observed supervisor and the registry settings
+/// used to reach it. The next dial may resolve an SSH alias differently.
+#[derive(Clone, PartialEq, Eq)]
+struct Takeover {
+    host_identity: String,
+    owner_revision: String,
+    dialed: DialedAs,
 }
 
 /// An out-of-band request from the manager to one actor: stop whatever you
@@ -1150,6 +1168,44 @@ struct ActorHandle {
     /// replacement built from a snapshot older than the newest seed is
     /// skipped rather than allowed to overwrite it.
     seed_epoch: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl ActorHandle {
+    /// Carry consent and wake this actor under its existing status and
+    /// retry controls. A later retry can observe consent left by a dial
+    /// that did not reach the supervisor.
+    fn arm_takeover(
+        &self,
+        expected_identity: &str,
+        owner_revision: &str,
+        approved: impl FnOnce(&ActorStatus) -> bool,
+    ) -> Result<(), ManagerError> {
+        let armed = self.status.send_if_modified(|status| {
+            if status.hold.is_some() || self.nudge.is_closed() || !approved(status) {
+                return false;
+            }
+            status.takeover = Some(Takeover {
+                host_identity: expected_identity.to_string(),
+                owner_revision: owner_revision.to_string(),
+                dialed: DialedAs::of(&self.row),
+            });
+            true
+        });
+        if !armed {
+            return Err(ManagerError::TakeoverSuperseded(self.row.id));
+        }
+        self.nudge(true);
+        Ok(())
+    }
+
+    /// Wake the actor with an explicit retry policy, replacing any policy
+    /// carried by the previous nudge.
+    fn nudge(&self, fresh_window: bool) {
+        self.nudge.send_modify(|nudge| {
+            nudge.revision += 1;
+            nudge.fresh_window = fresh_window;
+        });
+    }
 }
 
 /// What the gated actor task did before its supervisor observed completion.
@@ -1416,6 +1472,9 @@ pub enum ManagerError {
         approved: String,
         reported: String,
     },
+    /// The row changed between showing ownership and answering Take over.
+    #[error("host {0} is no longer awaiting this takeover; check its current state")]
+    TakeoverSuperseded(HostId),
 }
 
 /// Aborts a task when dropped — the piece that makes one spawned task's
@@ -1906,6 +1965,7 @@ impl ConnectionManager {
                         // else.
                         let mut withdrawn = None;
                         handle.status.send_modify(|status| {
+                            status.takeover = None;
                             status.state = HostState::Connecting {
                                 attempt: 0,
                                 stage: ConnectionStage::WaitingToConnect,
@@ -2010,6 +2070,7 @@ impl ConnectionManager {
                 last_error: None,
             },
             client: None,
+            takeover: None,
             live_sessions: None,
             // Zero is "never connected": no claim can ever carry it,
             // because a claim is only made against a published client.
@@ -3094,6 +3155,45 @@ impl ConnectionManager {
         Ok(self.nudge_now(host, false).await?.is_some())
     }
 
+    /// Authorize the choice shown on the frozen Hosts row. The actor
+    /// consumes the decision at hello, so merely losing a transport dial
+    /// does not leave the user facing the same ownership question.
+    pub(crate) fn take_over(
+        &self,
+        host: HostId,
+        approved_identity: &str,
+        approved_revision: &str,
+    ) -> Result<(), ManagerError> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let handle = map
+            .actors
+            .get(&host)
+            .ok_or(ManagerError::NoSuchHost(host))?;
+        handle.arm_takeover(approved_identity, approved_revision, |status| {
+            matches!(&status.state, HostState::OwnedElsewhere { host_identity, owner }
+                if host_identity == approved_identity && owner.owner_revision == approved_revision)
+        })
+    }
+
+    /// Confirmation in Add host has already verified and recorded the
+    /// discovered host's identity. A newly registered actor may still be
+    /// dialling when we arm the same one-shot used by the frozen row.
+    pub(crate) fn take_over_discovered(
+        &self,
+        host: HostId,
+        expected_identity: &str,
+        approved_revision: &str,
+    ) -> Result<(), ManagerError> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let handle = map
+            .actors
+            .get(&host)
+            .ok_or(ManagerError::NoSuchHost(host))?;
+        handle.arm_takeover(expected_identity, approved_revision, |_| {
+            handle.row.host_identity.as_deref() == Some(expected_identity)
+        })
+    }
+
     /// Reconnect `host` now with a fresh active-retry window: drop whatever
     /// connection it has, reload its row, and dial through the full ladder.
     ///
@@ -3152,14 +3252,7 @@ impl ConnectionManager {
             let retired = matches!(handle.status.borrow().state, HostState::Retired { .. });
             let unreachable_actor = handle.nudge.is_closed() || handle.task.is_finished();
             if !(retired || unreachable_actor) {
-                handle.nudge.send_modify(|nudge| {
-                    nudge.revision += 1;
-                    // Explicitly set rather than left alone: the value
-                    // is retained between sends, so a previous
-                    // reconfigure's flag would otherwise still be riding
-                    // along.
-                    nudge.fresh_window = fresh_window;
-                });
+                handle.nudge(fresh_window);
                 return Ok(Some(ticket));
             }
             true
@@ -3663,6 +3756,11 @@ enum AttemptOutcome {
     },
     /// The peer answered and refused: protocol skew.
     Skew(VersionSkew),
+    /// The same supervisor now answers to a different helm.
+    OwnedElsewhere {
+        host_identity: String,
+        owner: farhelm_proto::HelmOwnerRefusal,
+    },
     /// The peer answered with an identity that is not this row's.
     Mismatch {
         recorded: String,
@@ -3934,18 +4032,45 @@ impl HostActor {
                 } => *suspended_by_farhelm_at,
                 _ => None,
             };
+            let known_owner_refusal = match &self.status.borrow().state {
+                state @ HostState::OwnedElsewhere { .. } => Some(state.clone()),
+                _ => None,
+            };
             let (outcome, attempt) = self
-                .connect_phase(&row, ladder, active, incarnation, &mut nudge)
+                .connect_phase(
+                    &row,
+                    ladder,
+                    active && known_owner_refusal.is_none(),
+                    incarnation,
+                    &mut nudge,
+                )
                 .await;
             let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
                 // The manager already published the retargeted row. Reload
                 // it before doing anything with the old dial's answer.
                 continue;
             };
+            if let Some(refusal) = known_owner_refusal
+                && matches!(
+                    &outcome,
+                    AttemptOutcome::Failed { .. }
+                        | AttemptOutcome::Stopped
+                        | AttemptOutcome::Suspended { .. }
+                )
+            {
+                // A failed retry or a stopped supervisor provides no new
+                // ownership evidence. Keep provisioning blocked, including
+                // while the attempt is in flight above.
+                self.set_refusal(refusal, attempt);
+                next_nudge(&mut nudge).await;
+                active = true;
+                continue;
+            }
             #[cfg(test)]
             if matches!(
                 outcome,
                 AttemptOutcome::Skew(_)
+                    | AttemptOutcome::OwnedElsewhere { .. }
                     | AttemptOutcome::Mismatch { .. }
                     | AttemptOutcome::Unverified { .. }
                     | AttemptOutcome::Duplicate { .. }
@@ -4027,6 +4152,20 @@ impl HostActor {
                     // it asked for happens immediately and with a full
                     // active window behind it — regardless of whether the
                     // nudge itself asked for one.
+                    active = true;
+                }
+                AttemptOutcome::OwnedElsewhere {
+                    host_identity,
+                    owner,
+                } => {
+                    self.set_refusal(
+                        HostState::OwnedElsewhere {
+                            host_identity,
+                            owner,
+                        },
+                        attempt,
+                    );
+                    next_nudge(&mut nudge).await;
                     active = true;
                 }
                 AttemptOutcome::Unverified { recorded } => {
@@ -4490,6 +4629,17 @@ impl HostActor {
         }
     }
 
+    /// Clear precisely the approval this attempt settled without publishing
+    /// a change to the row's visible state.
+    fn consume_takeover(&self, approved: &Takeover) {
+        self.status.send_if_modified(|status| {
+            if status.takeover.as_ref() == Some(approved) {
+                status.takeover = None;
+            }
+            false
+        });
+    }
+
     /// The dial itself: open the transport, say hello, settle identity and
     /// browser links. [`Self::attempt`] runs it after a Tensorlake host's
     /// status check allows it, and at once for every other host.
@@ -4524,6 +4674,32 @@ impl HostActor {
             Ok(identity) => identity,
             Err(error) => return failure(row, error.context("reading the helm's identity")),
         };
+        let takeover = self
+            .status
+            .borrow()
+            .takeover
+            .as_ref()
+            .filter(|approval| approval.dialed == dialed)
+            .cloned();
+        if row.host_identity.is_none()
+            && let Some(approved) = &takeover
+        {
+            match self
+                .store
+                .host_identity_claimant(self.id, &approved.host_identity)
+                .await
+            {
+                Ok(Some(twin)) => {
+                    self.consume_takeover(approved);
+                    return AttemptOutcome::Duplicate {
+                        twin,
+                        identity: approved.host_identity.clone(),
+                    };
+                }
+                Ok(None) => {}
+                Err(error) => return failure(row, error),
+            }
+        }
         let hello = SupervisorClient::start_for_host_with_heartbeat(
             reader,
             writer,
@@ -4532,8 +4708,13 @@ impl HostActor {
             farhelm_proto::HelmHello {
                 identity,
                 answers_agent_requests: true,
-                expected_host_identity: row.host_identity.clone(),
-                take_over: None,
+                expected_host_identity: takeover
+                    .as_ref()
+                    .map(|approval| approval.host_identity.clone())
+                    .or_else(|| row.host_identity.clone()),
+                take_over: takeover
+                    .as_ref()
+                    .map(|approval| approval.owner_revision.clone()),
             },
             row.kind.environment_provider().is_some(),
         );
@@ -4549,25 +4730,65 @@ impl HostActor {
             },
             None => hello.await,
         };
+        let skew = hello_result.as_ref().err().and_then(|error| {
+            error
+                .chain()
+                .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+                .find_map(VersionSkew::cause_of)
+                .cloned()
+        });
+        if let Some(approved) = &takeover
+            && (hello_result.is_ok()
+                || skew.is_some()
+                || hello_result
+                    .as_ref()
+                    .is_err_and(|error| error.is::<crate::client::HelmOwnershipRefused>()))
+        {
+            // A peer hello proves the attempt reached the supervisor. A
+            // failed open or a proxy that never reached the socket leaves
+            // the decision for the next dial. The supervisor's revision
+            // blocks replay if it committed the change and its reply was lost.
+            self.consume_takeover(approved);
+        }
         let client = match hello_result {
             Ok(client) => client,
             Err(error) => {
-                if let Some(refusal) = error.downcast_ref::<crate::client::HelmOwnershipRefused>()
-                    && let Some(recorded) = &row.host_identity
-                {
-                    match &refusal.host_identity {
-                        Some(reported) if reported != recorded => {
+                if let Some(refusal) = error.downcast_ref::<crate::client::HelmOwnershipRefused>() {
+                    match (&row.host_identity, &refusal.host_identity) {
+                        (Some(recorded), Some(reported)) if reported != recorded => {
                             return AttemptOutcome::Mismatch {
                                 recorded: recorded.clone(),
                                 reported: reported.clone(),
                             };
                         }
-                        None => {
+                        (Some(recorded), None) => {
                             return AttemptOutcome::Unverified {
                                 recorded: recorded.clone(),
                             };
                         }
-                        Some(_) => {}
+                        (_, Some(host_identity)) => {
+                            if row.host_identity.is_none() {
+                                match self
+                                    .store
+                                    .host_identity_claimant(self.id, host_identity)
+                                    .await
+                                {
+                                    Ok(Some(twin)) => {
+                                        return AttemptOutcome::Duplicate {
+                                            twin,
+                                            identity: host_identity.clone(),
+                                        };
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => return failure(row, error),
+                                }
+                            }
+                            return AttemptOutcome::OwnedElsewhere {
+                                host_identity: host_identity.clone(),
+                                owner: refusal.owner.clone(),
+                            };
+                        }
+                        (None, None) => return failure(row, error),
                     }
                 }
                 // The skew refusal reaches this side as an io::Error
@@ -4575,11 +4796,7 @@ impl HostActor {
                 // TYPE rather than by matching prose is what makes both
                 // versions available to the state below. See
                 // `farhelm_proto::io::VersionSkew`.
-                if let Some(skew) = error
-                    .chain()
-                    .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
-                    .find_map(VersionSkew::cause_of)
-                {
+                if let Some(skew) = skew {
                     // Every PEER-SUPPLIED string here goes through
                     // `peer_text`. Bounding and escaping both matter: a
                     // build version is arbitrary bytes the
@@ -4606,7 +4823,7 @@ impl HostActor {
                         skew = sentence.as_str(),
                         "the host's supervisor refused the hello: protocol version skew"
                     );
-                    return AttemptOutcome::Skew(skew.clone());
+                    return AttemptOutcome::Skew(skew);
                 }
                 if let Some(ssh) = progress.ssh.as_ref() {
                     let may_classify = handshake_termination(&error);
@@ -4639,6 +4856,15 @@ impl HostActor {
             let hello = client.peer_hello();
             (hello.host_identity.clone(), hello.build_version.clone())
         };
+        if row.host_identity.is_none()
+            && let Some(approved) = takeover
+            && reported_identity.as_deref() != Some(approved.host_identity.as_str())
+        {
+            return failure(
+                row,
+                anyhow::anyhow!("the host changed since takeover was approved; press Retry"),
+            );
+        }
         let Some(identity) = reported_identity else {
             // A supervisor with no identity to report. NOT an old
             // supervisor: one predating PLAN_M6.md item 2 speaks an older
@@ -8752,6 +8978,178 @@ mod tests {
             .await
             .unwrap();
         assert!(fixture.transport.browser_requests.borrow().len() > before);
+    }
+
+    /// A fresh registry's reserved Local row takes the same path as an SSH
+    /// host. Consent survives an unsuccessful dial, is used by the next
+    /// hello, and displaces the first helm without a durable local flag.
+    #[farhelm_testtrace::test]
+    async fn takeover_recovers_the_local_host_after_a_failed_dial() {
+        use tokio::time::timeout;
+
+        struct OwnedSocket {
+            supervisor: Arc<farhelm_supervisor::service::Supervisor>,
+            down: std::sync::atomic::AtomicBool,
+        }
+
+        impl HostTransport for OwnedSocket {
+            fn connect<'a>(
+                &'a self,
+                _row: &'a HostRow,
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>
+            {
+                Box::pin(async move {
+                    anyhow::ensure!(
+                        !self.down.load(std::sync::atomic::Ordering::SeqCst),
+                        "the test transport failed before opening its socket"
+                    );
+                    let (ours, theirs) = tokio::io::duplex(64 * 1024);
+                    let supervisor = Arc::clone(&self.supervisor);
+                    tokio::spawn(farhelm_supervisor::service::handle_connection(
+                        supervisor, theirs,
+                    ));
+                    let (r, w) = tokio::io::split(ours);
+                    Ok(TransportConnection::plain((Box::new(r), Box::new(w))))
+                })
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let supervisor = farhelm_supervisor::service::Supervisor::new_with_exe(
+            &root.path().join("supervisor"),
+            std::env::current_exe().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(supervisor.owns_state_dir());
+        let owner_store = HelmStore::open(&root.path().join("owner.db"))
+            .await
+            .unwrap();
+        let owner_host = local_id(&owner_store).await;
+        let owner_identity = owner_store.helm_identity().await.unwrap();
+        let cadence = Cadence {
+            connect_backoff: Vec::new(),
+            reprobe: Duration::from_secs(60),
+            ..Cadence::default()
+        };
+        let owner = ConnectionManager::start(
+            owner_store,
+            Arc::new(OwnedSocket {
+                supervisor: Arc::clone(&supervisor),
+                down: std::sync::atomic::AtomicBool::new(false),
+            }),
+            cadence.clone(),
+        )
+        .await
+        .unwrap();
+        let _ = timeout(
+            Duration::from_secs(5),
+            owner.wait_for_state(owner_host, HostState::is_connected),
+        )
+        .await
+        .expect("initial helm must claim the fixture")
+        .unwrap();
+        let owner_client = owner.status(owner_host).unwrap().client.unwrap();
+
+        let fresh_store = HelmStore::open(&root.path().join("fresh.db"))
+            .await
+            .unwrap();
+        let fresh_host = local_id(&fresh_store).await;
+        let fresh_identity = fresh_store.helm_identity().await.unwrap();
+        let fresh_transport = Arc::new(OwnedSocket {
+            supervisor,
+            down: std::sync::atomic::AtomicBool::new(false),
+        });
+        let fresh = ConnectionManager::start(fresh_store.clone(), fresh_transport.clone(), cadence)
+            .await
+            .unwrap();
+        let frozen = timeout(
+            Duration::from_secs(5),
+            fresh.wait_for_state(fresh_host, |state| {
+                matches!(state, HostState::OwnedElsewhere { .. })
+            }),
+        )
+        .await
+        .expect("fresh Local row should freeze")
+        .unwrap();
+        let HostState::OwnedElsewhere {
+            host_identity,
+            owner: refusal,
+        } = frozen
+        else {
+            unreachable!("wait_for_state checks the phase");
+        };
+        assert!(refusal.connected);
+        assert_eq!(refusal.tag, owner_identity.tag);
+        assert_eq!(recorded_identity(&fresh_store, fresh_host).await, None);
+        assert!(matches!(
+            fresh.take_over(
+                fresh_host,
+                "different-installation",
+                &refusal.owner_revision
+            ),
+            Err(ManagerError::TakeoverSuperseded(_))
+        ));
+        fresh_transport
+            .down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut status = fresh.actors.lock().unwrap().actors[&fresh_host]
+            .status
+            .subscribe();
+        let refused_attempt = status.borrow().refusal_attempt;
+        fresh
+            .take_over(fresh_host, &host_identity, &refusal.owner_revision)
+            .unwrap();
+        timeout(
+            Duration::from_secs(5),
+            status.wait_for(|current| {
+                current.refusal_attempt > refused_attempt
+                    && matches!(current.state, HostState::OwnedElsewhere { .. })
+            }),
+        )
+        .await
+        .expect("intentional pre-hello dial failure")
+        .unwrap();
+        assert_eq!(recorded_identity(&fresh_store, fresh_host).await, None);
+        fresh_transport
+            .down
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(fresh.retry_now(fresh_host).await.unwrap());
+        timeout(
+            Duration::from_secs(5),
+            fresh.wait_for_state(fresh_host, HostState::is_connected),
+        )
+        .await
+        .expect("retry should spend the retained takeover")
+        .unwrap();
+        timeout(Duration::from_secs(5), owner_client.closed())
+            .await
+            .expect("the former owner's original connection closed");
+        let displaced = timeout(
+            Duration::from_secs(5),
+            owner.wait_for_state(owner_host, |state| {
+                matches!(state, HostState::OwnedElsewhere { .. })
+            }),
+        )
+        .await
+        .expect("former owner should see a refusal")
+        .unwrap();
+        assert!(matches!(displaced, HostState::OwnedElsewhere { owner, .. }
+            if owner.tag == fresh_identity.tag));
+        assert_eq!(
+            recorded_identity(&fresh_store, fresh_host).await.as_deref(),
+            Some(host_identity.as_str())
+        );
+        assert!(
+            fresh.actors.lock().unwrap().actors[&fresh_host]
+                .status
+                .borrow()
+                .takeover
+                .is_none(),
+            "the successful hello spent the grant"
+        );
+        fresh.shutdown_and_wait().await;
+        owner.shutdown_and_wait().await;
     }
 
     /// A destination reporting a DIFFERENT identity than the one on record

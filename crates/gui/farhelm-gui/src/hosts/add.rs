@@ -415,15 +415,24 @@ pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
 /// `POST /api/hosts/probe` for `destination` as a new host entry under `alias`: the destination exactly as typed, and
 /// the alias as typed, or `null` when it is blank, which the helm reads as no alias (it trims an alias itself). No
 /// install paths: the probe looks where setup installs, as it did for the old dialog, which stopped asking for them.
-pub(crate) fn probe_command(destination: &str, alias: &str) -> Result<Command, PathError> {
+pub(crate) fn probe_command(
+    destination: &str,
+    alias: &str,
+    from_agent: bool,
+) -> Result<Command, PathError> {
     let alias = (!alias.trim().is_empty()).then_some(alias);
+    let entry = if from_agent {
+        json!({ "alias": alias, "from_agent": true })
+    } else {
+        json!({ "alias": alias })
+    };
     Ok(Command::new(
         Work::Probe,
         Method::Post,
         ApiPath::api(&["hosts", "probe"])?,
         Some(json!({
             "target": { "kind": "ssh", "destination": destination },
-            "new_entry": { "alias": alias },
+            "new_entry": entry,
         })),
         "POST /api/hosts/probe",
     ))
@@ -540,6 +549,12 @@ pub(super) fn read_reply(outcome: &Outcome) -> Reply {
     // confirms by the probe's id, and the helm acts only on the plan it kept under that id.
     match ProbeReply::<IgnoredAny>::deserialize(body) {
         Ok(ProbeReply::Discovered { .. }) => Reply::Added,
+        Ok(ProbeReply::OwnedElsewhere { owner, .. }) => {
+            Reply::Show(Problem::Helm(HostText::from_host(format!(
+                "Another Farhelm ({}) manages this host.",
+                owner.tag
+            ))))
+        }
         Ok(ProbeReply::Manual { reason }) => {
             Reply::Show(Problem::Helm(HostText::from_host(reason.as_str())))
         }
@@ -892,7 +907,7 @@ impl AddHostDialog {
         let Some(operations) = session::current_operations(cx) else {
             return;
         };
-        let command = match probe_command(&destination, &alias) {
+        let command = match probe_command(&destination, &alias, self.from_agent) {
             Ok(command) => command,
             Err(error) => {
                 tracing::debug!(?error, "host probe not built");

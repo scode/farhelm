@@ -242,6 +242,7 @@ pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<Stri
     let phase = match &host.state {
         HostStateView::Unreachable { .. }
         | HostStateView::IdentityMismatch { .. }
+        | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }
         | HostStateView::Duplicate { .. }
         | HostStateView::Retired { .. }

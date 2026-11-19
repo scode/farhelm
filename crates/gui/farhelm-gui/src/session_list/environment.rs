@@ -176,6 +176,7 @@ impl<'a> Environment<'a> {
             | HostStateView::Unreachable { .. }
             | HostStateView::VersionSkew { .. }
             | HostStateView::IdentityMismatch { .. }
+            | HostStateView::OwnedElsewhere { .. }
             | HostStateView::IdentityUnverified { .. }
             | HostStateView::Duplicate { .. }
             | HostStateView::Retired { .. } => false,

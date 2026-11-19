@@ -5255,15 +5255,10 @@ fn read_identity_and_config(
 /// The row OTHER than `host` that currently claims `identity`, if any.
 ///
 /// The `hosts_identity_claim` index guarantees there is at most one, so
-/// this is a lookup rather than a scan-and-choose. Called inside the
-/// caller's own write transaction, never before it: the whole point is that
-/// the answer cannot change between being read and being acted on.
-fn claimant_of(
-    tx: &rusqlite::Transaction<'_>,
-    host: HostId,
-    identity: &str,
-) -> anyhow::Result<Option<HostId>> {
-    tx.query_row(
+/// this is a lookup. Identity writes hold their transaction across the
+/// lookup and write. A refusal can use it read-only to name an existing row.
+fn claimant_of(conn: &Connection, host: HostId, identity: &str) -> anyhow::Result<Option<HostId>> {
+    conn.query_row(
         "SELECT id FROM hosts WHERE host_identity = ?1 AND id <> ?2",
         rusqlite::params![identity, host],
         |r| r.get(0),
@@ -8245,6 +8240,21 @@ impl HelmStore {
                     Ok(outcome)
                 },
             )
+            .await
+    }
+
+    /// Check a refused hello before offering a takeover. This read neither
+    /// claims the identity nor changes the registry's existing collision rule.
+    pub(crate) async fn host_identity_claimant(
+        &self,
+        host: HostId,
+        identity: &str,
+    ) -> anyhow::Result<Option<HostId>> {
+        let identity = identity.to_owned();
+        self.conn
+            .call("host identity claim lookup task panicked", move |conn| {
+                claimant_of(conn, host, &identity)
+            })
             .await
     }
 

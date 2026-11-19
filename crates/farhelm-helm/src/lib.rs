@@ -688,6 +688,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/adopt",
             axum::routing::post(hosts::adopt_host),
         )
+        .route(
+            "/api/hosts/{id}/take-over",
+            axum::routing::post(hosts::take_over_host),
+        )
         // The shared client preference (SPEC.md, Session list).
         .route(
             "/api/preferences",
@@ -881,6 +885,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/provision",
             axum::routing::post(provisioning::provision_host),
+        )
+        .route(
+            "/api/hosts/take-over",
+            axum::routing::post(provisioning::take_over_discovered_host),
         )
         .route(
             "/api/hosts/{id}/update",
@@ -1554,11 +1562,11 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     if let Some(refusal) = find_cause::<manager::ManagerError>(e) {
         return match refusal {
             manager::ManagerError::NoSuchHost(_) => ErrorKind::NotFound,
-            // Both are "the host is not in the state this verb needs",
-            // which a client answers by re-rendering the host and offering
-            // whatever it is actually asking for now.
+            // Re-render the host when its current state cannot accept the
+            // user decision the client was displaying.
             manager::ManagerError::NotAwaitingAdoption { .. }
-            | manager::ManagerError::AdoptionSuperseded { .. } => ErrorKind::Conflict,
+            | manager::ManagerError::AdoptionSuperseded { .. }
+            | manager::ManagerError::TakeoverSuperseded(_) => ErrorKind::Conflict,
         };
     }
     if find_cause::<precondition::IncarnationStale>(e).is_some()

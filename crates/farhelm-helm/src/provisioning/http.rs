@@ -58,6 +58,10 @@ pub(crate) struct ProbeRequest {
 pub(crate) struct NewEntryRequest {
     #[serde(default)]
     pub(super) alias: Option<String>,
+    /// An approved agent Add may discover a host. Its approval does not
+    /// authorize an ownership change.
+    #[serde(default)]
+    pub(super) from_agent: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,6 +217,19 @@ pub(crate) async fn provision_host(
 ) -> Response {
     match state.provisioning.start_add(request).await {
         Ok(run) => (StatusCode::ACCEPTED, axum::Json(run)).into_response(),
+        Err(error) => provisioning_error(error),
+    }
+}
+
+/// Confirm the ownership change offered by Add host. Discovery has
+/// already proved the dial coordinates and this endpoint can only
+/// consume its opaque approval id once.
+pub(crate) async fn take_over_discovered_host(
+    State(state): State<Arc<AppState>>,
+    axum::Json(request): axum::Json<ProvisionRequest>,
+) -> Response {
+    match state.provisioning.confirm_takeover(request).await {
+        Ok(response) => axum::Json(response).into_response(),
         Err(error) => provisioning_error(error),
     }
 }

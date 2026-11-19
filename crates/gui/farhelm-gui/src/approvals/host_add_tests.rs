@@ -538,7 +538,9 @@ fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppCon
         probe,
         json!({
             "target": { "kind": "ssh", "destination": "ops@new.example2" },
-            "new_entry": { "alias": "newbox2" },
+            // Keep the approved agent origin through discovery so this
+            // request cannot receive a takeover confirmation.
+            "new_entry": { "alias": "newbox2", "from_agent": true },
         })
     );
     assert!(any_open(f.cx), "the dialog stays for the probe's outcome");

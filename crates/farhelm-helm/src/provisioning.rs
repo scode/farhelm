@@ -52,7 +52,7 @@ pub(crate) use backend::{
 };
 pub(crate) use http::{
     probe_host, provision_host, provisioning_error, provisioning_runs, provisioning_state,
-    uninstall_host, update_host,
+    take_over_discovered_host, uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
 pub(crate) use plan::ProvisioningTarget;
@@ -2136,6 +2136,7 @@ mod tests {
             remote_state_dir: None,
             new_entry: Some(http::NewEntryRequest {
                 alias: alias.map(str::to_string),
+                from_agent: false,
             }),
         }
     }
@@ -4565,6 +4566,177 @@ mod tests {
             1,
             "the confirmed run probed nothing"
         );
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Add host can register a refused supervisor only after an explicit
+    /// takeover. An agent Add never receives that confirmation.
+    #[farhelm_testtrace::test]
+    async fn takeover_discovery_waits_for_one_user_confirmation() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let owner = farhelm_proto::HelmOwnerRefusal {
+            tag: "ab12".into(),
+            owner_revision: "owner-1".into(),
+            connected: false,
+            last_connected_at: 42,
+        };
+        let report_owner = || {
+            *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::OwnedSupervisor {
+                owner: owner.clone(),
+                build_version: "test-build".into(),
+                host_identity: Some("owned-installation".into()),
+                dial_farhelm: root.path().join("lib/farhelm"),
+                dial_state_dir: Some(root.path().join("state")),
+            }));
+        };
+        let mut agent = new_entry_probe("builder.example", Some("builder"));
+        agent.new_entry.as_mut().unwrap().from_agent = true;
+        report_owner();
+        let refused = service
+            .probe(agent)
+            .await
+            .expect_err("an agent cannot offer takeover");
+        assert!(matches!(
+            refused.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::Refused(message)) if message.contains("ab12")
+        ));
+        assert_eq!(harness.store.list_hosts().await.unwrap().len(), 1);
+
+        report_owner();
+        let offered = service
+            .probe(new_entry_probe("builder.example", Some("builder")))
+            .await
+            .unwrap();
+        let ProbeResponse::OwnedElsewhere {
+            probe_id,
+            owner: displayed,
+        } = offered
+        else {
+            panic!("expected consent for an owned supervisor, got {offered:?}");
+        };
+        assert_eq!(displayed, owner);
+        assert_eq!(harness.store.list_hosts().await.unwrap().len(), 1);
+        let response = service
+            .confirm_takeover(ProvisionRequest {
+                probe_id: probe_id.clone(),
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Discovered {
+            host_id,
+            host_identity,
+            ..
+        } = response
+        else {
+            panic!("an accepted takeover registers the discovered host");
+        };
+        assert_eq!(host_identity.as_deref(), Some("owned-installation"));
+        let row = stored_row(&harness.store, host_id).await;
+        assert_eq!(row.destination.as_deref(), Some("builder.example"));
+        assert_eq!(
+            row.remote_farhelm.as_deref(),
+            root.path().join("lib/farhelm").to_str()
+        );
+        assert!(matches!(
+            service
+                .confirm_takeover(ProvisionRequest { probe_id })
+                .await
+                .unwrap_err()
+                .downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::UnknownPlan)
+        ));
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// A registered host frozen on ownership cannot even start the
+    /// provisioning probes behind Setup, Update or uninstall.
+    #[farhelm_testtrace::test]
+    async fn an_owned_elsewhere_host_refuses_setup_update_and_uninstall() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, read_hello};
+
+        let (client, server) = tokio::io::duplex(4096);
+        let peer = tokio::spawn(async move {
+            let (reader, writer) = tokio::io::split(server);
+            let request = read_hello(&mut FrameReader::new(reader)).await.unwrap();
+            assert!(matches!(request, ControlMsg::Hello { helm: Some(_), .. }));
+            let mut reply = ControlMsg::hello("supervisor");
+            let ControlMsg::Hello {
+                host_identity,
+                helm_owner_refusal,
+                ..
+            } = &mut reply
+            else {
+                unreachable!("hello constructor");
+            };
+            *host_identity = Some("owned-installation".into());
+            *helm_owner_refusal = Some(farhelm_proto::HelmOwnerRefusal {
+                tag: "ab12".into(),
+                owner_revision: "owner-1".into(),
+                connected: true,
+                last_connected_at: 42,
+            });
+            FrameWriter::new(writer)
+                .write_control(&reply)
+                .await
+                .unwrap();
+        });
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "owner.example",
+                HostScript {
+                    peer: Some(client),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let state = harness
+            .await_state(host, |state| {
+                matches!(state, HostState::OwnedElsewhere { .. })
+            })
+            .await;
+        assert!(!state.is_connected());
+        peer.await.unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let setup = ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: "owner.example".into(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+            new_entry: None,
+        };
+        assert!(
+            service
+                .probe(setup)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("ab12")
+        );
+        assert!(
+            service
+                .plan_update(host)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("ab12")
+        );
+        assert!(
+            service
+                .plan_uninstall(host)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("ab12")
+        );
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
