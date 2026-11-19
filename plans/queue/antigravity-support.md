@@ -445,3 +445,29 @@ script, write a closing entry in its log, and stop the watchdog. Never edit `pla
 
 Basic support for Antigravity (agy) is now available. It supports launching and session tracking - but session tracking
 requires manual installation of Antigravity hooks (see the Antigravity section of the documentation).
+
+## Blocked
+
+Blocked on 2026-11-19 (claim 3414ff).
+
+### Ship Antigravity launches while automatic Restart waits?
+
+The plan adds Antigravity to the launcher and follows its conversation through user-installed hooks so Restart can
+resume it. Its reporting design reuses the process check that Farhelm uses for Claude and Muse. That check allows the
+pinned process to update the conversation when it reports a new ID.
+
+In Antigravity CLI 1.5.12, a read-only subagent sent the same SessionStart and Stop events as the main conversation,
+with a different conversation ID. Both sets of hooks came from the same Antigravity process. Their payloads carried no
+child marker. In a fresh run the subagent's SessionStart and Stop both arrived before the main conversation's final
+Stop. With the planned design, Farhelm could offer to restart into that subagent's conversation while the work is
+running. The existing exceptions for Goose and Pi expressly accept that risk for those harnesses.
+
+The installed CLI accepted the planned launch flags. It also resumed an explicit conversation ID and ran an initial
+prompt in that conversation. Explicit selection requires the user to supply that ID. The unresolved choice is how much
+support to ship while automatic conversation tracking lacks a way to identify the main conversation.
+
+I recommend shipping launch support and explicit conversation selection now, with automatic tracking and plain Restart
+unavailable for Antigravity until Farhelm can verify which conversation reported. That puts the working launch path in
+users' hands and avoids selecting a subagent. Keeping the full feature together delays launch support while Farhelm
+looks for a reliable Antigravity signal or proves a check of the exact record named by the hook. That adds investigation
+and tests for both the main and child conversations, and may require a vendor change.
