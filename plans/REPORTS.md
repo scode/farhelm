@@ -38,3 +38,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`emacs-text-field-keys`](reports/emacs-text-field-keys.report.md) landed 2026-11-19 in #4279: Emacs Control-key editing (Ctrl+F/B/N/P/A/E/D/H/K) in text fields on macOS and Linux
 - [`docs-shot-desktop-fixes`](reports/docs-shot-desktop-fixes.report.md) landed 2026-11-19 in #4280, #4286: Settings → Hosts auto-update wording, template summary ellipsis, session row place id for the docs shot
 - [`persist-environment-seal`](reports/persist-environment-seal.report.md) landed 2026-11-19 in #4282: Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
+- [`stop-agent-podman-containers`](reports/stop-agent-podman-containers.report.md) landed 2026-11-19 in #4281, #4283, #4287: Stop agent- and tab-started Podman containers through Podman before the scope kill, with notices on failure
