@@ -1,7 +1,7 @@
-//! The three status sounds, synthesized into small mono 16-bit WAV files in memory.
+//! Status sounds synthesized into small mono 16-bit WAV files in memory.
 //!
-//! NOTE: This is not a general synthesizer. It renders exactly the old app's three sounds, so they sound the way the
-//! maintainer approved them, without an audio file in the repository or an audio crate in the build.
+//! The old app's three cues keep their original notes. The SSH cue uses the same oscillators, so the app can play
+//! it through its existing platform player without a new audio file or crate.
 //!
 //! The old app played these through Web Audio (`assets/sounds.js` at the reference commit, `createPlayer`): per note,
 //! one oscillator for the fundamental and, for a bell, two more at twice and three times its frequency, each through
@@ -96,9 +96,17 @@ const TURN_FINISHED: [Note; 1] = [
     Note { f: 523., t: 0., d: 0.35, a: 0.45, bell: false, wave: Wave::Triangle },
 ];
 
-/// `sound`'s notes, from the old table.
+/// The SSH cue is a short rising pair, distinct from the longer session-waiting bell.
+#[rustfmt::skip]
+const SSH_SIGN_IN: [Note; 2] = [
+    Note { f: 659., t: 0., d: 0.28, a: 0.4, bell: true, wave: Wave::Sine },
+    Note { f: 988., t: 0.12, d: 0.38, a: 0.35, bell: true, wave: Wave::Sine },
+];
+
+/// The oscillator notes that define each cue.
 fn notes(sound: Sound) -> &'static [Note] {
     match sound {
+        Sound::SshSignIn => &SSH_SIGN_IN,
         Sound::Approval => &APPROVAL,
         Sound::Waiting => &WAITING,
         Sound::TurnFinished => &TURN_FINISHED,
@@ -117,10 +125,12 @@ fn partials(note: &Note) -> &'static [(f64, f64)] {
 /// The bytes never change, so a UI reset has no reason to render them again, and nothing here depends on which UI
 /// session asks.
 pub fn wav(sound: Sound) -> &'static [u8] {
+    static SSH_SIGN_IN_WAV: OnceLock<Vec<u8>> = OnceLock::new();
     static APPROVAL_WAV: OnceLock<Vec<u8>> = OnceLock::new();
     static WAITING_WAV: OnceLock<Vec<u8>> = OnceLock::new();
     static TURN_FINISHED_WAV: OnceLock<Vec<u8>> = OnceLock::new();
     let cell = match sound {
+        Sound::SshSignIn => &SSH_SIGN_IN_WAV,
         Sound::Approval => &APPROVAL_WAV,
         Sound::Waiting => &WAITING_WAV,
         Sound::TurnFinished => &TURN_FINISHED_WAV,
@@ -291,8 +301,8 @@ mod tests {
 
     use super::*;
 
-    /// The three sounds, for tests that check each.
-    const ALL: [Sound; 3] = Sound::PRIORITY;
+    /// The cues exercised by the format and render checks.
+    const ALL: [Sound; 4] = Sound::PRIORITY;
 
     /// The little-endian u16 at `at`.
     fn u16_at(bytes: &[u8], at: usize) -> u16 {
@@ -347,6 +357,7 @@ mod tests {
     #[test]
     fn each_sound_lasts_until_its_release_tail_ends() {
         let ends = [
+            (Sound::SshSignIn, 0.12 + 0.38),
             (Sound::Approval, 0.25 + 0.9),
             (Sound::Waiting, 0.18 + 0.9),
             (Sound::TurnFinished, 0.35),

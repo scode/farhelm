@@ -15,9 +15,10 @@
 //!   of the connection to the helm, which closes everything ([`close_all`]) without asking.
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
-//!   shows its result where it belongs instead. The one exception is SPEC.md's window-start dialogs (the Welcome card,
-//!   and the first batch of announcements when nothing is open ahead of it), which open with a mark taken when their
-//!   owner first sees a new UI session, before its first snapshot is drawn ([`Mark::at_ui_session_start`]). The user
+//!   shows its result where it belongs instead. At window start, a pending SSH question may open before the first key
+//!   or click. The same exception covers the Welcome card
+//!   and the first batch of announcements when nothing is open ahead of it. Those dialogs take a mark when their
+//!   owner first sees a new UI session. SSH takes the mark when the window is built ([`Mark::at_ui_session_start`]). The user
 //!   has done nothing yet; if they type or click before the open, the open is refused, and the dialog stays unseen
 //!   until a later window start or reset (the maintainer's decision, 2026-11-14). A batch that SPEC.md has wait behind
 //!   the Welcome card (and, after Send feedback now, behind the feedback dialog) is not an exception: it opens with a
@@ -614,14 +615,32 @@ impl Anchor {
     /// anchor element must be positioned (`relative()`) so the tracker covers it. It borrows nothing from the anchor,
     /// so a function that made the anchor may return its tracker ([`beside_edge`] does).
     pub fn track(&self) -> impl IntoElement + use<> {
+        self.tracker(None)
+    }
+
+    /// Also report whether the anchor intersects its clip in this frame. A caller opening from a deferred action
+    /// can then reveal a scrolled-out control before using its bounds for placement.
+    pub(crate) fn track_visibility(&self, visible: Rc<Cell<bool>>) -> impl IntoElement + use<> {
+        self.tracker(Some(visible))
+    }
+
+    fn tracker(&self, visible: Option<Rc<Cell<bool>>>) -> impl IntoElement + use<> {
         let bounds = self.bounds.clone();
         // Pinned to the element's corner: an absolute child without insets would sit wherever it falls in the flow,
         // after the element's other children, and record the wrong place.
-        canvas(move |at, _, _| bounds.set(Some(at)), |_, _, _, _| {})
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
+        canvas(
+            move |at, window, _| {
+                bounds.set(Some(at));
+                if let Some(visible) = visible {
+                    visible.set(window.content_mask().bounds.intersects(&at));
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     }
 
     /// Where the anchor element is drawn, in window coordinates, or `None` when it has never been drawn or is no longer

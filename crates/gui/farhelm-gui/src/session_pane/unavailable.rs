@@ -371,12 +371,30 @@ pub(crate) struct Drawn<'a> {
 pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElement {
     let Drawn {
         key,
-        notice,
+        mut notice,
         focus,
         scroll,
         step,
         alone,
     } = drawn;
+    let sign_in = session::current_store(cx).and_then(|store| {
+        let collections = store.read(cx).collections();
+        let row = collections.get::<SessionRow>(key)?;
+        let host = collections.get::<HostView>(&HostView::key(row.host))?;
+        let state = crate::sign_in::status(host, cx)?;
+        notice.cause = state.words();
+        if state == crate::sign_in::Status::Waiting {
+            // The live question is actionable even while a previous ownership refusal remains the host's phase.
+            notice.explanation = HostSentence::new(EXPLANATION_ID)
+                .text("Answer the host’s SSH question to reconnect to this session.");
+        }
+        Some(crate::sign_in::action(
+            host,
+            state,
+            "session-unavailable-sign-in".to_owned(),
+            false,
+        ))
+    });
     let palette = theme::palette(cx);
     let accent = theme::color(palette.accent);
     let heading = notice.heading();
@@ -443,6 +461,7 @@ pub(crate) fn draw(drawn: Drawn, window: &mut Window, cx: &mut App) -> AnyElemen
                 .child(notice.explanation),
         )
         .children(resume.map(|button| div().mt(px(EXPLANATION_GAP)).flex().child(button)))
+        .children(sign_in.map(|button| div().mt(px(EXPLANATION_GAP)).flex().child(button)))
         .children(refused)
         .children(notice.detail.map(|detail| {
             div()

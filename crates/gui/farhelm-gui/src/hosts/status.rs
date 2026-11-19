@@ -214,6 +214,8 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
 pub struct HostStatus {
     /// The update badge ([`update_badge`]).
     pub update: Option<Urgency>,
+    /// A waiting SSH question or a sign-in the user must start again.
+    pub(crate) sign_in: Option<crate::sign_in::Status>,
     /// The work going on ([`live`]).
     pub live: Option<Live>,
     /// Whether the setup or Update warning shows ([`warned`]).
@@ -231,6 +233,7 @@ pub fn host_status(host: &HostView, cx: &App) -> HostStatus {
         .and_then(|store| store.read(cx).collections().get::<ProvisioningView>(&key));
     HostStatus {
         update: update_badge(host, progress, in_flight.is_some()),
+        sign_in: crate::sign_in::status(host, cx),
         live: live(progress, in_flight),
         warned: warned(host.id, cx),
     }

@@ -117,7 +117,7 @@ mod menu;
 pub(crate) mod offers;
 pub(crate) mod progress;
 pub(crate) mod refusal;
-mod remedies;
+pub(crate) mod remedies;
 pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
@@ -463,6 +463,7 @@ struct RowInput<'a> {
     refusal: Option<&'a Failure>,
     seen: Option<&'a progress::Seen>,
     status: Option<progress::Status>,
+    sign_in: Option<crate::sign_in::Status>,
     /// Whether the host's Update is available ([`update::available`]), which the inline Update needs.
     updatable: bool,
     /// The host's lifecycle offer ([`offers::Offers::lifecycle`]), which the inline Resume needs.
@@ -559,6 +560,7 @@ impl Render for HostsPanel {
                             refusal: operations.and_then(|operations| operations.failure(&op_key)),
                             seen,
                             status,
+                            sign_in: crate::sign_in::status(host, cx),
                             updatable: available,
                             lifecycle,
                             zone,
@@ -810,6 +812,9 @@ impl HostsPanel {
             input.seen,
             input.refusal.is_some(),
         );
+        let sign_in = input
+            .sign_in
+            .map(|state| crate::sign_in::action(host, state, format!("host-sign-in-{id}"), false));
         let line = div()
             .flex()
             .flex_row()
@@ -829,6 +834,7 @@ impl HostsPanel {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(palette.fg_0)),
             );
+        let line = line.children(sign_in);
         let main = div()
             .flex()
             .flex_col()
@@ -839,12 +845,16 @@ impl HostsPanel {
             .pl(px(ROW_PAD.1));
         // Progress takes a line of its own under the name, lined up with it, so a long step cannot take the name's
         // place; the toggle stays on the name's line (`.host-row-main:has(.host-status.updating)`).
-        let main = match &input.status {
+        let main = match (input.sign_in, &input.status) {
+            (Some(state), _) => main.child(
+                line.child(sign_in_status(id, state, palette))
+                    .children(toggle),
+            ),
             // A Suspend's or Resume's request, and the provider's change it starts (the pushed phase, counting the
             // seconds since Farhelm asked), put the status on a line of its own under the name, as the old row's grid
             // moved `.host-status` to its second row beside `.host-lifecycle-progress`; the unavailable inline Resume
             // stays on the name's line before the toggle, as the old grid kept `.host-resume` there.
-            Some(status @ progress::Status::Lifecycle(_)) => {
+            (None, Some(status @ progress::Status::Lifecycle(_))) => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
                     line.children(lifecycle::button(host, input.lifecycle, opener))
@@ -858,7 +868,7 @@ impl HostsPanel {
                         .child(progress::status_mark(id, &name, status, pulse, palette)),
                 )
             }
-            None if input.asked_ago.is_some() => {
+            (None, None) if input.asked_ago.is_some() => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
                     line.children(lifecycle::button(host, input.lifecycle, opener))
@@ -877,14 +887,14 @@ impl HostsPanel {
                         )),
                 )
             }
-            Some(status) => main.child(line.children(toggle)).child(
+            (None, Some(status)) => main.child(line.children(toggle)).child(
                 div()
                     .pl(px(MARK + ROW_GAP))
                     .pr(px(DETAIL_PAD_X))
                     .min_w_0()
                     .child(progress::status_mark(id, &name, status, pulse, palette)),
             ),
-            None => {
+            (None, None) => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
                     // The inline Resume sits between the name and the phase, as the old row drew it.
@@ -1155,6 +1165,24 @@ fn phase_status(
                         .child(ago.to_owned())
                 })),
             ),
+        )
+        .into_any_element()
+}
+
+/// The live question may outrank the phase for the row label while an older ownership refusal stays in its details.
+fn sign_in_status(id: i64, state: crate::sign_in::Status, palette: &Palette) -> AnyElement {
+    let words = state.words();
+    div()
+        .min_w_0()
+        .child(
+            StatusMark::new(
+                format!("host-status-{id}"),
+                words,
+                HoverHelp::tooltip(words).beside(),
+                Role::Status,
+                words,
+            )
+            .ink(palette.warn),
         )
         .into_any_element()
 }

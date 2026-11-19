@@ -2778,9 +2778,11 @@ The Hosts control at the foot of the rail carries an `↑` whenever any rail ava
 red when any update is required, amber otherwise; its accessible name and hover help give the number of hosts.
 
 The attention list above sessions has one row per host, with its rail mark and short name, its state, and the action
-that state offers. Live setup, update or uninstall progress takes precedence over a problem, which takes precedence over
-an available update. Working rows say **Setting up**, **Updating** or **Uninstalling**, followed by the current step's
-name when known, ellipsized to fit. Hovering anywhere on a working row opens the identity button's shared progress card,
+that state offers. An open SSH question shows **Waiting for sign-in** with **Answer**. A connection that needs a fresh
+sign-in shows **Sign-in needed** with **Sign in**. These rows appear among the problems and take precedence over the
+rest of the host's status. Other hosts show live setup, update or uninstall progress ahead of a problem, then an
+available update. Working rows say **Setting up**, **Updating** or **Uninstalling**, followed by the current step's name
+when known, ellipsized to fit. Hovering anywhere on a working row opens the identity button's shared progress card,
 including its bar, gaps and padding. Moving within that row keeps the card in place, and pressing anywhere dismisses it.
 Keyboard focus on the identity button opens the same card, with the same detail as the Hosts progress line. Before step
 data arrives, the whole row shares the button's plain tooltip. Their marks and bars have no separate plain tooltip.
@@ -2840,13 +2842,15 @@ the agent-spawn behavior below is one instance of this general rule, not a speci
 Farhelm can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when an
 agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
 in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
-Settings has sounds controls under **Notifications**, with one switch per event: waiting and approval default on, turn
-finished off. The switches are helm preferences, shared by every client of the helm (the maintainer decided on
+Settings has sounds controls under **Notifications**. SSH sign-in, waiting and approval default on. Turn finished
+defaults off. The switches are helm preferences, shared by every client of the helm (the maintainer decided on
 2026-11-13 that they are helm preferences rather than per-device ones). The open session stays quiet while its window is
-active; the state loaded when the window starts or resets makes no sound. Status sounds follow the sidebar's current
-host selector and filters; changing that view silently records its existing statuses. New approval requests sound
-regardless of those filters, because their cards are always shown. Each observation plays only its most urgent enabled,
-non-quiet event: approval, waiting, then turn finished.
+active. The initial session and approval state is silent. Status sounds follow the sidebar's current host selector and
+filters; changing that view silently records its existing statuses. New approval requests sound regardless of those
+filters, because their cards are always shown. An SSH question can chime as soon as the app sees it, including at
+startup or while the user is working in another app. It is independent of the selected session and its mute setting.
+Farhelm plays at most one cue for changes seen together, in this order among the sounds enabled and eligible to play:
+SSH sign-in, approval, waiting, then turn finished.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
@@ -3481,6 +3485,13 @@ That covers agent approvals, an agent's request to add a host, and anything else
 begins. They announce themselves and wait. The user reaches a waiting item with the pointer, or with a keyboard shortcut
 that answers it or moves focus to it. While a terminal has focus, Tab, Escape, Enter and ordinary keys keep going to its
 program. How each kind of item announces itself, and which shortcuts reach it, is not settled here.
+
+An SSH question from a host's first connection attempt at startup may open its popover on the answer field before the
+first key or click after opening Farhelm. Questions from later attempts, including retries for hosts that were
+unreachable at startup, wait in the sidebar unless the user just started the sign-in or sent an answer while the field
+still had focus and the same sign-in asks again or another question was already waiting. If a security-key touch notice
+is open when it ends, the same sign-in can focus its next question. These handoffs follow the moved-on test. While a
+question is waiting, its attention row can open the popover at any time.
 
 ### Where focus rests
 
@@ -5558,7 +5569,16 @@ confirmation through OpenSSH's askpass. A security-key presence notice can appea
 uses Farhelm's key without prompting. After a question is cancelled, expires in two minutes or sign-in fails, the host
 shows **Sign-in needed** and waits for an explicit retry. A connection that drops after a successful sign-in can ask
 again on reconnect. A failure before any question still retries automatically. Answers are sent to SSH without storing
-or logging them. Setup and updates can still use a connection opened using **? → SSH needs 2FA?**.
+or logging them.
+
+The question opens beside its attention row, with the connection's purpose and the host's question. It keeps the host's
+line breaks and escapes control characters. The answer is masked until **Show** is pressed. **Send** or Enter answers.
+**Cancel** stops the connection attempt. A security-key notice gives the touch instruction and **Cancel**, and closes
+when SSH stops waiting for the touch. The host's rail avatar carries an amber key while sign-in is waiting or needed.
+Hosts and the unavailable session card each offer **Sign in**. An open question can play a chime under **Settings →
+Notifications → SSH sign-in**, on by default.
+
+Setup and updates can still use a connection opened using **? → SSH needs 2FA?**.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to

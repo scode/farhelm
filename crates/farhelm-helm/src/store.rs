@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 89;
+pub(crate) const SCHEMA_VERSION: i64 = 90;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -1763,6 +1763,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub sound_turn_finished: Option<Option<bool>>,
+    /// Null restores the on default for new SSH questions.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sound_ssh_sign_in: Option<Option<bool>>,
     /// Points inside [`farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE`],
     /// refused outside it like [`PreferencePatch::sidebar_width`].
     #[serde(
@@ -3028,7 +3035,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  sound_waiting INTEGER CHECK (sound_waiting IN (0, 1)),
                  sound_approval INTEGER CHECK (sound_approval IN (0, 1)),
                  sound_turn_finished INTEGER CHECK (sound_turn_finished IN (0, 1)),
-                 terminal_text_size INTEGER
+                 terminal_text_size INTEGER,
+                 sound_ssh_sign_in INTEGER CHECK (sound_ssh_sign_in IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -3127,7 +3135,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 89;",
+              PRAGMA user_version = 90;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4991,6 +4999,22 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 89")?;
         version = 89;
     }
+    if version == 89 {
+        // Older databases have no saved choice. Leave it unset so the app uses its on default.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'sound_ssh_sign_in'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE preferences ADD COLUMN sound_ssh_sign_in INTEGER CHECK (sound_ssh_sign_in IN (0, 1));",
+            ).context("adding the SSH sign-in sound preference")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 90;")
+            .context("migrating helm.db to schema version 90")?;
+        version = 90;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5853,7 +5877,7 @@ impl HelmStore {
             conn
                 .query_row(
                     "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host, \
-                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size \
+                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -5876,6 +5900,7 @@ impl HelmStore {
                             sound_waiting: row.get(27)?,
                             sound_approval: row.get(28)?,
                             sound_turn_finished: row.get(29)?,
+                            sound_ssh_sign_in: row.get(31)?,
                             terminal_text_size: in_range(30, farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE)?,
                             last_container_host: row.get(23)?,
                             auto_update_remote_hosts: row.get(22)?,
@@ -6029,12 +6054,14 @@ impl HelmStore {
             let sound_turn_finished = patch.sound_turn_finished.flatten();
             let terminal_text_size_present = patch.terminal_text_size.is_some();
             let terminal_text_size = patch.terminal_text_size.flatten();
+            let sound_ssh_sign_in_present = patch.sound_ssh_sign_in.is_some();
+            let sound_ssh_sign_in = patch.sound_ssh_sign_in.flatten();
             tx
                 .execute(
                     "INSERT INTO preferences \
                          (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts, \
-                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56) \
+                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -6069,7 +6096,8 @@ impl HelmStore {
                          sound_waiting = CASE WHEN ?51 THEN excluded.sound_waiting ELSE sound_waiting END, \
                          sound_approval = CASE WHEN ?53 THEN excluded.sound_approval ELSE sound_approval END, \
                          sound_turn_finished = CASE WHEN ?55 THEN excluded.sound_turn_finished ELSE sound_turn_finished END, \
-                         terminal_text_size = CASE WHEN ?57 THEN excluded.terminal_text_size ELSE terminal_text_size END",
+                         terminal_text_size = CASE WHEN ?57 THEN excluded.terminal_text_size ELSE terminal_text_size END, \
+                         sound_ssh_sign_in = CASE WHEN ?59 THEN excluded.sound_ssh_sign_in ELSE sound_ssh_sign_in END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -6127,7 +6155,9 @@ impl HelmStore {
                         sound_turn_finished,
                         sound_turn_finished_present,
                         terminal_text_size,
-                        terminal_text_size_present
+                        terminal_text_size_present,
+                        sound_ssh_sign_in,
+                        sound_ssh_sign_in_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -10586,6 +10616,52 @@ mod tests {
         );
     }
 
+    /// An upgrade adds an unset SSH sound switch without resetting the user's other sounds. The setting then supports
+    /// the same explicit-off and reset-to-default operations as the other switches.
+    #[farhelm_testtrace::test]
+    async fn schema_90_adds_an_unset_ssh_sign_in_sound() {
+        let (dir, fresh) = fresh_store().await;
+        fresh
+            .update_preferences(PreferencePatch {
+                sound_waiting: Some(Some(false)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let schema = schema_objects(&fresh.conn.lock());
+        drop(fresh);
+        let path = dir.path().join("helm.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in; PRAGMA user_version = 89;",
+            )
+            .unwrap();
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 89, "premise: opening the previous schema");
+        }
+
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(schema_objects(&migrated.conn.lock()), schema);
+        let preferences = migrated.preferences().await.unwrap();
+        assert_eq!(preferences.sound_waiting, Some(false));
+        assert_eq!(preferences.sound_ssh_sign_in, None);
+        for choice in [Some(false), None] {
+            migrated
+                .update_preferences(PreferencePatch {
+                    sound_ssh_sign_in: Some(choice),
+                    ..PreferencePatch::default()
+                })
+                .await
+                .unwrap();
+            let preferences = migrated.preferences().await.unwrap();
+            assert_eq!(preferences.sound_ssh_sign_in, choice);
+            assert_eq!(preferences.sound_waiting, Some(false));
+        }
+    }
+
     /// Schema 84 is what the stable release of the time (v0.39.0) created
     /// when schema 85 was added, so this is the upgrade every installation of
     /// that release takes. It must keep
@@ -10717,6 +10793,7 @@ mod tests {
                 "ALTER TABLE preferences DROP COLUMN sound_approval;
                  ALTER TABLE preferences DROP COLUMN sound_turn_finished;
                  ALTER TABLE preferences DROP COLUMN terminal_text_size;
+                 ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
                  PRAGMA user_version = 84;",
             )
             .unwrap();
@@ -10732,6 +10809,7 @@ mod tests {
             Preferences {
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
                 ..chosen_row
             },
@@ -13799,6 +13877,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "a selection write must not discard the sort written before it"
@@ -13843,6 +13922,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
@@ -13886,6 +13966,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "an explicit null clears selection and its visits without changing settings"
@@ -13978,6 +14059,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
@@ -16571,6 +16653,8 @@ mod tests {
     /// front of the older columns the ladder appends again, and the migrated
     /// table would no longer match a fresh one.
     fn rewind_former_device_setting_columns(conn: &Connection) {
+        conn.execute_batch("ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;")
+            .expect("a fresh schema declares the later sound preference");
         for (name, _) in FORMER_DEVICE_SETTING_COLUMNS {
             conn.execute_batch(&format!("ALTER TABLE preferences DROP COLUMN {name};"))
                 .unwrap_or_else(|error| panic!("rewind preferences.{name}: {error}"));
@@ -18157,6 +18241,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "compact defaults absent, sort survives, and an unowned legacy selection clears"
@@ -18249,6 +18334,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "permissions defaults absent, other choices survive, and an unowned selection clears"

@@ -107,6 +107,7 @@ fn tunnels_down() -> TunnelState {
 /// What the rail reads about a host with nothing going on: no update, no work, no warning.
 fn idle() -> HostStatus {
     HostStatus {
+        sign_in: None,
         update: None,
         live: None,
         warned: false,
@@ -116,6 +117,7 @@ fn idle() -> HostStatus {
 /// [`idle`] with an update of `urgency`.
 fn behind(urgency: Urgency) -> HostStatus {
     HostStatus {
+        sign_in: None,
         update: Some(urgency),
         ..idle()
     }

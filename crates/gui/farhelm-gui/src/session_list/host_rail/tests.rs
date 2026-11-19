@@ -2017,6 +2017,7 @@ fn state_words_keep_the_old_tooltips_order() {
     let words = status::state_words(
         &host,
         &HostStatus {
+            sign_in: None,
             update: Some(Urgency::Optional),
             live: None,
             warned: true,
@@ -2111,6 +2112,7 @@ fn troubled_sandbox(id: i64, tunnels_failed: bool, credentials_failed: bool) -> 
 fn failing_credentials_and_forwards_join_the_avatars_words_after_its_phase() {
     use crate::hosts::status::HostStatus;
     let quiet = HostStatus {
+        sign_in: None,
         update: None,
         live: None,
         warned: false,

@@ -787,6 +787,9 @@ pub struct Preferences {
     /// stored value outside the range back as unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_text_size: Option<u32>,
+    /// Play a sound when a host asks for SSH sign-in. Unset means on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_ssh_sign_in: Option<bool>,
 }
 
 /// The widths [`Preferences::sidebar_width`] may hold, in logical pixels
@@ -1179,6 +1182,8 @@ pub enum SshConnectionPurpose {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SshQuestion {
     pub id: String,
+    /// Shared by the successive questions of this SSH process. Only the question id accepts a reply.
+    pub attempt: String,
     pub host: i64,
     pub purpose: SshConnectionPurpose,
     /// This question comes from the first dial of a host registered when the helm started.

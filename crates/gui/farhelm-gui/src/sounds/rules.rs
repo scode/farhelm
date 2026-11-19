@@ -12,15 +12,18 @@
 //!
 //! Three things make an observation silent for statuses while approvals are still judged:
 //!
-//! - The first observation of a UI session is the snapshot the window started or reset with, and records everything
-//!   it holds without a sound, approvals included.
+//! - The first observation of a UI session is the snapshot the window started or reset with, and records sessions
+//!   and approvals without a sound.
 //! - A change of the sidebar's view (its host selector or status filter) records the new view's statuses without a
 //!   sound, because sessions entering the view were not seen changing. Approval requests are not filtered by the view
 //!   (SPEC.md: "because their cards are always shown"), so a new one in the same observation still rings.
 //! - A session that disappears raises nothing; only status edges of visible sessions do.
 //!
+//! A new SSH question can ring even in the first snapshot. It is a host request with a deadline, independent of
+//! the selected session. The usual priority still limits an observation to one sound.
+//!
 //! The owner of a [`SoundRules`] keeps one per UI session and drops it on a reset, so the next connection's snapshot is
-//! a fresh, silent first observation. Seen approval ids live as long as the [`SoundRules`] does.
+//! a fresh first observation. Seen approval and question ids live as long as the [`SoundRules`] does.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -69,10 +72,11 @@ pub struct Approval {
     pub session: String,
 }
 
-/// The three sound switches, one per [`Sound`]: shared helm preferences, which the rules' owner reads when it observes.
+/// The sound switches, one per [`Sound`]: shared helm preferences, which the rules' owner reads when it observes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Switches {
     pub approval: bool,
+    pub ssh_sign_in: bool,
     pub waiting: bool,
     pub turn_finished: bool,
 }
@@ -81,6 +85,7 @@ impl Switches {
     /// Whether `sound`'s switch is on.
     pub fn enabled(self, sound: Sound) -> bool {
         match sound {
+            Sound::SshSignIn => self.ssh_sign_in,
             Sound::Approval => self.approval,
             Sound::Waiting => self.waiting,
             Sound::TurnFinished => self.turn_finished,
@@ -99,6 +104,7 @@ impl Switches {
         };
         Switches {
             approval: stored(|row| row.sound_approval, defaults.approval),
+            ssh_sign_in: stored(|row| row.sound_ssh_sign_in, defaults.ssh_sign_in),
             waiting: stored(|row| row.sound_waiting, defaults.waiting),
             turn_finished: stored(|row| row.sound_turn_finished, defaults.turn_finished),
         }
@@ -110,6 +116,7 @@ impl Default for Switches {
     fn default() -> Switches {
         Switches {
             approval: true,
+            ssh_sign_in: true,
             waiting: true,
             turn_finished: false,
         }
@@ -136,6 +143,8 @@ pub struct Observation {
     pub statuses: BTreeMap<String, Status>,
     /// Every pending approval request, whatever the view shows.
     pub approvals: Vec<Approval>,
+    /// Open SSH question ids. They are host-level events independent of the session filter and mute.
+    pub ssh_questions: Vec<String>,
     /// The session that stays quiet: the open session while its window is active, or `None`. Its waiting, its turn
     /// finishing and its own approval requests do not ring (they are still consumed).
     pub quiet: Option<String>,
@@ -153,10 +162,12 @@ pub struct Observation {
 /// list and is presented again (a later listing repeating it) must not ring a second time.
 #[derive(Debug, Default)]
 pub struct SoundRules {
-    /// `None` until the first observation, which is silent.
+    /// `None` until the first observation, which establishes the baseline for sessions and approvals.
     previous: Option<Previous>,
     /// Every approval id observed in this UI session, pending or not.
     seen_approvals: HashSet<String>,
+    /// Question ids are never reused by the helm. Consume an id even when its switch is off.
+    seen_questions: HashSet<String>,
 }
 
 /// The status edges the window can hear start at its last observation.
@@ -176,7 +187,7 @@ struct Event<'a> {
 }
 
 impl SoundRules {
-    /// Rules with no history: the next observation is a first observation and makes no sound.
+    /// Rules with no history. The first observation can announce a pending SSH question.
     pub fn new() -> SoundRules {
         SoundRules::default()
     }
@@ -187,12 +198,21 @@ impl SoundRules {
     /// the quiet session. A quiet or disabled event never hides a less urgent audible one, and however many sessions
     /// change at once, one observation plays at most one sound.
     pub fn observe(&mut self, current: Observation) -> Option<Sound> {
-        let sound = self.previous.as_ref().and_then(|previous| {
-            // A changed view has no status history to compare against: its statuses are recorded, not judged.
-            let statuses = (previous.view == current.view).then_some(&previous.statuses);
-            let events = self.events(statuses, &current);
-            choose(&events, &current, &previous.muted)
+        let new_question = current
+            .ssh_questions
+            .iter()
+            .any(|id| !self.seen_questions.contains(id));
+        let sign_in = (new_question && current.switches.enabled(Sound::SshSignIn))
+            .then_some(Sound::SshSignIn);
+        let sound = sign_in.or_else(|| {
+            self.previous.as_ref().and_then(|previous| {
+                // A changed view has no status history to compare against: its statuses are recorded, not judged.
+                let statuses = (previous.view == current.view).then_some(&previous.statuses);
+                let events = self.events(statuses, &current);
+                choose(&events, &current, &previous.muted)
+            })
         });
+        self.seen_questions.extend(current.ssh_questions);
         self.seen_approvals
             .extend(current.approvals.into_iter().map(|approval| approval.id));
         self.previous = Some(Previous {
@@ -287,6 +307,7 @@ mod tests {
                 })
                 .collect(),
             quiet: None,
+            ssh_questions: Vec::new(),
             muted: HashSet::new(),
             switches: Switches::default(),
         }
@@ -307,6 +328,7 @@ mod tests {
     fn all_on() -> Switches {
         Switches {
             approval: true,
+            ssh_sign_in: true,
             waiting: true,
             turn_finished: true,
         }
@@ -487,6 +509,7 @@ mod tests {
         );
         let only_finished = Switches {
             approval: false,
+            ssh_sign_in: true,
             waiting: false,
             turn_finished: true,
         };
@@ -500,6 +523,7 @@ mod tests {
         );
         let none = Switches {
             approval: false,
+            ssh_sign_in: true,
             waiting: false,
             turn_finished: false,
         };
@@ -541,6 +565,27 @@ mod tests {
         assert_eq!(rules.observe(at(Idle)), Some(Sound::TurnFinished));
     }
 
+    /// The first question is audible even with a selected quiet session and with no previous snapshot. Repeated
+    /// pushes and later preference changes do not play it again. A different question still rings.
+    #[test]
+    fn ssh_questions_ring_once_and_disabled_questions_are_consumed() {
+        let mut rules = SoundRules::new();
+        let at = |id: &str, on| Observation {
+            ssh_questions: vec![id.to_owned()],
+            quiet: Some("selected".to_owned()),
+            switches: Switches {
+                ssh_sign_in: on,
+                ..Switches::default()
+            },
+            ..obs(&[("selected", Waiting)], &[])
+        };
+        assert_eq!(rules.observe(at("first", true)), Some(Sound::SshSignIn));
+        assert_eq!(rules.observe(at("first", true)), None);
+        assert_eq!(rules.observe(at("second", false)), None);
+        assert_eq!(rules.observe(at("second", true)), None);
+        assert_eq!(rules.observe(at("third", true)), Some(Sound::SshSignIn));
+    }
+
     /// The defaults are SPEC.md's: waiting and approval on, turn finished off. A running-to-idle edge under the
     /// default switches is therefore silent.
     #[test]
@@ -549,6 +594,7 @@ mod tests {
             Switches::default(),
             Switches {
                 approval: true,
+                ssh_sign_in: true,
                 waiting: true,
                 turn_finished: false,
             }
@@ -577,6 +623,7 @@ mod tests {
             Switches::from_preferences(Some(&flipped)),
             Switches {
                 approval: false,
+                ssh_sign_in: true,
                 waiting: false,
                 turn_finished: true,
             }

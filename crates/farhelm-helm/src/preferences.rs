@@ -988,6 +988,7 @@ mod tests {
             ("sound_waiting", serde_json::json!(false)),
             ("sound_approval", serde_json::json!(false)),
             ("sound_turn_finished", serde_json::json!(true)),
+            ("sound_ssh_sign_in", serde_json::json!(false)),
             ("terminal_text_size", serde_json::json!(18)),
         ];
         for (name, value) in &fields {
@@ -1018,6 +1019,7 @@ mod tests {
                 sound_waiting: Some(false),
                 sound_approval: Some(false),
                 sound_turn_finished: Some(true),
+                sound_ssh_sign_in: Some(false),
                 terminal_text_size: Some(18),
                 ..Preferences::default()
             }
@@ -1330,6 +1332,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "each sparse patch lands its own field and keeps the others"
@@ -1456,6 +1459,7 @@ mod tests {
                 sound_waiting: None,
                 sound_approval: None,
                 sound_turn_finished: None,
+                sound_ssh_sign_in: None,
                 terminal_text_size: None,
             },
             "an explicit null clears selection and visits without changing settings"
