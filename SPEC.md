@@ -1405,10 +1405,9 @@ the session name when supplied. The pill takes neither focus nor pointer input. 
 or closes; replies handled within the threshold show no pill. Assistive technology gets one polite announcement when the
 status appears, not one for each elapsed second. A successful New or Clone opens its session only while the submitted
 launcher opening is still current and the user has pressed no key or pointer button anywhere in the page since their
-last answer to it. Quick launches use their dispatch as that answer until a later launcher answer. Auto-repeat, a lone
-modifier and an accidental double-click or repeated Enter on the launcher's own submit do not count. Waking the host,
-preparing the create and automatic selection after Delete do not reset or advance the count. A naming dialog waiting
-behind another dialog checks again before opening.
+last answer to it. Quick launches use their dispatch as that answer until a later launcher answer. Auto-repeat and a
+lone modifier do not count. Waking the host, preparing the create and automatic selection after Delete do not reset or
+advance the count. A naming dialog waiting behind another dialog checks again before opening.
 
 When the launch opens its session, ordinary sidebar selection applies, including closing Hosts, and terminal reveal
 decides focus. Otherwise the session appears in the sidebar, the selected session and its remembered selection stay as
@@ -3402,8 +3401,9 @@ Nothing closes what it did not open, and nothing changes what the user is typing
 
 Something the user started that finishes later (a launch's reply, a terminal that finishes loading, a question that
 arrives after a reply) first asks whether the user has moved on since starting it. Moving on means any key press or any
-click inside Farhelm. A modifier pressed alone, a repeat of the gesture that started it (auto-repeat, a double-click or
-repeated Enter on the same submit), scrolling, pointer movement, and switching to another app and back do not count.
+click inside Farhelm. After the user dismisses, answers or submits something, a fresh press or click is ordinary input,
+subject to the after-close rule below. Auto-repeat, a lone modifier, scrolling, pointer movement, and switching to
+another app and back do not count.
 
 Once the user has moved on, the result moves no focus, opens no dialog and switches no session. It shows up where it
 belongs (the session's row, a question card on its session) or as a notice the user can click. A launch that fails after

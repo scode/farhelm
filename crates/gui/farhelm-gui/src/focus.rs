@@ -5,9 +5,8 @@
 //! the bans on GPUI's focus calls (`crates/gui/clippy.toml`); in GPUI a focus move also redraws the whole window and
 //! drops pending keystrokes, one more reason for one owner. What it owns:
 //!
-//! - **"The user moved on."** A counter that any key press or click inside Farhelm advances, except a modifier alone, a
-//!   repeat of the same gesture (auto-repeat, a double click, Enter pressed again on the control that already has focus),
-//!   scrolling, pointer movement and switching apps, none of which reach it. Key presses are counted where GPUI shows
+//! - **"The user moved on."** Fresh keys and clicks advance the count. Auto-repeat, a lone modifier, scrolling, pointer
+//!   motion and switching apps leave it alone. Key presses are counted where GPUI shows
 //!   every keystroke before any binding runs (the actions module's keystroke interceptor, which hands each key-down to
 //!   [`note_press`] before anything else): a key that a binding handles, Farhelm's own Tab and Escape or GPUI Kit's
 //!   editing keys in a text input, never reaches an ordinary key listener, and SPEC.md counts every key press. The same
@@ -189,13 +188,10 @@ fn default_rules() -> Rules {
 
 // ---- "The user moved on" ---------------------------------------------------------------------------------------------
 
-/// The app-wide moved-on counter and what it needs to recognise a repeated key.
+/// The app-wide input count and the recent presses used to guard layer handoffs.
 #[derive(Default)]
 struct MovedOn {
     count: u64,
-    /// The last key press that counted, and what had focus when it did: the same key again on the same control is a
-    /// repeat of the gesture (Enter pressed twice on a submit), not a new one.
-    last_key: Option<(Keystroke, Option<WeakFocusHandle>)>,
     /// The last fresh key press (not a held repeat) and when it arrived, until a click: what closed a layer that
     /// closes now, for [`Closing`]. Kept past the key's own handling, because a close can run later in the same
     /// update, from an event the key made a control emit (a text field's Enter reporting Submitted).
@@ -212,7 +208,7 @@ impl Global for MovedOn {}
 const CLOSING_REPEAT: Duration = Duration::from_millis(500);
 
 /// A key press that closed a layer that held focus, which returned focus elsewhere (often the terminal). Its repeats
-/// are repeats of the gesture (SPEC.md, "Who may move focus": a repeated Enter on the same submit), and they are
+/// are covered by SPEC.md's after-close rule ("Opening and closing") and are
 /// swallowed: not counted as the user moving on, and not delivered to whatever focus went back to. Without this, a
 /// repeated Enter on the launcher's Launch counted as moving on, so the launch would not open its session, and it
 /// reached the terminal's program as a second Enter. The old app hid the launcher and left focus on the page's body,
@@ -319,10 +315,8 @@ pub fn has_moved_on(mark: &Mark, cx: &App) -> bool {
 }
 
 /// Record a key-down for "the user moved on" and as the keyboard in use ([`last_input_was_keyboard`]), and say whether
-/// it is swallowed: a repeat of a key press that closed a layer ([`Closing`]), which must reach nothing and is not
-/// counted. Every key-down, a held or swallowed one included, marks the keyboard in use. Otherwise a press is counted
-/// unless it repeats the last one on the same control, and a held repeat is not. A modifier pressed alone arrives
-/// without a key-down and is neither.
+/// it is swallowed by the closing guard ([`Closing`]). Every key-down marks the keyboard in use. Each fresh press
+/// outside that guard advances the count. A lone modifier arrives without a key-down.
 ///
 /// The actions module's keystroke interceptor, which sees every key before GPUI matches a binding, calls this before
 /// it does anything else with the key (hands it to the key capture, queues a physical-key row's action), and stops a
@@ -331,7 +325,6 @@ pub fn has_moved_on(mark: &Mark, cx: &App) -> bool {
 pub(crate) fn note_press(down: &KeyDownEvent, window: &mut Window, cx: &mut App) -> bool {
     note_input(true, window, cx);
     let now = cx.background_executor().now();
-    let focused = window.focused(cx);
     let Some(moved) = installed_mut::<MovedOn>(cx) else {
         return false;
     };
@@ -349,30 +342,17 @@ pub(crate) fn note_press(down: &KeyDownEvent, window: &mut Window, cx: &mut App)
     // submit gesture"), and becomes the press a layer closing now was closed by.
     moved.closing = None;
     moved.last_press = Some((down.keystroke.clone(), now));
-    let repeat = moved.last_key.as_ref().is_some_and(|(key, on)| {
-        *key == down.keystroke && on.as_ref().and_then(WeakFocusHandle::upgrade) == focused
-    });
-    moved.last_key = Some((
-        down.keystroke.clone(),
-        focused.map(|focus| focus.downgrade()),
-    ));
-    if !repeat {
-        moved.count += 1;
-    }
+    moved.count += 1;
     false
 }
 
-/// Count a click, unless it is the second or later click of a double click.
-fn note_click(event: &MouseDownEvent, cx: &mut App) {
-    if event.click_count > 1 {
-        return;
-    }
+/// Every click advances the count and retires the keyboard handoff guard.
+fn note_click(cx: &mut App) {
     let Some(moved) = installed_mut::<MovedOn>(cx) else {
         return;
     };
     moved.count += 1;
-    moved.last_key = None;
-    // A layer a click closes was not closed by a key, and a key pressed after a click repeats nothing.
+    // A layer the click closes has no closing key to guard.
     moved.last_press = None;
     moved.closing = None;
 }
@@ -836,11 +816,11 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
                 // Prepared on every frame, since the root view is never replayed from a cache.
                 |_, window, cx| window.defer(cx, settle_home),
                 |_, _, window, _| {
-                    window.on_mouse_event(|event: &MouseDownEvent, phase, window, cx| {
+                    window.on_mouse_event(|_: &MouseDownEvent, phase, window, cx| {
                         if phase == gpui::DispatchPhase::Capture {
                             // Every press, a double click's second one too: the ring goes with any click.
                             note_input(false, window, cx);
-                            note_click(event, cx);
+                            note_click(cx);
                         }
                     })
                 },

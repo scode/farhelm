@@ -2275,36 +2275,6 @@
   it, for example). No code change (about 2-3 lines). Remove the feedback file and its index entry in the same change.
 - Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
 
-## sequence-following-enter-does-not-count-as-moving-on.md
-
-- Outcome: `fix spec+code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed in source.
-  After a Cmd+X quick-launch sequence is launched with Enter, the terminal keeps focus while the launch is pending. The
-  moved-on check (crates/gui/farhelm-gui/src/focus.rs `note_press`) treats a press as a repeat whenever it is the same
-  keystroke on the same focused control as the previous press, with no time limit, so if the first key the user presses
-  afterwards is Enter in that terminal (reaching the shell or agent), it does not count as moving on and the finished
-  launch still switches to its session and opens the naming dialog. SPEC.md "Opening and closing" exempts only "an
-  accidental double-click or repeated Enter on the launcher's own submit"; the code applies it to any control. Bucket:
-  high (ordinary but narrow trigger: Enter must be the first key; the app takes the keyboard to a dialog; nothing is
-  lost).
-- Decision: the user picked "Drop the exemption everywhere" (2026-11-18 GUI UX triage page, QE-2, round 5), after asking
-  in their words: "except for esc spamming I don't agree about swalling when the user is the one initiating the irst
-  press to make the dialog/whatever go away. if we apply that consistently, then this seems to also go away - for both
-  the launcher window AND the sequence case". Principle: when the user's own press dismisses, answers or submits
-  something, their next presses are ordinary input; they reach whatever has focus and count as moving on. Only
-  Escape-spamming out of menus and dialogs gets the half-second swallow. Auto-repeat of a held key and a lone modifier
-  are not new presses and still do not count as moving on.
-- Completion criteria: SPEC.md "Opening and closing" drops the exemption for "an accidental double-click or repeated
-  Enter on the launcher's own submit" (keeping auto-repeat and a lone modifier), and states the principle above with
-  `enter-falls-through-after-dismiss-or-approval.md`'s fence change (one paragraph may carry both). The moved-on count
-  in the desktop app counts every fresh press and click after the launch's answer, from the launcher window and from a
-  quick-launch sequence; the time-unbounded same-key check goes. Tests: a delayed launch where a second Enter on Launch,
-  and an Enter in the terminal after a sequence, each leave the user where they are with the "Started" pill. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
-  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
-  entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
-
 ## enter-falls-through-after-dismiss-or-approval.md
 
 - Outcome: `fix spec+code`.

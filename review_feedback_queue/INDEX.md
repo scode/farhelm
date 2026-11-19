@@ -214,10 +214,6 @@ consequences.
   from an input method or dead key can go to the shell tab you just left if the platform is still using that tab's input
   handler.
 
-- [`sequence-following-enter-does-not-count-as-moving-on.md`](sequence-following-enter-does-not-count-as-moving-on.md) —
-  After using Enter to start a quick-launch sequence, you can press Enter again in the still-open terminal while the
-  launch is pending. The launch can then open its own session as if you hadn’t used the terminal in the meantime.
-
 - [`upload-path-pastes-into-restarted-agent.md`](upload-path-pastes-into-restarted-agent.md) — If you restart a session
   during an upload, the file can finish normally while its path is pasted into the new agent, possibly in a different
   conversation.

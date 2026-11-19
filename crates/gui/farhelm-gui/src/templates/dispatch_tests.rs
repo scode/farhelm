@@ -762,16 +762,33 @@ fn the_chord_and_number_keys_do_nothing_under_another_dialog(cx: &mut TestAppCon
     assert_eq!(text(cx), before, "nothing changed");
 }
 
-/// A sequence's Enter outside the launcher "directly launches through the same defaults, validation and admission as
-/// quick launch" (SPEC.md). Specified: the prefix, `go` and Enter send one create, with no layer opened and the launch
-/// marked as one New never showed.
+/// A sequence launches without taking focus from the terminal. The next Enter reaches that terminal and makes
+/// the pending launch leave it selected when the reply arrives ("Creation" in SPEC.md).
 #[gpui::test]
 fn a_sequences_enter_launches_unseen(cx: &mut TestAppContext) {
-    let (mut helm, cx) = window(cx, None);
-    keys(cx, &format!("{SEQUENCE_PREFIX_CHORD} g o enter"));
-    assert_eq!(creates(&mut helm, cx).len(), 1, "`go` launched");
-    assert!(!any_open(cx), "unseen");
-    assert!(unseen(cx));
+    let snapshot = vec![
+        listing(&["a"], &[session("a")]),
+        fixture_hosts(&[0, 1]),
+        crate::session_list::tests::preferences(&["a"], Some("a")),
+        templates(Availability::Available),
+    ];
+    let mut main = test_support::open_main(cx, snapshot);
+    main.terminal_live();
+    keys(main.cx, &format!("{SEQUENCE_PREFIX_CHORD} g o enter"));
+    let [create]: [FakeCommand; 1] = creates(&mut main.helm, main.cx)
+        .try_into()
+        .expect("one create");
+    assert!(unseen(main.cx) && !any_open(main.cx), "launched unseen");
+    assert!(test_support::terminal_focused(main.cx));
+    assert_eq!(main.program_input(), 0, "the sequence stayed in Farhelm");
+    keys(main.cx, "enter");
+    assert_eq!(main.program_input(), 1);
+    launcher::launch_tests::created(&mut main.helm, main.cx, create.id, "b");
+    let selected = main.cx.update(|_, cx| local_state::selected(cx));
+    assert_eq!(selected.as_deref(), Some("a"));
+    assert!(test_support::terminal_focused(main.cx) && !any_open(main.cx));
+    let report = label(main.cx, "launch-started-report");
+    assert_eq!(report.as_deref(), Some("Started “b”"));
 }
 
 /// Outside the launcher, an incomplete sequence opens New "with a prominent banner saying 'This sequence doesn't make

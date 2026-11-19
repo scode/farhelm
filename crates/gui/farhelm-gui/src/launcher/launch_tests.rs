@@ -166,7 +166,7 @@ pub(super) fn press(helm: &mut FakeHelm, cx: &mut VisualTestContext, path: &str)
 
 /// The helm lists session `key` beside `a` (as it does before answering the create that made it) and answers create
 /// `id` with that session, as `POST /api/sessions` does.
-pub(super) fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'static str) {
+pub(crate) fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'static str) {
     created_as(helm, cx, id, &["a", key], session(key));
 }
 
@@ -475,8 +475,7 @@ fn a_reset_withdraws_the_notice_with_its_launcher(cx: &mut gpui::TestAppContext)
     );
 }
 
-/// SPEC.md, "Creation": moving on does not count "an accidental double-click or repeated Enter on the launcher's own
-/// submit". Launch closes the launcher's dialog through the layer manager, so the second Enter of a double press lands on
+/// SPEC.md's after-close rule ("Opening and closing") guards Enter after the launcher closes. The second tap lands on
 /// whatever regains focus; the focus coordinator neither counts it nor delivers it there. Without that, a double Enter
 /// would keep the new session from opening and type a line break into the terminal. Specified: Enter in the Name field
 /// launches, a second Enter follows at once, and the reply naming b still opens b with its terminal focused; the second
