@@ -1,14 +1,15 @@
 //! Startup overrides for agent builds: the first window's size and a forced appearance, so a screenshot batch can
 //! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge; the start dialogs
 //! turned off, so a bridge run's first step acts on the app rather than on a Welcome card its fresh helm has never
-//! seen; and a staged run's session values (see "Staged session values" below), so a docs-media capture shows each
-//! session's age and folder as its scenario designs them.
+//! seen; and a staged run's values (see "Staged session values" and "Staged host values" below), so a docs-media
+//! capture shows each session's age and folder, and each staged host's launch history, checkout trash and file checks,
+//! as its scenario designs them.
 //!
 //! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values. The rest of this
 //! module is compiled into every build, so that the bootstrap has one way to read the overrides and ordinary test runs
 //! check the parsing and the bootstrap's use of it, but nothing installs overrides outside an agent build unless a test
-//! does. The staged session values are the exception: their reader and their rewrite exist only in agent builds and
-//! this crate's tests. These are test hooks, not settings: the real appearance
+//! does. The staged values are the exception: their reader, their rewrites and the hover action exist only in agent
+//! builds and this crate's tests. These are test hooks, not settings: the real appearance
 //! choice is the user's preference, which the helm's preferences hold (the maintainer decided on 2026-11-13 that
 //! appearance is a helm preference, not a per-device one), and a forced appearance wins over that stored choice for
 //! as long as the run lasts; the window's real size is its saved frame or the first-launch default. Turning the start
@@ -43,9 +44,16 @@ use std::collections::HashMap;
 
 #[cfg(any(feature = "agent", test))]
 use farhelm_helm_client::PushedEntry;
-use farhelm_helm_client::{PushedChanges, PushedState};
+use farhelm_helm_client::{FileStat, PushedChanges, PushedState};
+use farhelm_proto::CheckoutTrashListing;
+use farhelm_proto::session_requests::LaunchHistoryReply;
+use farhelm_proto::ui_channel::HostView;
 #[cfg(any(feature = "agent", test))]
-use farhelm_proto::ui_channel::Collection;
+use farhelm_proto::{
+    ArchivedCheckout, DownloadFileInfo, DownloadFileStatus, LaunchSelection,
+    session_requests::{FolderHistoryEntry, LaunchHistoryEntry},
+    ui_channel::{Collection, SessionRow},
+};
 use gpui::{App, Global, Pixels, Size, px, size};
 
 use crate::theme::Preference;
@@ -106,6 +114,16 @@ pub fn install_from_env(cx: &mut App) -> anyhow::Result<()> {
     };
     let staged = read().with_context(|| format!("{SESSION_PINS_ENV} names {}", path.display()))?;
     cx.set_global(staged);
+    // Only a run with staged values has staged files to hover, so only such a run handles the action; in any other
+    // agent run the bridge's `action` finds its name (GPUI registers every action type compiled in) and nothing
+    // happens.
+    cx.on_action(|_: &HoverStagedTerminalFile, cx| {
+        if !crate::terminal::hover_staged_file(cx) {
+            tracing::warn!(
+                "{HOVER_STAGED_FILE_ACTION}: no terminal shows a staged file path to hover"
+            );
+        }
+    });
     Ok(())
 }
 
@@ -201,8 +219,8 @@ pub fn start_dialogs_off(cx: &App) -> bool {
 //
 // Why the store: it is the one copy of pushed state every view reads (the row, the session pane's details bar, the
 // summary card, the quick switcher, the launcher's default folder), so one rewrite there reaches all of them, as the
-// old rewrite of both the listing and the detail reply did. Nothing else is rewritten, the order included: the list's
-// order is the helm's (`CollectionMeta::order`). The summary card's "Started" stays the real creation time, so it reads
+// old rewrite of both the listing and the detail reply did. Nothing else of what the helm pushes is rewritten, the
+// order included (the host values below are answers to reads, not pushed state): the list's order is the helm's (`CollectionMeta::order`). The summary card's "Started" stays the real creation time, so it reads
 // later than the staged last activity.
 //
 // Never in a release build. Everything that reads or applies the values is behind `any(feature = "agent", test)`, the
@@ -210,8 +228,9 @@ pub fn start_dialogs_off(cx: &App) -> bool {
 // gets [`staged_snapshot`] and [`staged_changes`] as pass-throughs. `crates/farhelm-desktop/tests/release_build.rs`
 // checks an ordinary build of the app for [`SESSION_PINS_ENV`]'s value, which it reads from this file.
 
-/// The variable naming the pins file, `{"sessions": [{"title": ..., "age": ..., "cwd": ...}]}`: for each session the
-/// scenario titles, its age in seconds and the folder its row shows.
+/// The variable naming the pins file, `{"sessions": [{"title": ..., "age": ..., "cwd": ...}], "hosts": [...]}`: for
+/// each session the scenario titles, its age in seconds and the folder its row shows, and for each scenario host, by
+/// its alias, what "Staged host values" below substitutes ([`StagedHost`] has the fields).
 #[cfg(any(feature = "agent", test))]
 pub const SESSION_PINS_ENV: &str = "FARHELM_DESKTOP_AGENT_SESSION_PINS";
 
@@ -232,21 +251,25 @@ pub const SESSION_PINS_ENV: &str = "FARHELM_DESKTOP_AGENT_SESSION_PINS";
 #[cfg(any(feature = "agent", test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StagedValues {
-    /// Seconds since the epoch.
+    /// Seconds since the epoch. Every staged age counts back from it, the host values' included.
     anchor: i64,
     by_title: HashMap<String, Staged>,
+    /// The staged hosts, by the alias the harness gives each scenario host ("Staged host values").
+    by_alias: HashMap<String, StagedHost>,
 }
 
 #[cfg(any(feature = "agent", test))]
 impl Global for StagedValues {}
 
 /// The pins file as the harness writes it, after its own checks of the scenario. Strict, so a harness and an app that
-/// disagree about the shape fail the launch rather than stage nothing.
+/// disagree about the shape fail the launch rather than stage nothing: `hosts` is required, an empty list for a run
+/// that stages no host.
 #[cfg(any(feature = "agent", test))]
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PinsFile {
     sessions: Vec<Staged>,
+    hosts: Vec<StagedHost>,
 }
 
 /// One session's entry in the pins file: its age in seconds and its folder as the scenario spells it (`~/src/farhelm`).
@@ -262,7 +285,7 @@ struct Staged {
 #[cfg(any(feature = "agent", test))]
 impl StagedValues {
     /// Parse a pins file's `text`, its ages counting back from `anchor` (seconds since the epoch). A repeated title
-    /// keeps its last entry; the harness, the file's only writer, refuses one.
+    /// keeps its last entry, and a repeated alias its last host; the harness, the file's only writer, refuses both.
     pub fn parse(text: &str, anchor: i64) -> anyhow::Result<StagedValues> {
         let file: PinsFile = serde_json::from_str(text)?;
         let by_title = file.sessions.into_iter();
@@ -270,6 +293,11 @@ impl StagedValues {
             anchor,
             by_title: by_title
                 .map(|staged| (staged.title.clone(), staged))
+                .collect(),
+            by_alias: file
+                .hosts
+                .into_iter()
+                .map(|host| (host.alias.clone(), host))
                 .collect(),
         })
     }
@@ -326,6 +354,302 @@ pub(crate) fn staged_changes<'a>(changes: &'a PushedChanges, cx: &App) -> Cow<'a
     #[cfg(not(any(feature = "agent", test)))]
     let _ = cx;
     Cow::Borrowed(changes)
+}
+
+// ---- Staged host values ---------------------------------------------------------------------------------------------
+//
+// The same seam, extended by the maintainer's decision of 2026-11-18, for three things a host answers that a staged run
+// cannot answer honestly. The docs screenshots (`docs/docs-shots/SPEC.md`, "What is real and what is not") need each of
+// them, and the browser capture rewrote each in transit:
+//
+// - The launch history (`GET /api/launch-history`), behind the launcher's recent setups, its recent folders and its
+//   search's "Recent setups". The helm records every staged session's launch there, in its scratch directory under the
+//   run, a machine path the capture's leak check refuses; and a fresh run has none of the history a page wants to
+//   show. So the reply's launches and folders are replaced by the scenario's, for a staged host, as the reply arrives
+//   (`launcher::view::history`). Everything downstream is the launcher's own: grouping, ranking, the filter, and the
+//   checks a recent row's model and effort must pass against the launch catalog.
+// - The checkout trash (`POST /api/checkout-trash/list`). A staged run has no managed checkouts, and real ones would
+//   list archive folders under the run. So a staged host's listing is the scenario's, made here instead of read
+//   (`trash`), and its deletes are refused before they are sent: the entries name no real folder, and a Delete must
+//   never reach a host for them.
+// - A terminal's file check (the helm's stat behind the hover on a printed path). The helm resolves a path against the
+//   session's real directory, the run's scratch directory, so the answer would be "Not found" or name a machine path.
+//   So a staged host's checks are answered here: Ready, with the scenario's full path and size, for a path it names,
+//   and Not found for every other one, without asking the host (`terminal::files`). A click on a staged answer
+//   downloads nothing. [`HoverStagedTerminalFile`] lets the bridge put the hover on such a path, since a terminal cell
+//   is no element the bridge can point at.
+//
+// Hosts are matched by their alias, which the harness gives every scenario host before any session exists and writes
+// into the pins file beside its values: a host the file does not name is left exactly as it is, and a staged host
+// renamed by hand loses its staging (its launch history then shows the real scratch folders again). A staged host's
+// values replace everything real, also when the scenario lists nothing for it, so a staged session's scratch folder
+// never shows. Ages count back from the same anchor as the sessions' ([`StagedValues`]).
+//
+// Never in a release build, for the same reasons and through the same fence as the session values: everything that
+// reads or applies them is behind `any(feature = "agent", test)`, and every other build gets the functions below as
+// pass-throughs. `crates/farhelm-desktop/tests/release_build.rs` checks an ordinary build for the hover action's name
+// too ([`HOVER_STAGED_FILE_ACTION`]).
+
+/// One staged host's entry in the pins file: the scenario's values for the host the harness aliased `alias`, ages in
+/// seconds before the anchor. Each list may be empty, and an empty one still replaces what the host would answer.
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedHost {
+    alias: String,
+    /// The recent setups, in any order (newest first once staged).
+    launches: Vec<StagedLaunch>,
+    /// The recent folders under the folder field, in any order (newest first once staged).
+    folders: Vec<StagedFolder>,
+    /// The managed checkouts in the host's trash.
+    trash: Vec<StagedArchive>,
+    /// The paths a terminal's file check finds on the host.
+    files: Vec<StagedFile>,
+}
+
+/// One earlier launch: its folder as the scenario spells it (`~/src/farhelm`), which stands for its canonical path too,
+/// and its choices in the wire's own shape, so the launcher reads them exactly as it reads a real history's.
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedLaunch {
+    cwd: String,
+    selection: LaunchSelection,
+    age: u32,
+}
+
+/// One folder a launch started in, spelled as for [`StagedLaunch`].
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedFolder {
+    cwd: String,
+    age: u32,
+}
+
+/// One archived checkout: `checkout` is its name, which sits in `<root>/.farhelm-trash/` as the supervisor's archives
+/// do (`ARCHIVE_DIR_NAME` in `crates/farhelm-supervisor/src/working_copies.rs`), without the archive time a real
+/// archive's folder name carries: the dialog shows only that folder's parent.
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedArchive {
+    repository: String,
+    checkout: String,
+    root: String,
+    age: u32,
+    bytes: u64,
+}
+
+/// One file a terminal names: `path` as the terminal prints it, and the full path and size the check answers with.
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedFile {
+    path: String,
+    shown_path: String,
+    size: u64,
+}
+
+/// The bridge's way to hover a staged file path in a terminal (`gpui-agent action farhelm_agent::HoverStagedTerminalFile`):
+/// the first path the pins file stages for a terminal's host that its screen shows, terminals with focus first, gets
+/// the hover a resting pointer gives it, so its check and the hover display follow as they would for the pointer
+/// (`terminal::hover_staged_file`). Exists because a printed path is a run of terminal cells, not an element the
+/// bridge's `hover` can aim at. Agent builds only, handled only in a run with a pins file ([`install_from_env`]).
+///
+/// The hover lasts until the terminal sees the pointer again: a move over its grid, or the pointer leaving it. So a
+/// capture must find the pointer outside the terminal when the action runs and park it outside again, which a capture
+/// that parks on its own search does (the terminal reacts to hover, so no park spot lies on it).
+#[cfg(any(feature = "agent", test))]
+#[derive(Clone, Debug, Default, PartialEq, gpui::Action)]
+#[action(namespace = farhelm_agent)]
+pub struct HoverStagedTerminalFile;
+
+/// [`HoverStagedTerminalFile`]'s name as the bridge spells it. Defined on one line, which the release build's check
+/// reads (`crates/farhelm-desktop/tests/release_build.rs`).
+#[cfg(any(feature = "agent", test))]
+pub const HOVER_STAGED_FILE_ACTION: &str = "farhelm_agent::HoverStagedTerminalFile";
+
+#[cfg(any(feature = "agent", test))]
+impl StagedValues {
+    /// The staged host `host` is, by its alias.
+    fn host(&self, host: &HostView) -> Option<&StagedHost> {
+        self.by_alias.get(host.alias.as_deref()?)
+    }
+
+    /// `reply` with its launches and folders replaced by `staged`'s, as the history of host `id`, newest first; the
+    /// checkout configuration's revision stays the helm's, since the launcher's checkout preview follows it.
+    fn history(
+        &self,
+        staged: &StagedHost,
+        id: i64,
+        reply: LaunchHistoryReply,
+    ) -> LaunchHistoryReply {
+        let mut launches: Vec<&StagedLaunch> = staged.launches.iter().collect();
+        launches.sort_by_key(|launch| launch.age);
+        let mut folders: Vec<&StagedFolder> = staged.folders.iter().collect();
+        folders.sort_by_key(|folder| folder.age);
+        LaunchHistoryReply {
+            launches: launches
+                .into_iter()
+                .map(|launch| LaunchHistoryEntry {
+                    host: id,
+                    target: None,
+                    github_repo: None,
+                    canonical_cwd: Some(launch.cwd.clone()),
+                    cwd: launch.cwd.clone(),
+                    selection: launch.selection.clone(),
+                    created_at: self.anchor - i64::from(launch.age),
+                    creation_seq: None,
+                })
+                .collect(),
+            folders: folders
+                .into_iter()
+                .map(|folder| FolderHistoryEntry {
+                    host: id,
+                    canonical_cwd: folder.cwd.clone(),
+                    canonical_proven: true,
+                    display_cwd: folder.cwd.clone(),
+                    created_at: self.anchor - i64::from(folder.age),
+                    creation_seq: None,
+                })
+                .collect(),
+            checkout_config_revision: reply.checkout_config_revision,
+        }
+    }
+
+    /// `staged`'s trash as a host's listing: nothing being removed, and every entry measured. Ids are the entries'
+    /// places in the file, unique within the host as a real listing's are.
+    fn trash(&self, staged: &StagedHost) -> CheckoutTrashListing {
+        CheckoutTrashListing {
+            checkouts: staged
+                .trash
+                .iter()
+                .enumerate()
+                .map(|(index, archive)| ArchivedCheckout {
+                    id: format!("staged-{index}"),
+                    name: archive.checkout.clone(),
+                    repository: archive.repository.clone(),
+                    path: format!("{}/.farhelm-trash/{}", archive.root, archive.checkout),
+                    archived_at: Some(self.anchor - i64::from(archive.age)),
+                    bytes: Some(archive.bytes),
+                    removing: false,
+                    stuck: None,
+                })
+                .collect(),
+            issues: Vec::new(),
+            removing: false,
+            // An older peer's answer: absence never resolves a notice, so a refused delete's notice stays in view.
+            reports_retired: false,
+        }
+    }
+
+    /// The file check's answer for `path` on staged host `host`: Ready with its staged path and size when `staged`
+    /// names it, Not found otherwise. Never offers opening, whatever the helm's list would say for its type.
+    fn file(&self, staged: &StagedHost, host: &HostView, path: &str) -> FileStat {
+        let info = match staged.files.iter().find(|file| file.path == path) {
+            Some(file) => DownloadFileInfo {
+                path: file.shown_path.clone(),
+                size: Some(file.size),
+                status: DownloadFileStatus::Ready,
+            },
+            None => DownloadFileInfo {
+                path: path.to_owned(),
+                size: None,
+                status: DownloadFileStatus::NotFound,
+            },
+        };
+        FileStat {
+            host: host.name.clone(),
+            can_open: Some(false),
+            info,
+        }
+    }
+}
+
+/// The staged values and the host `id` names in the current UI session's store, when that host is staged.
+#[cfg(any(feature = "agent", test))]
+fn staged_host_by_id(id: i64, cx: &App) -> Option<(&StagedValues, &StagedHost, HostView)> {
+    let staged = cx.try_global::<StagedValues>()?;
+    let store = crate::session::current_store(cx)?;
+    let view = store
+        .read(cx)
+        .collections()
+        .get::<HostView>(&HostView::key(id))?
+        .clone();
+    let host = staged.host(&view)?;
+    Some((staged, host, view))
+}
+
+/// `reply`, the launch history the helm answered for `host`, as the launcher keeps it: with the staged launches and
+/// folders in place of the real ones in an agent build whose pins file stages `host`, else unchanged.
+pub(crate) fn staged_launch_history(
+    reply: LaunchHistoryReply,
+    host: Option<&HostView>,
+    cx: &App,
+) -> LaunchHistoryReply {
+    #[cfg(any(feature = "agent", test))]
+    if let Some(view) = host
+        && let Some(staged) = cx.try_global::<StagedValues>()
+        && let Some(host) = staged.host(view)
+    {
+        return staged.history(host, view.id, reply);
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    let _ = (host, cx);
+    reply
+}
+
+/// The trash listing of host `id` in an agent build whose pins file stages it, which the Trash button takes in place of
+/// a read; `None` for every other host and in every other build, where the host is read.
+pub(crate) fn staged_trash(id: i64, cx: &App) -> Option<CheckoutTrashListing> {
+    #[cfg(any(feature = "agent", test))]
+    if let Some((staged, host, _)) = staged_host_by_id(id, cx) {
+        return Some(staged.trash(host));
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    let _ = (id, cx);
+    None
+}
+
+/// The file check's answer for `path` in a terminal of session `session`, when an agent build's pins file stages that
+/// session's host; `None` for every other session and in every other build, where the host is asked.
+pub(crate) fn staged_file_stat(session: &str, path: &str, cx: &App) -> Option<FileStat> {
+    #[cfg(any(feature = "agent", test))]
+    {
+        let row_host = crate::session::current_store(cx)?
+            .read(cx)
+            .collections()
+            .get::<SessionRow>(session)?
+            .host;
+        let (staged, host, view) = staged_host_by_id(row_host, cx)?;
+        Some(staged.file(host, &view, path))
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    {
+        let _ = (session, path, cx);
+        None
+    }
+}
+
+/// The paths [`HoverStagedTerminalFile`] looks for in a terminal of session `session`, in the pins file's order: the
+/// files its host stages, none for an unstaged host.
+#[cfg(any(feature = "agent", test))]
+pub(crate) fn staged_file_paths(session: &str, cx: &App) -> Vec<String> {
+    let Some(store) = crate::session::current_store(cx) else {
+        return Vec::new();
+    };
+    let Some(row_host) = store
+        .read(cx)
+        .collections()
+        .get::<SessionRow>(session)
+        .map(|row| row.host)
+    else {
+        return Vec::new();
+    };
+    staged_host_by_id(row_host, cx)
+        .map(|(_, host, _)| host.files.iter().map(|file| file.path.clone()).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -448,7 +772,7 @@ mod tests {
             {"title": "fix flaky attach test", "age": 120, "cwd": "~/src/farhelm"},
             {"title": "release 0.3.1", "age": 86400, "cwd": "~/src/farhelm"},
             {"title": "now", "age": 0, "cwd": "/srv"}
-        ]}"#;
+        ], "hosts": []}"#;
         let values = StagedValues::parse(text, 1_800_000_000).unwrap();
         let staged = |title: &str| values.stamp(title).unwrap();
         assert_eq!(values.by_title.len(), 3);
@@ -463,24 +787,261 @@ mod tests {
 
     /// The harness checks the scenario before it writes the file; the app's own rule is the file's shape, so a harness
     /// and an app that disagree about it fail the launch instead of staging nothing. Specified: an unknown field and a
-    /// missing one are refused, while the entry they spoil is accepted.
+    /// missing one are refused, in a session's entry and in a host's (each of its lists included, and a choice the
+    /// launch wire does not know), and a file without `hosts` is refused, while the entries they spoil are accepted.
     #[test]
     fn a_pins_file_of_another_shape_is_refused() {
         let entry = r#"{"title": "a", "age": 1, "cwd": "~/a"}"#;
-        let file = |entry: &str| format!(r#"{{"sessions": [{entry}]}}"#);
+        let host = HOST.to_owned();
+        let file =
+            |entry: &str, host: &str| format!(r#"{{"sessions": [{entry}], "hosts": [{host}]}}"#);
         assert!(
-            StagedValues::parse(&file(entry), 1_000).is_ok(),
+            StagedValues::parse(&file(entry, &host), 1_000).is_ok(),
             "the premise"
         );
-        for spoiled in [
+        let spoiled_sessions = [
             entry.replace(r#""cwd""#, r#""folder""#),
             entry.replace(r#", "cwd": "~/a""#, ""),
-        ] {
+        ];
+        for spoiled in spoiled_sessions {
             assert!(
-                StagedValues::parse(&file(&spoiled), 1_000).is_err(),
+                StagedValues::parse(&file(&spoiled, &host), 1_000).is_err(),
                 "{spoiled}"
             );
         }
+        let spoiled_hosts = [
+            host.replace(r#""alias""#, r#""name""#),
+            host.replace(r#""files""#, r#""paths""#),
+            host.replace(
+                r#""folders": [{"cwd": "~/work/notes", "age": 259200}, {"cwd": "~/src/farhelm", "age": 600}],"#,
+                "",
+            ),
+            host.replace(r#""shown_path""#, r#""full_path""#),
+            host.replace(r#""harness": "claude""#, r#""harness": "clod""#),
+            host.replace(r#""bytes": 48200000"#, r#""bytes": -1"#),
+        ];
+        for spoiled in spoiled_hosts {
+            assert!(
+                StagedValues::parse(&file(entry, &spoiled), 1_000).is_err(),
+                "{spoiled}"
+            );
+        }
+        let without_hosts = format!(r#"{{"sessions": [{entry}]}}"#);
+        assert!(StagedValues::parse(&without_hosts, 1_000).is_err());
+    }
+
+    /// One staged host as the harness writes it, aliased "this machine": two launches, two folders, a trash entry
+    /// and a file. The trash entry is spelled out so a test can spoil one of its fields.
+    const HOST: &str = r#"{"alias": "this machine",
+        "launches": [
+            {"cwd": "~/src/api", "selection": {"harness": "claude", "model": null, "effort": null,
+                                               "permissions": null}, "age": 7200},
+            {"cwd": "~/src/farhelm", "selection": {"harness": "codex", "model": null, "effort": "high",
+                                                   "permissions": "yolo", "workspace_trust": true}, "age": 600}
+        ],
+        "folders": [{"cwd": "~/work/notes", "age": 259200}, {"cwd": "~/src/farhelm", "age": 600}],
+        "files": [{"path": "e2e/attach.spec.ts", "shown_path": "/Users/you/src/farhelm/e2e/attach.spec.ts",
+                   "size": 6412}],
+        "trash": [{"repository": "acme/web", "checkout": "web-fix-login", "root": "/Users/you/work",
+                   "age": 5400, "bytes": 48200000}]}"#;
+
+    /// `view` with the alias the harness gives a scenario host.
+    fn aliased(mut view: HostView, alias: &str) -> HostView {
+        view.alias = Some(alias.to_owned());
+        view.name = alias.to_owned();
+        view
+    }
+
+    /// Why this matters: the docs screenshots of the launcher, the trash and a file hover must show the scenario's
+    /// values and never the real ones, the run's scratch folders among them
+    /// (`docs/docs-shots/SPEC.md`, "What is real and what is not"). Specified for a host matched by its alias: the history's launches and folders are the
+    /// staged ones only, newest first, on that host's id, each folder its own canonical path, stamped back from the
+    /// anchor, with the choices as written and the helm's checkout revision kept; the trash lists each entry under
+    /// `<root>/.farhelm-trash/`, with a unique id, its archive time and size, nothing removing; a staged path's check is
+    /// Ready with its full path and size under the host's display name and never offers opening, and any other path
+    /// is Not found as asked. A host with no alias, or another alias, is not staged.
+    #[test]
+    fn a_staged_host_answers_with_the_scenarios_values() {
+        let text = format!(r#"{{"sessions": [], "hosts": [{HOST}]}}"#);
+        let values = StagedValues::parse(&text, 1_800_000_000).unwrap();
+        let view = aliased(
+            crate::hosts::tests::host(7, "local", crate::hosts::tests::connected()),
+            "this machine",
+        );
+        let staged = values.host(&view).expect("matched by its alias");
+        let mut other = view.clone();
+        other.alias = Some("build-box".into());
+        assert!(values.host(&other).is_none());
+        other.alias = None;
+        assert!(values.host(&other).is_none());
+
+        let real = LaunchHistoryReply {
+            launches: Vec::new(),
+            folders: Vec::new(),
+            checkout_config_revision: 41,
+        };
+        let history = values.history(staged, view.id, real);
+        assert_eq!(history.checkout_config_revision, 41);
+        let launches: Vec<_> = history
+            .launches
+            .iter()
+            .map(|entry| {
+                (
+                    entry.host,
+                    entry.cwd.as_str(),
+                    entry.canonical_cwd.as_deref(),
+                    entry.created_at,
+                )
+            })
+            .collect();
+        assert_eq!(
+            launches,
+            [
+                (7, "~/src/farhelm", Some("~/src/farhelm"), 1_799_999_400),
+                (7, "~/src/api", Some("~/src/api"), 1_799_992_800),
+            ],
+            "newest first"
+        );
+        let codex = &history.launches[0].selection;
+        assert_eq!(
+            (
+                codex.harness,
+                codex.effort,
+                codex.permissions,
+                codex.workspace_trust
+            ),
+            (
+                farhelm_proto::LaunchHarness::Codex,
+                Some(farhelm_proto::LaunchEffort::High),
+                Some(farhelm_proto::LaunchPermission::Yolo),
+                Some(true)
+            )
+        );
+        let folders: Vec<_> = history
+            .folders
+            .iter()
+            .map(|folder| {
+                (
+                    folder.host,
+                    folder.display_cwd.as_str(),
+                    folder.canonical_cwd.as_str(),
+                    folder.created_at,
+                )
+            })
+            .collect();
+        assert_eq!(
+            folders,
+            [
+                (7, "~/src/farhelm", "~/src/farhelm", 1_799_999_400),
+                (7, "~/work/notes", "~/work/notes", 1_799_740_800),
+            ]
+        );
+
+        let trash = values.trash(staged);
+        assert!(!trash.removing && trash.issues.is_empty());
+        assert_eq!(
+            trash.checkouts,
+            [ArchivedCheckout {
+                id: "staged-0".into(),
+                name: "web-fix-login".into(),
+                repository: "acme/web".into(),
+                path: "/Users/you/work/.farhelm-trash/web-fix-login".into(),
+                archived_at: Some(1_799_994_600),
+                bytes: Some(48_200_000),
+                removing: false,
+                stuck: None,
+            }]
+        );
+
+        let ready = values.file(staged, &view, "e2e/attach.spec.ts");
+        assert_eq!(
+            ready,
+            FileStat {
+                host: "this machine".into(),
+                can_open: Some(false),
+                info: DownloadFileInfo {
+                    path: "/Users/you/src/farhelm/e2e/attach.spec.ts".into(),
+                    size: Some(6412),
+                    status: DownloadFileStatus::Ready,
+                },
+            }
+        );
+        let missing = values.file(staged, &view, "src/main.rs");
+        assert_eq!(
+            (missing.info.path.as_str(), missing.info.status),
+            ("src/main.rs", DownloadFileStatus::NotFound)
+        );
+    }
+
+    /// Why this matters: the launcher hands every history answer through here, staged run or not, so it must change
+    /// nothing but a staged host's answer. Specified: without staged values, and for a host the file does not name,
+    /// the answer comes back as the helm gave it; for a staged host its launches are the staged ones.
+    #[gpui::test]
+    fn only_a_staged_hosts_history_is_replaced(cx: &mut gpui::TestAppContext) {
+        let view = aliased(
+            crate::hosts::tests::host(3, "ssh", crate::hosts::tests::connected()),
+            "this machine",
+        );
+        let real = LaunchHistoryReply {
+            launches: vec![LaunchHistoryEntry {
+                host: 3,
+                target: None,
+                github_repo: None,
+                canonical_cwd: Some("/tmp/run/work/0".into()),
+                cwd: "/tmp/run/work/0".into(),
+                selection: LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Claude,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    container: None,
+                    workspace_trust: None,
+                },
+                created_at: 5,
+                creation_seq: None,
+            }],
+            folders: Vec::new(),
+            checkout_config_revision: 2,
+        };
+        cx.update(|cx| {
+            assert_eq!(
+                staged_launch_history(real.clone(), Some(&view), cx),
+                real,
+                "nothing staged"
+            );
+            let text = format!(r#"{{"sessions": [], "hosts": [{HOST}]}}"#);
+            cx.set_global(StagedValues::parse(&text, 1_000_000).unwrap());
+            let other = aliased(view.clone(), "gpu-1");
+            assert_eq!(staged_launch_history(real.clone(), Some(&other), cx), real);
+            assert_eq!(staged_launch_history(real.clone(), None, cx), real);
+            let staged = staged_launch_history(real.clone(), Some(&view), cx);
+            assert_eq!(
+                staged
+                    .launches
+                    .iter()
+                    .map(|entry| entry.cwd.as_str())
+                    .collect::<Vec<_>>(),
+                ["~/src/farhelm", "~/src/api"]
+            );
+        });
+    }
+
+    /// Why this matters: the docs capture dispatches the hover by name through the bridge, and the release build's
+    /// check looks for that name in the binary, so the name both use must be the one GPUI registers. Specified: the
+    /// constant is the action type's name, and GPUI builds the action from it with no data.
+    #[gpui::test]
+    fn the_hover_actions_name_is_the_one_gpui_registers(cx: &mut gpui::TestAppContext) {
+        use gpui::Action as _;
+        assert_eq!(
+            HoverStagedTerminalFile::name_for_type(),
+            HOVER_STAGED_FILE_ACTION
+        );
+        cx.update(|cx| {
+            let built = cx.build_action(HOVER_STAGED_FILE_ACTION, None).unwrap();
+            assert!(built.partial_eq(&HoverStagedTerminalFile));
+        });
     }
 
     /// A typo must fail the launch: ignoring it would capture the default look under the label the batch asked for, or

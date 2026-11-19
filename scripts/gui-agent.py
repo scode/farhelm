@@ -992,9 +992,11 @@ def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[st
 # remote hosts become `--remote-host` destinations, so the run is staged (`staged_start`). Once the app is up,
 # `stage_scenario` names the hosts, creates the sessions on them, waits for every status, sets the seen state, and
 # checks each row's permission shield in the window. Ported from the browser suite's `e2e/readme-hero/scenario.ts` and
-# `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). Each session's age and folder, which the
-# old staging rewrote in the helm's replies, reach the app in a file (`session_pins_body`). The window uses the
-# viewport's logical size. On Linux the caller can select its output scale separately.
+# `stage.ts` (removed in #3401; `git show 6ef88c9a^:e2e/readme-hero/stage.ts`). Each session's age and folder, and each
+# host's launch history, checkout trash and file checks ("the staged host values" below), which the old staging
+# rewrote in the helm's replies, reach the app in a file (`session_pins_body`). The scenario's `~` folders are created
+# in the run's private home (`create_scenario_dirs`), so the launcher's folder check finds them for real. The window
+# uses the viewport's logical size. On Linux the caller can select its output scale separately.
 
 # The wrappers a scenario session may name, each with the launch harness (`LaunchHarness`'s wire name in
 # crates/farhelm-proto/src/launch.rs) its agent launch asks for. The helm runs each harness's program by its bare name
@@ -1065,7 +1067,7 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
     hosts = document.get("hosts")
     if not isinstance(hosts, list) or not hosts:
         fail("at least one host is required")
-    keys = set()
+    keys, aliases = set(), set()
     for host in hosts:
         if not isinstance(host, dict) or not isinstance(host.get("key"), str) or not host["key"]:
             fail(f"host {host!r} needs a key")
@@ -1075,6 +1077,10 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
         if key in keys:
             fail(f"duplicate host key {key}")
         keys.add(key)
+        # The app finds a host's staged values by its alias (`staged_host_body`), so two hosts may not share one.
+        if host["alias"] in aliases:
+            fail(f"duplicate host alias {host['alias']}")
+        aliases.add(host["alias"])
         if host.get("kind") == "remote":
             if not isinstance(host.get("ssh"), str) or not host["ssh"]:
                 fail(f"host {key}: a remote host needs an ssh destination")
@@ -1136,18 +1142,180 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
             session["transcript"] = (directory / transcript).resolve()
     if sum(session["open"] for session in sessions) != 1:
         fail("exactly one session must carry open: true")
+    check_host_values(document, keys, fail)
+    # Checked here, so a folder that would leave the private home fails before anything is created.
+    scenario_home_dirs(document, fail)
     document["source"] = source
     return document
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Scenario runs: the staged host values
+#
+# What a scenario stages per host beyond its sessions, for the docs screenshots (docs/docs-shots/SPEC.md, "What is real
+# and what is not"): the launch history behind the launcher's recent setups and recent folders (`launch_history`,
+# `folders`), the checkout trash (`checkout_trash`) and a terminal's file checks (`terminal_files`). A staged run cannot
+# produce any of them for real: the helm records each staged session's launch in its scratch directory under the run, a
+# machine path the capture refuses; the run has no managed checkouts; and a printed path is looked up in that scratch
+# directory. The browser capture rewrote each in transit. The maintainer decided on 2026-11-18 to extend the app's pins
+# file seam instead (the "Staged host values" section of crates/gui/farhelm-gui/src/agent_startup.rs), so these go
+# into the pins file by host alias (`session_pins_body`), and an agent build substitutes them for what the host answers.
+# Every field is optional: a scenario without one stages that value empty for every host, which also hides what the
+# real host would have answered.
+
+# The wire names of the launch choices a staged recent setup may carry: `LaunchHarness`, `LaunchEffort` and
+# `LaunchPermission` in crates/farhelm-proto/src/launch.rs (snake_case; scripts/test-gui-agent.py checks them against
+# that source). `custom` is left out of the permissions on purpose: it needs its own flags, which a scenario has no
+# field for.
+LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok")
+LAUNCH_EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+LAUNCH_PERMISSIONS = ("guarded", "yolo", "approve", "smart_approve", "chat")
+
+# Each staged host field's entries: the keys an entry must have, with their kinds, and the keys it may have.
+HOST_VALUE_FIELDS = {
+    "launch_history": ({"host": str, "cwd": str, "harness": str, "age": int},
+                       {"model": str, "effort": str, "permissions": str, "workspace_trust": bool}),
+    "folders": ({"host": str, "cwd": str, "age": int}, {}),
+    "checkout_trash": ({"host": str, "repository": str, "checkout": str, "root": str, "age": int, "bytes": int}, {}),
+    "terminal_files": ({"host": str, "path": str, "shown_path": str, "size": int}, {}),
+}
+
+
+def check_host_values(document: dict, keys: set[str], fail) -> None:
+    """Check the scenario's staged host fields (HOST_VALUE_FIELDS) in place, calling `fail` with the first mistake: each
+    an optional list of objects with exactly the keys its field allows, every string non-empty, every number a
+    non-negative integer, `host` naming a scenario host, a recent setup's choices among the wire's names, and a trash
+    root an absolute path. As strict as the session checks, for the same reason: a typo would otherwise stage nothing
+    and leave a picture that looks plausible and is wrong.
+
+    A recent setup's model and effort are only checked for their shape: whether the launcher's catalog offers them for
+    the harness is the launcher's own check, which a staged setup goes through like any real one (the substitution is
+    upstream of it), so a model the catalog lacks shows the launcher's refusal in the picture, as the scenario's comment
+    warns."""
+    for field, (required, optional) in HOST_VALUE_FIELDS.items():
+        entries = document.get(field, [])
+        if not isinstance(entries, list):
+            fail(f"{field} must be a list")
+        for index, entry in enumerate(entries):
+            name = f"{field}[{index}]"
+            if not isinstance(entry, dict):
+                fail(f"{name} must be an object")
+            unknown = set(entry) - set(required) - set(optional)
+            if unknown:
+                fail(f"{name}: unknown field {sorted(unknown)[0]}")
+            for key, kind in {**required, **optional}.items():
+                if key not in entry:
+                    if key in required:
+                        fail(f"{name}: {key} is required")
+                    continue
+                value = entry[key]
+                # `bool` is an `int` to Python, so the kinds are compared exactly.
+                if type(value) is not kind or (kind is str and not value) or (kind is int and value < 0):
+                    shape = {str: "a non-empty string", int: "a non-negative integer", bool: "true or false"}[kind]
+                    fail(f"{name}: {key} must be {shape}")
+            if entry["host"] not in keys:
+                fail(f"{name}: unknown host {entry['host']!r}")
+            for key, allowed in (("harness", LAUNCH_HARNESSES), ("effort", LAUNCH_EFFORTS),
+                                 ("permissions", LAUNCH_PERMISSIONS)):
+                if key in entry and entry[key] not in allowed:
+                    fail(f"{name}: {key} must be one of {', '.join(allowed)}")
+            if "root" in entry and not entry["root"].startswith("/"):
+                fail(f"{name}: root must be an absolute path")
+
+
+def staged_selection(entry: dict) -> dict:
+    """A recent setup's choices in the wire's `LaunchSelection` shape, which the app reads them in: the harness, the
+    model, effort and permissions or null, and workspace trust only when the scenario gives it (the wire leaves it out
+    when unset)."""
+    selection = {key: entry.get(key) for key in ("model", "effort", "permissions")}
+    selection = {"harness": entry["harness"], **selection}
+    if "workspace_trust" in entry:
+        selection["workspace_trust"] = entry["workspace_trust"]
+    return selection
+
+
+def staged_host_body(plan: dict, host: dict) -> dict:
+    """The pins file's entry for scenario host `host`: its alias, which the app matches it by, and the scenario's values
+    for it in the shapes `StagedHost` in crates/gui/farhelm-gui/src/agent_startup.rs reads, in the file's order. Every
+    list is present, an empty one included: the app replaces what a staged host answers whatever the list holds."""
+
+    def mine(field: str) -> list[dict]:
+        return [entry for entry in plan.get(field, []) if entry["host"] == host["key"]]
+
+    return {
+        "alias": host["alias"],
+        "launches": [{"cwd": entry["cwd"], "selection": staged_selection(entry), "age": entry["age"]}
+                     for entry in mine("launch_history")],
+        "folders": [{"cwd": entry["cwd"], "age": entry["age"]} for entry in mine("folders")],
+        "trash": [{key: entry[key] for key in ("repository", "checkout", "root", "age", "bytes")}
+                  for entry in mine("checkout_trash")],
+        "files": [{key: entry[key] for key in ("path", "shown_path", "size")} for entry in mine("terminal_files")],
+    }
+
+
+def scenario_home_dirs(plan: dict, fail=None) -> list[str]:
+    """The folders under `~` the scenario names, as paths relative to the home, each once, in the file's order: every
+    session's `cwd`, every recent setup's and recent folder's, and every launch template's folder destination.
+
+    `start` creates them in the run's private home (`create_scenario_dirs`), which every staged supervisor, local and
+    remote, expands `~` against: the supervisor resolves `~` from its own HOME (`expand_tilde_cwd` in
+    crates/farhelm-supervisor/src/service/core.rs), and `start` gives each the staged HOME. So the launcher's real
+    folder check finds them, and shows no "does not exist" warning under the folder field. A folder outside `~` is left
+    alone. With `fail`, a `~` folder that would leave the home (a `..` part) or names another user's (`~user`) is
+    refused; without it, such a folder is skipped."""
+    folders = [session.get("cwd") for session in plan.get("sessions", [])]
+    folders += [entry.get("cwd") for field in ("launch_history", "folders") for entry in plan.get(field, [])]
+    for template in plan.get("templates", []) or []:
+        destination = ((template or {}).get("fields") or {}).get("destination") or {}
+        folders.append(destination.get("folder") if isinstance(destination, dict) else None)
+    found = []
+    for folder in folders:
+        if not isinstance(folder, str) or not folder.startswith("~") or folder == "~":
+            continue
+        parts = folder[2:].split("/") if folder.startswith("~/") else None
+        if parts is None or any(part in ("..", ".") for part in parts):
+            if fail:
+                fail(f"folder {folder!r} must be ~ or under ~/ without . or .. parts")
+            continue
+        relative = "/".join(part for part in parts if part)
+        if relative and relative not in found:
+            found.append(relative)
+    return found
+
+
+def create_scenario_dirs(home: Path, plan: dict) -> list[Path]:
+    """Create the scenario's `~` folders (`scenario_home_dirs`) in the staged run's private `home`, private like it, and
+    return them."""
+    made = []
+    for relative in scenario_home_dirs(plan):
+        directory = home / relative
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        made.append(directory)
+    return made
+
+
 def session_pins_body(plan: dict) -> dict:
     """The pins file a scenario run hands the app (SESSION_PINS_ENV): each session's title, `age` and `cwd`, which an
-    agent build shows in place of the session's real activity and scratch folder (why and how: the "Staged session
-    values" section of crates/gui/farhelm-gui/src/agent_startup.rs)."""
+    agent build shows in place of the session's real activity and scratch folder, and each scenario host's staged
+    values by its alias (`staged_host_body`), which it shows in place of what the host answers (why and how: the
+    "Staged session values" and "Staged host values" sections of crates/gui/farhelm-gui/src/agent_startup.rs).
+
+    The shape, which the app reads strictly (an unknown or missing key fails its launch):
+
+        {"sessions": [{"title": ..., "age": SECONDS, "cwd": "~/..."}],
+         "hosts": [{"alias": ...,
+                    "launches": [{"cwd": ..., "selection": {"harness": ..., "model": ..., "effort": ...,
+                                                            "permissions": ...}, "age": SECONDS}],
+                    "folders": [{"cwd": ..., "age": SECONDS}],
+                    "trash": [{"repository": ..., "checkout": ..., "root": "/...", "age": SECONDS, "bytes": N}],
+                    "files": [{"path": ..., "shown_path": "/...", "size": N}]}]}
+
+    Every age is seconds before the moment the app read the file."""
     return {
         "sessions": [
             {"title": session["title"], "age": session["age"], "cwd": session["cwd"]} for session in plan["sessions"]
-        ]
+        ],
+        "hosts": [staged_host_body(plan, host) for host in plan["hosts"]],
     }
 
 
@@ -2340,6 +2508,9 @@ def start(run: Path, args: list[str]) -> int:
             )
         record["staging"] = prepare_staging(run, binaries["fixtures"])
         save()
+        if scenario:
+            # Before any supervisor starts, so the launcher's first folder check on any staged host finds them.
+            create_scenario_dirs(Path(record["staging"]["home"]), scenario)
     if remote_hosts:
         # The staged hosts' sshd and the shim the helm dials them with ("The private sshd"), recorded before the wait so
         # `stop` finds an sshd that a failing or killed `start` left; then each destination is dialed once through the

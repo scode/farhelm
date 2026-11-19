@@ -35,6 +35,9 @@
 //!   ([`crate::rail_notices`]). That panel's Retry now goes through [`TrashButton::retry`], the dialog's Retry with the
 //!   panel's own availability rule ([`Snapshot::retry_target`]).
 //! - **The archive cue** ([`cue`]): the can wiggles when this window's session Delete moved a checkout into the trash.
+//! - **A staged run's hosts** (agent builds with a pins file only): a staged host's listing comes from the pins file
+//!   instead of a read, through the same answer path, and a delete from it is refused before anything is sent, with a
+//!   refusal beside each entry ([`crate::agent_startup::staged_trash`]): its entries exist on no host.
 //!
 //! NOTE: The old page's read generations are not ported, and its uncertain-outcome bookkeeping only in a smaller form
 //! ([`listing`]'s module docs say why).
@@ -122,6 +125,11 @@ const LIST_SHOWN: &str = "POST /api/checkout-trash/list";
 /// The delete route, as a refusal without words names it.
 const DELETE_SHOWN: &str = "POST /api/checkout-trash/delete";
 
+/// What a delete from a staged run's trash says, in place of the host's answer it never asks for ([`TrashButton::send`]).
+#[cfg(any(feature = "agent", test))]
+const STAGED_DELETE_REFUSAL: &str =
+    "Not deleted: this trash is staged for screenshots, and its checkouts exist on no host";
+
 /// The can's size in the button, the old `.checkout-trash-button svg`.
 const CAN: f32 = 16.;
 
@@ -206,7 +214,7 @@ impl TrashButton {
 
     /// Bring the kept reads in line with the registry: drop hosts the registry no longer lists as connected (and the
     /// notices of hosts it no longer lists at all), and read each connected host that is new, reconnected, or whose
-    /// `trash_epoch` moved. Does nothing while the registry is unread or unavailable.
+    /// `trash_epoch` moved, or that a staged run started or stopped answering for (its alias changed). Does nothing while the registry is unread or unavailable.
     fn sync(&mut self, cx: &mut Context<Self>) {
         let Some(store) = session::current_store(cx) else {
             return;
@@ -229,6 +237,13 @@ impl TrashButton {
         if !available {
             return;
         }
+        // Which hosts a staged run answers for, asked before the kept reads are borrowed (always none outside an agent
+        // build with a pins file).
+        let staged: Vec<i64> = registry
+            .iter()
+            .map(|host| host.0)
+            .filter(|&id| crate::agent_startup::staged_trash(id, cx).is_some())
+            .collect();
         let kept = self.current.current(cx);
         kept.notices
             .retain(|id, _| registry.iter().any(|host| host.0 == *id));
@@ -246,8 +261,10 @@ impl TrashButton {
                     ..HostTrash::default()
                 };
             }
-            if entry.serial == 0 || entry.epoch != epoch {
+            let staged = staged.contains(&id);
+            if entry.serial == 0 || entry.epoch != epoch || entry.staged != staged {
                 entry.epoch = epoch;
+                entry.staged = staged;
                 due.push(id);
             }
         }
@@ -274,6 +291,17 @@ impl TrashButton {
         entry.loading = true;
         entry.recheck = None;
         let serial = entry.serial;
+        // A staged run's host answers from the pins file instead of being read (`agent_startup`, "Staged host
+        // values"), through the same answer path a read's reply takes, so the can, the count and the dialog draw it as
+        // they would a host's.
+        if let Some(listing) = crate::agent_startup::staged_trash(host, cx) {
+            let reply = ListReply {
+                listing,
+                notice_error: None,
+            };
+            self.listed(host, serial, Ok(reply), cx);
+            return;
+        }
         let body = json!({
             "host": host,
             "expected_incarnation": entry.incarnation,
@@ -574,7 +602,35 @@ impl TrashButton {
 
     /// Start `target`'s delete as work on its host's trash key, and apply its answer when it settles
     /// ([`TrashButton::deleted`]).
+    ///
+    /// A staged run's host is never sent a delete: its listing names no real folder (`agent_startup`, "Staged host
+    /// values"), so the delete is refused here, as a refusal the dialog keeps showing for those checkouts.
     fn send(&mut self, target: Target, cx: &mut Context<Self>) {
+        #[cfg(any(feature = "agent", test))]
+        if crate::agent_startup::staged_trash(target.host, cx).is_some() {
+            // A refusal for each checkout, as a host refuses one it will not delete, so the dialog says why beside
+            // each entry rather than as an unconfirmed reply.
+            let refused: listing::Outcome = Ok(CheckoutTrashDeleted {
+                removed: Vec::new(),
+                issues: target
+                    .ids
+                    .iter()
+                    .map(|id| farhelm_proto::CheckoutTrashIssue {
+                        id: id.clone(),
+                        path: String::new(),
+                        message: STAGED_DELETE_REFUSAL.to_owned(),
+                    })
+                    .collect(),
+            });
+            let kept = self.current.current(cx);
+            listing::record_outcome(
+                kept.notices.entry(target.host).or_default(),
+                &target.ids,
+                &refused,
+            );
+            cx.notify();
+            return;
+        }
         let (Some(operations), Ok(command)) =
             (session::current_operations(cx), delete_command(&target))
         else {

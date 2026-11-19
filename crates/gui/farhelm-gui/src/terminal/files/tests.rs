@@ -681,6 +681,7 @@ fn ready_for_requires_the_same_cells_file_and_label() {
         platform: Platform::Linux,
         drawn: Drawn::default(),
         check,
+        staged: false,
         _stat: None,
     };
     files.hover = Some(hover(Check::Answered(ready("/work/a.txt", 3))));

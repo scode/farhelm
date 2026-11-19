@@ -1313,12 +1313,13 @@ class ScenarioTest(unittest.TestCase):
         """A scenario is edited by hand, and a mistake must fail `start` naming the file and what is wrong, not stage
         a fleet that differs from the design. Specified, each by its message: a session on a host the file does not
         define, a transcript that is not a file beside it, `$USER` with no account to expand it to, and the old
-        loader's other checks on what is staged (a second local host, a duplicated title, no or two open sessions, an
+        loader's other checks on what is staged (a second local host, two hosts under one alias, a duplicated title, no or two open sessions, an
         idle session without seen state, an unknown wrapper or status, and for the values the app pins on a row, a
         missing or empty `cwd`, an `age` that is missing, negative, fractional, a string or a boolean, and an age
         younger than the one above it)."""
         remote = '{ key: "r", alias: "r", kind: "remote", ssh: "$USER@localhost" }'
-        second_local = LOCAL_HOST.replace("local", "l2", 1)
+        second_local = LOCAL_HOST.replace("local", "l2", 1).replace('"here"', '"there"')
+        same_alias = remote.replace('alias: "r"', 'alias: "here"')
         closed = OPEN_SESSION.replace(", open: true", "")
         second_open = OPEN_SESSION.replace('title: "a"', 'title: "b"')
         cases = [
@@ -1327,6 +1328,7 @@ class ScenarioTest(unittest.TestCase):
              OPEN_SESSION.replace('transcript: "t.txt"', 'transcript: "missing.txt"')),
             (r"uses \$USER but USER is not set", f"{LOCAL_HOST}, {remote}", OPEN_SESSION),
             ("exactly one host must be kind: local", f"{LOCAL_HOST}, {second_local}", OPEN_SESSION),
+            ("duplicate host alias here", f"{LOCAL_HOST}, {same_alias}", OPEN_SESSION),
             ("duplicate session title", LOCAL_HOST, f"{OPEN_SESSION}, {closed}"),
             ("exactly one session must carry open", LOCAL_HOST, closed),
             ("exactly one session must carry open", LOCAL_HOST, f"{OPEN_SESSION}, {second_open}"),
@@ -1355,9 +1357,10 @@ class ScenarioTest(unittest.TestCase):
         shows the scenario's folder and age instead only for the sessions the pins file names, by title. Specified for
         the README hero: the file `start` writes into the run directory lists all seven sessions in the scenario's order
         with their title, age and folder exactly as the scenario gives them (the folder unexpanded, as the row shows
-        it), and the path reaches the app under the variable its agent build reads (`SESSION_PINS_ENV` in
-        `agent_startup.rs`, read from that source); a run that writes none leaves the variable unset, so every other
-        run shows sessions as the helm pushes them."""
+        it), and every host by its alias with empty staged values, since the hero stages none (so no staged session's
+        scratch folder shows in its launcher either); and the path reaches the app under the variable its agent build
+        reads (`SESSION_PINS_ENV` in `agent_startup.rs`, read from that source); a run that writes none leaves the
+        variable unset, so every other run shows sessions as the helm pushes them."""
         source = (REPO / "crates/gui/farhelm-gui/src/agent_startup.rs").read_text()
         names = re.findall(r'^pub const SESSION_PINS_ENV: &str = "([^"]+)";$', source, re.MULTILINE)
         self.assertEqual(names, [gui_agent.SESSION_PINS_ENV])
@@ -1374,12 +1377,118 @@ class ScenarioTest(unittest.TestCase):
             {"title": "triage crash reports", "age": 10800, "cwd": "~/src/api"},
             {"title": "release 0.3.1", "age": 86400, "cwd": "~/src/farhelm"},
             {"title": "port ci to nextest", "age": 172800, "cwd": "~/src/ci"},
+        ], "hosts": [
+            {"alias": alias, "launches": [], "folders": [], "trash": [], "files": []}
+            for alias in ("this machine", "build-box", "gpu-1")
         ]})
         args = gui_agent.app_env_args(run, {"farhelm": "/t/f"}, session_pins=path)
         pairs = dict(arg.split("=", 1) for arg in args[1::2])
         self.assertEqual(pairs[gui_agent.SESSION_PINS_ENV], str(path))
         args = gui_agent.app_env_args(run, {"farhelm": "/t/f"})
         self.assertNotIn(gui_agent.SESSION_PINS_ENV, dict(arg.split("=", 1) for arg in args[1::2]))
+
+    def test_the_pins_file_stages_each_hosts_history_trash_and_files(self):
+        """The docs screenshots show the launcher's recent setups and folders, the trash and a file hover, none of which
+        a staged run can answer honestly, so the app substitutes the scenario's for each host, which it finds by alias
+        (`agent_startup.rs`, "Staged host values"). Specified for the docs scenario: each host's entry lists exactly its
+        own values in the file's order, a recent setup's choices in the wire's `LaunchSelection` shape (model, effort and
+        permissions null unless given, workspace trust only when given), the trash entries and files with their fields
+        as written; a host the scenario gives nothing has every list empty."""
+        plan = gui_agent.load_scenario(REPO / "docs" / "docs-shots" / "scenario.json5", "someone")
+        hosts = {host["alias"]: host for host in gui_agent.session_pins_body(plan)["hosts"]}
+        self.assertEqual(list(hosts), ["this machine", "build-box", "gpu-1"])
+        local = hosts["this machine"]
+        self.assertEqual(local["launches"][:3], [
+            {"cwd": "~/src/farhelm", "selection": {"harness": "claude", "model": None, "effort": None,
+                                                   "permissions": None}, "age": 600},
+            {"cwd": "~/src/farhelm", "selection": {"harness": "claude", "model": None, "effort": None,
+                                                   "permissions": None}, "age": 7200},
+            {"cwd": "~/src/farhelm", "selection": {"harness": "codex", "model": None, "effort": None,
+                                                   "permissions": "yolo"}, "age": 3600},
+        ])
+        self.assertEqual(local["launches"][3]["selection"]["workspace_trust"], True)
+        self.assertEqual([folder["cwd"] for folder in local["folders"]], ["~/src/farhelm", "~/src/api", "~/work/notes"])
+        self.assertEqual([entry["checkout"] for entry in local["trash"]], ["web-fix-login", "api-2"])
+        self.assertEqual(local["trash"][0], {"repository": "acme/web", "checkout": "web-fix-login",
+                                             "root": "/Users/you/work", "age": 5400, "bytes": 48200000})
+        self.assertEqual(local["files"], [{"path": "e2e/attach.spec.ts",
+                                           "shown_path": "/Users/you/src/farhelm/e2e/attach.spec.ts", "size": 6412}])
+        self.assertEqual(hosts["build-box"], {"alias": "build-box", "launches": [], "folders": [], "files": [],
+                                              "trash": [{"repository": "acme/api", "checkout": "api-1",
+                                                         "root": "/home/dev/work", "age": 86400, "bytes": 187000000}]})
+        self.assertEqual(hosts["gpu-1"], {"alias": "gpu-1", "launches": [], "folders": [], "trash": [], "files": []})
+
+    def test_the_launch_choices_are_the_wires(self):
+        """A recent setup's choices reach the app in the wire's names, which it reads strictly, so the harness's lists
+        must be the wire's own, or a scenario the harness accepts would fail the app's launch (or one it refuses would
+        have worked). Specified against crates/farhelm-proto/src/launch.rs: the harnesses are every `LaunchHarness`
+        variant, the efforts every `LaunchEffort`, and the permissions every `LaunchPermission` but `custom`, which needs
+        flags a scenario cannot give, each in snake_case."""
+        source = (REPO / "crates/farhelm-proto/src/launch.rs").read_text()
+
+        def variants(name: str) -> list[str]:
+            body = source[source.index(f"pub enum {name} {{"):]
+            body = body[: body.index("\n}")]
+            words = re.findall(r"^\s*([A-Z]\w*),", body, re.MULTILINE)
+            return [re.sub(r"(?<!^)([A-Z])", r"_\1", word).lower() for word in words]
+
+        self.assertEqual(sorted(gui_agent.LAUNCH_HARNESSES), sorted(variants("LaunchHarness")))
+        self.assertEqual(sorted(gui_agent.LAUNCH_EFFORTS), sorted(variants("LaunchEffort")))
+        self.assertEqual(sorted(gui_agent.LAUNCH_PERMISSIONS + ("custom",)), sorted(variants("LaunchPermission")))
+
+    def test_mistakes_in_the_staged_host_values_are_refused(self):
+        """The staged host values are edited by hand like the rest of the scenario, and a typo would stage nothing and
+        leave a picture that looks plausible and is wrong. Specified, each by its message naming the entry: a field
+        that is not a list, an entry that is not an object, an unknown or missing key, an empty string, a negative or
+        boolean number, an unknown host, a harness, effort or permission the wire does not know (`custom` included),
+        and a trash root that is not absolute."""
+        setup = '{ host: "local", cwd: "~/a", harness: "claude", age: 1 }'
+        trash = '{ host: "local", repository: "a/b", checkout: "c", root: "/w", age: 1, bytes: 2 }'
+        cases = [
+            ("launch_history must be a list", "launch_history: {}"),
+            (r"folders\[0\] must be an object", "folders: [1]"),
+            (r"launch_history\[0\]: unknown field colour", f"launch_history: [{setup[:-2]}, colour: 1 }}]"),
+            (r"terminal_files\[0\]: size is required",
+             'terminal_files: [{ host: "local", path: "a", shown_path: "/a" }]'),
+            (r"folders\[0\]: cwd must be a non-empty string", 'folders: [{ host: "local", cwd: "", age: 1 }]'),
+            (r"folders\[0\]: age must be a non-negative integer",
+             'folders: [{ host: "local", cwd: "~/a", age: -1 }]'),
+            (r"checkout_trash\[0\]: bytes must be a non-negative integer",
+             f"checkout_trash: [{trash.replace('bytes: 2', 'bytes: true')}]"),
+            (r"launch_history\[0\]: unknown host 'nowhere'",
+             f"launch_history: [{setup.replace('local', 'nowhere')}]"),
+            (r"harness must be one of", f"launch_history: [{setup.replace('claude', 'cursor-agent')}]"),
+            (r"effort must be one of", f'launch_history: [{setup[:-2]}, effort: "huge" }}]'),
+            (r"permissions must be one of", f'launch_history: [{setup[:-2]}, permissions: "custom" }}]'),
+            (r"workspace_trust must be true or false", f"launch_history: [{setup[:-2]}, workspace_trust: 1 }}]"),
+            (r"root must be an absolute path", f"checkout_trash: [{trash.replace('/w', '~/w')}]"),
+        ]
+        for message, field in cases:
+            path = self.dir / "staged.json5"
+            path.write_text(scenario_text(LOCAL_HOST, OPEN_SESSION)[:-1] + f", {field} }}")
+            with self.subTest(message=message), self.assertRaisesRegex(gui_agent.UsageError, message) as raised:
+                gui_agent.load_scenario(path, "someone")
+            self.assertTrue(str(raised.exception).startswith(f"{path}: "), raised.exception)
+
+    def test_the_scenarios_home_folders_are_made_in_the_private_home(self):
+        """The launcher checks a folder on its host and warns under the field when it does not exist, and New starts in
+        the open session's staged folder, which exists on no machine; so staging makes every `~` folder the scenario
+        names inside the run's private home, which every staged supervisor expands `~` against. Specified for the docs
+        scenario: the sessions', recent setups', recent folders' and templates' `~` folders, each once in the file's
+        order, made as directories under the home and nowhere else; and a `~` folder with a `..` part, or another
+        user's `~name`, is refused naming it."""
+        plan = gui_agent.load_scenario(REPO / "docs" / "docs-shots" / "scenario.json5", "someone")
+        self.assertEqual(gui_agent.scenario_home_dirs(plan),
+                         ["src/farhelm", "src/api", "work/tok", "work/notes"])
+        home = self.dir / "home"
+        home.mkdir()
+        made = gui_agent.create_scenario_dirs(home, plan)
+        self.assertEqual(made, [home / "src/farhelm", home / "src/api", home / "work/tok", home / "work/notes"])
+        self.assertTrue(all(directory.is_dir() for directory in made))
+        self.assertEqual(sorted(path.name for path in self.dir.iterdir()), ["home", "t.txt"], "nothing outside home")
+        for cwd in ("~/../escape", "~/a/./b", "~other/a"):
+            with self.subTest(cwd=cwd), self.assertRaisesRegex(gui_agent.UsageError, "must be ~ or under ~/"):
+                gui_agent.load_scenario(self.write(sessions=OPEN_SESSION.replace('"~/a"', f'"{cwd}"')), "someone")
 
     def test_a_scenario_run_is_staged(self):
         """A scenario's sessions are launched as `claude` and `codex` by bare name, which only a staged run's wrappers

@@ -2637,6 +2637,34 @@ impl AttachedTerminal {
         }
     }
 
+    /// Rest the hover on the middle of the first place the screen shows `needle` ([`TerminalView::find_shown`]), as
+    /// a pointer resting there would, and say whether the screen showed it. The position is the centre of that cell
+    /// in window coordinates, checked to map back to the same cell ([`AttachedTerminal::link_cell`] is the inverse),
+    /// so the destination display is anchored where a real pointer would have put it. For an agent build's staged
+    /// file hover ([`hover_staged_file`]); the hover lasts until the grid sees the pointer move or leave.
+    #[cfg(any(feature = "agent", test))]
+    fn hover_text(&mut self, needle: &str, cx: &mut Context<Self>) -> bool {
+        let found = (|| {
+            let origin = self.grid_origin?;
+            let view = self.committed.as_ref()?.read(cx);
+            let (col, row) = view.find_shown(needle)?;
+            let placement = self.placement(view, cx)?;
+            let cell = self.cell(cx)?;
+            let position = gpui::point(
+                origin.x + px((f32::from(col) + 0.5) * cell.width),
+                origin.y + px((f32::from(row) + 0.5) * placement.cell_height - placement.lift),
+            );
+            (self.link_cell(position, cx) == Some((col, row))).then_some(position)
+        })();
+        match found {
+            Some(position) => {
+                self.hover_link_at(Some(position), cx);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The hovered link a primary press at `position` landed on: the link the pointer is over, not one found anew at
     /// the press (the old app's rule).
     fn pressed_link(&self, position: Point<Pixels>, cx: &App) -> Option<TerminalLink> {
@@ -4310,6 +4338,46 @@ mod probe {
         fallback?.read(cx).terminal_text(cx)
     }
 
+    /// Hover the first staged file path a live owner's screen shows, owners whose pane holds focus first and then the
+    /// oldest, each trying its host's staged paths in the pins file's order
+    /// ([`crate::agent_startup::staged_file_paths`]); whether one was hovered. Focus first for the same reason as
+    /// [`terminal_text`]: the focused terminal is the one a script is looking at.
+    pub(super) fn hover_staged_file(cx: &mut App) -> bool {
+        let Some(owners) = cx.try_global::<Owners>() else {
+            return false;
+        };
+        let owners: Vec<_> = owners
+            .0
+            .iter()
+            .filter_map(|owner| owner.upgrade())
+            .collect();
+        let windows = cx.windows();
+        let focused = |owner: &gpui::Entity<AttachedTerminal>, cx: &mut App| {
+            let focus = owner.read(cx).focus.clone();
+            windows.iter().any(|window| {
+                window
+                    .update(cx, |_, window, _| focus.is_focused(window))
+                    .unwrap_or(false)
+            })
+        };
+        let mut ordered = Vec::with_capacity(owners.len());
+        let mut rest = Vec::new();
+        for owner in owners {
+            if focused(&owner, cx) {
+                ordered.push(owner);
+            } else {
+                rest.push(owner);
+            }
+        }
+        ordered.extend(rest);
+        ordered.into_iter().any(|owner| {
+            let paths = crate::agent_startup::staged_file_paths(&owner.read(cx).target.session, cx);
+            owner.update(cx, |owner, cx| {
+                paths.iter().any(|path| owner.hover_text(path, cx))
+            })
+        })
+    }
+
     /// Whether any live owner's view says the pointer rests on a link: a test's premise that a terminal it cannot
     /// reach directly (inside the main view) is seeing the hover it then checks the consequences of.
     #[cfg(test)]
@@ -4334,4 +4402,11 @@ mod probe {
 #[cfg(test)]
 pub(crate) fn any_hovered_link(cx: &App) -> bool {
     probe::any_hovered_link(cx)
+}
+
+/// Hover the first staged file path a terminal shows ([`probe::hover_staged_file`]): `super::hover_staged_file`'s
+/// work, kept here because it needs the owners' registry and their private hover.
+#[cfg(any(feature = "agent", test))]
+pub(crate) fn hover_staged_file(cx: &mut App) -> bool {
+    probe::hover_staged_file(cx)
 }

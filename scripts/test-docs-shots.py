@@ -20,8 +20,9 @@ batch = engine.load(Path(__file__).with_name("gui-screenshot-batch.py"))
 class Harness:
     """A stand-in bridge and capture: persistent layers, a declared window and an optional capture refusal."""
 
-    def __init__(self, fail=False, layers=False, size=100):
+    def __init__(self, fail=False, layers=False, size=100, nodes=()):
         self.fail, self.layers, self.size, self.calls, self.captures = fail, layers, size, [], []
+        self.nodes = list(nodes)
 
     def cli(self, run, record, args, capture=False):
         """Answer the engine's reads and record inputs, so reset and capture ordering are observable."""
@@ -33,6 +34,8 @@ class Harness:
             out = json.dumps({"x": 20, "y": 30, "w": 10, "h": 10})
         elif args[0] == "windows":
             out = json.dumps([{"width": self.size, "height": self.size, "scale": 1}])
+        elif args[0] == "tree":
+            out = json.dumps({"nodes": self.nodes})
         return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
 
     def capture(self, run, record, args):
@@ -309,6 +312,18 @@ class DocsShots(unittest.TestCase):
         harness = Panel()
         engine.reset(engine.Bridge(harness, self.root, {}))
         self.assertIn(["click", "id:hosts-panel-toggle"], harness.calls)
+
+    def test_a_container_id_takes_its_whole_box_from_the_tree(self):
+        """A launcher form row has no snapshot entry, so `get box` would crop to its first label and cut the field off;
+        an id one element holds in the raw tree gives that element's whole box, and anything else falls back."""
+        row = {"id": "launcher-folder-row", "visible": {"x": 5, "y": 6, "w": 910, "h": 32}}
+        twins = [{"id": "twin", "visible": {"x": 1, "y": 1, "w": 1, "h": 1}}] * 2
+        harness = Harness(nodes=[row, *twins])
+        bridge = engine.Bridge(harness, self.root, {})
+        self.assertEqual(bridge.box("id:launcher-folder-row"), {"x": 5, "y": 6, "w": 910, "h": 32})
+        self.assertEqual(bridge.box("id:twin"), {"x": 20, "y": 30, "w": 10, "h": 10})
+        self.assertEqual(bridge.box("id:absent"), {"x": 20, "y": 30, "w": 10, "h": 10})
+        self.assertEqual(sum(args == ["tree"] for args in harness.calls), 1)
 
     def test_max_width_keeps_the_left_edge(self):
         """A wide region capped by max_width keeps its left edge and loses the right, as the old maxWidth did."""

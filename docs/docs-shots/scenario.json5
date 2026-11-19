@@ -88,12 +88,15 @@
     },
   ],
 
-  // What the session launcher remembers, shown as its recent setups. A fresh
-  // stack remembers nothing and staged sessions do not count as launches, so
-  // the capture rewrites the launcher's history reply from this list. Model
-  // and effort, when given, must be ones the launcher's own catalog offers for
-  // that harness, or the launcher will refuse the setup. `age` is seconds
-  // before the capture; the launcher ranks by how often, then how recently.
+  // What the session launcher remembers, shown as its recent setups and in
+  // its search. A fresh stack remembers only the staged sessions' launches, in
+  // scratch directories under the run, so the app shows this list instead for
+  // every host here (the pins file's staged host values, scripts/gui-agent.py;
+  // a host this list leaves out shows none). `harness`, `effort` and
+  // `permissions` are the launch wire's names; model and effort, when given,
+  // must be ones the launcher's own catalog offers for that harness, or the
+  // launcher will refuse the setup. `age` is seconds before the app started;
+  // the launcher ranks by how often, then how recently.
   launch_history: [
     { host: "local", cwd: "~/src/farhelm", harness: "claude", age: 600 },
     { host: "local", cwd: "~/src/farhelm", harness: "claude", age: 7200 },
@@ -108,8 +111,9 @@
   // real plan with this invented home directory. No shot confirms the setup.
   add_host: { ssh: "dev@new-box", home: "/home/dev" },
 
-  // The folders the launcher offers under its folder field, from the same
-  // rewritten reply.
+  // The folders the launcher offers under its folder field, staged the same
+  // way. Staging also creates every `~` folder in this file inside the run's
+  // private home, so the launcher's folder check finds them.
   folders: [
     { host: "local", cwd: "~/src/farhelm", age: 600 },
     { host: "local", cwd: "~/src/api", age: 172800 },
@@ -130,10 +134,11 @@
 
   // Managed checkouts whose last session was deleted, for the trash dialog on
   // the session list page. The staged fleet has no managed checkouts, so the
-  // trash listing is answered from these in transit, and only for a shot that
-  // asks for it. `root` is the invented directory checkouts go into on that
-  // host; `age` is seconds since the checkout moved to the trash; `bytes` is
-  // the disk usage shown.
+  // app answers every host's trash listing from these instead of reading it,
+  // for the whole run (so the Trash button shows its count in every shot), and
+  // refuses every delete from it. `root` is the invented directory checkouts
+  // go into on that host; `age` is seconds since the checkout moved to the
+  // trash; `bytes` is the disk usage shown.
   checkout_trash: [
     { host: "local", repository: "acme/web", checkout: "web-fix-login", root: "/Users/you/work", age: 5400, bytes: 48200000 },
     { host: "local", repository: "acme/api", checkout: "api-2", root: "/Users/you/work", age: 259200, bytes: 213000000 },
@@ -142,9 +147,12 @@
 
   // Files the open session's terminal names, for the download hover on the
   // Work in a session page. The staged sessions' real directories are the
-  // run's temporary state, so the hover's check is answered from these in
-  // transit, and only for a shot that asks for it. `path` is as the terminal
-  // prints it; `shown_path` is the invented full path the hover reports.
+  // run's temporary state, so the app answers the hover's check from these on
+  // the hosts here (and "Not found" for any other path there), without asking
+  // the host. `path` is as the terminal prints it; `shown_path` is the
+  // invented full path the hover reports. The bridge's
+  // `farhelm_agent::HoverStagedTerminalFile` action puts the hover on the
+  // first of these the terminal shows.
   terminal_files: [
     { host: "local", path: "e2e/attach.spec.ts", shown_path: "/Users/you/src/farhelm/e2e/attach.spec.ts", size: 6412 },
   ],

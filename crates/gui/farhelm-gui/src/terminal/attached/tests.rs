@@ -8403,3 +8403,73 @@ fn a_text_size_step_resizes_every_open_terminal(cx: &mut TestAppContext) {
     redraw(h.cx);
     assert_eq!(h.fake().received(), [], "no second resize");
 }
+
+/// Why this matters: the docs screenshot of a file hover needs a path's hover to show the scenario's file, and the
+/// staged session's real folder (the run's scratch directory) never, and the bridge cannot rest a pointer on a
+/// terminal cell (`agent_startup`, "Staged host values", and its `HoverStagedTerminalFile`). Specified, with session
+/// `s1`'s host (`alias2`) staging `missing.txt` and `notes.txt`, the screen showing only the second and the pointer
+/// off the terminal: the hover action rests on the middle of `notes.txt`, where a pointer would; the display shows the
+/// staged name, the host's name with the staged folder, and the staged size, at once; the host is never asked; and a
+/// click on it saves nothing.
+#[gpui::test]
+fn the_staged_file_hover_rests_on_a_staged_path_and_never_asks_the_host(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    let pins = r#"{"sessions": [], "hosts": [{"alias": "alias2", "launches": [], "folders": [], "trash": [],
+        "files": [{"path": "missing.txt", "shown_path": "/Users/you/missing.txt", "size": 1},
+                  {"path": "notes.txt", "shown_path": "/Users/you/notes.txt", "size": 4800}]}]}"#;
+    let staged = crate::agent_startup::StagedValues::parse(pins, 1_800_000_000).unwrap();
+    h.cx.update(|_, cx| cx.set_global(staged));
+    let line = "see notes.txt now";
+    h.attach_rows(
+        serde_json::json!([[0, {"w": false, "r": [[0, line.len(), line, [0, -1, -1]]]}]]),
+        serde_json::json!([]),
+    );
+    h.answer_listing(&[]);
+    redraw(h.cx);
+    assert_eq!(
+        h.text().as_deref().map(str::trim_end),
+        Some(line),
+        "the premise"
+    );
+
+    // The pointer outside the terminal, as a capture leaves it: one over the grid would take the hover back at the
+    // next frame's pointer check, as a real pointer there would.
+    h.rest_on(point(px(PANE.0 + 100.), px(100.)));
+    assert!(
+        !h.read(|owner, _| owner.pointer_over),
+        "the premise: the pointer is off the terminal"
+    );
+    assert!(h.cx.update(|_, cx| crate::terminal::hover_staged_file(cx)));
+    settle(h.cx);
+    redraw(h.cx);
+    let cell = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).hover_cell());
+    assert_eq!(cell, Some((8, 0)), "the middle of `notes.txt`");
+    let line_of = |h: &mut Harness<'_>, id: &str| test_support::label(h.cx, id);
+    assert_eq!(
+        line_of(&mut h, "terminal-file-name").as_deref(),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        line_of(&mut h, "terminal-file-directory").as_deref(),
+        Some("host2:/Users/you/")
+    );
+    assert_eq!(
+        line_of(&mut h, "terminal-file-status").as_deref(),
+        Some("4.8 KB")
+    );
+    assert!(h.transfers.take().is_empty(), "the host was never asked");
+
+    // The click the file tests show saving a ready file: resting on the path, then pressing and releasing there.
+    let at = h.at_cell(8, 0);
+    h.rest_on(at);
+    assert!(
+        h.read(|owner, cx| owner.points_at_link(cx)),
+        "the premise: a ready check, which shows the pointing hand"
+    );
+    h.click_with(at, Modifiers::none());
+    redraw(h.cx);
+    assert!(
+        h.transfers.take().is_empty(),
+        "nothing is saved from a staged answer"
+    );
+}

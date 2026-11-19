@@ -1464,15 +1464,19 @@ impl Launcher {
 }
 
 /// One labelled row: the label in the left column, its control beside it (`.launch-composer-row`). `selector` names the
-/// row for tests, which find a field by where it is drawn. The label is usually its words; the Name row's carries a
-/// launch template's pill beside them.
+/// row twice: as its debug selector, which the in-process tests find a field by, and as its element id, which the
+/// test-automation bridge sees (a debug selector is invisible to it). The id is what lets a docs screenshot's crop take
+/// in the label column: the controls inside have ids of their own, but their union starts at the control column, so a
+/// crop around them alone cuts "Folder", "Harness" and the other labels off. The label is usually its words; the Name
+/// row's carries a launch template's pill beside them.
 fn row(
     selector: &'static str,
     label: impl IntoElement,
     control: impl IntoElement,
     palette: &theme::Palette,
-) -> Div {
+) -> Stateful<Div> {
     div()
+        .id(selector)
         .debug_selector(move || selector.into())
         .flex()
         .items_start()
@@ -2330,7 +2334,10 @@ impl Render for Launcher {
                 )
             });
         let checkout_rows = self.checkout_rows(palette, window, cx);
+        // The id makes the whole Destination block one target for the bridge, labels included, so a docs screenshot
+        // can crop to it (the rows' own ids, from `row`, cover it only piecewise).
         let destination = div()
+            .id("launcher-destination-section")
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))

@@ -92,6 +92,14 @@ const _: () = assert!(
         && *farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE.end() == TextSize::MAX as u32
 );
 
+/// Give the first staged file path a terminal shows the hover a resting pointer gives it, terminals with focus first,
+/// and say whether one did: what an agent build's [`crate::agent_startup::HoverStagedTerminalFile`] does (its docs say
+/// why it exists and how long the hover lasts). Agent builds and tests only.
+#[cfg(any(feature = "agent", test))]
+pub(crate) fn hover_staged_file(cx: &mut App) -> bool {
+    attached::hover_staged_file(cx)
+}
+
 /// The terminal font's measured character in logical pixels, and the font size its glyphs are shaped at.
 ///
 /// This is the old app's measurement (`measureChar` in grid-terminal.js at the reference commit): the advance of "W"
@@ -601,6 +609,30 @@ impl TerminalView {
         self.model
             .link_at(position)
             .or_else(|| self.model.path_link_at(position))
+    }
+
+    /// The view cell in the middle of the first place what is shown now holds `needle` within one row, top row first,
+    /// as (column, row) of what is shown; `None` when no row holds it, or for an empty `needle`. For an agent build's
+    /// staged file hover ([`hover_staged_file`]), which hovers a printed path by its text: the middle cell, because
+    /// the old capture rested the pointer on a path's middle, and any of its cells finds the whole link. Columns are
+    /// counted in characters, which is exact for a row of single-width characters, as the staged transcripts are; a
+    /// wide character before the match would put the cell to its left.
+    #[cfg(any(feature = "agent", test))]
+    pub fn find_shown(&self, needle: &str) -> Option<(u16, u16)> {
+        if needle.is_empty() {
+            return None;
+        }
+        (0..self.shown.len()).find_map(|row| {
+            let row = u16::try_from(row).ok()?;
+            if self.row_is_notice(row) {
+                return None;
+            }
+            let (cols, line) = self.model.line(self.line_at_row(row)?)?;
+            let text = line.text(0, cols);
+            let at = text.find(needle)?;
+            let col = text[..at].chars().count() + needle.chars().count() / 2;
+            Some((u16::try_from(col).ok()?, row))
+        })
     }
 
     /// What the destination display of `link` shows, as the grid model judges it now; `None` for a link that is not a

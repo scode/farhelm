@@ -36,12 +36,12 @@ capture waits for each session to reach the status the scenario asks for before 
 rewrite statuses in transit; if a status will not settle, the fix is in the fake agent's behaviour or the wait, not in
 the listing.
 
-Two session fields are pinned to the scenario's values, and only those two. A fresh stack cannot honestly show a session
-that was last active an hour ago, and the maintainer chose to set each session's last-activity stamp from the scenario
-rather than add a clock seam to the supervisor. The working directory is the other: a session's directory has to exist
-on the capturing machine, and the only directories that can be created there are under the run's temporary state, whose
-path is exactly the kind of machine detail the picture must not show. So each session runs in a scratch directory and
-the app shows the directory the scenario names.
+Two session fields are pinned to the scenario's values, and only those two of a session's. A fresh stack cannot honestly
+show a session that was last active an hour ago, and the maintainer chose to set each session's last-activity stamp from
+the scenario rather than add a clock seam to the supervisor. The working directory is the other: a session's directory
+has to exist on the capturing machine, and the only directories that can be created there are under the run's temporary
+state, whose path is exactly the kind of machine detail the picture must not show. So each session runs in a scratch
+directory and the app shows the directory the scenario names.
 
 The browser capture did this by intercepting the helm's session replies on their way to the page. The desktop app has no
 such channel to intercept, since it talks to the helm embedded in the same process, so the pinned values go through a
@@ -49,8 +49,18 @@ debug-only seam in the app instead (the maintainer's decision of 2026-11-16). Th
 directory from the scenario into a file, an agent build of the app reads it at startup, and the app rewrites those two
 fields of the named sessions as it takes in what its helm pushes, so the list's rows and the open session's details bar
 both show them. The seam is compiled only into agent builds, which an optimized build refuses to compile, so no release
-build can carry it. Nothing else is altered, statuses included. The ages count from the app's start, so they read older
-by however long the capture took to stage the fleet (seconds, for this scenario).
+build can carry it. The ages count from the app's start, so they read older by however long the capture took to stage
+the fleet (seconds, for this scenario).
+
+The same file carries a block of values per scenario host, matched by the host's alias, which the maintainer added to
+the seam on 2026-11-18 for the docs screenshots (`docs/docs-shots/SPEC.md`): the launch history behind the launcher's
+recent setups and recent folders, the checkout trash, and the answers to a terminal's file checks. An agent build shows
+those in place of what each staged host would answer, and never asks the host for its trash or a file, nor sends it a
+trash delete. Every scenario host gets the block, an empty one when the scenario stages nothing for it, as this one
+does. That matters here too: the helm records each staged session's launch in its scratch directory, so without the
+block the launcher's recent folders would show machine paths. Nothing else is altered, statuses included. Separately,
+staging creates every `~` folder the scenario names inside the run's private home, which is the home every staged
+supervisor expands `~` against, so the launcher's folder check finds them for real.
 
 The pinned stamps do not reorder the list. The desktop app's "Recently active" order is the helm's own: it puts running
 and waiting sessions first and orders each group by when its sessions last started work, while the browser capture
