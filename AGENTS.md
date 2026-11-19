@@ -113,7 +113,7 @@ or podman, or clean up, read `.agents/machine.md` in full first.
 
 ## Claude Code shell commands
 
-This section applies only to Claude Code sessions and their subagents. If you are Claude Code, a shell command you
+This section applies only to Claude Code sessions and their subagents. When running as Claude Code, a shell command you
 compose and run (through your shell tool, or in a prompt to a Claude Code subagent that will run it) contains no glob
 and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no variables (`$HOME`, `$d`), no `$(...)` or
 backticks, no `${...}`, no `$((...))`. Anything that needs one of those is written as a Deno TypeScript script, in a
