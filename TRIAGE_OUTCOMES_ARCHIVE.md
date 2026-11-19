@@ -23842,6 +23842,20 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `nyzknxoyrmmo`, bookmark `plan/drawn-frame-actions/04-wayland-drop-release-point`,
   https://github.com/scode/farhelm/pull/4183/changes.
 
+## trailing-retired-session-tcp-relay-cache-only-admission.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A port tunnel can
+  open for a retired container session if its cached record is unreadable. The supervisor's tunnel start doesn't check
+  retirement (uploads do); the helm comment claiming it does is false. No shipped trigger. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: supervisor refuses tunnels for retired sessions + fix the comment (~10-15 + test). Size
+  gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the
+  changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and
+  its index entry in the same change.
+- Execution: change `rkxxwlnlllltvrnmqrnrqptlsxxqtpmq`, bookmark
+  `plan/gui-ux-backend-fixes/01-retired-session-tcp-relay`, https://github.com/scode/farhelm/pull/4234/changes.
+
 ## approval-scrollports-lack-keyboard-entry.md
 
 - Outcome: `fix code`.

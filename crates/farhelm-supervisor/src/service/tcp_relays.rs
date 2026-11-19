@@ -4,7 +4,7 @@
 //! tiny credit acknowledgements use the existing priority queue.
 
 use super::connection::reply_frame;
-use super::core::{RequestError, Supervisor, error_kind};
+use super::core::{RequestError, Supervisor, error_kind, require_active_launch};
 use farhelm_proto::tcp_relay::TcpRelayState;
 use farhelm_proto::{ControlMsg, ErrorKind, Frame, MAX_TCP_TUNNEL_PORTS, UPLOAD_CHUNK_BYTES};
 use std::collections::{HashMap, HashSet};
@@ -264,6 +264,8 @@ pub(crate) struct RelayRequest {
 
 /// Register state before spawning, so immediate credit or cancellation can
 /// find the owner. Slow connect and socket I/O never occupy the shared reader.
+/// The stored launch keeps retired sessions Delete-only even when the helm
+/// cannot read its cached row.
 pub(crate) fn start(
     tasks: &mut tokio::task::JoinSet<()>,
     sup: Arc<Supervisor>,
@@ -275,9 +277,12 @@ pub(crate) fn start(
     let owned = Arc::clone(&state);
     let task = tasks.spawn(async move {
         let opened = async {
-            if sup.store.session(&request.session_id).await?.is_none() {
-                return Err(RequestError::new(ErrorKind::NotFound, "session not found").into());
-            }
+            let row = sup
+                .store
+                .session(&request.session_id)
+                .await?
+                .ok_or_else(|| RequestError::new(ErrorKind::NotFound, "session not found"))?;
+            require_active_launch(&row.launch)?;
             connect_loopback(request.address, request.port).await
         };
         let socket = tokio::select! {

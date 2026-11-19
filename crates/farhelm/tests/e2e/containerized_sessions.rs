@@ -208,6 +208,38 @@ async fn retired_session_refuses_prompts_uploads_and_downloads() {
     h.client.delete_session(&session.id).await.unwrap();
 }
 
+/// A retired launch must refuse a tunnel before touching its listening target.
+/// This checks both the refusal and the fixture socket's untouched accept queue.
+#[farhelm_testtrace::test]
+async fn retired_session_refuses_tcp_relays() {
+    let (h, session, _cwd) = legacy_session().await;
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let target = listener.local_addr().unwrap();
+    let mut peer = RawPeer::connect(&h.sup).await;
+    peer.control(&ControlMsg::BeginTcpRelay {
+        req_id: 1,
+        session_id: session.id,
+        channel: 1,
+        address: Some(target.ip()),
+        port: target.port(),
+    })
+    .await;
+    let reply = peer.next_control(5).await;
+    assert!(
+        matches!(
+            reply,
+            ControlMsg::Error { req_id: 1, kind: ErrorKind::InvalidRequest, ref message, .. }
+                if message.contains("retired")
+        ),
+        "{reply:?}"
+    );
+    assert_eq!(
+        listener.accept().expect_err("no relay dial").kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
 /// Deletion derives the owned name from the stored session UUID and ignores
 /// vanished legacy image/token paths. With no container ever created here,
 /// the installed engine must confirm absence or a missing engine ends cleanup.
