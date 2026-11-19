@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_78` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_79` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 78;
+pub const PROTOCOL_VERSION: u32 = 79;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -943,6 +943,12 @@ impl SessionStatus {
 /// (SPEC.md); the helm never invents or mutates these fields.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// The supervisor holds no agent terminal for this session. A terminal
+    /// it still holds may be unreachable or may retain an exited agent's
+    /// output. Older cached rows omit this field and keep the ordinary
+    /// attach behavior until a fresh report says otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal_missing: bool,
     /// Current workspace-trust question for the session's harness. This is an
     /// informational managed-checkout hint, never permission authority. Missing
     /// screen evidence and older stored rows mean false.
@@ -5383,6 +5389,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -5442,6 +5449,30 @@ mod tests {
                 .screen_yolo
         );
     }
+
+    /// A row cached before protocol 79 takes the ordinary attach path. Only
+    /// a positive report of a missing terminal needs a new wire field.
+    #[farhelm_testtrace::test]
+    fn session_terminal_missing_defaults_to_false_and_round_trips() {
+        let mut info: SessionInfo = serde_json::from_value(serde_json::json!({
+            "id": "s", "title": "demo", "cwd": "/work", "invocation": "agent",
+            "launch": SessionLaunch::plain_command("agent")
+        }))
+        .expect("a cached row without the flag decodes");
+        assert!(!info.terminal_missing);
+        let present = serde_json::to_value(&info).expect("encode present terminal");
+        assert!(present.get("terminal_missing").is_none());
+
+        info.terminal_missing = true;
+        let missing = serde_json::to_value(&info).expect("encode missing terminal");
+        assert_eq!(missing["terminal_missing"], true);
+        assert!(
+            serde_json::from_value::<SessionInfo>(missing)
+                .expect("decode missing terminal")
+                .terminal_missing
+        );
+    }
+
     /// The GitHub-checkout vocabulary is protocol 24's surface, so its wire
     /// JSON is golden-pinned like every request/reply pair before it: a
     /// serde-attribute change here would compile and pass a round-trip
@@ -5550,6 +5581,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -5804,8 +5836,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_78() {
-        assert_eq!(PROTOCOL_VERSION, 78);
+    fn protocol_version_is_pinned_at_79() {
+        assert_eq!(PROTOCOL_VERSION, 79);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -7221,6 +7253,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_agent_kind_decodes_absent_as_generic_and_roundtrips() {
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7281,6 +7314,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7433,6 +7467,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7478,6 +7513,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn effective_work_start_falls_back_stably_and_saturates() {
         let mut info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7526,6 +7562,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7575,6 +7612,7 @@ mod tests {
     #[test]
     fn a_session_cached_with_terminal_kinds_still_decodes() {
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -8230,6 +8268,7 @@ mod tests {
         let reply = ControlMsg::SessionRestarted {
             req_id: 42,
             session: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
@@ -8443,6 +8482,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
             session: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
@@ -8587,6 +8627,7 @@ mod tests {
                 ControlMsg::SessionRenamed {
                     req_id: 50,
                     session: SessionInfo {
+                        terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
                         workspace_trust_prompt: false,
@@ -9203,6 +9244,7 @@ mod tests {
             req_id: 1,
             sealed: false,
             sessions: vec![SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,

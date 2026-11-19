@@ -1627,6 +1627,7 @@ mod tests {
             req_id,
             sealed: false,
             sessions: vec![SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
@@ -1695,6 +1696,7 @@ mod tests {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
             session: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
@@ -1736,6 +1738,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
             session: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,

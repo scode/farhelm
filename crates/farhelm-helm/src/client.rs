@@ -4882,6 +4882,7 @@ mod tests {
 
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,

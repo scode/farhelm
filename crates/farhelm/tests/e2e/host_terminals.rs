@@ -270,9 +270,11 @@ async fn a_host_agents_exit_is_recorded_once_its_child_exits() {
             annotation: None
         }
     );
-    assert_eq!(
-        listed_info(&h, &session.id).await.status,
-        SessionStatus::Exited { exit_code: Some(7) }
+    let exited = listed_info(&h, &session.id).await;
+    assert_eq!(exited.status, SessionStatus::Exited { exit_code: Some(7) });
+    assert!(
+        !exited.terminal_missing,
+        "its terminal still holds the final screen"
     );
     end_host(&installed).await;
 }
@@ -615,6 +617,70 @@ async fn end_unheld_host(started: &Started, session_id: &str) {
         .await
         .expect("the host takes Shutdown");
     wait_until_pid_gone(started.pid, WAIT_SECS).await;
+}
+
+/// The list and Rename report an absent terminal, and Restart clears it as
+/// soon as the new host is published. Clients use the fact to choose between
+/// a recovery card and an attach, independently of the listed agent status.
+#[farhelm_testtrace::test]
+async fn terminal_availability_follows_the_published_host_across_restart() {
+    let h = harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = create_resumable_session(
+        &h,
+        work.path().to_str().expect("UTF-8 workdir"),
+        &fixture_cmd("fake-agent --script basic"),
+        80,
+        24,
+    )
+    .await;
+    wait_for_agent_ready(&h, &session.id).await;
+    assert!(!session.terminal_missing);
+    assert!(!listed_info(&h, &session.id).await.terminal_missing);
+    let old = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("created terminal");
+    let old_pid = host_process(old.socket()).expect("the created host serves its socket");
+    end_host(&Installed {
+        socket: old.socket().to_owned(),
+        host: old,
+        pid: old_pid,
+    })
+    .await;
+    h.sup
+        .forget_agent_terminal_for_test(&session.id)
+        .await
+        .expect("remove the ended terminal from the map");
+
+    let missing = listed_info(&h, &session.id).await;
+    assert!(
+        missing.terminal_missing,
+        "the list describes the missing host"
+    );
+    let renamed = h
+        .client
+        .rename_session(&session.id, "Renamed", None)
+        .await
+        .expect("rename");
+    assert!(renamed.terminal_missing, "Rename reports the same absence");
+
+    let restarted = h
+        .client
+        .restart_session(&session.id, false)
+        .await
+        .expect("restart with a new host");
+    assert!(
+        !restarted.terminal_missing,
+        "the reply describes the newly published host"
+    );
+    wait_for_agent_ready(&h, &session.id).await;
+    assert!(!listed_info(&h, &session.id).await.terminal_missing);
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("end the restarted session");
 }
 
 /// Delete finds the host of a session that has no agent terminal by the

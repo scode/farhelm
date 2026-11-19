@@ -249,6 +249,7 @@ mod tests {
 
         harness.fleet.edit(local, |script| {
             script.sessions = vec![farhelm_proto::SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
