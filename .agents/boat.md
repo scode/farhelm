@@ -2,7 +2,7 @@
 
 NOTE: This is not the default way to test. Use it only when the maintainer asks for boats in the task at hand (the
 landing monitor has standing permission, recorded in its log). Without that, run checks locally as
-`.agents/validation.md` describes.
+`.agents/validation.md` describes. The SSH test worker (`.agents/test-worker.md`) is the other remote option.
 
 Boat sandboxes (https://docs.boat.dev) are full Ubuntu 24.04 VMs driven through the `boat` CLI, which must be installed
 and signed in. `scripts/boat/boat-tests.ts` (Deno) runs two kinds of work on them from the development machine, against

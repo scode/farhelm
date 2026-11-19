@@ -132,8 +132,8 @@ Then, for each `[complete]` plan in queue order:
    before step 1 if an earlier plan just landed; check what that plan changed against this one again.
 3. Confirm no PR in the stack touches `plans/`.
 4. Run the checks the rebase calls for, per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`. When the
-   maintainer has asked for boats or Tensorlake in this flow, run the slow suites there per `.agents/boat.md` or
-   `.agents/tensorlake.md`, within the budget the maintainer gave.
+   maintainer has asked for boats, the SSH test worker or Tensorlake in this flow, run the slow suites there per
+   `.agents/boat.md`, `.agents/test-worker.md` or `.agents/tensorlake.md`, within the budget the maintainer gave.
 5. Land the stack bottom-up per `jjstack`, marking each PR ready as it lands, and record each merged PR in the monitor
    log. Before each merge, run `queue status` and confirm the line still carries your claim id; if it does not, the
    maintainer released it, so stop landing that plan and treat it as released (`plans/.agents/landing.md`, "Starting and
