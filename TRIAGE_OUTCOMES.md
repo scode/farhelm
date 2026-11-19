@@ -1826,17 +1826,6 @@
   same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## trailing-removed-lone-legacy-tab-lifecycle-oracles.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main 7a7899dff (git history): incorrect as a shipped or current problem. The
-  test deletion (#3360, 647f0227) and the end of old terminals (#3362, dbfc69751) are adjacent commits that first
-  shipped together in v0.39.0, so no release served old tabs without those tests, and old tabs no longer exist. Bucket:
-  other.
-- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-discards-nov18.md`
-
 ## trailing-osc52-classifier-removal-clipboard-read-disclosure.md
 
 - Outcome: `discard`.

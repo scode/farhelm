@@ -29,10 +29,6 @@ consequences.
   — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-removed-lone-legacy-tab-lifecycle-oracles.md`](trailing-removed-lone-legacy-tab-lifecycle-oracles.md) —
-  Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md`](trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md)
   — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
