@@ -86,10 +86,6 @@ consequences.
   covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
   edit it.
 
-- [`codex-login-file-rendered-in-cleartext.md`](codex-login-file-rendered-in-cleartext.md) — The Codex credential editor
-  shows the entire selected login file, including live access and refresh tokens. Someone looking at the screen or a
-  recording can see them.
-
 - [`stale-checkout-settings-overwrite-cli-edits.md`](stale-checkout-settings-overwrite-cli-edits.md) — Saving the
   post-clone command from a Settings window that was already open can erase newer edits you made from the command line.
   Using the old view’s Use default can also clear a newer host-folder override.

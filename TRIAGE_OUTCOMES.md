@@ -1889,22 +1889,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-discards-nov18.md`
 
-## codex-login-file-rendered-in-cleartext.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The Codex login field in
-  Settings → Credentials is an unmasked growing text box and a chosen auth.json's whole text, live access and refresh
-  tokens included, is put into it (settings/credentials/editor.rs), a deliberate port from the old app; every other
-  credential field is masked. SPEC.md allows a pasted or selected auth.json but says nothing about showing it. Bucket:
-  high (highest if on-screen display counts as disclosure).
-- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
-- Completion criteria: after choosing a file the editor shows its name and whether it validated, not its contents; a
-  pasted value is not displayed back in cleartext either. About 30-60 lines. Remove the feedback file and its index
-  entry in the same change. Narrowed on 2026-11-18 (planning page, question C): the user picked "A chosen file is never
-  shown; a paste stays visible", so a pasted value may stay visible; "whether it validated" is shown only when the
-  editor can check it by the helm's own rule. This supersedes the earlier wording above.
-- Execution: planned in `plans/queue/secrets-logs-and-screen.md`
-
 ## masked-fields-expose-secrets-to-text-services.md
 
 - Outcome: `discard`.
