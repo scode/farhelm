@@ -299,3 +299,23 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 ## Release note
 
 No release note needed.
+
+## Blocked
+
+Blocked on 2026-11-19 (claim 84005f).
+
+### A later Tensorlake pause can inherit the earlier time
+
+You approved clearing Farhelm's saved pause attribution when a Tensorlake host runs again. If you resume a host outside
+Farhelm and Tensorlake pauses it later, Hosts can still show the earlier “Suspended from Farhelm” label and time. The
+plan caps a single fix at about 100 changed lines, including tests.
+
+The first attempt fit in 95 lines. Review found that Retry during reconnection and a Hosts read in progress can each
+restore the old time. The full fix needs to clear the earlier pause from both places and let a new Farhelm Suspend keep
+its own timestamp. Simplifying the Hosts display takes most of the original allowance before the reconnect and Suspend
+changes.
+
+May this fix exceed the 100-line limit, or should it be split into two reviewed drafts that land together? I recommend a
+single larger fix so the state Farhelm records and the state Hosts shows can be reviewed together. With a split, one
+draft would make Hosts use the connection's current state and the other would clear the old pause safely. Users would
+get the corrected attribution once both landed. The other six backend fixes are in the plan's draft stack.
