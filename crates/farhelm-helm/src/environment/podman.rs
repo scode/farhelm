@@ -13,7 +13,7 @@ use crate::store::HelmStore;
 use crate::tensorlake::build::{PodmanProgress, RecipeBuilds};
 use anyhow::Context as _;
 use farhelm_proto::recipes::RecipeBase;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 mod build;
@@ -791,7 +791,8 @@ impl Podman {
 
     /// An interrupted launch can leave a container without a session. Offer
     /// cleanup for that row only at its recorded place, since another SSH route
-    /// can see the same container. Recorded helpers belong to recipe cleanup.
+    /// can see the same container, and only after launch work on it ends.
+    /// Recorded helpers belong to recipe cleanup.
     ///
     /// Every place is asked at once: the route is bounded as a whole
     /// ([`list_leftovers`]), so a sequential walk would make the bound cover
@@ -801,6 +802,7 @@ impl Podman {
     /// leftovers ([`listing`]).
     async fn leftovers(
         &self,
+        hosts_adding: impl Future<Output = HashSet<HostId>>,
     ) -> anyhow::Result<Vec<farhelm_proto::environment::ContainerLeftoverView>> {
         let rows = self.0.store.list_hosts().await?;
         let recipes = self.0.store.tensorlake_recipe_rows().await?;
@@ -827,10 +829,12 @@ impl Podman {
                 anyhow::Ok((place, owned))
             }))
             .await?;
-        // Read ownership after discovery: a helper created while listing must
-        // not briefly appear as an unrecorded deletion candidate.
+        // Discovery can see containers created while the places answer.
+        // Read ownership and launch state afterward so a new helper or a
+        // session still launching does not appear as a deletion candidate.
         let recipes = self.0.store.tensorlake_recipe_rows().await?;
         let rows = self.0.store.list_hosts().await?;
+        let hosts_adding = hosts_adding.await;
         let mut result = Vec::new();
         for (place, owned) in discovered {
             'container: for item in owned {
@@ -852,7 +856,8 @@ impl Podman {
                     host.get_or_insert(row.id);
                 }
                 if let Some(host) = host
-                    && !self.0.store.cached_sessions(host).await?.is_empty()
+                    && (hosts_adding.contains(&host)
+                        || !self.0.store.cached_sessions(host).await?.is_empty())
                 {
                     continue;
                 }
@@ -870,7 +875,7 @@ impl Podman {
 }
 
 /// `GET /api/container-orphans`: the containers this helm owns on its
-/// container hosts that no completed session on this helm holds, for
+/// container hosts that no session or in-flight Add on this helm holds, for
 /// Settings → Containers.
 ///
 /// The provider-owned Containers adapter uses the same concrete service
@@ -889,18 +894,25 @@ impl Podman {
 pub(crate) async fn list_leftovers(
     axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
 ) -> axum::response::Response {
-    listing(state.podman.as_deref().cloned()).await
+    listing(
+        state.podman.as_deref().cloned(),
+        state.provisioning.hosts_adding(),
+    )
+    .await
 }
 
-/// The body of [`list_leftovers`], taking only the Podman service so tests
-/// can hand it one whose commands stall.
+/// The body of [`list_leftovers`], so tests can supply a Podman service whose
+/// commands stall. The launch-state future is polled after discovery.
 ///
 /// A listing that reaches the bound is dropped and answers 504 with the
 /// shared "the host did not answer" words: a read leaves nothing to finish,
 /// and a partial list would claim that the hosts not yet asked have no
 /// leftovers. Every other failure keeps its 502 and the provider's reason, so
 /// a failed discovery stays an error rather than an empty list.
-async fn listing(podman: Option<Podman>) -> axum::response::Response {
+async fn listing(
+    podman: Option<Podman>,
+    hosts_adding: impl Future<Output = HashSet<HostId>>,
+) -> axum::response::Response {
     use axum::response::IntoResponse as _;
     let Some(podman) = podman else {
         return (
@@ -910,7 +922,7 @@ async fn listing(podman: Option<Podman>) -> axum::response::Response {
             .into_response();
     };
     let read = async move {
-        Ok(match podman.leftovers().await {
+        Ok(match podman.leftovers(hosts_adding).await {
             Ok(items) => axum::Json(items).into_response(),
             Err(error) => (
                 axum::http::StatusCode::BAD_GATEWAY,

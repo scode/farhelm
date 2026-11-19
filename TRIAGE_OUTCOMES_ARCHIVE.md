@@ -21648,6 +21648,34 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Natural detach drops the old attachment's input side before releasing the lock, as detach_stalled
   does (about 5 lines, optional test). Size gate: about 100 lines of diff (code, tests and docs, not counting
   TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
-  to the user. Remove the feedback file and its index entry in the same change.
+  to the user. Remove the feedback file and its index entry in the same change. <<<<<<< conflict 1 of 1 %%%%%%% diff
+  from: ukwxmxks 005bc344 "fix: cancel queued terminal input before admitting a new viewer" (parents of rebased
+  revision) \\\\\\\ to: ukwxmxks f1c95258 "fix: cancel queued terminal input before admitting a new viewer" (rebase
+  destination) -- Execution: change `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark
+- `plan/triage-misc-nov18/01-natural-detach-input-order`,
+  [PR #4156](https://github.com/scode/farhelm/pull/4156/changes). +- Execution: change
+  `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark `plan/triage-misc-nov18/01-natural-detach-input-order`,
+
+* [PR #4156](https://github.com/scode/farhelm/pull/4156/changes). +++++++ zxronrqs 7badc480 "fix: hide launching
+  containers from the leftovers list" (rebased revision)
+
 - Execution: change `ukwxmxkssnrqmwutpqzrtvzxkkzozrsv`, bookmark `plan/triage-misc-nov18/01-natural-detach-input-order`,
   [PR #4156](https://github.com/scode/farhelm/pull/4156/changes).
+
+## container-leftover-delete-races-first-session.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): mechanism confirmed. Settings →
+  Containers not on this helm lists any row-backed container with no cached sessions, without checking for a launch in
+  progress (environment/podman.rs), and the answer sends a host Delete with no "still no sessions" check
+  (settings/containers.rs); during the launch the removal is refused as busy, after it the new session is removed. The
+  prompt warns about everything in the container, but SPEC.md "Container sessions" limits the list to failed cleanup and
+  interrupted launches. The window lasts the whole launch. Bucket: high.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: containers whose first launch is still in progress are left out of the list (about 15-30 lines,
+  with a test). Remove the feedback file and its index entry in the same change.
+- Execution: change `zxronrqsxmoqznsyytmwzwmlmomkutpm`, bookmark
+  `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
+  [PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
+
+>>>>>>> conflict 1 of 1 ends

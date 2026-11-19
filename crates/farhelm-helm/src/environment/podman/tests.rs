@@ -738,7 +738,10 @@ async fn incomplete_session_rows_are_listed_and_refuse_rowless_cleanup() {
             .unwrap()
             .is_empty()
     );
-    let listed = provider.leftovers().await.unwrap();
+    let listed = provider
+        .leftovers(std::future::ready(HashSet::new()))
+        .await
+        .unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].host, Some(host));
     assert_eq!(listed[0].id, ID);
@@ -786,7 +789,10 @@ async fn a_second_ssh_route_cannot_list_or_delete_a_recorded_container_as_an_orp
         assert_eq!(owned[0].name, "farhelm-sess-test");
     }
 
-    let listed = provider.leftovers().await.unwrap();
+    let listed = provider
+        .leftovers(std::future::ready(HashSet::new()))
+        .await
+        .unwrap();
     // The first route still offers it once, as the host's own (row-backed) leftover, so hiding it from the twin does
     // not hide it everywhere.
     assert_eq!(listed.len(), 1);
@@ -1037,7 +1043,11 @@ async fn a_leftover_listing_answers_at_the_reply_bound_when_its_host_stalls() {
     // store's work on the blocking pool holds it still until it is done.
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let response = crate::rest_harness::within_reply_bound(listing(Some(provider))).await;
+    let response = crate::rest_harness::within_reply_bound(listing(
+        Some(provider),
+        std::future::ready(HashSet::new()),
+    ))
+    .await;
     let waited = started.elapsed();
     crate::rest_harness::assert_answered_at_reply_bound(waited, "the listing");
     assert!(
@@ -1155,7 +1165,11 @@ async fn the_listing_asks_its_container_hosts_concurrently() {
     );
     tokio::time::pause();
     let started = tokio::time::Instant::now();
-    let response = crate::rest_harness::within_reply_bound(listing(Some(provider))).await;
+    let response = crate::rest_harness::within_reply_bound(listing(
+        Some(provider),
+        std::future::ready(HashSet::new()),
+    ))
+    .await;
     let waited = started.elapsed();
     assert_eq!(
         response.status(),
