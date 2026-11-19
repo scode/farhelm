@@ -795,9 +795,6 @@ consequences.
 - [`short-trash-frame-reachability-unresolved.md`](short-trash-frame-reachability-unresolved.md) — A very short Trash
   window may leave its content or controls unreachable; actual supported geometry and recovery remain unverified.
 
-- [`sentence-case-sweep-leaves-authored-lowercase-text.md`](sentence-case-sweep-leaves-authored-lowercase-text.md) —
-  Several ordinary refusal messages and the no-alias label retain lowercase wording after the sentence-case change.
-
 - [`uuid-hold-intercepts-terminal-lease.md`](uuid-hold-intercepts-terminal-lease.md) — The destination-authority test's
   global UUID hold can catch late terminal startup instead of the intended launch key.
 

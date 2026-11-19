@@ -599,7 +599,7 @@ fn restart_with_refuses_a_held_field_and_says_why(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("agent type cannot change here: this dialog keeps agent type fixed for restart")
+        Some("Agent type cannot change here: this dialog keeps agent type fixed for restart")
     );
     assert_eq!(draft(cx), before, "nothing changed");
     assert_eq!(search_text(cx), "codex", "the box keeps its text");
@@ -612,7 +612,7 @@ fn restart_with_refuses_a_held_field_and_says_why(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("destination cannot change here: this dialog keeps destination fixed for restart")
+        Some("Destination cannot change here: this dialog keeps destination fixed for restart")
     );
     for _ in 0.."folder:/elsewhere".len() {
         keys(cx, "backspace");
@@ -621,7 +621,7 @@ fn restart_with_refuses_a_held_field_and_says_why(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("session name cannot change here: this dialog keeps session name fixed for restart")
+        Some("Session name cannot change here: this dialog keeps session name fixed for restart")
     );
     for _ in 0.."name:x".len() {
         keys(cx, "backspace");
@@ -669,7 +669,7 @@ fn replace_with_refuses_a_host_row(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("host cannot change here: this dialog keeps host fixed for replace")
+        Some("Host cannot change here: this dialog keeps host fixed for replace")
     );
     assert_eq!(draft(cx).host, Some(1), "the host stays");
 }
@@ -1072,10 +1072,15 @@ fn history_rows_are_refused_where_they_cannot_apply(cx: &mut TestAppContext) {
     test_support::click(cx, "launcher-search-row");
     let before = draft(cx);
     type_in(cx, "recent:");
+    assert!(
+        name_of(cx, "launcher-search-option-0")
+            .is_some_and(|name| name.starts_with("Recent setup: /src/project · ")),
+        "the first result is the recent setup"
+    );
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("destination cannot change here: this dialog keeps destination fixed for restart")
+        Some("Destination cannot change here: this dialog keeps destination fixed for restart")
     );
     assert_eq!(draft(cx), before, "nothing changed");
     for _ in 0.."recent:".len() {
@@ -1090,7 +1095,7 @@ fn history_rows_are_refused_where_they_cannot_apply(cx: &mut TestAppContext) {
     keys(cx, "enter");
     assert_eq!(
         name_of(cx, "launcher-search-refusal").as_deref(),
-        Some("destination cannot change here: this dialog keeps destination fixed for restart")
+        Some("Destination cannot change here: this dialog keeps destination fixed for restart")
     );
     assert_eq!(draft(cx), before, "nothing changed");
 
