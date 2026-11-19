@@ -188,8 +188,7 @@ Case: SSH command arrival preserves an independent approval owner.
 
 replaced: `layers_tests`, `focus_on_an_approval_card_outlives_the_dialog_and_goes_home_with_the_card`
 
-- With focus put on Allow without answering it, a late focus move the dialog makes inside itself (the SSH help's
-  recovery when its commands arrive) leaves focus on Allow, and nothing is answered.
+- With focus on Allow, a late focus move inside the dialog leaves focus on Allow and sends no answer.
 
 ### `tests/keyboard-scroll.spec.ts`
 

@@ -38,9 +38,7 @@ as it was.
 The same menu's **Documentation** item opens these docs in your browser, **Keyboard shortcuts** shows the
 [keys Farhelm uses](/docs/using/keyboard-shortcuts/), and **Release notes** opens
 [what changed in each release](/docs/release-notes/). **Announcements**, after Release notes once Farhelm has shown you
-an announcement, shows past announcements again. **SSH needs 2FA?** shows commands to start connections to
-[hosts that ask for approval on every ssh login](/docs/get-started/add-a-remote-host/). **Welcome** shows the
-introduction again, with a link to [your first session](/docs/get-started/first-session/). In the Farhelm app on your
-Mac its **Check for updates** item looks for a new release and installs it
-([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). On Linux, **Open-Source Notices** at the end shows
-the licenses of the open-source code and fonts the app includes.
+an announcement, shows past announcements again. **Welcome** shows the introduction again, with a link to
+[your first session](/docs/get-started/first-session/). In the Farhelm app on your Mac its **Check for updates** item
+looks for a new release and installs it ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). On Linux,
+**Open-Source Notices** at the end shows the licenses of the open-source code and fonts the app includes.

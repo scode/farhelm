@@ -5,10 +5,8 @@ use gpui::{IntoElement, ParentElement as _, TestAppContext, div};
 use crate::components::{HoverHelp, copy_button};
 use crate::test_support::{click, keys, open};
 
-/// The copy control copies the text it was given, the text the user was shown, and stays where it is: the old copy
-/// buttons (Copy plan, SSH help's commands) left focus on the button so a keyboard user could go on from it. Specified:
-/// with the copy button focused (Tab, so under either platform's click rule), a click puts its text on the clipboard
-/// exactly, line breaks and all, and focus is still on the button.
+/// Copy leaves focus on the button so the keyboard user can continue from it. With the button focused by Tab,
+/// clicking copies the supplied text exactly, including line breaks, and leaves the button focused.
 #[gpui::test]
 fn a_copy_button_copies_its_text_and_keeps_focus(cx: &mut TestAppContext) {
     let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));

@@ -1180,10 +1180,10 @@ fn the_kind_predicates_decide_for_sandboxes() {
     use crate::store::HostKind::{Local, Ssh, Tensorlake};
     let table = [
         // kind, reserved local, remote install, panel updates, panel uninstalls,
-        // missing local supervisor, remote, destination editable, manual masters,
+        // missing local supervisor, remote, destination editable,
         // removal deletes machine, ssh access
         (
-            Local, true, false, false, false, true, false, false, false, false, None,
+            Local, true, false, false, false, true, false, false, false, None,
         ),
         (
             Ssh,
@@ -1192,7 +1192,6 @@ fn the_kind_predicates_decide_for_sandboxes() {
             true,
             true,
             false,
-            true,
             true,
             true,
             false,
@@ -1207,24 +1206,12 @@ fn the_kind_predicates_decide_for_sandboxes() {
             false,
             true,
             false,
-            false,
             true,
             Some(SshAccessKind::Tensorlake),
         ),
     ];
-    for (
-        kind,
-        local,
-        install,
-        updates,
-        uninstalls,
-        missing,
-        remote,
-        editable,
-        masters,
-        deletes,
-        access,
-    ) in table
+    for (kind, local, install, updates, uninstalls, missing, remote, editable, deletes, access) in
+        table
     {
         assert_eq!(kind.is_reserved_local(), local, "{kind:?}");
         assert_eq!(kind.has_remote_install(), install, "{kind:?}");
@@ -1233,7 +1220,6 @@ fn the_kind_predicates_decide_for_sandboxes() {
         assert_eq!(kind.reports_missing_local_supervisor(), missing, "{kind:?}");
         assert_eq!(kind.is_remote(), remote, "{kind:?}");
         assert_eq!(kind.destination_is_editable(), editable, "{kind:?}");
-        assert_eq!(kind.offers_manual_ssh_masters(), masters, "{kind:?}");
         assert_eq!(kind.removal_deletes_machine(), deletes, "{kind:?}");
         assert_eq!(kind.ssh_access(), access, "{kind:?}");
     }

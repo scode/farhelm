@@ -2625,17 +2625,6 @@ neither its framing nor its version. Initial not-found/refused socket errors exi
 exit 1. Provisioning still requires its own wrapper records before treating 75 as positive absence: the connected marker
 grants no setup permission and supplies no resolved executable path.
 
-The authenticated `POST /api/ssh-connections` composes read-only command help from registered SSH destinations and an
-optional extra destination from Add host. It does not probe or mutate hosts. The helm uses its own state directory, the
-same connection overrides, socket fit checks and ControlPath encoder as its SSH clients, then shell-quotes every local
-argument. A relative state directory keeps its socket spelling and length gate: the pasted command uses a quoted
-subshell that changes to the helm's working directory first. The masters use `-N -f`, `BatchMode=no`,
-`ControlMaster=yes` and `ControlPersist=yes` so authentication can prompt and the idle connection stays available before
-a client attaches. Unsupported paths are explained once per connection at the top of the response; `/api/hosts` still
-exposes no helm state-directory field. The dialog reads once per opening and uses the existing native-first clipboard
-path to copy exact command bytes. From Add host the parent stays mounted with its draft, hidden while the child modal
-owns isolation; closing restores its isolation and focus. The SSH transport itself is unchanged.
-
 The ssh child's stderr is piped and relayed as bounded, control-escaped tracing events attributed to the host, not
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
 remote party a direct, unbounded write channel to the operator's own terminal, escape sequences included. The relay
@@ -2714,7 +2703,9 @@ The sessions actor checks for a live shared socket before dialing. With no maste
 interactive client in its own process group, with `ControlMaster=auto`, `SSH_ASKPASS_REQUIRE=force` and one password
 attempt. A short remote command leaves the authenticated master behind. Other clients keep `BatchMode=yes`. A lock on
 OpenSSH's expanded control path serializes sign-ins for aliases sharing that master. Container routes leave sign-in to
-the host owning the connection. A missing shareable socket keeps the existing unshared behavior.
+the host owning the connection. A socket path that exceeds OpenSSH's limit or contains a literal `${` takes the unshared
+batch path. A connection or host check that fails before reaching the host names the state-directory constraint that
+prevented a prompt.
 
 The helper reaches a 0600 socket in a private per-attempt directory. The helm publishes pending question text and
 creates a fresh reply id for each prompt. Replies carry the answer once, in memory, back to the helper's stdout. The
@@ -6692,9 +6683,9 @@ is not widened, because that needs a rebuild of `hosts`, and about ten tables ca
 column has a CHECK (`kind = 'ssh' OR tensorlake_sandbox IS NULL`), since relaxing a column CHECK later costs a rebuild
 too (schema 58). Rust derives a distinct `HostKind::Tensorlake` through the common kind/name/provider decode in every
 reader, so each exhaustive match and named predicate decides what a sandbox does: it has a remote install and is updated
-like an ssh host, is remote for browser links and tunnels, has no panel uninstall, no editable destination and no manual
-2FA connections, and its removal deletes the machine. A reader that decoded `kind` alone would let a sandbox row be
-retargeted or forgotten as an ssh row.
+like an ssh host, is remote for browser links and tunnels, has no panel uninstall or editable destination, uses
+Farhelm's SSH key without prompting, and its removal deletes the machine. A reader that decoded `kind` alone would let a
+sandbox row be retargeted or forgotten as an ssh row.
 
 Connections to a sandbox use the ordinary ssh argv, with its shared connections, plus the snapshot builder's Tensorlake
 ssh options (see "Tensorlake snapshot builds") before the option terminator, so builders and hosts share Farhelm's key,

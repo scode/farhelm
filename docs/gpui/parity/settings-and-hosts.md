@@ -185,9 +185,7 @@ automatically" (Deviations, "The Hosts panel").
 
 ### `tests/ssh-help.spec.ts`
 
-Tests: 4. Covers: ssh help displays and copies both registered-host commands.
-
-replaced (below)
+Retired with the old SSH command dialog. The new sign-in flows have their own desktop tests (below).
 
 ### `tests/workspace-trust.spec.ts`
 
@@ -697,41 +695,8 @@ A dialog the user closed shows nothing, and a refusal has no row to show on, sin
 
 ## `tests/ssh-help.spec.ts`
 
-SSH help is `hosts::ssh_help`. Its entry points are `hosts::ssh_help::open`, for the ? menu's "SSH needs 2FA?", which
-passes the ? button as the control closing returns focus to (the old app returned it to its Help toggle; the menu item
-goes with its popover), and which this area's tests stand in for with a button of their own; and Add host's "Start its
-connections yourself first." link, which opens it for the destination as typed. The ? menu's entry and the focus back on
-the ? button are the menu's own test, crates/gui/farhelm-gui/src/help_menu/tests.rs
-`ssh_help_opens_from_the_menu_and_returns_focus_to_the_button`.
-
-Replacing tests, in `crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs` unless named otherwise:
-
-- "ssh help displays and copies both registered-host commands":
-  `the_menu_entry_shows_each_hosts_two_commands_and_copies_their_exact_bytes` (the read and its body, focus on Close,
-  the host's name, destination and commands as host text, each Copy's name and the raw bytes it copies, Escape back to
-  the opener under macOS's click rule, nothing else sent). The helm's half, that a registered host gets both commands
-  and an unregistered destination is never added, is the helm's own test
-  (`ssh_help_lists_and_validates_without_mutation` in `crates/farhelm-helm/src/ssh_help.rs`).
-- "ssh help names the empty state and remains dismissible during a failed read":
-  `with_no_ssh_hosts_it_points_at_add_host_and_a_refusal_shows_in_its_place`.
-- "add host opens ssh help for its draft without losing the form":
-  `the_ssh_help_link_shows_the_drafts_commands_and_closing_returns_to_the_draft` in
-  `crates/gui/farhelm-gui/src/hosts/add/tests.rs` (the empty draft's line, Escape and Close back to the link with the
-  draft intact, the typed destination's section, no probe sent). Its checks of the link's color, underline and focus
-  ring are the `host-add-dialog` golden's and the shared button's; that the page behind takes no focus and Tab stays in
-  Add host afterwards are the layer manager's invariants, checked after every test step.
-- "ssh help returns focus when a setup offer replaced its opener":
-  `a_probe_answered_while_ssh_help_is_open_opens_nothing_over_it` in `crates/gui/farhelm-gui/src/hosts/add/tests.rs`. A
-  setup offer never replaces Add host once the user has moved on since Add, and the click on the link is moving on: with
-  SSH help open over a probe, the plan opens no confirmation, SSH help keeps focus, Add host's line says the user moved
-  on, and closing SSH help returns focus to the link, which is still there. A probe that registers the host closes Add
-  host, and SSH help over it closes with it, as the old help went with its form; the test checks that too, with focus
-  back on the rail's Add host.
-- No old spec covered the reasons the helm cannot compose a connection's command:
-  `an_unavailable_connection_is_named_once_at_the_top_and_offers_no_copy`.
-
-The reply's types are the helm's own, in `farhelm-proto` (`farhelm_proto::ssh_help`), with a wire-shape test there
-(`the_reply_keeps_its_wire_shape`).
+The old command dialog and its endpoint were retired when the desktop app began showing SSH questions. See
+`hosts/add/tests.rs` for the inline setup question and `sign_in/tests.rs` for questions beside the attention list.
 
 ## `tests/provisioning.spec.ts`, setup progress, failure and rerun
 
@@ -1970,16 +1935,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Continue sends the name trimmed.** The old dialog checked the trimmed name but sent it as typed; the helm trims the
   alias but derives the sandbox's `farhelm-host-…` name from the string sent, so a name with spaces around it now gets
   the sandbox name of the trimmed one.
-
-### SSH help
-
-- **Add host stays drawn under SSH help.** The old Add host form hid itself while SSH help was open over it (its veil
-  stayed). Here it stays on screen under SSH help's veil, dimmed twice: the layer manager has no hidden layer, and
-  closing SSH help returns focus to the link only while the link is drawn.
-- **No golden.** The reference screens have no SSH help scene.
-- **A refusal shows the helm's words alone**, in the app's shared refusal wording; the old line started with the method,
-  URL and status. An unusable typed destination shows the helm's 400 body as it sent it, a JSON object with its `error`
-  field, which the old line also showed raw after its prefix.
 
 ### The setup confirmation
 

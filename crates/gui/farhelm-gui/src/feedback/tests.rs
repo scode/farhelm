@@ -67,7 +67,7 @@ impl Render for HelpBar {
                 Button::new(
                     "help-toggle",
                     "Help",
-                    HoverHelp::tooltip("Help: feedback, docs and SSH help"),
+                    HoverHelp::tooltip("Help: feedback and docs"),
                     Role::Button,
                 )
                 .focus(&self.toggle)

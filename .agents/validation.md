@@ -862,13 +862,14 @@ systemd or SSH substrate ran.
   and then Title A–Z from the list title's order menu makes the helm store each order and the window draw the three in
   the helm's own order for it, and Recently active is chosen again; and on a session of its own, open and idle, Running
   takes its row out of the list while the details bar still names it, and the Rename shortcut renames it in the helm's
-  listing; from the Help menu, Send feedback opens its dialog, a typed contact brings up Re-use for future feedback, and
-  Cancel closes it with focus back on the ? button, never pressing Send; and a click on the session list header's Trash
-  opens its dialog with focus on Close and, once the helm has read the local host's trash, says the trash is empty, and
-  Escape closes it with focus back on Trash; and on a session of its own, the list heading's New opens the launcher, and
-  the quick switcher's `New session named` row for a typed name opens it with that name in its Name field, neither
-  starting a session; from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it
-  with focus back on the ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every
+  listing; the Help menu opens on Send feedback, has no SSH command item, and Escape returns focus to Help; from the
+  Help menu, Send feedback opens its dialog, a typed contact brings up Re-use for future feedback, and Cancel closes it
+  with focus back on the ? button, never pressing Send; and a click on the session list header's Trash opens its dialog
+  with focus on Close and, once the helm has read the local host's trash, says the trash is empty, and Escape closes it
+  with focus back on Trash; and on a session of its own, the list heading's New opens the launcher, and the quick
+  switcher's `New session named` row for a typed name opens it with that name in its Name field, neither starting a
+  session; from the Help menu, Welcome reopens the Welcome card with focus on Got it, and Escape closes it with focus
+  back on the ? button, the helm's `welcome_seen` unchanged; and the smoke's own run, started as every
   `gui-agent.py start` is with the start dialogs off, shows no Welcome card and leaves it unseen, while a second app run
   started with `--start-dialogs` (no sessions, `--no-build`, stopped whatever happens) shows the card by itself and
   writes nothing; and on a session of its own running the spawning fake agent, a `farhelm spawn` from inside it waits on

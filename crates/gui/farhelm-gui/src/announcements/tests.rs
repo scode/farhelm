@@ -4,7 +4,7 @@
 //! and when it opens nothing. Those run in the Welcome card's test window (`welcome::tests::open_start`), since the
 //! batch is that owner's to open; the card's tests cover the batch waiting behind the card.
 //!
-//! As SSH help's tests do, the dialog is opened from a stand-in for the `?` button: one button in a root view of the
+//! The dialog is opened from a stand-in for the `?` button in the root view of the
 //! test's own, whose click takes a mark and calls [`super::open_history`] with its own focus handle, which is where
 //! closing must return focus. The queue comes from the fake helm's snapshot, as the helm pushes it. Every step ends in
 //! one of the shared harness's step helpers, so the focus and layer invariants are checked after each.

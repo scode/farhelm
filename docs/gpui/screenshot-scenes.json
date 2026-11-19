@@ -2952,7 +2952,7 @@
     },
     {
       "golden": "host-add-dialog",
-      "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, the second-factor question with its SSH help link, Cancel and Add",
+      "title": "The Add host dialog with an SSH destination typed, the optional alias, Cancel and Add",
       "reference": "host-add-dialog"
     },
     {

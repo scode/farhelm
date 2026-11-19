@@ -1,8 +1,7 @@
 //! The command well: a command the helm composed, in a monospace well that wraps it, with Copy beside it.
 //!
-//! It ports the old `.ssh-help-command` and `.tensorlake-command` rules (`app.css` at reference commit `24bc0580`),
-//! which SSH help and Settings → Tensorlake had each built by hand; this is the one copy. It draws no caption (SSH
-//! help's label is its own) and no copy confirmation (Tensorlake's line is its section's, told through `on_copy`).
+//! It keeps the old `.tensorlake-command` layout (`app.css` at reference commit `24bc0580`). Settings owns the
+//! line confirming a copy, since it also shows the current state of the key. The well tells it through `on_copy`.
 
 use gpui::{
     App, FocusHandle, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,

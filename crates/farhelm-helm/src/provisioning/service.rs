@@ -3589,12 +3589,6 @@ impl ProvisioningService {
             .ok_or_else(|| anyhow::Error::new(HostStoreError::HostNotFound(host)))
     }
 
-    /// The helm's state path also owns both SSH control sockets. Command help
-    /// uses this production binding rather than a client-provided path.
-    pub(crate) fn local_state_dir(&self) -> &std::path::Path {
-        &self.layout.local_state_dir
-    }
-
     /// Resolve execution access afresh for each probe. Installation coordinates
     /// stay those of the admitted host, while its route comes from the store.
     async fn probe_target_for_row(&self, row: &HostRow) -> anyhow::Result<ProbeTarget> {

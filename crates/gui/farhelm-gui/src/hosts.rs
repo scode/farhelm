@@ -26,9 +26,8 @@
 //! all, Uninstall, Retry and Adopt refuse to start while a session launch is in flight ([`launch_in_flight`]), as the
 //! old app refused a host change during a launch.
 //!
-//! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
-//! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?". Add host opens it for the destination
-//! typed there.
+//! SSH setup, update and uninstall can wait for sign-in before their first remote command. A registered host's
+//! question appears beside its attention row. A question for a draft stays within Add host.
 //!
 //! The menu's Remove asks the removal confirmation, or with "Remove hosts without asking" on goes ahead at once
 //! ([`remove`]). A removal asked through the confirmation reports a refusal inside it, which stays up through the
@@ -122,7 +121,6 @@ pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
 pub(crate) mod setup_sign_in;
-pub mod ssh_help;
 pub mod status;
 pub(crate) mod uninstall;
 pub(crate) mod update;
@@ -1243,8 +1241,8 @@ fn detail_line(kind: Kind, line: HostSentence, palette: &Palette) -> AnyElement 
 }
 
 /// A host dialog's error line (`.create-session-error`): `line`, which names the helm's or a host's words through the
-/// sentence's host parts, at 12 pixels in the danger ink, padded as the old line was. Add host's line and SSH help's
-/// refusals and unavailable connections share it, so the two dialogs' errors cannot drift apart.
+/// sentence's host parts, at 12 pixels in the danger ink. Host actions use this because a refusal can include
+/// the destination or a remote host's own diagnostic.
 fn problem_line(line: HostSentence, palette: &Palette) -> AnyElement {
     div()
         .pt(px(2.))

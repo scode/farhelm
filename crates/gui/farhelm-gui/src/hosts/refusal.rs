@@ -15,10 +15,9 @@
 //! it for a refused setup and, with "Remove hosts without asking" on, Remove, which take it as their pieces of the port
 //! arrive ([`Refusal::of`] takes the action's words).
 //!
-//! It is not a question: it asks nothing, so it is a dialog of its own with Close in its footer and the header's ×, as
-//! SSH help is; Remove, when drawn, hands over to Remove host's own question rather than acting itself. What it shows is
-//! frozen when it opens, as the old dialog kept its host snapshot, so it stays readable if the registry stops listing
-//! the host meanwhile.
+//! Close in the footer and the header's × dismiss the refusal. When shown, Remove opens the host removal question.
+//! The refusal keeps the host snapshot from when it opened, so it stays readable if the registry stops listing the
+//! host meanwhile.
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{HelmMarker, HostView};

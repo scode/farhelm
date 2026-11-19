@@ -1044,17 +1044,6 @@ impl HostKind {
         }
     }
 
-    /// Whether the 2FA help may offer commands that start this host's
-    /// shared ssh connections by hand. Those connections use the user's own
-    /// ssh setup, which a sandbox's do not, and Tensorlake's gateway never
-    /// asks for an interactive approval.
-    pub fn offers_manual_ssh_masters(self) -> bool {
-        match self {
-            HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake | HostKind::Podman => false,
-        }
-    }
-
     /// Whether removing this row deletes the machine behind it (D6:
     /// terminate the sandbox and delete its snapshots) rather than merely
     /// forgetting the entry. [`HelmStore::remove_host_row`] enforces it.

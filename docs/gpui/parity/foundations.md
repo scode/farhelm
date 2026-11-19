@@ -166,8 +166,6 @@ scrolling body and its body stop are tested once, on the frame: crates/gui/farhe
 - "host-settings scrollports stay reachable while saving": superseded, since no host settings control goes unavailable
   while a save runs, so the body never loses its last stop ([Settings and hosts](settings-and-hosts.md) records the same
   after its host settings tests)
-- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `every_text_only_state_gives_the_body_a_stop_that_tab_reaches`
-  (text-only SSH help scrollports have keyboard entry points)
 - crates/gui/farhelm-gui/src/hosts/remove/tests.rs `the_removal_questions_body_has_a_stop_that_tab_reaches` (remove-host
   scrollports have keyboard entry points)
 - crates/gui/farhelm-gui/src/hosts/settings/tests.rs `tab_walks_down_the_body_while_a_destination_save_is_held`
@@ -245,19 +243,8 @@ partly
 - crates/gui/farhelm-gui/src/components/tests/scroll_box.rs
   `an_approvals_complete_initial_prompt_is_keyboard_scrollable` (an approval's complete initial prompt is
   keyboard-scrollable)
-- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `every_text_only_state_gives_the_body_a_stop_that_tab_reaches` (SSH
-  help remains keyboard-scrollable with loading, error, no hosts and no commands)
-- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `a_long_command_wraps_inside_the_dialog` (long SSH commands wrap
-  while Copy preserves their exact bytes; the bytes are pinned by
-  `the_menu_entry_shows_each_hosts_two_commands_and_copies_their_exact_bytes`)
 - crates/gui/farhelm-gui/src/hosts/remove/tests.rs `the_removal_questions_body_has_a_stop_that_tab_reaches` (the
   remove-host explanation is keyboard-scrollable)
-- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `the_commands_arriving_leave_focus_usable` (SSH command arrival
-  keeps usable focus from body, dismiss and backdrop; from the body, focus goes to the closest remaining control, the
-  Sessions Copy, where the old app went to the footer Close, and a veil press keeps Close focused, where the old
-  backdrop click left nothing focused, both as SPEC.md, "Opening and closing", has it)
-- crates/gui/farhelm-gui/src/hosts/ssh_help/tests.rs `a_reply_to_a_closed_opening_leaves_a_reopened_one_alone` (SSH help
-  closed before its reply leaves a reopened region independent)
 - "host settings remain keyboard-scrollable while every setting is saving", "host settings keep usable focus after a
   successful checkbox save" and "host settings automatic busy recovery remembers the commands checkbox": superseded,
   decided by the migration's orchestrator on 2026-11-16. All three rest on the old dialog disabling every control while

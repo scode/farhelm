@@ -257,24 +257,23 @@ helm's own machine has no uninstall in the panel: Farhelm there is removed with 
 [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
 The helm connects to each registered supervisor through local IPC, the user's own SSH access, or a Podman exec pipe into
-a container. A remote container uses SSH to its container host and Podman exec there. Passwordless SSH from the helm's
-machine remains the prerequisite for remote hosts, and the helm handles connectivity transparently. Supervisors listen
-on no network port except IPv4 loopback ports claimed by a helm for an environment host's configured recipe tunnels.
-Those listeners belong to the claiming connection and close when it ends. The helm limits these claims to environment
-hosts. The supervisor's transport-independent protocol does not know the provider or host kind. The helm's own machine
-is a host without registration: its supervisor (the one the desktop app starts or reuses) is reached locally, no
-SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts, minus SSH: a supervisor
-that answers is discovered and registered like any other, and the panel never touches the unit file that runs it. What
-the panel does NOT do on the helm's own machine is install one. The desktop app starts that machine's supervisor itself
-whenever it opens and none answers, so the local row tells the user to quit Farhelm and open it again instead of
-offering to install, and the panel never builds a second installation beside the app's. Until a supervisor exists the
-local host appears with that instruction, not as a phantom unreachable host; any detail the helm gives is shown as
-evidence, never as the instruction. There is no supervisor-to-supervisor connection or transitive aggregation. A
-container host's supervisor does not relay the container's protocol. The helm sees exactly the hosts in its registry,
-including the session-owned hosts described under [Sandbox sessions](#sandbox-sessions) and
-[Container sessions](#container-sessions). Those entries participate in ordinary host management and session
-aggregation, with their permanent rail icons hidden. The machine running the helm must therefore be able to reach every
-registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
+a container. A remote container uses SSH to its container host and Podman exec there. When an ordinary SSH host asks for
+sign-in, the desktop app shows its question. Supervisors listen on no network port except IPv4 loopback ports claimed by
+a helm for an environment host's configured recipe tunnels. Those listeners belong to the claiming connection and close
+when it ends. The helm limits these claims to environment hosts. The supervisor's transport-independent protocol does
+not know the provider or host kind. The helm's own machine is a host without registration: its supervisor (the one the
+desktop app starts or reuses) is reached locally, no SSH-to-self involved. The helm manages it through the same
+discovery-first flow as remote hosts, minus SSH: a supervisor that answers is discovered and registered like any other,
+and the panel never touches the unit file that runs it. What the panel does NOT do on the helm's own machine is install
+one. The desktop app starts that machine's supervisor itself whenever it opens and none answers, so the local row tells
+the user to quit Farhelm and open it again instead of offering to install, and the panel never builds a second
+installation beside the app's. Until a supervisor exists the local host appears with that instruction, not as a phantom
+unreachable host; any detail the helm gives is shown as evidence, never as the instruction. There is no
+supervisor-to-supervisor connection or transitive aggregation. A container host's supervisor does not relay the
+container's protocol. The helm sees exactly the hosts in its registry, including the session-owned hosts described under
+[Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Those entries participate in
+ordinary host management and session aggregation, with their permanent rail icons hidden. The machine running the helm
+must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel).
 
 The host registry belongs to the helm. An ordinary remote entry carries its SSH destination, and an environment entry
 carries its provider binding and place. A host can carry an optional alias, shown in place of its destination everywhere
@@ -4650,26 +4649,14 @@ inside the environment the first attempt created, where a retry could not find i
 ## Feedback
 
 The host rail's foot has a **?** button below the settings gear. It opens a small menu with these items, in order:
-**Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard shortcuts**, **Release notes**, **SSH needs 2FA?**
-and **Welcome**. Chat on Discord opens the project's Discord invite (`https://discord.gg/G3bukxTjXR`) the same way as
-Documentation. Documentation opens the docs site (`https://farhelm.io/docs/`) in the system browser. Keyboard shortcuts
-opens the dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens the general release
-notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. After this helm
-has shown an announcement, **Announcements** appears directly after **Release notes**, with the description **Shows
-previously shown announcements again**; it reopens the shown history described below. The installed desktop app's menu
-adds **Check for updates** last (see [Installation and updates](#installation-and-updates)). Welcome shows the welcome
-card again.
-
-**SSH needs 2FA?** shows the two shell commands for each registered SSH host: **Sessions connection** and **Setup and
-updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
-each prompts normally, then stays connected in the background. The dialog recommends taking a screenshot and asking an
-agent to automate the commands. With no SSH hosts, it points at Add host. Add host also links to this dialog with
-commands for its typed destination; closing it returns to the intact draft. An empty draft asks for a destination, and
-an invalid destination is refused before composing commands. Commands use the helm's actual socket paths and connection
-overrides, including disabling port forwards: clients cannot cancel forwards belonging to a master someone already
-started. When the state path is too long for either socket, contains literal `${`, or is not UTF-8, the dialog names the
-affected connection and reason once at the top, including the path and byte limit where applicable, instead of commands
-for that connection. It never starts SSH or registers a host.
+**Send feedback**, **Chat on Discord**, **Documentation**, **Keyboard shortcuts**, **Release notes** and **Welcome**.
+Chat on Discord opens the project's Discord invite (`https://discord.gg/G3bukxTjXR`) the same way as Documentation.
+Documentation opens the docs site (`https://farhelm.io/docs/`) in the system browser. Keyboard shortcuts opens the
+dialog described in [Desktop window chrome](#desktop-window-chrome). Release notes opens the general release notes page
+(`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. After this helm has shown
+an announcement, **Announcements** appears directly after **Release notes**, with the description **Shows previously
+shown announcements again**; it reopens the shown history described below. The installed desktop app's menu adds **Check
+for updates** last (see [Installation and updates](#installation-and-updates)). Welcome shows the welcome card again.
 
 ### Welcome card
 
@@ -4806,10 +4793,10 @@ a known_hosts file in the helm's state directory, never in the user's own.
   holds; hardening that keeps other software from passing for the app goes through that credential.
 - **Helm to supervisor**: ordinary remote supervisors use the user's SSH access. Containers use a Podman exec pipe, with
   SSH to the container host when remote. The helm's own machine's supervisor uses local IPC. These all carry the same
-  supervisor protocol. Passwordless SSH authenticates with the user's keys, with the Tensorlake exception below.
-  Supervisors listen on no network port except IPv4 loopback listeners claimed for configured environment recipe
-  tunnels, owned by that full-authority connection. The helm limits claims to environment hosts. The supervisor does not
-  know its provider or host kind, and there is no supervisor token to manage.
+  supervisor protocol. SSH authenticates with the user's configuration and can ask for sign-in in the desktop app.
+  Tensorlake uses the separate key described below. Supervisors listen on no network port except IPv4 loopback listeners
+  claimed for configured environment recipe tunnels, owned by that full-authority connection. The helm limits claims to
+  environment hosts. The supervisor does not know its provider or host kind, and there is no supervisor token to manage.
 - **Session to supervisor (spawn)**: the spawn CLI reaches its own supervisor over local IPC only, never the network.
   Its per-session credential identifies the asking session and dies with that session. It does not restrict permitted
   operations to that session: fleet operations follow the Agent-spawned sessions contract and the confirmed trust
