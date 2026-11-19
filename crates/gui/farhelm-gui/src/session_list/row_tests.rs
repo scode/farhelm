@@ -248,6 +248,7 @@ fn an_age_moves_on_when_the_clock_ticks_even_in_an_inactive_window(cx: &mut Test
 /// host list read, the host's name is the one the helm sent. Specified: a row with both paints `buildbox`, `:` and its
 /// directory with the home folded (`~/src/a`); a row with no directory paints `buildbox` and no `:`; a row whose helm
 /// sent no host name paints its directory (`/srv/ci`) and no `:`; a row with neither paints only its title and age.
+/// The screenshot callout id names the line itself, so the title and age must be outside that node.
 #[gpui::test]
 fn the_last_line_names_the_host_and_directory_without_a_dangling_separator(
     cx: &mut TestAppContext,
@@ -269,6 +270,15 @@ fn the_last_line_names_the_host_and_directory_without_a_dangling_separator(
     assert_eq!(row_texts(&nodes, "host"), ["host", "1m", "buildbox"]);
     assert_eq!(row_texts(&nodes, "dir"), ["dir", "1m", "/srv/ci"]);
     assert_eq!(row_texts(&nodes, "none"), ["none", "1m"]);
+    let texts = texts_within(&nodes, "session-row-both-place");
+    assert_eq!(
+        texts
+            .iter()
+            .map(|text| text.text.as_str())
+            .collect::<Vec<_>>(),
+        ["buildbox", ":", "~/src/both"]
+    );
+    assert!(node(&nodes, "session-row-none-place").is_none());
 }
 
 /// The last line's parts are the one place a row's host name and directory are chosen, so they are pinned apart from

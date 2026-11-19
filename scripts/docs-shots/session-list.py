@@ -100,11 +100,9 @@ SHOTS = [
                 "safety check can refuse an action or ask you.",
                 side="right", dx=70, dy=85,
             ),
-            # Below the row rather than beside it: the right-hand space already holds the other two, and an arrow from
-            # there would cross one of them. The row's host and directory line has no element of its own; it is the
-            # row's last line, so an arrow to the row's bottom edge lands on it. Shifted left to the window's edge, as
-            # the old shot's box sat, which keeps the rail's foot in the crop.
-            Callout(f"id:session-item-{{session:{WAITING}}}", "The host and directory it runs in.", side="bottom",
+            # Keep the box below the host and directory line so its arrow clears both callouts to the right.
+            # The left shift keeps the navigation rail's foot in the crop.
+            Callout(f"id:session-row-{{session:{WAITING}}}-place", "The host and directory it runs in.", side="bottom",
                     dx=-90, dy=10),
         ],
         max_width=930,
