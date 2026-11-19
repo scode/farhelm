@@ -41,6 +41,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   race (a Suspend clicked while Farhelm records that the sandbox ran can reuse the first pause's time). The alternative
   was holding the six fixes for one larger pause draft.
 
+- **Revisit limiting the SSH sign-in startup focus to Farhelm's first connection attempts.** Decided on the maintainer's
+  behalf by the landing monitor on 2026-11-19, when ssh-askpass-2fa's landing blocked: as built, a sign-in question
+  could open with its answer field focused at any time until the user's first key or click after Farhelm opened, so a
+  question arriving an hour after a login-time start could catch typing meant for a terminal and send it to the host as
+  the answer. The plan now lets only questions from the connection attempts Farhelm makes when it starts open focused
+  that way (still only before the first key or click); later reconnects wait in the sidebar unless the user started the
+  action. The alternatives were a fixed time limit, ending the exception when the window first loses focus, or keeping
+  it unbounded with SPEC.md saying so.
+
 ## Near term
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
