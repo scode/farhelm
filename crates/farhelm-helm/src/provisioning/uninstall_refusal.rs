@@ -72,6 +72,13 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
              the host's settings"
                 .to_string()
         }
+        HostState::OwnedElsewhere { owner, .. } => format!(
+            concat!(
+                "Farhelm can't uninstall from this host while another Farhelm ({}) manages it. ",
+                "Use Take over in Hosts before uninstalling."
+            ),
+            owner.tag
+        ),
         HostState::IdentityUnverified { .. } => {
             "Farhelm can't uninstall from this host: something answers at its ssh destination \
              but doesn't say which Farhelm install it is, so Farhelm can't confirm it is the \

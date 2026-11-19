@@ -249,6 +249,7 @@ pub(crate) fn runs_newer_version(state: &HostStateView) -> bool {
         HostStateView::Connecting { .. }
         | HostStateView::Unreachable { .. }
         | HostStateView::IdentityMismatch { .. }
+        | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }
         | HostStateView::Duplicate { .. }
         | HostStateView::TensorlakeChanging { .. }
@@ -328,6 +329,7 @@ pub(crate) fn adoptable(state: &HostStateView) -> Option<&str> {
         | HostStateView::Unreachable { .. }
         | HostStateView::Connected { .. }
         | HostStateView::VersionSkew { .. }
+        | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }
         | HostStateView::Duplicate { .. }
         | HostStateView::TensorlakeChanging { .. }
@@ -509,7 +511,8 @@ pub(crate) fn offers(
     in_flight: bool,
 ) -> Offers {
     let kind = HostKind::of(host);
-    let provisions = kind.offers_provisioning_actions();
+    let owned_elsewhere = matches!(host.state, HostStateView::OwnedElsewhere { .. });
+    let provisions = kind.offers_provisioning_actions() && !owned_elsewhere;
     let too_new = runs_newer_version(&host.state);
     let suspended = matches!(
         host.state,
@@ -560,7 +563,7 @@ pub(crate) fn offers(
             .provider()
             .filter(|_| !deleting)
             .map(|provider| (provider, !busy)),
-        uninstall: kind.uninstalls_from_panel().then_some(!busy),
+        uninstall: (kind.uninstalls_from_panel() && !owned_elsewhere).then_some(!busy),
         retry: (!deleting).then_some(!busy),
         // A Suspend is never offered while the change runs ([`lifecycle_of`]), so `changing` only greys a Resume.
         lifecycle: lifecycle_of(host).map(|verb| (verb, !busy && !changing)),

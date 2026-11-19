@@ -52,6 +52,7 @@ pub(crate) fn words(state: &HostStateView) -> &'static str {
         HostStateView::Connected { .. } => "Connected",
         HostStateView::VersionSkew { .. } => "Needs update",
         HostStateView::IdentityMismatch { .. } => "Identity mismatch",
+        HostStateView::OwnedElsewhere { .. } => "Managed by another Farhelm",
         HostStateView::IdentityUnverified { .. } => "Identity unverified",
         HostStateView::Duplicate { .. } => "Duplicate",
         HostStateView::TensorlakeChanging { starting: true, .. } => "Starting…",
@@ -133,6 +134,7 @@ pub(crate) fn tone(state: &HostStateView) -> Tone {
         HostStateView::Suspended { .. } => Tone::Quiet,
         HostStateView::VersionSkew { .. }
         | HostStateView::IdentityMismatch { .. }
+        | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }
         | HostStateView::Duplicate { .. }
         | HostStateView::Retired { .. }
@@ -519,6 +521,10 @@ pub(crate) fn evidence(
             .text("; the destination now reports ")
             .host(&install_id(reported))
             .text(", so nothing is connected until this is decided"),
+        HostStateView::OwnedElsewhere { owner, .. } => line
+            .text("Managed by another Farhelm (")
+            .mono(&pushed(&owner.tag))
+            .text(")"),
         HostStateView::IdentityUnverified { recorded } => line
             .text(
                 "The host answered without an identity, so this helm cannot confirm it is still the install \
@@ -635,6 +641,9 @@ pub(crate) fn remedy(
         HostStateView::IdentityMismatch { .. } => Some(line.text(
             "Adopt the identity the host reports, or fix the destination; adopting resets all five of this host's \
              permissions to asking",
+        )),
+        HostStateView::OwnedElsewhere { .. } => Some(line.text(
+            "Use Take over in Hosts to manage this host and its sessions from this Farhelm.",
         )),
         HostStateView::IdentityUnverified { .. } => Some(line.text(
             "Fix the host so it reports its identity, or retarget or remove this entry — it is re-probed meanwhile, \

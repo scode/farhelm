@@ -668,6 +668,7 @@ pub(in crate::hosts) fn read_plan(outcome: &Outcome) -> Result<Plan, Problem> {
             steps: *steps,
         }),
         Ok(ProbeReply::Discovered { .. })
+        | Ok(ProbeReply::OwnedElsewhere { .. })
         | Ok(ProbeReply::Manual { .. })
         | Ok(ProbeReply::Provisionable { .. }) => Err(Problem::App(
             "The helm did not return a Tensorlake creation plan",

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use farhelm_proto::io::{
     ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake, handshake_as_helm,
 };
-use farhelm_proto::{ControlMsg, HelmHello};
+use farhelm_proto::{ControlMsg, HelmHello, HelmOwnerRefusal};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -76,6 +76,16 @@ pub(crate) enum ProbeObservation {
         /// supervisor opens; `None` (an older supervisor) is never refused.
         database_schema: Option<i64>,
     },
+    /// The supervisor answered but refused this helm. Keep the dial
+    /// coordinates so an explicit Add host confirmation can register it
+    /// without installing anything.
+    OwnedSupervisor {
+        owner: HelmOwnerRefusal,
+        build_version: String,
+        host_identity: Option<String>,
+        dial_farhelm: PathBuf,
+        dial_state_dir: Option<PathBuf>,
+    },
     /// A supervisor answered the hello but speaks a DIFFERENT protocol
     /// version, so the exchange stopped at the version refusal. Presence is
     /// PROVEN — only a live supervisor sends a hello at all — and the skew
@@ -130,7 +140,9 @@ pub async fn discover_local_supervisor(
         probe_state_dir: Some(state_dir.to_path_buf()),
     };
     match backend.probe(&target).await.map_err(anyhow::Error::new)? {
-        ProbeObservation::Supervisor { .. } => Ok(LocalSupervisorDiscovery::Answering),
+        ProbeObservation::Supervisor { .. } | ProbeObservation::OwnedSupervisor { .. } => {
+            Ok(LocalSupervisorDiscovery::Answering)
+        }
         // A skewed supervisor is still a supervisor OWNING the socket and
         // the state directory: starting a rival because we cannot talk to
         // it would be strictly worse than reusing it and letting the
@@ -2451,19 +2463,10 @@ impl ProvisioningBackend for SystemBackend {
         drop(writer);
         match handshake_result {
             Ok(Ok(ControlMsg::Hello {
-                helm_owner_refusal: Some(owner),
-                ..
-            })) => {
-                stop_probe(&mut child, stderr_task).await;
-                Err(BackendFailure::new(
-                    format!("the host is managed by another Farhelm ({})", owner.tag),
-                    "",
-                ))
-            }
-            Ok(Ok(ControlMsg::Hello {
                 build_version,
                 host_identity,
                 database_schema,
+                helm_owner_refusal,
                 ..
             })) => {
                 let stderr = stop_probe(&mut child, stderr_task).await;
@@ -2498,6 +2501,15 @@ impl ProvisioningBackend for SystemBackend {
                     target.probe_farhelm.clone()
                 };
                 path_text(&dial_farhelm)?;
+                if let Some(owner) = helm_owner_refusal {
+                    return Ok(ProbeObservation::OwnedSupervisor {
+                        owner,
+                        build_version,
+                        host_identity,
+                        dial_farhelm,
+                        dial_state_dir: target.probe_state_dir.clone(),
+                    });
+                }
                 Ok(ProbeObservation::Supervisor {
                     build_version,
                     host_identity,

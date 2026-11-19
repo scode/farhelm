@@ -125,6 +125,13 @@ impl From<&HostState> for HostStateView {
                 recorded: recorded.clone(),
                 reported: reported.clone(),
             },
+            HostState::OwnedElsewhere {
+                host_identity,
+                owner,
+            } => HostStateView::OwnedElsewhere {
+                host_identity: host_identity.clone(),
+                owner: owner.clone(),
+            },
             HostState::IdentityUnverified { recorded } => HostStateView::IdentityUnverified {
                 recorded: recorded.clone(),
             },
@@ -1479,6 +1486,30 @@ pub(crate) async fn adopt_host(
     }
 }
 
+/// The supervisor and owner shown on the frozen row when the user pressed
+/// Take over. Refuse a stale click if another refusal has replaced it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TakeoverRequest {
+    pub(crate) host_identity: String,
+    pub(crate) owner_revision: String,
+}
+
+/// Authorize a single takeover hello and wake the host's existing actor.
+pub(crate) async fn take_over_host(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(request): axum::Json<TakeoverRequest>,
+) -> impl IntoResponse {
+    match state
+        .manager
+        .take_over(host, &request.host_identity, &request.owner_revision)
+    {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(error) => http_error(error.into()),
+    }
+}
+
 /// `POST /api/hosts/{id}/retry` — reconnect this host now.
 ///
 /// The "try again" control SPEC.md's always-visible connection state
@@ -1682,6 +1713,15 @@ mod tests {
             HostStateView::IdentityMismatch {
                 recorded: "a".to_string(),
                 reported: "b".to_string(),
+            },
+            HostStateView::OwnedElsewhere {
+                host_identity: "a".into(),
+                owner: farhelm_proto::HelmOwnerRefusal {
+                    tag: "ab12".into(),
+                    owner_revision: "owner-1".into(),
+                    connected: true,
+                    last_connected_at: 1,
+                },
             },
             HostStateView::IdentityUnverified {
                 recorded: "a".to_string(),

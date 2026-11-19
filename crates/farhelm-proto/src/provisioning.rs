@@ -129,6 +129,12 @@ pub enum ProbeReply<Plan> {
         build_version: String,
         host_identity: Option<String>,
     },
+    /// Add found a host managed by another helm. Only confirming this
+    /// single-use probe id can register it and authorize the takeover.
+    OwnedElsewhere {
+        probe_id: String,
+        owner: crate::HelmOwnerRefusal,
+    },
     Provisionable {
         probe_id: String,
         plan: Plan,

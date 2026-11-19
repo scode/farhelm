@@ -694,8 +694,6 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         let before_registry_loss = fixture.supervisor_pid().await;
         let original_entry = store.entry_uuid_of(host).await.unwrap().expect("original host entry");
         let original_tag = store.helm_identity().await.unwrap().tag;
-        let registered_mac = store.list_hosts().await.unwrap().into_iter()
-            .find(|row| row.id == host).expect("Mac row with the discovered dial coordinates");
         let retired_client = wait_real_client(&manager, host).await;
         service.abort_run(host).await;
         tokio::time::timeout(Duration::from_secs(30), manager.shutdown_and_wait())
@@ -708,42 +706,17 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         (store, manager, service) = fresh_mac_helm(
             local.path().join("helm-after-registry-loss"), &fixture, &payloads, &payload,
         ).await;
-        let refusal = service.probe(probe()).await.expect_err("discovery cannot silently reclaim the Mac");
-        assert!(refusal.to_string().contains(&original_tag));
-        assert_eq!(store.list_hosts().await.unwrap().len(), 1, "refusal registers nothing");
-        // Exercise the takeover hello over the same SSH route as a host
-        // actor. The fresh helm can then register the owned Mac normally.
-        let transport = crate::manager::SystemTransport::new(local.path().join("helm-after-registry-loss"));
-        let fresh_identity = store.helm_identity().await.unwrap();
-        let connect = |take_over| {
-            let hello = farhelm_proto::HelmHello {
-                identity: fresh_identity.clone(),
-                answers_agent_requests: true,
-                expected_host_identity: Some(identity.clone()),
-                take_over,
-            };
-            let transport = &transport;
-            let registered_mac = &registered_mac;
-            async move {
-                let (reader, writer) = crate::manager::HostTransport::connect(transport, registered_mac)
-                    .await?.io;
-                crate::client::SupervisorClient::start_for_host(
-                    reader, writer, Arc::default(), host, hello,
-                ).await
-            }
+        let mut add = probe();
+        add.new_entry = Some(NewEntryRequest { alias: None, from_agent: false });
+        let offered = service.probe(add).await
+            .unwrap_or_else(|error| mac_fixture_failure("discover the Mac for takeover", error));
+        let ProbeResponse::OwnedElsewhere { probe_id, owner } = offered else {
+            panic!("a fresh registry must ask before taking over the Mac");
         };
-        let refusal = tokio::time::timeout(Duration::from_secs(30), connect(None))
-            .await.expect("ownership refusal timed out").err().expect("another helm still owns the Mac");
-        let revision = refusal.downcast_ref::<crate::client::HelmOwnershipRefused>()
-            .expect("the refusal must carry the existing owner").owner.owner_revision.clone();
-        let takeover = tokio::time::timeout(Duration::from_secs(30), connect(Some(revision)))
-            .await.expect("takeover hello timed out")
-            .unwrap_or_else(|error| mac_fixture_failure("take over the Mac", error));
-        assert_eq!(takeover.peer_hello().host_identity.as_deref(), Some(identity.as_str()));
-        drop(takeover);
-        crate::manager::HostTransport::release_shared_connections(&transport, &registered_mac).await;
-        let recovered = service.probe(probe()).await
-            .unwrap_or_else(|_| panic!("the fresh helm's Mac discovery failed"));
+        assert_eq!(owner.tag, original_tag);
+        assert_eq!(store.list_hosts().await.unwrap().len(), 1, "the offer registers nothing");
+        let recovered = service.confirm_takeover(ProvisionRequest { probe_id }).await
+            .unwrap_or_else(|error| mac_fixture_failure("confirm Mac takeover", error));
         let ProbeResponse::Discovered { host_id, host_identity, .. } = recovered else {
             panic!("the fresh helm offered setup instead of adopting the running Mac")
         };
@@ -757,8 +730,8 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         assert_eq!(remote_rows.len(), 1, "the fresh helm must register exactly one remote host");
         assert_eq!(remote_rows[0].id, host);
         assert_eq!(remote_rows[0].host_identity.as_deref(), Some(identity.as_str()));
-        assert_eq!(fixture.supervisor_pid().await, before_registry_loss, "lost-registry recovery restarted the supervisor");
         mac_assert_survival(&fixture, &manager, host, retained, "lost-registry discovery survival").await;
+        assert_eq!(fixture.supervisor_pid().await, before_registry_loss, "lost-registry recovery restarted the supervisor");
 
         let client = wait_real_client(&manager, host).await;
         client.close_tab(&session.id, &tab.id).await.expect("end the owned tab");

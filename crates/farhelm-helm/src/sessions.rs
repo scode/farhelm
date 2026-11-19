@@ -1070,6 +1070,10 @@ fn refusal_text(
             "the host now reports identity {reported} where {recorded} was recorded; adopt the \
              new identity or fix the destination"
         ),
+        manager::HostState::OwnedElsewhere { owner, .. } => format!(
+            "another Farhelm ({}) manages this host; use Take over in Hosts",
+            owner.tag
+        ),
         manager::HostState::IdentityUnverified { recorded } => format!(
             "the host answered without an identity, so this helm cannot confirm it is still the \
              install recorded as {recorded}; fix the host so it reports its identity, or \

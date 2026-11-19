@@ -266,6 +266,7 @@ pub(crate) fn notice(
             | HostStateView::Unreachable { .. }
             | HostStateView::VersionSkew { .. }
             | HostStateView::IdentityMismatch { .. }
+            | HostStateView::OwnedElsewhere { .. }
             | HostStateView::IdentityUnverified { .. }
             | HostStateView::Duplicate { .. }
             | HostStateView::Retired { .. }

@@ -744,6 +744,9 @@ impl ProvisioningService {
                     if self.memory.lock().await.busy.contains(&host) {
                         return Err(anyhow::Error::new(ProvisioningRequestError::Busy(host)));
                     }
+                    if let Some(reason) = self.known_owner_refusal(host) {
+                        return Err(refused(reason));
+                    }
                     let row = self.host_row(host).await?;
                     let binding = row
                         .tensorlake
@@ -862,13 +865,7 @@ impl ProvisioningService {
             tensorlake,
         };
         let mut memory = self.memory.lock().await;
-        while memory.plan_order.len() >= MAX_PENDING_PLANS {
-            if let Some(id) = memory.plan_order.pop_front() {
-                memory.plans.remove(&id);
-                memory.tensorlake_plans.remove(&id);
-            }
-        }
-        memory.plan_order.push_back(probe_id.clone());
+        memory.remember_approval(&probe_id);
         memory.tensorlake_plans.insert(probe_id, plan);
         Ok(response)
     }
@@ -946,6 +943,11 @@ impl ProvisioningService {
             })?),
             None => None,
         };
+        if plan.host.is_some()
+            && let Some(reason) = self.known_owner_refusal(host)
+        {
+            return Err(refused(reason));
+        }
         let run_id = uuid::Uuid::new_v4().to_string();
         {
             let mut memory = self.memory.lock().await;

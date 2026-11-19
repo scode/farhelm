@@ -81,6 +81,7 @@ const MAX_ENDED_LAUNCHES: usize = 16;
 pub(super) struct ProvisioningMemory {
     pub(super) plans: HashMap<String, PendingPlan>,
     tensorlake_plans: HashMap<String, tensorlake_add::TensorlakeAddPlan>,
+    takeovers: HashMap<String, PendingTakeover>,
     plan_order: VecDeque<String>,
     pub(super) runs: HashMap<HostId, ProvisioningView>,
     pub(super) busy: std::collections::HashSet<HostId>,
@@ -104,6 +105,19 @@ pub(super) struct ProvisioningMemory {
 }
 
 impl ProvisioningMemory {
+    /// New approvals of every kind share the existing pending-plan bound.
+    /// Removing the oldest id must also drop its payload.
+    fn remember_approval(&mut self, probe_id: &str) {
+        if self.plan_order.len() >= MAX_PENDING_PLANS
+            && let Some(expired) = self.plan_order.pop_front()
+        {
+            self.plans.remove(&expired);
+            self.tensorlake_plans.remove(&expired);
+            self.takeovers.remove(&expired);
+        }
+        self.plan_order.push_back(probe_id.to_string());
+    }
+
     /// Keep `run` as an ended launch's, dropping the oldest ended ones past
     /// the bound. A copy still running belongs to a launch whose cleanup has
     /// not finished and is never dropped: that launch still has to publish its
@@ -215,6 +229,16 @@ struct DiscoveredDial {
     farhelm: PathBuf,
     state_dir: Option<PathBuf>,
     identity: Option<String>,
+}
+
+/// The discovery that an explicit Add host confirmation can accept. Keep
+/// the registration and dial coordinates together so a confirmation cannot
+/// authorize takeover of a newly probed destination.
+struct PendingTakeover {
+    registration: ProbeRegistration,
+    discovered: DiscoveredDial,
+    build_version: String,
+    owner_revision: String,
 }
 
 /// What [`ProvisioningService::delete_registered_host`] does with the host's
@@ -355,6 +379,7 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
             peer_text(reported),
             peer_text(recorded),
         ),
+        HostState::OwnedElsewhere { owner, .. } => format!("{REFUSED}. {}", owner_refusal(owner)),
         HostState::IdentityUnverified { recorded } => format!(
             "{REFUSED}: it answered without an identity, but this host has identity {} on \
              record; wait until it reports its identity again, or change this entry's destination \
@@ -381,6 +406,15 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
         _ => return None,
     };
     Some(BackendFailure::new(sentence, ""))
+}
+
+/// The same remedy applies whether the actor or the provisioning probe
+/// learned that the host is managed elsewhere.
+fn owner_refusal(owner: &farhelm_proto::HelmOwnerRefusal) -> String {
+    format!(
+        "Another Farhelm ({}) manages this host. Use Take over in Hosts first.",
+        owner.tag
+    )
 }
 
 /// Why Update must not run against a host whose supervisor reports
@@ -893,6 +927,12 @@ impl ProvisioningService {
                 reason.to_string(),
             )));
         }
+        if let Some(reason) = stored
+            .as_ref()
+            .and_then(|row| self.known_owner_refusal(row.id))
+        {
+            return Err(ProvisioningRequestError::Refused(reason).into());
+        }
         // A destination this helm knows as a Tensorlake host is reached
         // with Farhelm's key, whichever form of the request named it.
         let access = stored
@@ -903,6 +943,10 @@ impl ProvisioningService {
             request.remote_farhelm = request.remote_farhelm.or(row.remote_farhelm);
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
         }
+        let from_agent = request
+            .new_entry
+            .as_ref()
+            .is_some_and(|entry| entry.from_agent);
         let (target, registration) = self.target(&request, access)?;
         // An add from the add host dialog is refused before anything
         // contacts the destination when the destination is already a host
@@ -942,6 +986,7 @@ impl ProvisioningService {
                             identity: host_identity.clone(),
                         },
                         build_version.clone(),
+                        None,
                     )
                     .await?;
                 Ok(ProbeResponse::Discovered {
@@ -949,6 +994,43 @@ impl ProvisioningService {
                     build_version,
                     host_identity,
                 })
+            }
+            ProbeObservation::OwnedSupervisor {
+                owner,
+                build_version,
+                host_identity,
+                dial_farhelm,
+                dial_state_dir,
+            } => {
+                if from_agent
+                    || !matches!(
+                        &registration,
+                        ProbeRegistration::Ssh {
+                            new_entry: Some(_),
+                            ..
+                        }
+                    )
+                    || host_identity.is_none()
+                {
+                    return Err(ProvisioningRequestError::Refused(owner_refusal(&owner)).into());
+                }
+                let probe_id = uuid::Uuid::new_v4().to_string();
+                let mut memory = self.memory.lock().await;
+                memory.remember_approval(&probe_id);
+                memory.takeovers.insert(
+                    probe_id.clone(),
+                    PendingTakeover {
+                        registration,
+                        discovered: DiscoveredDial {
+                            farhelm: dial_farhelm,
+                            state_dir: dial_state_dir,
+                            identity: host_identity,
+                        },
+                        build_version,
+                        owner_revision: owner.owner_revision.clone(),
+                    },
+                );
+                Ok(ProbeResponse::OwnedElsewhere { probe_id, owner })
             }
             // A supervisor that answered but speaks another protocol is
             // still DISCOVERED: register it like any answering supervisor
@@ -972,6 +1054,7 @@ impl ProvisioningService {
                             identity: None,
                         },
                         peer_build.clone(),
+                        None,
                     )
                     .await?;
                 Ok(ProbeResponse::Discovered {
@@ -1008,12 +1091,7 @@ impl ProvisioningService {
                 )?;
                 let confirmation = plan.confirmation();
                 let mut memory = self.memory.lock().await;
-                while memory.plan_order.len() >= MAX_PENDING_PLANS {
-                    if let Some(expired) = memory.plan_order.pop_front() {
-                        memory.plans.remove(&expired);
-                    }
-                }
-                memory.plan_order.push_back(probe_id.clone());
+                memory.remember_approval(&probe_id);
                 memory.plans.insert(
                     probe_id.clone(),
                     PendingPlan {
@@ -1052,16 +1130,61 @@ impl ProvisioningService {
         registration: ProbeRegistration,
         discovered: DiscoveredDial,
         build_version: String,
+        owner_revision: Option<String>,
     ) -> anyhow::Result<HostId> {
         let service = Arc::clone(self);
         crate::run_owned(async move {
+            let approved = if let Some(revision) = owner_revision {
+                let identity = discovered
+                    .identity
+                    .clone()
+                    .context("the host did not report its identity")?;
+                Some((identity, revision))
+            } else {
+                None
+            };
             let host_id = service
-                .register(&registration, None, Some(discovered))
+                .register(&registration, None, Some(discovered), approved)
                 .await?;
             service
                 .resolve_failed_add_discovery(host_id, &build_version)
                 .await;
             anyhow::Ok(host_id)
+        })
+        .await
+    }
+
+    /// Accept an Add host decision exactly once. The registration task owns
+    /// reconciliation and arming the actor even if the GUI stops waiting.
+    pub(super) async fn confirm_takeover(
+        self: &Arc<Self>,
+        request: ProvisionRequest,
+    ) -> anyhow::Result<ProbeResponse> {
+        let service = Arc::clone(self);
+        crate::run_owned(async move {
+            let pending = {
+                let mut memory = service.memory.lock().await;
+                let pending = memory
+                    .takeovers
+                    .remove(&request.probe_id)
+                    .ok_or(ProvisioningRequestError::UnknownPlan)?;
+                memory.plan_order.retain(|id| id != &request.probe_id);
+                pending
+            };
+            let host_identity = pending.discovered.identity.clone();
+            let host_id = service
+                .register_discovered(
+                    pending.registration,
+                    pending.discovered,
+                    pending.build_version.clone(),
+                    Some(pending.owner_revision),
+                )
+                .await?;
+            Ok(ProbeResponse::Discovered {
+                host_id,
+                build_version: pending.build_version,
+                host_identity,
+            })
         })
         .await
     }
@@ -1073,6 +1196,7 @@ impl ProvisioningService {
         registration: &ProbeRegistration,
         plan: Option<&ProvisioningPlan>,
         discovered: Option<DiscoveredDial>,
+        takeover: Option<(String, String)>,
     ) -> anyhow::Result<HostId> {
         let (host, inserted) = match registration {
             ProbeRegistration::ExistingEnvironment { guard } => {
@@ -1182,7 +1306,10 @@ impl ProvisioningService {
         };
         let reconciled = async {
             self.sync_registry().await?;
-            if !self.manager.retry_now(host).await? {
+            if let Some((expected_identity, owner_revision)) = takeover {
+                self.manager
+                    .take_over_discovered(host, &expected_identity, &owner_revision)?;
+            } else if !self.manager.retry_now(host).await? {
                 bail!("the registered host actor was not available for retry");
             }
             anyhow::Ok(())
@@ -1325,6 +1452,9 @@ impl ProvisioningService {
             ProbeRegistration::Local => None,
             ProbeRegistration::ExistingEnvironment { guard } => Some(guard.host),
         };
+        if let Some(reason) = existing.and_then(|host| self.known_owner_refusal(host)) {
+            return Err(ProvisioningRequestError::Refused(reason).into());
+        }
         if let Some(existing) = existing
             && !self.memory.lock().await.busy.insert(existing)
         {
@@ -1333,7 +1463,7 @@ impl ProvisioningService {
         }
         let registered = async {
             let host = self
-                .register(registration, Some(&pending.plan), None)
+                .register(registration, Some(&pending.plan), None, None)
                 .await?;
             anyhow::Ok((host, registration_for_row(&self.host_row(host).await?)?))
         }
@@ -1544,6 +1674,9 @@ impl ProvisioningService {
                     probe_farhelm: dial_farhelm,
                     probe_state_dir: dial_state_dir,
                 }
+            }
+            ProbeObservation::OwnedSupervisor { owner, .. } => {
+                return Err(ProvisioningRequestError::Refused(owner_refusal(&owner)).into());
             }
             ProbeObservation::Absent => original_target,
         };
@@ -1855,6 +1988,9 @@ impl ProvisioningService {
                         }
                         (Some(dial_farhelm), dial_state_dir)
                     }
+                    ProbeObservation::OwnedSupervisor { owner, .. } => {
+                        return Err(refused(owner_refusal(&owner)));
+                    }
                     ProbeObservation::SkewedSupervisor { .. } | ProbeObservation::Absent => {
                         return Err(refused(
                             "the supervisor stopped answering while uninstall was checking it; \
@@ -1910,6 +2046,9 @@ impl ProvisioningService {
                 }
                 match self.backend.probe(&target).await {
                     Ok(ProbeObservation::Absent) => {}
+                    Ok(ProbeObservation::OwnedSupervisor { owner, .. }) => {
+                        return Err(refused(owner_refusal(&owner)));
+                    }
                     Ok(_) | Err(_) => return Err(not_connected()),
                 }
                 // No running supervisor to ask, so the row's registered
@@ -2126,13 +2265,7 @@ impl ProvisioningService {
 
     async fn retain_plan(&self, probe_id: String, pending: PendingPlan) {
         let mut memory = self.memory.lock().await;
-        while memory.plan_order.len() >= MAX_PENDING_PLANS {
-            if let Some(expired) = memory.plan_order.pop_front() {
-                memory.plans.remove(&expired);
-                memory.tensorlake_plans.remove(&expired);
-            }
-        }
-        memory.plan_order.push_back(probe_id.clone());
+        memory.remember_approval(&probe_id);
         memory.plans.insert(probe_id, pending);
     }
 
@@ -2422,6 +2555,9 @@ impl ProvisioningService {
                     .require_registration_unchanged(host, registration)
                     .await?;
                 self.require_not_suspended(&row)?;
+                if let Some(reason) = self.known_owner_refusal(host) {
+                    return Err(BackendFailure::new(reason, ""));
+                }
                 let mut observation = self.backend.probe(original_target).await?;
                 let installed_target = ProbeTarget {
                     transport: pending.plan.target.clone(),
@@ -2451,6 +2587,7 @@ impl ProvisioningService {
                                 state_dir: dial_state_dir,
                                 identity: host_identity,
                             }),
+                            None,
                         )
                         .await
                         .map_err(|error| {
@@ -2481,6 +2618,7 @@ impl ProvisioningService {
                                 state_dir: dial_state_dir,
                                 identity: None,
                             }),
+                            None,
                         )
                         .await
                         .map_err(|error| {
@@ -2494,6 +2632,9 @@ impl ProvisioningService {
                              (build {peer_build}); ADD registered it — use the host's update action \
                              to bring it to this helm's version"
                         )))
+                    }
+                    ProbeObservation::OwnedSupervisor { owner, .. } => {
+                        Err(BackendFailure::new(owner_refusal(&owner), ""))
                     }
                     ProbeObservation::Absent => Ok(Revalidation::Execute),
                 }
@@ -2601,9 +2742,12 @@ impl ProvisioningService {
                             }),
                         )
                     }
+                    ProbeObservation::OwnedSupervisor { owner, .. } => {
+                        return Err(BackendFailure::new(owner_refusal(&owner), ""));
+                    }
                     ProbeObservation::Absent => (Some(&pending.plan), None),
                 };
-                self.register(registration, plan, discovered)
+                self.register(registration, plan, discovered, None)
                     .await
                     .map_err(|error| {
                         BackendFailure::new(
@@ -2707,6 +2851,15 @@ impl ProvisioningService {
         }
     }
 
+    /// The known owner also protects Setup when the supervisor no longer
+    /// answers a probe, including while a confirmed rerun is being admitted.
+    fn known_owner_refusal(&self, host: HostId) -> Option<String> {
+        match self.manager.state(host) {
+            Some(HostState::OwnedElsewhere { owner, .. }) => Some(owner_refusal(&owner)),
+            _ => None,
+        }
+    }
+
     /// UPDATE cannot resolve an identity decision that the connection
     /// manager has deliberately frozen for the user. Refusing both while
     /// planning and immediately before mutation closes the confirmation
@@ -2726,6 +2879,9 @@ impl ProvisioningService {
                      one's destination, then press Retry"
                 ),
             )),
+            Some(HostState::OwnedElsewhere { owner, .. }) => {
+                Err(BackendFailure::new(owner_refusal(&owner), ""))
+            }
             _ => Ok(()),
         }
     }
