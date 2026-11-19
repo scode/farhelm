@@ -24104,6 +24104,20 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `plan/gui-ux-wording/16-layout-preference-save-failures`,
   [PR #4268](https://github.com/scode/farhelm/pull/4268/changes).
 
+## closing-settings-can-hide-ntfy-save-refusal.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Closing Settings
+  before an ntfy save is refused loses the refusal. SPEC already drops errors on close for some switches, not for ntfy.
+  Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix spec: accept dropping the refusal on close, as for the switches (~2). Size gate: about 100
+  lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment);
+  over that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the
+  same change.
+- Execution: change `uzkrlkuksxxrktuvruwtpsyllsnlswqm`, bookmark `plan/gui-ux-wording/17-closing-settings-can-hide`,
+  [PR #4269](https://github.com/scode/farhelm/pull/4269/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.

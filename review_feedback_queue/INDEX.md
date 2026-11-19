@@ -2684,10 +2684,6 @@ consequences.
 - [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
   without typing can undo a host rename that just happened through an approved agent request.
 
-- [`closing-settings-can-hide-ntfy-save-refusal.md`](closing-settings-can-hide-ntfy-save-refusal.md) — If you save an
-  ntfy setting and close Settings before the helm refuses the write, the window can lose the refusal. Reopening shows
-  the old value with no explanation.
-
 - [`partial-host-edit-reports-whole-failure.md`](partial-host-edit-reports-whole-failure.md) — A single approved host
   edit can change the alias and then fail to change the icon or color. The failure message can leave out that the alias
   already changed.
