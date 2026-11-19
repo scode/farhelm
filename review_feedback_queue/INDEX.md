@@ -1034,9 +1034,6 @@ consequences.
 - [`legacy-quickstart-stops-surviving-supervisor.md`](legacy-quickstart-stops-surviving-supervisor.md) — The parked
   quickstart contradicts itself about whether the supervisor survives quitting the Mac app.
 
-- [`inherited-lock-test-self-dup.md`](inherited-lock-test-self-dup.md) — A terminal-host regression can pass without
-  inheriting its intended version lock if the opened file already has descriptor 8; that allocation was not observed.
-
 - [`literal-deleted-suffix-breaks-desktop-owner.md`](literal-deleted-suffix-breaks-desktop-owner.md) — A development
   executable literally ending in ` (deleted)` can lose ownership recognition and leave an older answering build reused.
 
