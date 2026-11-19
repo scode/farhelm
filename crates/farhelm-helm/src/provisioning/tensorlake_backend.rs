@@ -129,8 +129,8 @@ impl SystemBackend {
     }
 
     /// Read in 32 KiB chunks so the normal 64 KiB command-output budget
-    /// stays intact. Size is checked first and again after reading: a file
-    /// changed during this read is refused, not partially merged.
+    /// stays intact. The measured sizes before and after reading must agree
+    /// with the number of bytes read. Edits that preserve the size can pass.
     pub(super) async fn read_agent_file(
         &self,
         target: &ProvisioningTarget,
