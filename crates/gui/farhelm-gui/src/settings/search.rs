@@ -159,6 +159,10 @@ impl Entry {
 
 /// Assemble the authored sections in display order, interleaving the trust hints with their own agents just like the
 /// Settings pane. Switch entries come from the same lists the dialog uses for their state.
+///
+/// Only settings this build draws are listed: the tunnel switch exists only where [`terminal::shown_on`] says so.
+/// Sections this build hides (App without an active updater) are filtered when matching, since that depends on
+/// live state the catalog does not see.
 fn catalog(platform: Platform) -> Vec<Entry> {
     let mut entries = Vec::new();
     for &section in Section::ALL {
@@ -393,6 +397,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
             ]),
         }
     }
+    entries.retain(|entry| entry.target != Target::Tunnels || terminal::shown_on(platform));
     entries
 }
 
@@ -510,6 +515,14 @@ impl Search {
         !self.words.is_empty()
     }
 
+    /// The navigation count describes the same rows as the results pane.
+    pub(super) fn section_count(&self, section: Section) -> usize {
+        self.matches
+            .iter()
+            .filter(|&&index| self.catalog[index].section == section)
+            .count()
+    }
+
     /// Every edit selects the first result, including one that replaces a query with no matches.
     pub(super) fn edited(&mut self, cx: &App) {
         self.words = self.input.text(cx).split_whitespace().map(fold).collect();
@@ -520,6 +533,8 @@ impl Search {
             self.catalog
                 .iter()
                 .enumerate()
+                // A section this build hides offers nothing to open, so its settings are not results.
+                .filter(|(_, entry)| entry.section.listed(cx))
                 .filter_map(|(index, entry)| entry.matches(&self.words).then_some(index))
                 .collect()
         } else {
