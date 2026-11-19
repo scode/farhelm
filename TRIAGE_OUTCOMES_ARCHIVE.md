@@ -24118,6 +24118,50 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `uzkrlkuksxxrktuvruwtpsyllsnlswqm`, bookmark `plan/gui-ux-wording/17-closing-settings-can-hide`,
   [PR #4269](https://github.com/scode/farhelm/pull/4269/changes).
 
+## linux-sound-resolves-player-on-path.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Linux notification
+  sounds run the first pw-play on PATH. No route lets host content influence it; the user's PATH is theirs. Bucket:
+  other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: one SPEC.md paragraph (about 5 lines, in the trust section) states that the user's own local
+  configuration is trusted and theirs to keep sane: helper programs the desktop app runs are found on the user's PATH,
+  flags a custom command passes to its agent are the user's (Farhelm's added hook flags may clash with them), and an
+  agent settings file the user grew near Farhelm's read limit is theirs to manage. No code change. Remove this feedback
+  file and the other two QF items (muse-current-hook-override-semantics-unresolved.md,
+  agent-settings-write-exceeds-next-read-limit.md), with their index entries, in the same change.
+- Execution: change `mmmppkptrzmypzpovnlutnulkvzlovuo`, bookmark `plan/gui-ux-wording/18-own-configuration-principle`,
+  [PR #4270](https://github.com/scode/farhelm/pull/4270/changes).
+
+## muse-current-hook-override-semantics-unresolved.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A Muse custom
+  command that sets its own hooks may clash with Farhelm's. Farhelm adds its hook flags without reading the rest; the
+  docs already say such flags are yours to avoid. Bucket: other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
+- Execution: change `mmmppkptrzmypzpovnlutnulkvzlovuo`, bookmark `plan/gui-ux-wording/18-own-configuration-principle`,
+  [PR #4270](https://github.com/scode/farhelm/pull/4270/changes).
+
+## agent-settings-write-exceeds-next-read-limit.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Saving agent
+  settings can push a near-1 MiB file over the next read's limit. Only for agent settings files near 1 MiB; realistic
+  files are far smaller. Bucket: other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
+- Execution: change `mmmppkptrzmypzpovnlutnulkvzlovuo`, bookmark `plan/gui-ux-wording/18-own-configuration-principle`,
+  [PR #4270](https://github.com/scode/farhelm/pull/4270/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.

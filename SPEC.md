@@ -4673,6 +4673,12 @@ The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below defi
 trust between hosts, and the user's approval that agent-requested actions across hosts need. Apply those boundaries when
 interpreting the transport and credential rules here.
 
+Farhelm trusts the user's own local configuration. The desktop app uses the user's PATH when it looks up a helper by
+name, as it does for Linux's `pw-play`. The user chooses the flags in a custom command, including Muse hook settings
+that can clash with the hooks Farhelm adds. The user also manages unusually large agent settings files. Applying agent
+credentials to a sandbox host reads only settings files of at most 1 MiB, and its own write can grow a file near that
+size past it. Later applications then refuse the file until the user reduces its size.
+
 Steady-state operation between Farhelm's own components uses the desktop app's deliberately local loopback edge between
 its window and its embedded helm, and the helm to each supervisor (local IPC, SSH or Podman exec). User-opened localhost
 tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on the session host; the
