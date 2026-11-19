@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import signal
 import sys
 
@@ -23,6 +24,32 @@ finally:
     del _previous_bytecode_setting
 
 
+def read_ledger(inventory, path):
+    """One ledger file's text, read through the inventory's byte budget."""
+    ledger_fd = os.open(path.parent, DIRECTORY_FLAGS)
+    try:
+        return inventory.budget.read(ledger_fd, path.name, 4 * 1024 * 1024).decode("utf-8")
+    finally:
+        os.close(ledger_fd)
+
+
+def ledger_entries(text):
+    """A ledger's dated entries without the preamble before its first heading.
+
+    The flake ledger is split between `FLAKES.md` (active flakes) and
+    `FLAKES_ARCHIVE.md` (closed ones), and the summary counts both. Joining the
+    files whole would run one file's last entry into the next file's preamble,
+    which then reads as that entry's body: `FLAKES.md`'s preamble quotes the
+    `Class:` and `Cause:` field names, and a `Cause:` line that is no longer
+    the body's last would count as invalid.
+    """
+    match = re.search(r"^## ", text, re.MULTILINE)
+    if match is None:
+        return ""
+    entries = text[match.start():]
+    return entries if entries.endswith("\n") else entries + "\n"
+
+
 def report(args, inventory):
     """Collect declared input directories independently and expose any incomplete discovery."""
     limit = None
@@ -31,16 +58,11 @@ def report(args, inventory):
         for kind in ("root", "run", "batch"):
             for path in getattr(args, kind):
                 inventory.directory(path, kind)
-        ledger_fd = None
         try:
-            ledger_fd = os.open(args.flakes.parent, DIRECTORY_FLAGS)
-            text = inventory.budget.read(ledger_fd, args.flakes.name, 4 * 1024 * 1024).decode("utf-8")
+            text = "".join(ledger_entries(read_ledger(inventory, path)) for path in args.flakes)
             ledger = {"state": "read", **flake_summary(text, args.since)}
         except (OSError, ValueError):
             inventory.issue("flake_ledger_unreadable_or_invalid")
-        finally:
-            if ledger_fd is not None:
-                os.close(ledger_fd)
     except InventoryLimit as error:
         limit = str(error)
     benign = {"run_duplicate_copy", "batch_duplicate_copy", "unrecognized_root_entry"}
@@ -76,10 +98,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for kind in ("root", "run", "batch"):
         parser.add_argument("--" + kind, action="append", type=pathlib.Path, default=[])
-    parser.add_argument("--flakes", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parents[1] / "FLAKES.md")
+    parser.add_argument("--flakes", action="append", type=pathlib.Path)
     parser.add_argument("--since")
     parser.add_argument("--scan-output", action="store_true")
     args = parser.parse_args(argv)
+    if args.flakes is None:
+        checkout = pathlib.Path(__file__).resolve().parents[1]
+        args.flakes = [checkout / "FLAKES.md", checkout / "FLAKES_ARCHIVE.md"]
     if sum(len(getattr(args, kind)) for kind in ("root", "run", "batch")) > 32:
         parser.error("at most 32 input directories may be selected")
     if args.since is not None:

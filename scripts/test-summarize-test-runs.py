@@ -53,7 +53,7 @@ class SummaryCommandTest(unittest.TestCase):
 
     def arguments(self, root, **changes):
         """Keep fixture paths explicit so the command never reads the repository ledger."""
-        values = dict(root=[root], run=[], batch=[], flakes=root / "FLAKES.md", since=None)
+        values = dict(root=[root], run=[], batch=[], flakes=[root / "FLAKES.md"], since=None)
         values.update(changes)
         return argparse.Namespace(**values)
 
@@ -97,6 +97,34 @@ class SummaryCommandTest(unittest.TestCase):
             self.assertEqual(report["runs"]["excluded_undated"], 1)
             self.assertEqual(report["batches"]["declared_finished"], 2)
             self.assertEqual(report["flake_ledger"]["dated_entries"], 1)
+
+    def test_active_ledger_and_archive_are_counted_together_without_their_preambles(self):
+        """The flake history is split between FLAKES.md and FLAKES_ARCHIVE.md, and the summary counts both.
+
+        Each file opens with a preamble that quotes the field names. If the
+        files were simply joined, one file's last entry would run on into the
+        next file's preamble, so its `Cause:` line would no longer be the
+        body's last and would count as invalid. Every entry here must keep its
+        own tags.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            entry = "## {date} — {title}\n\nobservation\n\nClass: {cls}\n\nCause: {cause}\n"
+            preamble = "# Ledger\n\nEntries end with `Class: <class>` and `Cause: <confidence>`.\n\n"
+            (root / "FLAKES.md").write_text(
+                preamble + entry.format(date="2026-11-09", title="active", cls="substrate", cause="hypothesis"))
+            (root / "FLAKES_ARCHIVE.md").write_text(
+                preamble + entry.format(date="2026-09-07", title="closed", cls="readiness", cause="established"))
+            report = cli.report(
+                self.arguments(root, flakes=[root / "FLAKES.md", root / "FLAKES_ARCHIVE.md"]), Inventory())
+            ledger = report["flake_ledger"]
+            self.assertEqual(ledger["state"], "read")
+            self.assertEqual(ledger["dated_entries"], 2)
+            self.assertEqual((ledger["first_date"], ledger["last_date"]), ("2026-09-07", "2026-11-09"))
+            self.assertEqual(ledger["cause"]["hypothesis"], 1)
+            self.assertEqual(ledger["cause"]["established"], 1)
+            self.assertEqual(ledger["cause"]["invalid"] + ledger["cause"]["missing"], 0)
+            self.assertEqual(ledger["class"]["substrate"] + ledger["class"]["readiness"], 2)
 
     def test_missing_ledger_and_exhausted_discovery_are_explicit(self):
         """A partial inventory remains usable but cannot present its denominator as complete."""

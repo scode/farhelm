@@ -48,15 +48,21 @@ this rule exists to prevent.
 
 ## FLAKES.md
 
-`FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
+`FLAKES.md` holds the LATENT flakes believed active: tests that pass where they were written and fail elsewhere,
 sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
 flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry: one
 paragraph naming the test and its file (no line numbers), what was observed and where, the cause found or suspected, and
-the disposition (fixed in which PR, ignored with what reason, or open). Fixed ones stay; a fixed flake that recurs gets
-a new dated entry. Do NOT log a test that was written, flaked, and was fixed within the same session: that is ordinary
-development, and logging it buries the tech debt the file exists to show. Open flakes also get a Deflake entry in
-TODO.md and its `deflake/known-flakes.txt` line, as `deflake/AGENTS.md` describes for a deflake run's flakes; this
-covers flakes recorded from now on, not older entries. The log keeps the history, TODO.md keeps the work.
+the disposition (fixed in which PR, ignored with what reason, or open). Do NOT log a test that was written, flaked, and
+was fixed within the same session: that is ordinary development, and logging it buries the tech debt the file exists to
+show. Each active flake also has a Deflake entry in TODO.md and its `deflake/known-flakes.txt` line, as
+`deflake/AGENTS.md` describes for a deflake run's flakes.
+
+A flake is closed when it is fixed, dismissed, or moot because its test no longer exists. The PR that closes it adds a
+dated closing entry saying which, moves that entry and every earlier entry for the same flake from `FLAKES.md` to the
+end of `FLAKES_ARCHIVE.md`, and removes the flake's TODO.md entry and `deflake/known-flakes.txt` line. The archive is
+append-only history. Search it by test name or file before recording a failure, never read it whole: a closed flake that
+recurs gets a new entry in `FLAKES.md` (it is open again) citing the archived one by date and title. The two files keep
+the history, TODO.md keeps the work.
 
 For new entries, follow FLAKES.md's evidence fields and its `Class:` / `Cause:` lines. A guessed cause is a hypothesis,
 even if a later run passed. Do not rewrite older entries to make them fit the new fields.
