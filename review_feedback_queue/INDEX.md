@@ -1658,11 +1658,6 @@ consequences.
   can make its terminal detach with an input-failure notice instead of the Delete's notice or its cleanup-failure
   explanation. The landed notice fix misses the reader's direct failure path.
 
-- [`notification-cleanup-row-premise.md`](notification-cleanup-row-premise.md) — The new upgrade test's cleanup
-  assertion does not prove that deleting a session removes its retained notification. Another test independently checks
-  notification preservation through all later migrations, so this is a narrow missing premise in the migrated-trigger
-  check, not absence of all notification-upgrade coverage.
-
 - [`transition-accessor-comment.md`](transition-accessor-comment.md) — A maintainer following the test's explanation
   encounters an accessor name that no longer exists. No product behavior or lifecycle guarantee is shown to be wrong.
 

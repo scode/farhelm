@@ -8847,8 +8847,8 @@ mod tests {
     /// being the old `pane` (a tmux pane id, an empty one, a socket name);
     /// neither `sessions` nor `create_reservations` has a `tmux_name` column
     /// and `sessions` has no `pane`; both reservations read back unchanged;
-    /// the columns and indexes are those of a fresh database; deleting the
-    /// host session's row still deletes its notification; and a second open
+    /// the columns and indexes are those of a fresh database; the host session's notification survives the upgrade
+    /// and disappears when its session is deleted; and a second open
     /// reads the same rows.
     #[farhelm_testtrace::test]
     async fn schema_34_drops_tmux_names_and_keeps_every_session_and_reservation() {
@@ -8933,6 +8933,17 @@ mod tests {
         assert_eq!(indexes_of(&path), indexes_of(&fresh));
 
         let conn = Connection::open(&path).unwrap();
+        let retained: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_notifications WHERE session_id = 'host-running'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, 1,
+            "premise: the notification survived the upgrade"
+        );
         conn.execute("DELETE FROM sessions WHERE id = 'host-running'", [])
             .unwrap();
         let notifications: i64 = conn
