@@ -21523,6 +21523,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `tqpmlytnznnk`, bookmark `plan/triage-discards-nov18/07-discard-environment-history-origin`,
   https://github.com/scode/farhelm/pull/4166/changes.
 
+## trailing-ui-host-retry-selects-delete-from-live-phase.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The menu now labels the
+  destructive retry "Finish the deletion" (#3896); the choice is still made at click time (hosts/remedies.rs), but the
+  helm accepts the request only for an environment whose seal-triggered destruction already failed
+  (sessions/sandbox.rs), a destruction the user already confirmed and that SPEC.md says is never lifted. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `szwtnytmuzpx`, bookmark `plan/triage-discards-nov18/08-discard-host-retry-phase`,
+  https://github.com/scode/farhelm/pull/4167/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
