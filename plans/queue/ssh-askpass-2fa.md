@@ -518,3 +518,89 @@ watchdog. Never edit `plans/` yourself.
 
 Farhelm now better supports remote hosts that have interactive password/2FA/security key flows so long as it goes
 through ssh's usual SSH_ASKPASS mechanism. You will be prompted/alerted when needed.
+
+## Blocked
+
+Blocked while landing on 2026-11-19 (claim 5d181f).
+
+### The landing stopped before merging anything
+
+The landing monitor's checks and review of the SSH sign-in prompts (askpass and 2FA) found problems that need the
+executor's own fixes rather than a quick patch at landing. None of the plan's six PRs has merged; main holds nothing of
+this plan. One decision is needed from you: the startup focus exception, below. The landing monitor answers it on your
+behalf with the recommended option; the rest is fixing work for the executor.
+
+#### Failing tests
+
+The whole workspace suite (`cargo nextest run --workspace --exclude farhelm-desktop`), run on an arm64 Linux test
+machine, failed five helm tests that the plan's narrower test selections never ran
+(`3f1abd10-2a7e-405e-9f1c-38ca12dee9f3`). All five are mistakes in the tests, not in the product:
+
+- Three tests of the desktop's live update channel read the pushed collections by their position in the first snapshot.
+  The plan adds the two sign-in collections before Templates, so these tests now read the wrong collection:
+  `dismissing_an_announcement_outside_the_channel_moves_it_to_history_on_the_ui`,
+  `marking_a_notice_read_outside_the_channel_reaches_an_idle_connected_ui` and
+  `a_provisioning_step_transition_reaches_the_connected_ui`.
+- Two checkout-settings migration tests build an old helm database by downgrading a current one, and the downgrade does
+  not drop the new SSH sign-in sound preference column: `checkout_migration_from_26_recreates_the_config_tables` and
+  `checkout_open_existing_refuses_older_schema_without_migrating`.
+
+Everything else passed: the rest of the workspace suite; the desktop app's tests, `cargo nextest run -p farhelm-desktop`
+(`8b7d40fa-9230-4fb9-b2ae-8b37738ecf6e`); the end-to-end smoke, `python3 -B scripts/gui-e2e-smoke.py`, 49 of 50 steps
+with paste skipped as always on Linux (`424dd9ca-9051-4af5-aac7-e54dbe5f71d5`); the reference screenshots,
+`python3 scripts/check-gui-goldens.py` (`01c8dd15-6a56-435d-8d58-f64752d42cf4`); and, without recorder ids, the four
+clippy runs and the website build.
+
+#### Two bugs in the new behavior
+
+- Adding a host that asks for a code can fail even though setup worked. Adding a host signs in twice, once to set it up
+  and once for the connection sessions use, so a 2FA host asks two questions. When setup finishes, its last step asks
+  the sessions connection to retry and waits only 30 seconds for it to connect. That retry kills a sessions question the
+  user may be answering at that moment (the question vanishes mid-typing), asks again without opening the new question
+  by itself, and the run then fails with "waiting for the provisioned supervisor: timed out". The same happens after the
+  user cancelled or let the sessions question expire. The desktop test for this flow has the sessions question arrive
+  only after setup is done, which cannot happen while setup waits for that connection.
+- An ordinary SSH host that is simply unreachable (laptop offline, VPN down, machine powered off) now reports "SSH
+  sign-in timed out before the host asked a question" on every retry, in place of the usual connection error, even for
+  users who have no 2FA anywhere. Add host to an unreachable destination shows the same sentence.
+
+#### The startup focus exception never ends
+
+The plan lets a sign-in question open by itself with its answer field focused "at startup", until the user's first key
+or click in Farhelm. Switching to another app does not count as moving on. So if Farhelm opens at login and the user
+goes straight to a browser, a question that arrives an hour later after a Wi-Fi drop still opens focused, and the first
+thing typed on coming back (say `ls` and Enter) is sent to the host as the answer. That is a failed attempt and sends
+the user's typing to the server. The plan's own design says "the app just opened".
+
+The options:
+
+- Limit the startup exception to questions from the connection attempts Farhelm makes when it starts, keeping the
+  existing condition that the user has not yet pressed a key or clicked. A question from any later attempt (a reconnect,
+  or a host that was unreachable at startup and connects later) waits in the sidebar unless the user started the action.
+  This keeps the "Farhelm just opened" case working and closes the gap.
+- End it after a fixed time, which is arbitrary, or when Farhelm's window first loses focus, which never happens when
+  Farhelm opens in the background at login and never had focus.
+- Keep it as built, and have SPEC.md say that the exception has no time limit.
+
+Recommendation: the first option.
+
+#### Smaller things the review found
+
+- SPEC_impl.md sections near the new transport text are now untrue: the pushed collections list omits the two new
+  collections; the list of a host's connection states lacks "Sign-in needed"; the connection deadlines paragraph still
+  says one 20-second budget per attempt and that background retries never show the host as connecting.
+- Closing Add host between the check starting and the first question leaves the SSH sign-in running. Its question shows
+  nowhere but still chimes, and re-adding the same destination fails for up to two minutes.
+- Resuming a failed uninstall of a host that is not connected refuses as "not connected" whenever the host's retry state
+  changed while the confirmation was open, which a sign-in in between always does.
+- Leftovers of the removed SSH help: its doc comment now heads the Tensorlake module in the protocol crate, and two code
+  comments still name it. The docs page's sounds section does not mention the new chime and says opening Farhelm never
+  sounds for requests already waiting, which an SSH question now does.
+- Setup sign-in's choice of connection uses a catch-all over remote routes, where the repository's code rules ask for
+  each route to be named.
+- The answer route sits with the cancellable read-only routes without a stated reason.
+
+#### What is needed
+
+Fix the five tests, the two bugs (with tests that show them), the startup focus exception per the decision, and the
+smaller items, then deliver again.
