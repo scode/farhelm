@@ -7532,6 +7532,7 @@ impl Supervisor {
             | AgentKind::Goose
             | AgentKind::Pi
             | AgentKind::Grok
+            | AgentKind::Antigravity
             | AgentKind::Muse
             | AgentKind::Generic => {}
         }
@@ -7567,6 +7568,7 @@ impl Supervisor {
             | AgentKind::Claude
             | AgentKind::Goose
             | AgentKind::Muse
+            | AgentKind::Antigravity
             | AgentKind::Generic => {}
         }
         let Some(vendor) = crate::agent_kind::locator_vendor(snapshot.kind) else {
@@ -15398,7 +15400,7 @@ impl Supervisor {
     }
 
     /// Dispatch report authority independently of the Restart provenance gate.
-    /// Claude and Muse share a process pin while retaining ownership version 0;
+    /// Claude, Muse and Antigravity use a process pin with ownership version 0;
     /// routing them through the proof predicate would withdraw Restart offers.
     /// Every integration chooses its admission explicitly so a new kind cannot
     /// inherit another vendor's process or record rules.
@@ -15427,6 +15429,16 @@ impl Supervisor {
                     id,
                     report,
                     vendor::positional::MUSE,
+                    generation,
+                    entry,
+                )
+                .await
+            }
+            AgentKind::Antigravity => {
+                self.report_positional_conversation(
+                    id,
+                    report,
+                    vendor::positional::ANTIGRAVITY,
                     generation,
                     entry,
                 )
@@ -17388,6 +17400,7 @@ pub(crate) mod tests {
             "pi" => (AgentKind::Pi, &["--session"]),
             "omp" => (AgentKind::Omp, &["--resume"]),
             "grok" => (AgentKind::Grok, &["--no-leader", "--resume"]),
+            "agy" => (AgentKind::Antigravity, &["--conversation"]),
             _ => {
                 return IntegrationSnapshot {
                     kind: AgentKind::Generic,
@@ -30736,6 +30749,7 @@ exit 1
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
             AgentKind::Grok => "grok",
+            AgentKind::Antigravity => "antigravity",
             AgentKind::Muse => "muse",
             AgentKind::Generic => "agent",
         };

@@ -1429,6 +1429,7 @@ pub const fn harness_label(harness: LaunchHarness) -> &'static str {
     match harness {
         LaunchHarness::Codex => "Codex",
         LaunchHarness::Claude => "Claude",
+        LaunchHarness::Antigravity => "Antigravity",
         LaunchHarness::Muse => "Muse",
         LaunchHarness::Cursor => "Cursor",
         LaunchHarness::Grok => "Grok",

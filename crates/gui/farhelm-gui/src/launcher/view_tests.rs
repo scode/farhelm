@@ -1047,7 +1047,7 @@ fn each_agent_type_offers_its_own_permission_vocabulary(cx: &mut TestAppContext)
         "Smart approve",
         "Chat",
     ];
-    let cases: [(&'static str, &[&str], &str, bool); 9] = [
+    let cases: [(&'static str, &[&str], &str, bool); 10] = [
         (
             "launcher-harness-Codex",
             &["Guarded", "YOLO", "Custom"],
@@ -1056,6 +1056,12 @@ fn each_agent_type_offers_its_own_permission_vocabulary(cx: &mut TestAppContext)
         ),
         (
             "launcher-harness-Claude",
+            &["Guarded", "YOLO", "Custom"],
+            "Guarded",
+            true,
+        ),
+        (
+            "launcher-harness-Antigravity",
             &["Guarded", "YOLO", "Custom"],
             "Guarded",
             true,

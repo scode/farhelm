@@ -33,6 +33,7 @@
 //! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
 //!   ancestor corrects a child-first conversation choice.
 //! - [`NotificationKind::MusePinCorrected`]: the same correction for Muse.
+//! - [`NotificationKind::AntigravityPinCorrected`]: the same correction for Antigravity.
 //! - [`NotificationKind::OldTerminal`]: nothing any more. Earlier releases'
 //!   ticker recorded it while something of a session still ran in an old
 //!   tmux terminal; this release ends those terminals at startup and
@@ -84,6 +85,8 @@ pub(crate) enum NotificationKind {
     /// A recorded Muse ancestor corrected a conversation selected by its child.
     /// The prior Restart target remains relevant after successful capture.
     MusePinCorrected,
+    /// An Antigravity process above the previously pinned reporter took over capture.
+    AntigravityPinCorrected,
     /// Something in the session still ran in an old terminal (its agent in
     /// a tmux pane, or an open tmux tab), which an upcoming release would
     /// forcibly terminate: earlier releases recorded it, one per session.
@@ -99,7 +102,7 @@ pub(crate) enum NotificationKind {
 }
 
 impl NotificationKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
@@ -107,6 +110,7 @@ impl NotificationKind {
         Self::CodexPinCorrected,
         Self::ClaudePinCorrected,
         Self::MusePinCorrected,
+        Self::AntigravityPinCorrected,
         Self::OldTerminal,
         Self::OldTerminalEnded,
     ];
@@ -124,6 +128,7 @@ impl NotificationKind {
             | Self::CodexPinCorrected
             | Self::ClaudePinCorrected
             | Self::MusePinCorrected
+            | Self::AntigravityPinCorrected
             | Self::OldTerminal
             | Self::OldTerminalEnded => false,
         }
@@ -143,6 +148,7 @@ impl NotificationKind {
             | NotificationKind::CodexPinCorrected
             | NotificationKind::ClaudePinCorrected
             | NotificationKind::MusePinCorrected
+            | NotificationKind::AntigravityPinCorrected
             | NotificationKind::OldTerminal
             | NotificationKind::OldTerminalEnded => false,
         }
@@ -159,6 +165,7 @@ impl NotificationKind {
             NotificationKind::CodexPinCorrected => "codex_pin_corrected",
             NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
             NotificationKind::MusePinCorrected => "muse_pin_corrected",
+            NotificationKind::AntigravityPinCorrected => "antigravity_pin_corrected",
             NotificationKind::OldTerminal => "old_terminal",
             NotificationKind::OldTerminalEnded => "old_terminal_ended",
         }
@@ -191,6 +198,12 @@ pub(crate) const CLAUDE_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a
 pub(crate) const MUSE_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Muse conversation \
     started by another Muse process in this session. A Restart before now would have resumed \
     that conversation. Farhelm now follows the conversation of the Muse process that started it.";
+
+/// Explain the earlier Restart target when an Antigravity ancestor corrects the pin.
+pub(crate) const ANTIGRAVITY_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a conversation \
+    reported by another process in this session. A Restart before now would have resumed that \
+    conversation. \
+    Farhelm now follows the conversation reported by the Antigravity process that started it.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///
@@ -538,7 +551,7 @@ mod tests {
             }
             let text = hook_silent_text(kind);
             assert!(text.contains(kind.display_name().expect("eligible agent name")));
-            assert!(text.contains(readiness.clause(ReadinessWording::ToTheUser)));
+            assert!(text.contains(readiness.clause(ReadinessWording::ToTheUser).as_ref()));
             assert!(text.contains("Restart cannot resume this conversation"));
             assert!(text.contains("custom command"));
             assert!(text.contains("`{farhelm_args}`"));

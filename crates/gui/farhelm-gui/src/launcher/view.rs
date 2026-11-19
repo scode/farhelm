@@ -1572,6 +1572,7 @@ const fn conversation_label(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Claude
         | LaunchHarness::Codex
         | LaunchHarness::Muse
+        | LaunchHarness::Antigravity
         | LaunchHarness::Grok => "Conversation ID",
     }
 }

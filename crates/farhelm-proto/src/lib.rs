@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_79` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_80` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 79;
+pub const PROTOCOL_VERSION: u32 = 80;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -1465,8 +1465,8 @@ pub enum RestartReadiness {
     /// After the agent's first reply, once its conversation is saved.
     FirstReply,
     /// After the first prompt, and only with Farhelm's hooks installed in
-    /// the agent by the user (Grok's; its documentation page says how).
-    FirstPromptWithHooks,
+    /// the agent by the user. Carries the name of its documentation page.
+    FirstPromptWithHooks(&'static str),
 }
 
 /// Who a [`RestartReadiness::clause`] is addressed to.
@@ -1492,7 +1492,7 @@ impl RestartReadiness {
             RestartReadiness::ShortlyAfterStart
             | RestartReadiness::AtStart
             | RestartReadiness::FirstPrompt
-            | RestartReadiness::FirstPromptWithHooks => true,
+            | RestartReadiness::FirstPromptWithHooks(_) => true,
             RestartReadiness::FirstReply => false,
         }
     }
@@ -1500,12 +1500,11 @@ impl RestartReadiness {
     /// When Restart becomes available, as a clause that completes "Restart
     /// becomes available …" ("once you submit your first prompt").
     ///
-    /// No surface may assume more than that shape: none of them can hold a
-    /// link, so Grok's hook setup is named as a documentation page in plain
-    /// text. Restart explanations, agent instructions, and the supervisor's
-    /// silent-conversation-hook notification share this timing phrase.
-    pub fn clause(self, wording: ReadinessWording) -> &'static str {
-        match (self, wording) {
+    /// The clause uses plain text because the refusal and notification
+    /// surfaces cannot render a link to the hook setup page.
+    pub fn clause(self, wording: ReadinessWording) -> std::borrow::Cow<'static, str> {
+        use std::borrow::Cow;
+        let clause = match (self, wording) {
             (RestartReadiness::ShortlyAfterStart, _) => "a few seconds after it starts",
             (RestartReadiness::AtStart, _) => "as soon as it starts",
             (RestartReadiness::FirstPrompt, ReadinessWording::ToTheUser) => {
@@ -1517,15 +1516,20 @@ impl RestartReadiness {
             (RestartReadiness::FirstReply, _) => {
                 "after the agent's first reply, once the conversation is saved"
             }
-            (RestartReadiness::FirstPromptWithHooks, ReadinessWording::ToTheUser) => {
-                "after your first prompt, and only if Farhelm's Grok hooks are installed (see the \
-                 Grok page in Farhelm's documentation)"
+            (RestartReadiness::FirstPromptWithHooks(agent), ReadinessWording::ToTheUser) => {
+                return Cow::Owned(format!(
+                    "after your first prompt, and only if Farhelm's {agent} hooks are installed \
+                     (see the {agent} page in Farhelm's documentation)"
+                ));
             }
-            (RestartReadiness::FirstPromptWithHooks, ReadinessWording::Neutral) => {
-                "after the first prompt, and only if Farhelm's Grok hooks are installed on the \
-                 host (see the Grok page in Farhelm's documentation)"
+            (RestartReadiness::FirstPromptWithHooks(agent), ReadinessWording::Neutral) => {
+                return Cow::Owned(format!(
+                    "after the first prompt, and only if Farhelm's {agent} hooks are installed on \
+                     the host (see the {agent} page in Farhelm's documentation)"
+                ));
             }
-        }
+        };
+        Cow::Borrowed(clause)
     }
 }
 
@@ -1564,6 +1568,8 @@ crate::enum_with_all! {
         /// Grok's tracked native launch kind. Capture policy is added separately,
         /// but this identity must survive launch snapshots now.
         Grok,
+        /// Antigravity CLI with conversation reports from user-installed hooks.
+        Antigravity,
         /// Muse Code, with per-launch hooks and positional conversation capture.
         Muse,
         /// Explicitly non-integrated: no status heuristics beyond the
@@ -1596,6 +1602,7 @@ impl AgentKind {
             AgentKind::Pi => Some("Pi"),
             AgentKind::Omp => Some("OMP"),
             AgentKind::Grok => Some("Grok"),
+            AgentKind::Antigravity => Some("Antigravity"),
             AgentKind::Muse => Some("Muse"),
             AgentKind::Generic => None,
         }
@@ -1629,8 +1636,10 @@ impl AgentKind {
             // The first reply is the normal save point for Pi and OMP.
             // OMP can also save a new conversation immediately on /new.
             AgentKind::Pi | AgentKind::Omp => Some(RestartReadiness::FirstReply),
-            // Grok's hooks are installed by the user, not injected.
-            AgentKind::Grok => Some(RestartReadiness::FirstPromptWithHooks),
+            // Both manual integrations report on the first prompt when the user installed hooks.
+            AgentKind::Grok | AgentKind::Antigravity => self
+                .display_name()
+                .map(RestartReadiness::FirstPromptWithHooks),
             AgentKind::Generic => None,
         }
     }
@@ -1645,6 +1654,7 @@ impl AgentKind {
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
             AgentKind::Grok => "grok",
+            AgentKind::Antigravity => "antigravity",
             AgentKind::Muse => "muse",
             AgentKind::Generic => "generic",
         }
@@ -2645,6 +2655,8 @@ pub enum ReportVendor {
     Omp,
     /// xAI's Grok Build CLI, via manually configured lifecycle hooks.
     Grok,
+    /// Antigravity CLI's manually configured SessionStart and Stop hooks.
+    Antigravity,
     /// Muse Code, via the per-launch JSON hooks override.
     Muse,
 }
@@ -5748,6 +5760,7 @@ mod tests {
                     | AgentKind::Pi
                     | AgentKind::Omp
                     | AgentKind::Grok
+                    | AgentKind::Antigravity
                     | AgentKind::Muse => {
                         panic!("reporting kind {kind:?} must declare its readiness")
                     }
@@ -5836,8 +5849,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_79() {
-        assert_eq!(PROTOCOL_VERSION, 79);
+    fn protocol_version_is_pinned_at_80() {
+        assert_eq!(PROTOCOL_VERSION, 80);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -7906,6 +7919,7 @@ mod tests {
             AgentKind::Pi,
             AgentKind::Omp,
             AgentKind::Grok,
+            AgentKind::Antigravity,
             AgentKind::Muse,
             AgentKind::Generic,
         ] {
@@ -7916,6 +7930,7 @@ mod tests {
                 AgentKind::Pi => "pi",
                 AgentKind::Omp => "omp",
                 AgentKind::Grok => "grok",
+                AgentKind::Antigravity => "antigravity",
                 AgentKind::Muse => "muse",
                 AgentKind::Generic => "generic",
             };

@@ -27,18 +27,19 @@ draws the mark. Several of the terms below forbid modification, and an unaltered
 
 ## Per-harness provenance
 
-| Harness  | Mark                      | Status                 | Source                                                                          |
-| -------- | ------------------------- | ---------------------- | ------------------------------------------------------------------------------- |
-| Claude   | eight-ray starburst       | Farhelm original       | drawn here; not the Anthropic spark                                             |
-| Codex    | OpenAI blossom            | official, unaltered    | `OpenAI-black-monoblossom.svg` from OpenAI's brand download                     |
-| Muse     | stroked "M" with dot ends | community, unofficial  | `resources/muse-logo.svg` in `corona10/muse-code-vscode` (MIT), sparkle dropped |
-| Cursor   | 2D cube                   | official, unaltered    | `CUBE_2D_LIGHT.svg` from cursor.com/brand                                       |
-| Goose    | goose silhouette          | official, unaltered    | `ui/desktop/src/components/icons/Goose.tsx` in `aaif-goose/goose` (Apache-2.0)  |
-| Pi       | pixel-grid "P" with dot   | official, unaltered    | `https://pi.dev/favicon.svg`, the press kit's badge mark                        |
-| OMP      | block-style π             | official, tile dropped | `https://omp.sh/favicon.svg` path (MIT repo `can1357/oh-my-pi`)                 |
-| Grok     | block "G"                 | Farhelm original       | drawn here; retained independently of the current official kit                  |
-| OpenCode | even-odd ring             | official, unaltered    | `packages/ui/src/assets/favicon/favicon-v3.svg` in `anomalyco/opencode` (MIT)   |
-| Terminal | window with prompt        | Farhelm original       | drawn here                                                                      |
+| Harness     | Mark                      | Status                 | Source                                                                          |
+| ----------- | ------------------------- | ---------------------- | ------------------------------------------------------------------------------- |
+| Claude      | eight-ray starburst       | Farhelm original       | drawn here; not the Anthropic spark                                             |
+| Codex       | OpenAI blossom            | official, unaltered    | `OpenAI-black-monoblossom.svg` from OpenAI's brand download                     |
+| Muse        | stroked "M" with dot ends | community, unofficial  | `resources/muse-logo.svg` in `corona10/muse-code-vscode` (MIT), sparkle dropped |
+| Cursor      | 2D cube                   | official, unaltered    | `CUBE_2D_LIGHT.svg` from cursor.com/brand                                       |
+| Goose       | goose silhouette          | official, unaltered    | `ui/desktop/src/components/icons/Goose.tsx` in `aaif-goose/goose` (Apache-2.0)  |
+| Pi          | pixel-grid "P" with dot   | official, unaltered    | `https://pi.dev/favicon.svg`, the press kit's badge mark                        |
+| OMP         | block-style π             | official, tile dropped | `https://omp.sh/favicon.svg` path (MIT repo `can1357/oh-my-pi`)                 |
+| Grok        | block "G"                 | Farhelm original       | drawn here; retained independently of the current official kit                  |
+| Antigravity | rising chevron and bar    | Farhelm original       | drawn here independently of Google's artwork                                    |
+| OpenCode    | even-odd ring             | official, unaltered    | `packages/ui/src/assets/favicon/favicon-v3.svg` in `anomalyco/opencode` (MIT)   |
+| Terminal    | window with prompt        | Farhelm original       | drawn here                                                                      |
 
 ### Claude — Farhelm original, by constraint
 
@@ -137,6 +138,13 @@ geometry. The G names the harness without tracing or approximating its official 
 legible at the sidebar's 12px size. The inspected official favicon and repository artwork are monochrome; the kit ZIP
 was unavailable during the color re-check.
 
+### Antigravity — Farhelm original
+
+Google's Antigravity site carries product artwork, and Google's
+[brand terms](https://about.google/intl/en/brand-resource-center/brand-terms/) cover approved use of its marks. Farhelm
+uses its own rising chevron above a short bar. The drawing bounds are `x=1..11` and `y=2..10` in the shared 12-unit box,
+so it already spans 10 units and centers at `(6, 6)`.
+
 ### OpenCode — official favicon cut
 
 `https://opencode.ai/brand` publishes eight logo variants with no usage terms at all, and the repository is MIT. Farhelm
@@ -147,22 +155,23 @@ single even-odd ring, the small-size simplification OpenCode itself uses, so the
 ## Colors
 
 Color identifies an agent, never its permission mode or activity. The following source and terms re-check was made on
-2026-11-03. The seven colored marks clear 3:1 against both the sidebar and row hover surfaces in each theme. Light
-shades change lightness where contrast requires it; they are Farhelm adjustments, not additional official colors. Every
+2026-11-03. The colored marks clear 3:1 against both the sidebar and row hover surfaces in each theme. Light shades
+change lightness where contrast requires it; they are Farhelm adjustments, not additional official colors. Every
 selected mark uses white (`--on-fill`) instead. Geometry and sizing remain independent of these CSS roles.
 
-| Mark     | Dark / light          | Source and color-use basis                                                                                                                                                                                                                                                                                                                                   |
-| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Claude   | `#d97757` / `#d25e39` | Anthropic's [official palette](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/brand-guidelines/SKILL.md) supplies terracotta. It colors Farhelm's original starburst under the maintainer decision above, not the restricted official spark.                                                                      |
-| Muse     | `#456bff` / `#456bff` | Farhelm blue. The [community SVG](https://github.com/corona10/muse-code-vscode/blob/6846fc377227ef7667c5eb211019e64338d5762f/resources/muse-logo.svg) is MIT-licensed; its source blue is unofficial. The [product page](https://dev.meta.ai/products/muse-code) and [SDK](https://github.com/meta-models/muse-code-sdk) supplied no Muse Code-specific hue. |
-| Cursor   | `#2fbfaf` / `#249084` | Farhelm teal. The [brand page](https://cursor.com/brand) and downloads supply neutral variants. No additional color restriction was found there; `currentColor` is a rendering mechanism, not an express color license.                                                                                                                                      |
-| Pi       | `#4d9abf` / `#3e89ad` | Blue from the [primary logo](https://pi.dev/logo.svg) in the [MIT-labeled press kit](https://pi.dev/press-kit). That logo also uses coral `#f09082` and yellow `#f1be58`; Farhelm takes one published hue for its unchanged badge, rather than reproducing the three-color arrangement. No requirement to keep those fills together was found.               |
-| OMP      | `#9b4dff` / `#9b4dff` | The middle purple stop of the [official favicon](https://omp.sh/favicon.svg), whose other stops are pink `#ed4abf` and cyan `#5ad8e6`. Purple separates from Pi's blue better than cyan. The MIT source and official monochrome implementation are the basis described above.                                                                                |
-| Grok     | `#d8b839` / `#987f1e` | Farhelm gold on its original G. The [official favicon](https://grok.com/images/favicon.svg) is neutral; the current kit's no-alteration rule applies to official artwork, which is not used here.                                                                                                                                                            |
-| OpenCode | `#83b94b` / `#638d37` | Farhelm yellow-green. The [brand page](https://opencode.ai/brand) and [favicon](https://opencode.ai/favicon-v3.svg) supply white/grey artwork. The MIT repository and [open-source terms](https://opencode.ai/legal/terms-of-service) remain the copyright basis; no separate color restriction was found on the checked pages.                              |
-| Codex    | inherited grey        | The [OpenAI guidelines](https://openai.com/brand/) explicitly forbid adding blossom colors. Keep the existing one-color treatment; inherited grey is not the supplied black or white.                                                                                                                                                                        |
-| Goose    | inherited grey        | The [LF Projects policy](https://lfprojects.org/policies/trademark-policy/) still asks that logos have no color variations. Keep the existing one-color treatment described above.                                                                                                                                                                           |
-| Terminal | inherited grey        | Farhelm's own non-agent mark; it retains the ordinary agent-track foreground.                                                                                                                                                                                                                                                                                |
+| Mark        | Dark / light          | Source and color-use basis                                                                                                                                                                                                                                                                                                                                   |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude      | `#d97757` / `#d25e39` | Anthropic's [official palette](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/brand-guidelines/SKILL.md) supplies terracotta. It colors Farhelm's original starburst under the maintainer decision above, not the restricted official spark.                                                                      |
+| Muse        | `#456bff` / `#456bff` | Farhelm blue. The [community SVG](https://github.com/corona10/muse-code-vscode/blob/6846fc377227ef7667c5eb211019e64338d5762f/resources/muse-logo.svg) is MIT-licensed; its source blue is unofficial. The [product page](https://dev.meta.ai/products/muse-code) and [SDK](https://github.com/meta-models/muse-code-sdk) supplied no Muse Code-specific hue. |
+| Cursor      | `#2fbfaf` / `#249084` | Farhelm teal. The [brand page](https://cursor.com/brand) and downloads supply neutral variants. No additional color restriction was found there; `currentColor` is a rendering mechanism, not an express color license.                                                                                                                                      |
+| Pi          | `#4d9abf` / `#3e89ad` | Blue from the [primary logo](https://pi.dev/logo.svg) in the [MIT-labeled press kit](https://pi.dev/press-kit). That logo also uses coral `#f09082` and yellow `#f1be58`; Farhelm takes one published hue for its unchanged badge, rather than reproducing the three-color arrangement. No requirement to keep those fills together was found.               |
+| OMP         | `#9b4dff` / `#9b4dff` | The middle purple stop of the [official favicon](https://omp.sh/favicon.svg), whose other stops are pink `#ed4abf` and cyan `#5ad8e6`. Purple separates from Pi's blue better than cyan. The MIT source and official monochrome implementation are the basis described above.                                                                                |
+| Grok        | `#d8b839` / `#987f1e` | Farhelm gold on its original G. The [official favicon](https://grok.com/images/favicon.svg) is neutral; the current kit's no-alteration rule applies to official artwork, which is not used here.                                                                                                                                                            |
+| OpenCode    | `#83b94b` / `#638d37` | Farhelm yellow-green. The [brand page](https://opencode.ai/brand) and [favicon](https://opencode.ai/favicon-v3.svg) supply white/grey artwork. The MIT repository and [open-source terms](https://opencode.ai/legal/terms-of-service) remain the copyright basis; no separate color restriction was found on the checked pages.                              |
+| Antigravity | `#e85d9a` / `#c73c7a` | Farhelm rose-magenta, checked 2026-11-19. Against the sidebar and row hover, respectively, the contrast is 4.91:1 and 3.47:1 in Dark, and 4.11:1 and 3.74:1 in Light.                                                                                                                                                                                        |
+| Codex       | inherited grey        | The [OpenAI guidelines](https://openai.com/brand/) explicitly forbid adding blossom colors. Keep the existing one-color treatment; inherited grey is not the supplied black or white.                                                                                                                                                                        |
+| Goose       | inherited grey        | The [LF Projects policy](https://lfprojects.org/policies/trademark-policy/) still asks that logos have no color variations. Keep the existing one-color treatment described above.                                                                                                                                                                           |
+| Terminal    | inherited grey        | Farhelm's own non-agent mark; it retains the ordinary agent-track foreground.                                                                                                                                                                                                                                                                                |
 
 For a future harness, check the owner's current terms before assigning color. Keep a mark one-color where those terms do
 not allow coloring; otherwise take a published official hue when one exists. A black, white or grey mark supplies no

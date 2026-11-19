@@ -1269,8 +1269,8 @@ enum SupervisorCmd {
 
 /// The `--vendor` flag's spelling: exactly the wire enum's adapters,
 /// so the CLI-to-wire mapping is total and cannot drift one variant at a
-/// time. Some adapters are installed automatically, Grok is configured by
-/// the user, and `internal goose-hook` supplies Goose internally; the flag
+/// time. Some adapters are installed automatically, Grok and Antigravity are
+/// configured by the user, and `internal goose-hook` supplies Goose internally; the flag
 /// still mirrors the complete closed wire enum.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum HookVendor {
@@ -1281,6 +1281,7 @@ enum HookVendor {
     Pi,
     Omp,
     Grok,
+    Antigravity,
 }
 
 impl HookVendor {
@@ -1294,6 +1295,7 @@ impl HookVendor {
             HookVendor::Pi => farhelm_proto::ReportVendor::Pi,
             HookVendor::Omp => farhelm_proto::ReportVendor::Omp,
             HookVendor::Grok => farhelm_proto::ReportVendor::Grok,
+            HookVendor::Antigravity => farhelm_proto::ReportVendor::Antigravity,
         }
     }
 }
@@ -1416,8 +1418,8 @@ enum InternalCmd {
     /// supervisor that launched this session to apply.
     ///
     /// Farhelm injects `<farhelm_exe> internal hook` for vendors with a
-    /// per-launch hook surface. Grok instead uses manually configured
-    /// `SessionStart`, `UserPromptSubmit`, and `Stop` callbacks. Either way it
+    /// per-launch hook surface. Grok and Antigravity use callbacks configured
+    /// by the user. Either way it
     /// runs below the agent, inside the user's terminal, with the session
     /// credential in its environment. Everything it needs to report arrives
     /// on stdin or in that environment. See `hook.rs` for the silence and
@@ -1650,7 +1652,20 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
     );
     match version_lock::hold_for_process(&exe, inherited.as_deref()) {
         Ok(ProcessHold::NotInLayout | ProcessHold::Held | ProcessHold::Unsupported) => Ok(()),
-        Err(_) if quiet => std::process::exit(0),
+        Err(_) if quiet => {
+            // A hook that cannot hold its version (an update or uninstall
+            // holds the lock) skips the report, but its vendor still reads
+            // stdout: Antigravity expects its JSON reply on every exit, so
+            // answer exactly as the hook's own path would without
+            // `--announce`.
+            if let Cmd::Internal {
+                command: InternalCmd::Hook { vendor, .. },
+            } = command
+            {
+                hook::write_response(&mut std::io::stdout(), vendor.report_vendor(), false);
+            }
+            std::process::exit(0)
+        }
         Err(error) => {
             // A session's hold step or launch shim that cannot hold its
             // version records why in the launch's status file, as every
@@ -2048,12 +2063,13 @@ fn main() -> anyhow::Result<()> {
                 let hook_log = env.hook_log();
                 let credential = env.hook_credential();
 
+                let vendor = vendor.report_vendor();
                 hook::run_with(
                     credential,
                     std::io::stdin(),
                     hook_budget(),
                     hook_log,
-                    vendor.report_vendor(),
+                    vendor,
                 );
 
                 // AFTER the report, never before. The report is the part
@@ -2062,9 +2078,7 @@ fn main() -> anyhow::Result<()> {
                 // costs a small write to a pipe the vendor is draining.
                 // Ordering it second means a stdout that somehow will not
                 // take the line cannot delay the report.
-                if announce {
-                    hook::announce(&mut std::io::stdout());
-                }
+                hook::write_response(&mut std::io::stdout(), vendor, announce);
 
                 // Exit rather than return, for the STATUS above all: 0 is
                 // decided right here, unconditionally, rather than by

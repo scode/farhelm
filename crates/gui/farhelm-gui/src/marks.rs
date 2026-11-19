@@ -32,6 +32,7 @@ pub enum HarnessGlyph {
     Grok,
     OpenCode,
     Terminal,
+    Antigravity,
 }
 
 impl HarnessGlyph {
@@ -50,6 +51,7 @@ impl HarnessGlyph {
         HarnessGlyph::Grok,
         HarnessGlyph::OpenCode,
         HarnessGlyph::Terminal,
+        HarnessGlyph::Antigravity,
     ];
 
     /// The stable word naming this mark: the old UI's `data-glyph` value and the key its identity colors were
@@ -64,6 +66,7 @@ impl HarnessGlyph {
             HarnessGlyph::Pi => "pi",
             HarnessGlyph::Omp => "omp",
             HarnessGlyph::Grok => "grok",
+            HarnessGlyph::Antigravity => "antigravity",
             HarnessGlyph::OpenCode => "opencode",
             HarnessGlyph::Terminal => "terminal",
         }
@@ -79,6 +82,7 @@ impl HarnessGlyph {
             HarnessGlyph::Pi => &PI,
             HarnessGlyph::Omp => &OMP,
             HarnessGlyph::Grok => &GROK,
+            HarnessGlyph::Antigravity => &ANTIGRAVITY,
             HarnessGlyph::OpenCode => &OPENCODE,
             HarnessGlyph::Muse => &MUSE,
             HarnessGlyph::Terminal => &TERMINAL,
@@ -194,6 +198,9 @@ const OMP_PI: &str = "M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z";
 /// original drawing names the harness independently of xAI's artwork.
 const GROK_GLYPH: &str = "M21 4H8C4.686 4 2 6.686 2 10V14C2 17.314 4.686 20 8 20H21V11H12V15H16V16H8C6.895 16 6 15.105 6 14V10C6 8.895 6.895 8 8 8H21Z";
 
+/// Farhelm's original Antigravity mark, a rising chevron above a short bar.
+const ANTIGRAVITY_GLYPH: &str = "M1 6.5 6 2 11 6.5 9.5 8 6 4.8 2.5 8ZM3 8.5H9V10H3Z";
+
 /// OpenCode's favicon cut: one ring drawn with the even-odd rule. The project's logo file is a two-tone pair of nested
 /// frames whose inner mid-grey square collapses to one color; the favicon is the small-size simplification the project
 /// itself publishes.
@@ -298,6 +305,15 @@ const GROK: HarnessMark = mark(
     -0.0526,
     -0.3158,
     0.526316,
+);
+
+// Bounds x=1..11 and y=2..10 already span ten units and center on (6, 6).
+const ANTIGRAVITY: HarnessMark = mark(
+    &[fill(ANTIGRAVITY_GLYPH)],
+    bbox(1.0, 2.0, 10.0, 8.0),
+    0.0,
+    0.0,
+    1.0,
 );
 // In a 512 box.
 const OPENCODE: HarnessMark = mark(

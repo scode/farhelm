@@ -276,6 +276,8 @@ pub enum Icon {
     HarnessOmp,
     /// Grok: Farhelm's own block G.
     HarnessGrok,
+    /// Antigravity: Farhelm's rising chevron and bar.
+    HarnessAntigravity,
     /// OpenCode: its favicon ring.
     HarnessOpenCode,
     /// A command no agent type was declared for: Farhelm's own window with a prompt.
@@ -434,6 +436,7 @@ impl Icon {
         Icon::HarnessPi,
         Icon::HarnessOmp,
         Icon::HarnessGrok,
+        Icon::HarnessAntigravity,
         Icon::HarnessOpenCode,
         Icon::HarnessTerminal,
         Icon::PermissionYolo,
@@ -537,6 +540,7 @@ impl Icon {
             Icon::HarnessPi => "icons/harness-pi.svg",
             Icon::HarnessOmp => "icons/harness-omp.svg",
             Icon::HarnessGrok => "icons/harness-grok.svg",
+            Icon::HarnessAntigravity => "icons/harness-antigravity.svg",
             Icon::HarnessOpenCode => "icons/harness-opencode.svg",
             Icon::HarnessTerminal => "icons/harness-terminal.svg",
             Icon::PermissionYolo => "icons/permission-yolo.svg",
@@ -648,6 +652,9 @@ impl Assets {
             "icons/harness-pi.svg" => Some(include_bytes!("../assets/icons/harness-pi.svg")),
             "icons/harness-omp.svg" => Some(include_bytes!("../assets/icons/harness-omp.svg")),
             "icons/harness-grok.svg" => Some(include_bytes!("../assets/icons/harness-grok.svg")),
+            "icons/harness-antigravity.svg" => {
+                Some(include_bytes!("../assets/icons/harness-antigravity.svg"))
+            }
             "icons/harness-opencode.svg" => {
                 Some(include_bytes!("../assets/icons/harness-opencode.svg"))
             }

@@ -59,6 +59,8 @@ crate::enum_with_all! {
         OpenCode,
         /// Grok's native terminal UI. Tracked launches require `--no-leader`.
         Grok,
+        /// Antigravity CLI. Launch choices work with or without its manual hooks.
+        Antigravity,
     }
 }
 
@@ -79,19 +81,22 @@ impl LaunchHarness {
             | LaunchHarness::Claude
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
-            | LaunchHarness::Grok => true,
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => true,
         }
     }
 
     /// Literal arguments appended after Farhelm expands its own placeholders.
     /// Positional prompts follow an option terminator, so leading hyphens
-    /// cannot become agent options. OpenCode's TUI uses a dedicated flag.
+    /// cannot become agent options. OpenCode and Antigravity attach the
+    /// value to a dedicated flag, so even a prompt of `--help` stays data.
     /// This must never be added to the session's reusable launch or resume argv.
     pub fn initial_prompt_arguments(self, prompt: &str) -> Result<Vec<String>, String> {
         match self {
             LaunchHarness::Goose => Err("Goose does not accept an initial prompt".into()),
             LaunchHarness::Pi => Err("Pi cannot accept an arbitrary literal initial prompt".into()),
             LaunchHarness::OpenCode => Ok(vec![format!("--prompt={prompt}")]),
+            LaunchHarness::Antigravity => Ok(vec![format!("--prompt-interactive={prompt}")]),
             LaunchHarness::Cursor
             | LaunchHarness::Codex
             | LaunchHarness::Claude
@@ -149,6 +154,7 @@ impl LaunchHarness {
             LaunchHarness::Pi => AgentKind::Pi,
             LaunchHarness::Omp => AgentKind::Omp,
             LaunchHarness::Grok => AgentKind::Grok,
+            LaunchHarness::Antigravity => AgentKind::Antigravity,
         }
     }
 
@@ -169,7 +175,8 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::Grok => self.agent_kind(),
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => self.agent_kind(),
         }
     }
 
@@ -188,7 +195,8 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
-            | LaunchHarness::Grok => false,
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => false,
         }
     }
 
@@ -209,7 +217,8 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::OpenCode => true,
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Antigravity => true,
             LaunchHarness::Grok => false,
         }
     }
@@ -241,7 +250,8 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::Grok => Cow::Borrowed(model),
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => Cow::Borrowed(model),
         }
     }
 
@@ -259,7 +269,8 @@ impl LaunchHarness {
             | LaunchHarness::Muse
             | LaunchHarness::Goose
             | LaunchHarness::Pi
-            | LaunchHarness::Omp => true,
+            | LaunchHarness::Omp
+            | LaunchHarness::Antigravity => true,
             LaunchHarness::Cursor | LaunchHarness::OpenCode | LaunchHarness::Grok => false,
         }
     }
@@ -281,7 +292,8 @@ impl LaunchHarness {
             | LaunchHarness::Claude
             | LaunchHarness::Muse
             | LaunchHarness::Omp
-            | LaunchHarness::Grok => Some(LaunchPermission::Guarded),
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => Some(LaunchPermission::Guarded),
         }
     }
 
@@ -342,7 +354,8 @@ impl LaunchHarness {
                 | LaunchHarness::Codex
                 | LaunchHarness::Claude
                 | LaunchHarness::Muse
-                | LaunchHarness::Grok => None,
+                | LaunchHarness::Grok
+                | LaunchHarness::Antigravity => None,
             },
         }
     }
@@ -356,6 +369,7 @@ impl LaunchHarness {
     pub const fn guarded_flags(self) -> &'static [&'static str] {
         match self {
             LaunchHarness::Claude | LaunchHarness::Grok => &["--permission-mode", "auto"],
+            LaunchHarness::Antigravity => &["--mode", "auto"],
             LaunchHarness::Codex => &["-a", "on-request", "-s", "workspace-write"],
             LaunchHarness::Muse => &["--permission-profile", ":auto-review"],
             LaunchHarness::Omp => &["--approval-mode", "write"],
@@ -376,6 +390,7 @@ impl LaunchHarness {
             LaunchHarness::Claude
             | LaunchHarness::Codex
             | LaunchHarness::Grok
+            | LaunchHarness::Antigravity
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
@@ -395,6 +410,7 @@ impl LaunchHarness {
             LaunchHarness::Claude
             | LaunchHarness::Codex
             | LaunchHarness::Grok
+            | LaunchHarness::Antigravity
             | LaunchHarness::Goose
             | LaunchHarness::Muse
             | LaunchHarness::Cursor
@@ -412,6 +428,7 @@ impl LaunchHarness {
             LaunchHarness::Claude
             | LaunchHarness::Codex
             | LaunchHarness::Grok
+            | LaunchHarness::Antigravity
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Muse => true,
@@ -454,7 +471,8 @@ impl LaunchHarness {
             LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
-            | LaunchHarness::Grok => matches!(
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => matches!(
                 permission,
                 LaunchPermission::Yolo | LaunchPermission::Guarded | LaunchPermission::Custom
             ),
@@ -897,6 +915,9 @@ mod tests {
                     super::LaunchHarness::OpenCode => {
                         assert_eq!(args, [format!("--prompt={text}")])
                     }
+                    super::LaunchHarness::Antigravity => {
+                        assert_eq!(args, [format!("--prompt-interactive={text}")])
+                    }
                     super::LaunchHarness::Goose | super::LaunchHarness::Pi => unreachable!(),
                     super::LaunchHarness::Cursor
                     | super::LaunchHarness::Codex
@@ -909,6 +930,13 @@ mod tests {
         }
         assert!(!super::LaunchHarness::Muse.supports_initial_prompt(true));
         assert!(super::LaunchHarness::Codex.supports_initial_prompt(true));
+        assert!(super::LaunchHarness::Antigravity.supports_initial_prompt(true));
+        assert_eq!(
+            super::LaunchHarness::Antigravity
+                .initial_prompt_arguments("--help")
+                .unwrap(),
+            ["--prompt-interactive=--help"]
+        );
     }
 
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
@@ -951,6 +979,7 @@ mod tests {
             LaunchHarness::Codex,
             LaunchHarness::Muse,
             LaunchHarness::Grok,
+            LaunchHarness::Antigravity,
         ] {
             assert_eq!(
                 harness.request_permission(None),
@@ -1070,6 +1099,13 @@ mod tests {
             (Omp, true, true, Some(LaunchPermission::Guarded), false),
             (OpenCode, true, false, Some(LaunchPermission::Yolo), true),
             (Grok, false, false, Some(LaunchPermission::Guarded), false),
+            (
+                Antigravity,
+                true,
+                true,
+                Some(LaunchPermission::Guarded),
+                false,
+            ),
         ];
         assert_eq!(expected.len(), LaunchHarness::ALL.len());
         for (harness, model, effort, omitted, only_yolo) in expected {
@@ -1107,7 +1143,8 @@ mod tests {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
-            | LaunchHarness::Grok => {}
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => {}
         }
         let all = [Guarded, Yolo, Custom, Approve, SmartApprove, Chat];
         for (harness, offered) in [
@@ -1123,6 +1160,7 @@ mod tests {
             (LaunchHarness::Pi, &[Yolo][..]),
             (LaunchHarness::OpenCode, &[Yolo][..]),
             (LaunchHarness::Grok, &[Guarded, Yolo, Custom][..]),
+            (LaunchHarness::Antigravity, &[Guarded, Yolo, Custom][..]),
         ] {
             for permission in all {
                 assert_eq!(

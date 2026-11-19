@@ -231,7 +231,7 @@ ENSURE_HOSTS_ENV = "FARHELM_DESKTOP_AGENT_ENSURE_HOSTS"
 # Every program the app launches an agent harness as, by bare name (`program` in crates/farhelm-helm/src/launches.rs,
 # which test-gui-agent.py checks this against), each shadowed by a wrapper of the run's in a staged run. A launch the
 # launcher or a template composes names one of these, and a staged scenario's sessions do too.
-STAGED_AGENTS = ("codex", "claude", "muse", "cursor-agent", "opencode", "goose", "pi", "omp", "grok")
+STAGED_AGENTS = ("codex", "claude", "muse", "cursor-agent", "opencode", "goose", "pi", "omp", "grok", "agy")
 
 # The file a wrapper runs, with `sh`, from the session's working directory when it is there: a scenario writes one into
 # each session's scratch directory to give it its own replay (`exec <fixtures> fake-agent --script replay ... "$@"`).
@@ -1167,7 +1167,7 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
 # `LaunchPermission` in crates/farhelm-proto/src/launch.rs (snake_case; scripts/test-gui-agent.py checks them against
 # that source). `custom` is left out of the permissions on purpose: it needs its own flags, which a scenario has no
 # field for.
-LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok")
+LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok", "antigravity")
 LAUNCH_EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 LAUNCH_PERMISSIONS = ("guarded", "yolo", "approve", "smart_approve", "chat")
 

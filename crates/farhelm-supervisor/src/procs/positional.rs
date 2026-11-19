@@ -1,4 +1,4 @@
-//! Claude Code and Muse's positional attribution of a hook to its emitter.
+//! Positional attribution of a Claude Code, Muse or Antigravity hook to its emitter.
 //! Admission pins that process; ancestry alone does not establish authority.
 
 use super::*;

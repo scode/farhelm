@@ -158,7 +158,8 @@ fn render(agent: &Command) -> String {
          Do not put secrets in a wrapper: its words appear in process listings and templates.\n\
          Guarded permissions select the agent's automatic safety mode with explicit flags.\n\
          They do not promise to ask before every action: Claude uses auto mode, Grok auto-review, Codex uses\n\
-         workspace-write with on-request approval, Muse uses its auto-review profile, and\n\
+         workspace-write with on-request approval, Muse uses its auto-review profile,\n\
+         Antigravity requests its auto mode (its default mode where auto mode is unavailable), and\n\
          OMP's guarded choice approves workspace edits and asks about other actions. Your\n\
          own rules and in-session mode switches can loosen these modes. Older stored launches without those flags and\n\
          Cursor's own setting count as YOLO on hosts that ask first. A command\n\
@@ -205,7 +206,7 @@ fn render(agent: &Command) -> String {
          mutually exclusive. The message is sent once, when the agent starts; Restart,\n\
          Clone and Replace do not send it again. Templates can set a prompt for every\n\
          launch using them, including template create/edit through these shared flags.\n\
-         Claude, Codex, Cursor, Grok, Muse, OMP and OpenCode accept initial prompts;\n\
+         Antigravity, Claude, Codex, Cursor, Grok, Muse, OMP and OpenCode accept initial prompts;\n\
          Goose, Pi and custom commands do not. Muse cannot combine one with a named\n\
          conversation. --inherit-agent refuses prompt flags; use an ordinary spawn.\n\
          Newlines and tabs are allowed; other control characters are refused. The prompt\n\

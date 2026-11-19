@@ -88,6 +88,15 @@ const OMP_EFFORTS: &[LaunchEffort] = &[
 /// catalog vocabulary makes an explicit effort invalid rather than guessing a
 /// translation to a provider-specific variant.
 const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
+/// Model rows narrow this vocabulary where the CLI offers fewer efforts.
+const ANTIGRAVITY_EFFORTS: &[LaunchEffort] = &[
+    LaunchEffort::Low,
+    LaunchEffort::Medium,
+    LaunchEffort::High,
+    LaunchEffort::Xhigh,
+];
+const ANTIGRAVITY_EFFORTS_THROUGH_HIGH: &[LaunchEffort] =
+    &[LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High];
 
 /// The known models for this release, ordered within each generation for the launcher.
 ///
@@ -95,6 +104,34 @@ const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
 /// entry and its accepted efforts so saved templates and exact IDs can still use it.
 /// Drop an entry deliberately when its model becomes obsolete.
 const CATALOG: &[CatalogModel] = &[
+    CatalogModel {
+        id: "gemini-4-neon",
+        family: "neon",
+        latest: true,
+        harness: LaunchHarness::Antigravity,
+        efforts: ANTIGRAVITY_EFFORTS,
+    },
+    CatalogModel {
+        id: "gemini-4-argon",
+        family: "argon",
+        latest: true,
+        harness: LaunchHarness::Antigravity,
+        efforts: ANTIGRAVITY_EFFORTS_THROUGH_HIGH,
+    },
+    CatalogModel {
+        id: "gemini-4-hydrogen",
+        family: "hydrogen",
+        latest: true,
+        harness: LaunchHarness::Antigravity,
+        efforts: ANTIGRAVITY_EFFORTS,
+    },
+    CatalogModel {
+        id: "gemini-3.8-flash",
+        family: "flash",
+        latest: true,
+        harness: LaunchHarness::Antigravity,
+        efforts: ANTIGRAVITY_EFFORTS_THROUGH_HIGH,
+    },
     CatalogModel {
         id: "auto",
         family: "auto",
@@ -540,9 +577,10 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     if let Some(model) = &selection.model {
         match selection.harness {
             LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
-            LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::Cursor => {
-                argv.extend(["--model".to_string(), model.clone()])
-            }
+            LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::Antigravity => argv.extend(["--model".to_string(), model.clone()]),
             LaunchHarness::OpenCode => argv.extend([
                 "--model".to_string(),
                 opencode_model_argument(model)?.to_string(),
@@ -567,7 +605,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 "-c".to_string(),
                 format!("model_reasoning_effort={}", effort.as_cli_arg()),
             ]),
-            LaunchHarness::Claude => {
+            LaunchHarness::Claude | LaunchHarness::Antigravity => {
                 argv.extend(["--effort".to_string(), effort.as_cli_arg().to_string()])
             }
             LaunchHarness::Muse => argv.extend([
@@ -611,7 +649,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     if selection.permissions == Some(LaunchPermission::Yolo) {
         let flag = match selection.harness {
             LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
-            LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
+            LaunchHarness::Claude | LaunchHarness::Antigravity => {
+                Some("--dangerously-skip-permissions")
+            }
             LaunchHarness::OpenCode => Some("--auto"),
             LaunchHarness::Cursor => Some("--force"),
             LaunchHarness::Grok => Some("--always-approve"),
@@ -673,6 +713,7 @@ pub(crate) fn workspace_trust_enabled(
         LaunchHarness::Claude
         | LaunchHarness::Cursor
         | LaunchHarness::Grok
+        | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp => false,
@@ -711,6 +752,7 @@ fn workspace_trust_arguments(
         LaunchHarness::Claude
         | LaunchHarness::Cursor
         | LaunchHarness::Grok
+        | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp => &[],
@@ -790,6 +832,7 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
         LaunchHarness::Goose => Some(&["--resume", "--session-id", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Pi => Some(&["--session", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
+        LaunchHarness::Antigravity => Some(&["--conversation", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
     }
 }
@@ -829,7 +872,8 @@ pub(crate) fn named_start(
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::Grok => {
+            | LaunchHarness::Grok
+            | LaunchHarness::Antigravity => {
                 return Err("this agent launch has no resume command".into());
             }
         };
@@ -881,6 +925,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Pi => "pi",
         LaunchHarness::Omp => "omp",
         LaunchHarness::Grok => "grok",
+        LaunchHarness::Antigravity => "agy",
     }
 }
 
@@ -1005,6 +1050,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Pi => PI_EFFORTS,
         LaunchHarness::Omp => OMP_EFFORTS,
         LaunchHarness::Grok => &[],
+        LaunchHarness::Antigravity => ANTIGRAVITY_EFFORTS,
     }
 }
 
@@ -1147,6 +1193,11 @@ mod tests {
                 Some("--resume"),
             ),
             (LaunchHarness::Muse, vec!["muse"], Some("resume")),
+            (
+                LaunchHarness::Antigravity,
+                vec!["agy"],
+                Some("--conversation"),
+            ),
             (LaunchHarness::Cursor, vec!["cursor-agent"], None),
             (LaunchHarness::Omp, vec!["omp"], Some("--resume")),
         ] {
@@ -1372,6 +1423,7 @@ mod tests {
                 LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
                 LaunchHarness::Pi => Some(&["--session"]),
                 LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
+                LaunchHarness::Antigravity => Some(&["--conversation"]),
                 LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
             };
             let expected = suffix.map(|suffix| {
@@ -1577,6 +1629,11 @@ mod tests {
                 LaunchHarness::Grok,
                 vec!["--no-leader", "--permission-mode", "auto"],
                 Some("--resume"),
+            ),
+            (
+                LaunchHarness::Antigravity,
+                vec!["--mode", "auto"],
+                Some("--conversation"),
             ),
             (
                 LaunchHarness::Muse,
@@ -2409,6 +2466,59 @@ mod tests {
                 "--resume".to_string(),
                 "{conversation}".to_string(),
             ])
+        );
+    }
+
+    /// Known Antigravity models constrain effort, while a custom ID has the
+    /// full CLI vocabulary. Restart and named starts use the same selector
+    /// and keep the literal model and permission arguments.
+    #[test]
+    fn antigravity_catalog_and_compiler_preserve_model_effort_and_conversation() {
+        let catalog = super::launcher_catalog();
+        let models: Vec<_> = catalog
+            .iter()
+            .filter(|row| row.harness == LaunchHarness::Antigravity)
+            .collect();
+        assert_eq!(models.len(), 4);
+        for (id, family, accepts_xhigh) in [
+            ("gemini-4-neon", "neon", true),
+            ("gemini-4-argon", "argon", false),
+            ("gemini-4-hydrogen", "hydrogen", true),
+            ("gemini-3.8-flash", "flash", false),
+        ] {
+            let row = models
+                .iter()
+                .find(|row| row.id == id)
+                .expect("Antigravity model");
+            assert!(row.latest);
+            assert_eq!(row.family, family);
+            let mut choice = selection(LaunchHarness::Antigravity);
+            choice.model = Some(id.into());
+            choice.effort = Some(LaunchEffort::Xhigh);
+            assert_eq!(super::compile(choice).is_ok(), accepts_xhigh, "{id}");
+        }
+        let mut choice = selection(LaunchHarness::Antigravity);
+        choice.model = Some("gemini-custom".into());
+        choice.effort = Some(LaunchEffort::Xhigh);
+        choice.permissions = Some(LaunchPermission::Yolo);
+        let launch = super::compile(choice).expect("custom Antigravity model");
+        let expected = [
+            "agy",
+            "--model",
+            "gemini-custom",
+            "--effort",
+            "xhigh",
+            "--dangerously-skip-permissions",
+        ];
+        let start = launch.start_argv().expect("fresh Antigravity start");
+        assert_eq!(&start[..expected.len()], &expected);
+        assert_eq!(&start[expected.len()..], [FARHELM_ARGS_PLACEHOLDER]);
+        let named =
+            super::named_start(&launch, "explicit-id".into()).expect("named Antigravity start");
+        assert_eq!(&named.argv[..expected.len()], &expected);
+        assert_eq!(
+            &named.argv[expected.len()..],
+            ["--conversation", "explicit-id", FARHELM_ARGS_PLACEHOLDER]
         );
     }
 

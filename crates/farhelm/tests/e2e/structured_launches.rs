@@ -88,6 +88,7 @@ impl FakeHarness {
                     LaunchHarness::Omp => "omp",
                     LaunchHarness::OpenCode => "opencode",
                     LaunchHarness::Grok => "grok",
+                    LaunchHarness::Antigravity => "agy",
                 })
                 .to_string_lossy()
                 .into_owned(),
@@ -113,6 +114,7 @@ impl FakeHarness {
                 | LaunchHarness::Muse
                 | LaunchHarness::Goose
                 | LaunchHarness::Pi
+                | LaunchHarness::Antigravity
                 | LaunchHarness::OpenCode => argv.extend(["--model".to_string(), model.clone()]),
                 // OMP compiles the provider-qualified form its CLI's
                 // resolver documents; the fixture mirrors that shape so a
@@ -132,7 +134,7 @@ impl FakeHarness {
                     "-c".to_string(),
                     format!("model_reasoning_effort={}", effort.as_cli_arg()),
                 ]),
-                LaunchHarness::Claude => {
+                LaunchHarness::Claude | LaunchHarness::Antigravity => {
                     argv.extend(["--effort".to_string(), effort.as_cli_arg().to_string()])
                 }
                 LaunchHarness::Muse => argv.extend([
@@ -153,7 +155,9 @@ impl FakeHarness {
         if selection.permissions == Some(LaunchPermission::Yolo) {
             let flag = match selection.harness {
                 LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
-                LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
+                LaunchHarness::Claude | LaunchHarness::Antigravity => {
+                    Some("--dangerously-skip-permissions")
+                }
                 LaunchHarness::OpenCode => Some("--auto"),
                 LaunchHarness::Cursor => Some("--force"),
                 LaunchHarness::Grok => Some("--always-approve"),
@@ -217,6 +221,7 @@ pub(crate) fn fake_harness_with_script(script: &str) -> FakeHarness {
         "opencode",
         "cursor-agent",
         "grok",
+        "agy",
     ] {
         let executable = bin.path().join(name);
         let counter = bin.path().join(format!("{name}.generation"));
@@ -287,6 +292,7 @@ pub(crate) fn fake_agent_launch(
         LaunchHarness::Goose => Some(&["--resume", "--session-id"]),
         LaunchHarness::Pi => Some(&["--session"]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
+        LaunchHarness::Antigravity => Some(&["--conversation"]),
         LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
     };
     let resume = suffix.map(|suffix| {
@@ -598,6 +604,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
+            | LaunchHarness::Antigravity
             | LaunchHarness::OpenCode => "--model",
             LaunchHarness::Grok => unreachable!("Grok has no supported model"),
         };
@@ -619,7 +626,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     if let Some(effort) = selection.effort {
         let expected = match selection.harness {
             LaunchHarness::Codex => format!("model_reasoning_effort={}", effort.as_cli_arg()),
-            LaunchHarness::Claude => effort.as_cli_arg().to_string(),
+            LaunchHarness::Claude | LaunchHarness::Antigravity => effort.as_cli_arg().to_string(),
             LaunchHarness::Muse => effort.as_cli_arg().to_string(),
             LaunchHarness::Goose => return,
             LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
@@ -629,7 +636,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
-            LaunchHarness::Claude => "--effort",
+            LaunchHarness::Claude | LaunchHarness::Antigravity => "--effort",
             LaunchHarness::Muse => "--reasoning-effort",
             LaunchHarness::Goose => return,
             LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
@@ -678,7 +685,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     if selection.permissions == Some(LaunchPermission::Yolo) {
         let flag = match selection.harness {
             LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
-            LaunchHarness::Claude => "--dangerously-skip-permissions",
+            LaunchHarness::Claude | LaunchHarness::Antigravity => "--dangerously-skip-permissions",
             LaunchHarness::OpenCode => "--auto",
             LaunchHarness::Cursor => "--force",
             LaunchHarness::Grok => "--always-approve",
@@ -707,6 +714,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         LaunchHarness::Muse,
         LaunchHarness::Cursor,
         LaunchHarness::Grok,
+        LaunchHarness::Antigravity,
     ];
 
     for harness in defaults {
@@ -751,6 +759,16 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             harness: LaunchHarness::Grok,
             model: None,
             effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        },
+        LaunchSelection {
+            permission_flags: None,
+            harness: LaunchHarness::Antigravity,
+            model: Some("gemini-4-neon".into()),
+            effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -827,9 +845,8 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             .expect("created session remains stored");
         assert_eq!(stored.launch.agent_selection(), Some(&selection.clone()));
 
-        // Cursor has no conversation reporting, and the Grok fixture never
-        // reports: neither may invent Resume, so Restart is unavailable
-        // rather than relaunching fresh (SPEC.md, Lifecycle operations).
+        // Cursor has no conversation reporting. The Grok and Antigravity
+        // fixtures have a resume command but have not reported an identity.
         if selection.harness == LaunchHarness::Cursor {
             assert_eq!(
                 live.restart_offer,
@@ -837,7 +854,10 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             );
             assert_restart_refused(&h, &created.id).await;
         }
-        if selection.harness == LaunchHarness::Grok {
+        if matches!(
+            selection.harness,
+            LaunchHarness::Grok | LaunchHarness::Antigravity
+        ) {
             assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::NotCaptured);
             assert_restart_refused(&h, &created.id).await;
         }
