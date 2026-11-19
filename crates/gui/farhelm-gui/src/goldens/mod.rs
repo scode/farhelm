@@ -398,6 +398,11 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
     session_lists_at(state, px(394.), cx)
 }
 
+/// Give both group headers and the loose row below them room in the sidebar's viewport.
+fn session_list_groups(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    session_lists_at(state, px(496.), cx)
+}
+
 /// The session list a scene's setup made, in a column of the sidebar's width and surface, `height` tall.
 fn session_lists_at(state: &SceneState, height: Pixels, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -675,8 +680,8 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "session-list-groups",
-        size: (420., 450.),
-        draw: session_lists,
+        size: (420., 520.),
+        draw: session_list_groups,
         setup: session_list_groups_setup,
     },
     Scene {

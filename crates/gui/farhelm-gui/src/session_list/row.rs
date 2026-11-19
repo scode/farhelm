@@ -593,22 +593,25 @@ fn title_element(
     .into_any_element()
 }
 
-/// A marked row's marker: [`MARKER_WIDTH`] down the row's whole leading edge, over everything else in it, in the
-/// accent fill, or in the fill's ink on the selected row's accent fill. No listeners, so it takes no presses.
+/// A marked stripe uses the fill's ink on the open row so both meanings remain visible.
 fn marker(key: &str, selected: bool, palette: &Palette) -> impl IntoElement {
-    let selector = format!("session-marked-{key}");
+    leading_marker(if selected {
+        palette.on_fill
+    } else {
+        palette.accent_fill
+    })
+    .debug_selector(|| format!("session-marked-{key}"))
+}
+
+/// Full-height leading stripe shared by marked rows and collapsed headers that hold the open session.
+pub(super) fn leading_marker(ink: crate::theme::Token) -> gpui::Div {
     div()
         .absolute()
         .top_0()
         .bottom_0()
         .left_0()
         .w(MARKER_WIDTH)
-        .bg(theme::color(if selected {
-            palette.on_fill
-        } else {
-            palette.accent_fill
-        }))
-        .debug_selector(move || selector.clone())
+        .bg(theme::color(ink))
 }
 
 /// The first line's last track: the session's age in the row's secondary ink, right-aligned in a track at least

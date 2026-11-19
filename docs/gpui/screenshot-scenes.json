@@ -2692,7 +2692,7 @@
     },
     {
       "golden": "session-list-groups",
-      "title": "The session list with indented group members and a guide through the group's pin separator",
+      "title": "The session list with indented members in one group and the open session marked on another group's collapsed header",
       "reference": null
     },
     {

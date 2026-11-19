@@ -814,6 +814,7 @@ impl Render for SessionList {
                     .is_some_and(|layer| crate::layers::is_open(layer, window, cx))
         };
         self.after_menus(menu_open, window, cx);
+        let selected = local_state::selected(cx);
         // One pass over the listing for what the frame needs from all of it: the keys in the order drawn (pins first,
         // then as the order hold keeps them), the pins' Move neighbors and the separator, the marks shown and the
         // marked menu's offers, whether any row pulses or shows a spinner (a pending Delete or Stop, or a Replace that
@@ -837,6 +838,11 @@ impl Render for SessionList {
             current.hold.release_if_due(menu_open);
             let roster = groups::roster(collections);
             let served = selection::listed(collections);
+            let open = selected.as_deref().and_then(|key| {
+                collections
+                    .get::<SessionRow>(key)
+                    .map(|row| Listed { key, row })
+            });
             let served_count = served.len();
             let layout =
                 current
@@ -871,6 +877,7 @@ impl Render for SessionList {
                 current.hold.original_pins(),
                 &current.group_collapse,
                 meta.and_then(|meta| meta.counts),
+                open,
                 cx,
             );
             let projection = exposed.then(|| marking::project(&listed, &current.marks));
@@ -1028,8 +1035,6 @@ impl Render for SessionList {
                 )
                 .child(foot);
         };
-        let selected = local_state::selected(cx);
-
         let count = count_line(meta, served_count);
         let heading = heading(
             bar,

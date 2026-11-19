@@ -173,7 +173,7 @@ pub(super) fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: 
     session_list_scene_opening(state, &rows, Some("p"), cx);
 }
 
-/// Show the guide across a group's pin divider and down to its last member, with an ordinary row on either side.
+/// Show the guide through an expanded group's pin divider and the open-session stripe on a different, collapsed group.
 pub(super) fn session_list_groups_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let row = |key, title, cwd, ago| {
         session(key)
@@ -209,7 +209,7 @@ pub(super) fn session_list_groups_setup(state: &SceneState, _: &mut Window, cx: 
             members: 1,
         },
     ];
-    session_list_scene_with_listing(state, sessions, preferences(&["b"], None), Vec::new(), cx);
+    session_list_scene_with_listing(state, sessions, preferences(&["d"], None), Vec::new(), cx);
 }
 
 /// The fleet with two rows marked as a Cmd-click marks them: the open row, which keeps its accent fill under a marker

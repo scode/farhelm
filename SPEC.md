@@ -2488,7 +2488,9 @@ pin, Restart keeps it, and Replace and Replace with carry it at its current posi
 A group header shows its name, a collapse toggle and its count. A keyboard user can reach the toggle, which exposes its
 expanded state to assistive technology. The header shows the member count, or **N of M** with an active filter, where N
 members match out of M. Groups with no matches are hidden. An incomplete count follows the list's partial-reply warning
-rule below. Collapsing hides all of the group's rows, including pins, and other clients show the same collapsed state. A
+rule below. Collapsing hides all of the group's rows, including pins, and other clients show the same collapsed state.
+If a collapsed group holds the open session, its header has a blue stripe along its left edge. The toggle's hover help
+and accessible description name the open session. Opening a member leaves the group's shared collapse state alone. A
 collapsed header draws the dot of its most urgent matching member with a live attention color: waiting (red), unseen
 idle (blue), then running (green). A muted member counts only while waiting on a connected host. The dot uses the same
 mark as its row and the tooltip names that member and status. The header only draws the dot while collapsed and a member
