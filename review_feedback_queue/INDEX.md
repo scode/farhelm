@@ -1870,11 +1870,6 @@ consequences.
   template prechecks its inherited host even when the user never picked that host. Saving without clearing the visible
   check can make a template installation-specific unexpectedly.
 
-- [`irreversible-confirmation-focus-contract.md`](irreversible-confirmation-focus-contract.md) — The new focus rules say
-  permanent trash deletion starts on its confirming answer, then give risky irreversible actions a Cancel-first
-  exception without defining which rule wins. This is a specification ambiguity, not a demonstrated change to current
-  deletion behavior.
-
 - [`cache-lock-repair-child-lifetime.md`](cache-lock-repair-child-lifetime.md) — Repository-cache repair assumes Git
   cannot outlive its outer-lock owner; a real collision or damage remains unverified after investigation.
 
