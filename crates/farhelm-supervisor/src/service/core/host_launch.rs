@@ -634,7 +634,7 @@ impl Supervisor {
             )
             .await;
         }
-        self.track_pending_hold(artifacts.spec(), host.clone());
+        self.track_pending_hold(id, generation, artifacts.spec(), host.clone());
         Ok(SpawnedInHost {
             host,
             artifacts,

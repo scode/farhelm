@@ -23856,6 +23856,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `rkxxwlnlllltvrnmqrnrqptlsxxqtpmq`, bookmark
   `plan/gui-ux-backend-fixes/01-retired-session-tcp-relay`, https://github.com/scode/farhelm/pull/4234/changes.
 
+## recovered-agent-retains-stale-launch-hold-handle.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: After a terminal
+  reconnect, Mac supervisor replacement waits 3 s and warns wrongly. The shutdown check reads the ended terminal's
+  handle. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code (~15-30). Size gate: about 100 lines of diff (code, tests and docs, not counting
+  TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
+  to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `ylvqxqozswkopxqssvxoqpznwpxqkyoz`, bookmark
+  `plan/gui-ux-backend-fixes/02-recovered-agent-retains-stale`, https://github.com/scode/farhelm/pull/4236/changes.
+
 ## approval-scrollports-lack-keyboard-entry.md
 
 - Outcome: `fix code`.
