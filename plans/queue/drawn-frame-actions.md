@@ -407,3 +407,34 @@ not a reason to stop the plan.
   correctly (the attempt that did was 129 lines, 118 reusing an existing supervisor test), it may go up to about 140
   lines under the same counting rule; say in the report what it came to. Reuse the existing supervisor test where it
   fits. If it would need much more than that, block again rather than cutting coverage of either wait.
+
+## Blocked
+
+Blocked on 2026-11-19 (claim cf10b9).
+
+### The launcher's warning and its delayed answers
+
+Restart with and Replace with can ask separately for permission to start a YOLO session. The warning about the original
+session can change while that question is open. If the original agent exits, the warning can disappear. It can then
+restart while an answer waits for the host setting to save or a checkout preview to finish. Replace can then stop the
+restarted agent even though no warning was visible when the user answered.
+
+The earlier decision split the menu and interrupted card from the launcher, kept the warning live, and allowed about 140
+changed lines for the launcher with both waits and Cancel covered. The menu and card are within their limit. The
+launcher trial is 231 added or removed lines after excluding the shared presentation helper. It carries the warning's
+permission through the two existing waits and adds tests that change the original session during each wait. A separate
+scope review found no credible way to fit both waits and their tests within about 140 lines. The checkout-preview and
+Cancel cases passed. The host-setting test stopped before it could check the retry.
+
+Can the remaining launcher work use a roughly 240-line budget in one PR? I recommend allowing it. The main button and
+each follow-up answer would share one definition of what its warning authorizes. A second option is to split the
+launcher's main-button fix from its follow-up fix, with a separate size allowance for the follow-up. That keeps each
+review focused but leaves a draft boundary where the initial button is fixed and the later answer still needs work.
+Either option keeps the warning live and covers both waits and Cancel.
+
+The draft stack contains the session header and interrupted card’s Replace
+[#4176](https://github.com/scode/farhelm/pull/4176/changes), the session menu and interrupted card’s Restart
+[#4193](https://github.com/scode/farhelm/pull/4193/changes), environment Stop and suspend
+[#4181](https://github.com/scode/farhelm/pull/4181/changes), and the Wayland drop correction
+[#4183](https://github.com/scode/farhelm/pull/4183/changes). The launcher trial is retained for the next executor to
+finish and review.
