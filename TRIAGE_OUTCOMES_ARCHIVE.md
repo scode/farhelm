@@ -23887,3 +23887,16 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `vowlzrrkvosnwunqmwvxtmmxmonzloxu`, bookmark
   `plan/gui-ux-desktop-fixes/03-session-navigation-interrupts-close`,
   [PR #4242](https://github.com/scode/farhelm/pull/4242/changes).
+
+## selected-template-state-contrast.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Selected template
+  barely stands out in Dark. 2.76:1 against the dialog, no other marker. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: palette tweak or selected marker (~2-30). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
+  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `oxpwlrtkynstqmptwmwuwwvqxurxwuoy`, bookmark
+  `plan/gui-ux-desktop-fixes/04-selected-template-state-contrast`,
+  [PR #4245](https://github.com/scode/farhelm/pull/4245/changes).
