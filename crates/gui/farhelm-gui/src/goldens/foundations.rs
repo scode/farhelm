@@ -4,9 +4,9 @@
 
 use crate::assets::Icon;
 use crate::components::{
-    Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, RadioGroup, RadioOption,
-    Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, TabOption, TabStrip,
-    TextInput, Tier,
+    Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, OptionRow, RadioGroup,
+    RadioOption, Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, TabOption,
+    TabStrip, TextInput, Tier,
 };
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
@@ -23,6 +23,40 @@ use gpui::{
 };
 
 use super::{SceneState, press_tab, rest_pointer_on_control};
+
+/// A dialog list with help beside its selected row. Both the row above and the row below stay readable.
+pub(super) fn dialog_list_help(_: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let mut list = div()
+        .relative()
+        .w(px(224.))
+        .flex()
+        .flex_col()
+        .child(layers::beside_edge("dialog-list-help-edge", window, cx));
+    for (id, title, selected) in [
+        ("review", "Review changes", false),
+        ("build", "Check build", true),
+        ("deploy", "Watch deployment", false),
+    ] {
+        list = list.child(
+            OptionRow::new(
+                id,
+                title,
+                HoverHelp::tooltip("Switch to this session"),
+                Role::ListBoxOption,
+            )
+            .selected(selected)
+            .child(div().child(title)),
+        );
+    }
+    DialogFrame::new("list-help", "Quick switcher", list, vec![])
+        .width(px(304.))
+        .into_any_element()
+}
+
+/// Rest on the selected row long enough for the normal help mechanism to show it.
+pub(super) fn dialog_list_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    rest_pointer_on_control(state, "build", window, cx);
+}
 
 /// The checkbox, off, on, and on but unavailable: the old app's native checkbox tinted with the accent.
 pub(super) fn checkboxes(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {

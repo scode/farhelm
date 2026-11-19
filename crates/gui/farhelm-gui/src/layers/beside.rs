@@ -104,8 +104,8 @@ pub(super) struct HelpEdges {
 }
 
 impl HelpEdges {
-    /// Select a surface using the visible center. A sidebar row belongs to its in-tree column even when
-    /// a popover covers part of that row. Menu controls look only among popover surfaces.
+    /// Select a surface using the visible center. Inline rows look among in-tree edges, even when a popover
+    /// covers part of a row. Menus and launcher suggestions look only among popover surfaces.
     fn place(
         &self,
         placement: HelpPlacement,
@@ -120,7 +120,10 @@ impl HelpEdges {
         }
         let center = visible.center();
         match placement {
-            HelpPlacement::Menu => {
+            HelpPlacement::Menu
+            | HelpPlacement::List {
+                in_popover: true, ..
+            } => {
                 let panel = self
                     .panels
                     .iter()
@@ -135,6 +138,10 @@ impl HelpEdges {
                 let Some((index, panel)) = panel else {
                     return Some(ordinary());
                 };
+                if matches!(placement, HelpPlacement::List { .. }) {
+                    let beside = place(panel.right(), target.bounds, size, area);
+                    return keep_clear(beside, ordinary, size, &self.panels[index + 1..]);
+                }
                 let lower = self.panels[..index]
                     .iter()
                     .filter_map(|surface| surface.get());
@@ -143,7 +150,11 @@ impl HelpEdges {
                     .filter_map(|surface| surface.get());
                 place_menu(panel, target.bounds, size, area, lower, higher)
             }
-            HelpPlacement::Beside(_) | HelpPlacement::Rail(_) => {
+            HelpPlacement::Beside(_)
+            | HelpPlacement::Rail(_)
+            | HelpPlacement::List {
+                in_popover: false, ..
+            } => {
                 let edge = self
                     .inline
                     .iter()
@@ -159,20 +170,41 @@ impl HelpEdges {
                 let placed = edge.map_or_else(ordinary, |edge| {
                     place(edge.right(), target.bounds, size, area)
                 });
-                // A rail button keeps accepting pointer hover while its menu is open beside it. Give the open
-                // panel the space it already occupies, including when the tooltip falls back above the button.
-                let card = Bounds::new(placed.origin, size);
-                let clear = !matches!(placement, HelpPlacement::Rail(_))
-                    || !self
-                        .panels
-                        .iter()
-                        .filter_map(|surface| surface.get())
-                        .any(|panel| panel.intersects(&card));
-                clear.then_some(placed)
+                match placement {
+                    HelpPlacement::Rail(_) => {
+                        clears_panels(placed, size, &self.panels).then_some(placed)
+                    }
+                    HelpPlacement::List { .. } => keep_clear(placed, ordinary, size, &self.panels),
+                    _ => Some(placed),
+                }
             }
             HelpPlacement::Ordinary | HelpPlacement::Below => Some(ordinary()),
         }
     }
+}
+
+/// A column's item stays hoverable when its menu opens beside it. Use ordinary help if the list's preferred
+/// position would cover that open menu, and leave the menu clear if the fallback would also cover it.
+fn keep_clear(
+    beside: Placed,
+    ordinary: impl FnOnce() -> Placed,
+    size: Size<Pixels>,
+    panels: &[AnchorBounds],
+) -> Option<Placed> {
+    if clears_panels(beside, size, panels) {
+        return Some(beside);
+    }
+    let fallback = ordinary();
+    clears_panels(fallback, size, panels).then_some(fallback)
+}
+
+/// Menus own the space their visible panels already occupy.
+fn clears_panels(placed: Placed, size: Size<Pixels>, panels: &[AnchorBounds]) -> bool {
+    let card = Bounds::new(placed.origin, size);
+    panels
+        .iter()
+        .filter_map(|surface| surface.get())
+        .all(|panel| !panel.intersects(&card))
 }
 
 /// Where a tooltip goes: its card's origin, which side that is, and for beside placement the height of the notch's
@@ -363,7 +395,10 @@ impl PlacedBeside {
     ) -> Self {
         let fill = theme::color(palette.bg_2);
         let border = theme::color(palette.border);
-        let ring = if let HelpPlacement::Beside(cues) | HelpPlacement::Rail(cues) = placement {
+        let ring = if let HelpPlacement::Beside(cues)
+        | HelpPlacement::Rail(cues)
+        | HelpPlacement::List { cues, .. } = placement
+        {
             let color = theme::color(if cues.on_fill {
                 palette.on_fill
             } else {

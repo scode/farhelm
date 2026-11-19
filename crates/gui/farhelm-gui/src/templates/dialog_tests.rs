@@ -966,6 +966,88 @@ fn a_long_summary_stays_inside_its_row() {
     }
 }
 
+/// Template openers share the list's right edge, so help on one row does not cover another row.
+/// Both pointer hover and Tab focus use that edge inside the dialog overlay.
+#[gpui::test]
+fn template_openers_show_help_beside_their_list(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    click(cx, "templates-button");
+    let opener = test_support::center(cx, "template-open-my-codex");
+    let next = test_support::center(cx, "template-open-webbuilder");
+    assert!(opener.y < next.y, "both template rows are ready");
+    let wait_for_help = |cx: &mut VisualTestContext| {
+        test_support::advance(cx, crate::layers::HOVER_DELAY);
+        cx.update(|window, cx| {
+            let tooltip = crate::layers::shown_tooltip(window, cx).expect("a template row tooltip");
+            assert!(tooltip.text.starts_with("Edit template"));
+            assert_eq!(tooltip.side(), crate::layers::TooltipSide::Beside);
+            assert!(tooltip.ring().unwrap().bounds.contains(&opener));
+        });
+    };
+    cx.simulate_mouse_move(opener, None, gpui::Modifiers::none());
+    test_support::check(cx);
+    wait_for_help(cx);
+
+    cx.simulate_mouse_move(gpui::point(px(0.), px(0.)), None, gpui::Modifiers::none());
+    test_support::check(cx);
+    // Start from the dialog's initial focus, passing New template before the first row opener.
+    for _ in 0..4 {
+        keys(cx, "tab");
+        if test_support::focused_id(cx).as_deref() == Some("template-open-my-codex") {
+            break;
+        }
+    }
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("template-open-my-codex")
+    );
+    wait_for_help(cx);
+}
+
+/// The number-shortcut menu extends past the list's edge, where the bolt's help would ordinarily sit.
+/// Hovering the bolt while the menu is open must leave the choices readable.
+#[gpui::test]
+fn template_bolt_help_clears_the_open_number_menu(cx: &mut TestAppContext) {
+    let templates = templates();
+    let (_helm, cx) = open_header(cx, &templates, None);
+    click(cx, "templates-button");
+    let at = test_support::center(cx, "template-bolt-my-codex");
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    test_support::check(cx);
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    let without_menu = test_support::bounds(cx, "tooltip-card");
+
+    click(cx, "template-key-my-codex");
+    assert!(any_open_menu(cx));
+    let nodes = frame(cx);
+    let menu = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("templates-key-menu"))
+        .unwrap()
+        .bounds;
+    assert!(
+        menu.intersects(&without_menu),
+        "the normal card would cover part of the menu"
+    );
+    assert!(
+        !menu.contains(&at),
+        "the bolt stays accessible beside the popover"
+    );
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    test_support::check(cx);
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    assert!(any_open_menu(cx));
+    cx.update(|window, cx| {
+        let tooltip = crate::layers::shown_tooltip(window, cx).expect("the hover reached the bolt");
+        let expected =
+            super::shortcuts::bolt_help(false, super::shortcuts::may_mark(&templates[0]));
+        assert_eq!(tooltip.text.as_ref(), expected);
+    });
+    if let Some(card) = cx.debug_bounds("tooltip-card") {
+        assert!(!menu.intersects(&card));
+    }
+}
+
 /// Whether a popover menu is open over the dialog.
 fn any_open_menu(cx: &mut VisualTestContext) -> bool {
     frame(cx)

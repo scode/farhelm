@@ -1307,7 +1307,7 @@ fn dismiss(
 }
 
 impl Render for SettingsDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let store = session::current_store(cx);
         let preferences = store
@@ -1316,6 +1316,8 @@ impl Render for SettingsDialog {
             .cloned();
         let weak = cx.weak_entity();
 
+        let help_edge =
+            layers::beside_edge("settings-navigation-help-edge", window, cx).into_any_element();
         let listed = Section::ALL
             .iter()
             .copied()
@@ -1323,6 +1325,7 @@ impl Render for SettingsDialog {
         // `.app-settings-navigation`: the section buttons, 6 pixels apart, with a rule between them and the section.
         let navigation = div()
             .id("settings-sections")
+            .relative()
             .role(Role::Navigation)
             .aria_label("Settings sections")
             .flex_none()
@@ -1333,12 +1336,14 @@ impl Render for SettingsDialog {
             .pr(px(12.))
             .border_r_1()
             .border_color(theme::color(palette.border_dialog))
+            .child(help_edge)
             .children(listed.map(|section| {
                 let weak = weak.clone();
                 Button::new(
                     format!("settings-section-{}", section.key()),
                     section.label(),
-                    HoverHelp::tooltip(format!("Show {} settings", section.label())),
+                    HoverHelp::tooltip(format!("Show {} settings", section.label()))
+                        .beside_list(false),
                     Role::Button,
                 )
                 .tier(Tier::Nav)

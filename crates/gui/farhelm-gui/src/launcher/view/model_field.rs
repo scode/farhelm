@@ -406,6 +406,7 @@ fn draw_model_rows(
         let weak = weak.clone();
         children.push(
             OptionRow::new(id, label, HoverHelp::tooltip(help), Role::ListBoxOption)
+                .in_popover()
                 .selected(active == Some(index))
                 .child(words)
                 .on_click(move |_, window, cx| {

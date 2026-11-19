@@ -171,6 +171,7 @@ impl Launcher {
     pub(super) fn browse_listing(
         &self,
         palette: &theme::Palette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let key = self.browse_key(cx)?;
@@ -198,11 +199,17 @@ impl Launcher {
         };
         let mut rows = div()
             .id("launcher-browse-list")
+            .relative()
             // Tests find the listing by where it is drawn; this records nothing outside test builds.
             .debug_selector(|| "launcher-browse-list".into())
             .flex()
             .flex_col()
             .gap(px(8.))
+            .child(crate::layers::beside_edge(
+                "launcher-browse-help-edge",
+                window,
+                cx,
+            ))
             .child(self.browse_choice(
                 "launcher-browse-use".into(),
                 "Use ",
@@ -260,7 +267,7 @@ impl Launcher {
         Button::new(
             id,
             words.accessible_name(),
-            HoverHelp::tooltip(help),
+            HoverHelp::tooltip(help).beside_list(false),
             Role::Button,
         )
         .content(words)

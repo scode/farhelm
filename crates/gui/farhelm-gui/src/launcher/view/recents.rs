@@ -48,6 +48,7 @@ use crate::launcher::recents::{
     explicit_before_permissions, permission_value, placement, selection_summary, setup_key, strip,
     uses_guarded_default,
 };
+use crate::layers;
 use crate::theme::{self, metrics};
 
 /// Why a new environment's setup is not taken in Replace with, the old launcher's words for a placement where the mode
@@ -234,13 +235,19 @@ impl Launcher {
         let replacing = matches!(self.draft.mode, Mode::ReplaceWith { .. });
         let verb = if replacing { "Replace" } else { "Launch" };
         let mut slots = div()
+            .relative()
             .flex()
             .flex_col()
             .overflow_hidden()
             .rounded(metrics::RADIUS_MD)
             .border_1()
             .border_color(theme::color(palette.border))
-            .bg(theme::color(palette.well));
+            .bg(theme::color(palette.well))
+            .child(layers::beside_edge(
+                "launcher-recents-help-edge",
+                window,
+                cx,
+            ));
         let drawn: Vec<SetupKey> = rows.iter().map(|(entry, _)| setup_key(entry)).collect();
         for (index, (entry, placement)) in rows.into_iter().enumerate() {
             let handle = self.recents.handle_for(drawn[index].clone(), cx);
@@ -277,7 +284,7 @@ impl Launcher {
             let row = Button::new(
                 format!("launcher-recent-{index}"),
                 name,
-                HoverHelp::sentence(whole),
+                HoverHelp::sentence(whole).beside_list(false),
                 Role::Button,
             )
             .tier(Tier::RecentSetup)

@@ -281,6 +281,11 @@ pub(crate) enum HelpPlacement {
     /// The rail's own edge. A popover opened there keeps its choices clear of the rail button's help.
     Rail(BesideCues),
     Menu,
+    /// List help points past the right edge with a ring. The launcher draws its choices in popovers.
+    List {
+        cues: BesideCues,
+        in_popover: bool,
+    },
 }
 
 /// The words and placement a control hands to the layer manager. Ordinary help (a [`Help`] or a string, converted)

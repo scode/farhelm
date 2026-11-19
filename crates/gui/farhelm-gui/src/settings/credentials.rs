@@ -55,6 +55,7 @@ use super::tensorlake_key::TensorlakeKey;
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::layers;
 use crate::local_time::{self, Zone};
 use crate::operations::{Command, Work};
 use crate::theme::{self, metrics};
@@ -372,7 +373,12 @@ impl Credentials {
     }
 
     /// One list: its heading with Add, then a row per credential with Edit, or "None saved.".
-    fn group(&self, group: Group, cx: &Context<Self>) -> gpui::Stateful<Div> {
+    fn group(
+        &self,
+        group: Group,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let loaded = self.catalog.is_some();
@@ -467,7 +473,7 @@ impl Credentials {
                     Button::new(
                         format!("credential-edit-{}", credential.name),
                         "Edit",
-                        HoverHelp::tooltip(edit_label.clone()),
+                        HoverHelp::tooltip(edit_label.clone()).beside_list(false),
                         Role::Button,
                     )
                     .accessible_name(edit_label)
@@ -500,18 +506,24 @@ impl Credentials {
                     .id(ElementId::Name(
                         format!("{}-list", group.words().add_id).into(),
                     ))
+                    .relative()
                     .role(Role::List)
                     .aria_label(group.words().heading)
                     .flex()
                     .flex_col()
                     .gap(px(ROW_GAP))
+                    .child(layers::beside_edge(
+                        format!("{}-help-edge", group.words().add_id),
+                        window,
+                        cx,
+                    ))
                     .children(rows),
             )
     }
 
     /// The overview: the delivery failures of the last replacement, the help, the warning, the Tensorlake key form and
     /// the three lists.
-    fn overview(&self, cx: &Context<Self>) -> AnyElement {
+    fn overview(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let palette = theme::palette(cx);
         let mut parts: Vec<AnyElement> = self
             .undelivered
@@ -594,16 +606,20 @@ impl Credentials {
                     .min_w_0()
                     .children(parts),
             )
-            .children([0, 1, 2].map(Group).map(|group| self.group(group, cx)))
+            .children(
+                [0, 1, 2]
+                    .map(Group)
+                    .map(|group| self.group(group, window, cx)),
+            )
             .into_any_element()
     }
 }
 
 impl Render for Credentials {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = match &self.editor {
             Some(editor) => editor.clone().into_any_element(),
-            None => self.overview(cx),
+            None => self.overview(window, cx),
         };
         div()
             .id("credentials")

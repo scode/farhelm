@@ -2442,7 +2442,7 @@ impl Render for Launcher {
             .child(destination)
             .child(choices)
             // After the choices, as the old listing was (`browse`).
-            .children(self.browse_listing(palette, cx))
+            .children(self.browse_listing(palette, window, cx))
             .children(self.save_panel.clone());
 
         // What a press has to say: the draft's own reason after a press it refused, or the helm's words refusing the

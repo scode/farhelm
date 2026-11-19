@@ -238,7 +238,7 @@ impl Recipes {
         let rebuild = Button::new(
             format!("recipe-rebuild-{}-{at}", place.recipe),
             "Rebuild",
-            HoverHelp::tooltip(words.rebuild_help),
+            HoverHelp::tooltip(words.rebuild_help).beside_list(false),
             Role::Button,
         )
         .accessible_name(rebuild_name)

@@ -827,7 +827,7 @@ impl TemplatesDialog {
                 .text("Quick launch ")
                 .host(&name)
                 .accessible_name(),
-            HoverHelp::tooltip(shortcuts::bolt_help(marked, eligible)),
+            HoverHelp::tooltip(shortcuts::bolt_help(marked, eligible)).beside_list(false),
             Role::Button,
         )
         .tier(Tier::QuickMark { lit: marked })
@@ -865,7 +865,7 @@ impl TemplatesDialog {
                 .text("Number shortcut ")
                 .host(&name)
                 .accessible_name(),
-            HoverHelp::tooltip(shortcuts::key_help(eligible, bound)),
+            HoverHelp::tooltip(shortcuts::key_help(eligible, bound)).beside_list(false),
             Role::Button,
         )
         .tier(Tier::NumberKey {
@@ -942,7 +942,8 @@ impl TemplatesDialog {
                 HostSentence::new("template-open-help")
                     .text("Edit template ")
                     .host(&name),
-            ),
+            )
+            .beside_list(false),
             Role::Button,
         )
         .tier(Tier::TemplateRow)
@@ -1295,11 +1296,13 @@ impl Render for TemplatesDialog {
         });
         let list = div()
             .id("templates-list")
+            .relative()
             .role(Role::List)
             .aria_label("Template list")
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))
+            .child(layers::beside_edge("templates-help-edge", window, cx))
             .children(
                 templates
                     .iter()

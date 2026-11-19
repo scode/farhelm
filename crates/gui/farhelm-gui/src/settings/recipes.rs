@@ -850,7 +850,7 @@ impl Recipes {
                     Button::new(
                         format!("recipe-build-{name}"),
                         action.label(),
-                        HoverHelp::tooltip(action.help()),
+                        HoverHelp::tooltip(action.help()).beside_list(false),
                         Role::Button,
                     )
                     .accessible_name(label)
@@ -880,7 +880,7 @@ impl Recipes {
             Button::new(
                 format!("recipe-edit-{name}"),
                 "Edit",
-                HoverHelp::tooltip("Edit this recipe"),
+                HoverHelp::tooltip("Edit this recipe").beside_list(false),
                 Role::Button,
             )
             .accessible_name(format!("Edit {name}"))
@@ -1065,7 +1065,10 @@ impl Render for Recipes {
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |section, cx| section.open_editor(None, window, cx));
         });
+        // The section and its list share a right edge. Register it only while the overview is drawn.
         section
+            .relative()
+            .child(layers::beside_edge("recipes-help-edge", window, cx))
             .child(choices::help(HELP, cx))
             .children(self.listing(catalog.as_ref(), &places, pulse, now, zone, cx))
             .children(self.read_failure(catalog.as_ref(), cx))

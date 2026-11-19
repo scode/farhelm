@@ -1393,6 +1393,7 @@ fn draw_repository_rows(
                 HoverHelp::tooltip(help),
                 Role::ListBoxOption,
             )
+            .in_popover()
             .selected(active == Some(index))
             .child(
                 div()
