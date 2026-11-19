@@ -494,7 +494,8 @@ impl Render for NoticesPanel {
         let clear = Button::new(
             CLEAR_ID,
             "Clear resolved",
-            HoverHelp::tooltip("Remove only the resolved notifications shown in this panel"),
+            HoverHelp::tooltip("Remove only the resolved notifications shown in this panel")
+                .beside_menu(),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -504,7 +505,7 @@ impl Render for NoticesPanel {
         let close = Button::new(
             CLOSE_ID,
             "Close",
-            HoverHelp::tooltip("Close notifications and mark the shown items read"),
+            HoverHelp::tooltip("Close notifications and mark the shown items read").beside_menu(),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -721,7 +722,7 @@ fn session_limit_entry(
     let feedback = Button::new(
         format!("{SEND_FEEDBACK_ID_PREFIX}{id}"),
         "Send feedback",
-        HoverHelp::tooltip("Open the Farhelm feedback dialog"),
+        HoverHelp::tooltip("Open the Farhelm feedback dialog").beside_menu(),
         Role::Button,
     )
     .tier(Tier::Neutral)
@@ -771,7 +772,7 @@ fn actions_row(
                 "Retry removing this checkout's files with the usual cleanup checks"
             } else {
                 "Retry needs a connected host, a current stuck entry and no other operation in progress"
-            }),
+            }).beside_menu(),
             Role::Button,
         )
         .tier(Tier::Neutral)
@@ -784,7 +785,7 @@ fn actions_row(
     let open_trash = Button::new(
         format!("{OPEN_TRASH_ID_PREFIX}{}", notice.id),
         "Open Trash",
-        HoverHelp::tooltip("Open Trash to inspect archived checkouts on all hosts"),
+        HoverHelp::tooltip("Open Trash to inspect archived checkouts on all hosts").beside_menu(),
         Role::Button,
     )
     .tier(Tier::Neutral)

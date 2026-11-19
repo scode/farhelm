@@ -263,7 +263,7 @@ pub(super) fn session_lists_beside(
                 .relative()
                 .h_full()
                 .child(column)
-                .child(layers::beside_edge(window, cx)),
+                .child(layers::beside_edge("golden-sidebar-help-edge", window, cx)),
         )
         .into_any_element()
 }

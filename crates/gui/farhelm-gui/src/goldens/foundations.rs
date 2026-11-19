@@ -547,7 +547,7 @@ pub(super) fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut A
         .relative()
         .h_full()
         .child(sidebar)
-        .child(layers::beside_edge(window, cx));
+        .child(layers::beside_edge("golden-help-edge", window, cx));
     // Wide enough that the card fits beside the column: a narrower scene shows the fallback above the row instead.
     div()
         .w(px(576.))
@@ -563,7 +563,7 @@ pub(super) fn tooltip_beside_setup(state: &SceneState, window: &mut Window, cx: 
         on_fill: false,
         radius: theme::metrics::RADIUS_MD,
     };
-    let hint = layers::Hint::beside(BESIDE_HELP.into(), cues);
+    let hint = layers::Hint::placed(BESIDE_HELP.into(), layers::HelpPlacement::Beside(cues));
     layers::show_tooltip_at(
         &state.tooltip_owner,
         hint,

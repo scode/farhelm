@@ -38,6 +38,8 @@ linux/focus-ring--dark.png 6b7b43d368f719b9d73f4c93732399604dc5aba1
 linux/focus-ring--light.png 5cfb9bdb574c9451c8ddfcfbcf879933fccc6d20
 linux/help-menu--dark.png cb343a668751fcafad35ab9360a3dd70f16e2bbf
 linux/help-menu--light.png 944eaf9af90c40350779c682772f051ff18b3121
+linux/help-menu-announcements-hover--dark.png 39a34962a550e2af935381bdab13675a6f341f87
+linux/help-menu-announcements-hover--light.png 63d415bc3255651f9bc370f75902e63d57e18d64
 linux/host-add-dialog--dark.png 3626e7f18511dbbb0bbc493982c6c49086502d05
 linux/host-add-dialog--light.png 08166489d78424b50cbed37e364d23d4eda2338d
 linux/host-add-dialog-agent--dark.png a93fb1059a0295108c15f0b83d7381b96e55aa2a

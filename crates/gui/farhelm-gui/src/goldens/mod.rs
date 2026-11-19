@@ -746,6 +746,12 @@ static SCENES: &[Scene] = &[
         setup: help_menu_setup,
     },
     Scene {
+        name: "help-menu-announcements-hover",
+        size: (1050., 640.),
+        draw: session_lists_then,
+        setup: help_menu_announcements_hover_setup,
+    },
+    Scene {
         name: "session-bell-list",
         // Wide and tall enough for the whole list beside the sidebar, which the scene centres.
         size: (960., 680.),
@@ -1238,23 +1244,35 @@ static SCENES: &[Scene] = &[
     },
 ];
 
-/// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
+/// Draw until the scene finishes its after-draw interactions and two consecutive captures match.
+/// An unchanged frame can precede a fake helm snapshot, so compare pixels only once the scene is ready.
 fn settle(
     cx: &mut gpui::HeadlessAppContext,
     window: gpui::AnyWindowHandle,
+    view: &Entity<SceneView>,
     name: &str,
 ) -> anyhow::Result<image::RgbaImage> {
     let mut previous = None;
     for _ in 0..MAX_SETTLE_FRAMES {
         cx.run_until_parked();
-        cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))?;
+        let ready = cx.update_window(window, |_, window, cx| {
+            window.draw(cx).clear(cx);
+            view.read(cx).state.after.get().is_none()
+        })?;
+        if !ready {
+            previous = None;
+            continue;
+        }
         let capture = cx.capture_screenshot(window)?;
         if previous.as_ref() == Some(&capture) {
             return Ok(capture);
         }
         previous = Some(capture);
     }
-    anyhow::bail!("{name} never settled: {MAX_SETTLE_FRAMES} frames, no two in a row the same")
+    let pending = cx.update(|cx| view.read(cx).state.after.get().is_some());
+    anyhow::bail!(
+        "{name} never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"
+    )
 }
 
 /// What a golden run does, read from the two variables `scripts/check-gui-goldens.py` sets. The references are not in
@@ -1352,7 +1370,7 @@ fn component_goldens() -> anyhow::Result<()> {
                 let staged = view.read(cx).state.clone();
                 (scene.setup)(&staged, window, cx);
             })?;
-            let screenshot = settle(&mut cx, window.into(), &name)?;
+            let screenshot = settle(&mut cx, window.into(), &view, &name)?;
             screenshot.save(captures.join(&name))?;
             let references = match &run {
                 GoldenRun::Update(dir) => {

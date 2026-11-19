@@ -583,7 +583,7 @@ impl Render for PanelHarness {
             .w(crate::theme::metrics::SIDEBAR_WIDTH - px(56.))
             .h_full()
             .child(self.panel.clone())
-            .child(layers::beside_edge(window, cx));
+            .child(layers::beside_edge("test-progress-help-edge", window, cx));
         root::wrap(column, &self.root, window, cx)
     }
 }

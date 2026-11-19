@@ -112,7 +112,7 @@ use gpui::{
 
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
-use crate::layers::{self, BesideCues, Help, Hint, TooltipOwner};
+use crate::layers::{self, BesideCues, Help, HelpPlacement, Hint, TooltipOwner};
 use crate::theme;
 
 /// What a control says when the user hovers it, moves keyboard focus onto it, or asks assistive technology about it.
@@ -131,20 +131,21 @@ use crate::theme;
 /// any string, so that is held by review rather than by the type, as for a dialog's title. Rich help that is not
 /// words, the session row's summary card, is a view of the caller's on a card of fixed width ([`HoverHelp::card`]).
 ///
-/// Help sits against its control, centered above it or else below, as the old app's ordinary tooltip did. Any form can
-/// ask to sit beside the sidebar instead ([`HoverHelp::beside`]), as SPEC.md has every session-row hover and the host
-/// progress card do.
+/// Ordinary help sits above its control, or below when space runs out. Session rows and host progress cards use
+/// [`HoverHelp::beside`]. Menu items and notification actions use [`HoverHelp::beside_menu`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoverHelp {
     help: Help,
-    /// The cues of help placed beside the sidebar; `None` for ordinary help, placed against the control.
-    beside: Option<BesideCues>,
+    placement: HelpPlacement,
 }
 
 impl HoverHelp {
     /// Ordinary help in the given form.
     fn of(help: Help) -> Self {
-        HoverHelp { help, beside: None }
+        HoverHelp {
+            help,
+            placement: HelpPlacement::Ordinary,
+        }
     }
 
     /// Help shown as a tooltip, in the app's own words.
@@ -216,25 +217,36 @@ impl HoverHelp {
         HoverHelp::of(Help::card_with(width, build, text))
     }
 
-    /// This help, placed beside the sidebar: 6 pixels past the edge the sidebar draws ([`layers::beside_edge`]),
-    /// centered on this control, with a notch pointing back at it and a ring just inside its bounds, or against the
-    /// control without either cue in a window too narrow for that (`layers/beside.rs` has the numbers). It is for
-    /// SPEC.md's session-row hovers and host progress card, and nothing else. The control needs nothing more: its
-    /// bounds are recorded as part of wiring its help ([`with_hover_help`]). The ring takes the accent and square
-    /// corners unless [`HoverHelp::ring_on_fill`] or [`HoverHelp::ring_radius`] say otherwise.
-    ///
-    /// The control must be drawn inside the sidebar column that draws the edge. The old app checked that itself (its
-    /// target had to be inside `.app-sidebar`, or it got the ordinary placement); here the help is placed against the
-    /// edge wherever the control is, so a control elsewhere would get a card at the sidebar's edge, away from it.
+    /// Use the enclosing help edge for session rows and host progress cards. The card sits 6 pixels to its right
+    /// with a notch and a ring inside the control's bounds. Ordinary placement takes over if the edge or the room
+    /// beside it is missing. The ring takes the accent and square corners by default.
     pub fn beside(mut self) -> Self {
-        self.beside.get_or_insert_default();
+        self.beside_cues();
         self
+    }
+
+    /// Keep help outside a menu or stacked popover when either side fits. Menu items already carry a highlight,
+    /// so this placement draws a notch alone.
+    pub(crate) fn beside_menu(mut self) -> Self {
+        self.placement = HelpPlacement::Menu;
+        self
+    }
+
+    /// Applying a ring cue opts the control into beside placement and preserves any cue set earlier.
+    fn beside_cues(&mut self) -> &mut BesideCues {
+        if !matches!(self.placement, HelpPlacement::Beside(_)) {
+            self.placement = HelpPlacement::Beside(BesideCues::default());
+        }
+        let HelpPlacement::Beside(cues) = &mut self.placement else {
+            unreachable!()
+        };
+        cues
     }
 
     /// Beside help ([`HoverHelp::beside`], which this implies) whose ring takes the on-fill color: for a control in a
     /// selected row, which already wears the accent fill, as the old ring did under `.session-row.selected`.
     pub fn ring_on_fill(mut self) -> Self {
-        self.beside.get_or_insert_default().on_fill = true;
+        self.beside_cues().on_fill = true;
         self
     }
 
@@ -243,7 +255,7 @@ impl HoverHelp {
     /// where the old inset-shadow ring followed the control's corners by itself, so a rounded control passes its
     /// radius.
     pub fn ring_radius(mut self, radius: Pixels) -> Self {
-        self.beside.get_or_insert_default().radius = radius;
+        self.beside_cues().radius = radius;
         self
     }
 
@@ -316,10 +328,7 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement + ParentElement>(
     } else {
         element
     };
-    let help = match help.beside {
-        Some(cues) => Hint::beside(help.help.clone(), cues),
-        None => Hint::from(help.help.clone()),
-    };
+    let help = Hint::placed(help.help.clone(), help.placement);
     // The bounds tracker only while this control's help waits or shows, so an idle frame draws nothing for it.
     let element = if layers::help_drawn(&owner, &help, window, cx) {
         element.child(owner.read(cx).track())

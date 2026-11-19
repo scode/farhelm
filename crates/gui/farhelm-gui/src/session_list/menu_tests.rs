@@ -386,6 +386,37 @@ fn hovering_switches_submenus_and_preserves_the_expanded_parent_highlight(cx: &m
     assert!(sent(&mut fake).is_empty());
 }
 
+/// A hover over Mute opens a submenu in the space ordinarily used by the parent's tooltip. The tooltip goes
+/// to the other side while the submenu is readable and its choices can still be reached.
+#[gpui::test]
+fn mute_help_leaves_the_open_submenu_clear(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    cx.simulate_resize(size(px(1280.), px(820.)));
+    test_support::settle(cx);
+    test_support::click(cx, "session-menu-b");
+    let at = test_support::center(cx, "session-menu-mute");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute"));
+    let panel = test_support::bounds(cx, "session-menu");
+    let submenu = test_support::bounds(cx, "submenu");
+    assert!(
+        submenu.left() >= panel.right(),
+        "the preview opens on the right"
+    );
+    test_support::advance(cx, layers::HOVER_DELAY);
+    let help = cx
+        .update(|window, cx| layers::shown_tooltip(window, cx))
+        .expect("Mute shows help while its choices are open");
+    assert_eq!(help.side(), layers::TooltipSide::BesideLeft);
+    let card = test_support::bounds(cx, "tooltip-card");
+    assert!(
+        card.right() < panel.left(),
+        "the help clears the parent menu"
+    );
+    assert!(!card.intersects(&submenu), "the help clears the submenu");
+}
+
 /// SPEC.md: a menu goes away "when the thing it is about is gone (a deleted session's open menu, say)", and focus
 /// never stays inside something that is no longer drawn. This is the popover-movement acceptance case the layer
 /// manager left to the first real menu. Run under Linux's click rule, where the click focuses b's button, so the button

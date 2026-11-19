@@ -15,7 +15,7 @@ use gpui::{
     Window, div, point, px, size,
 };
 
-use super::beside::{Placed, at_pointer, place};
+use super::beside::{Placed, at_pointer, place, place_menu};
 use crate::components::{Button, HoverHelp, Role};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, TooltipSide};
@@ -27,6 +27,76 @@ use crate::theme;
 /// The old tests' 1000 by 800 window.
 fn viewport() -> gpui::Size<Pixels> {
     size(px(1000.), px(800.))
+}
+
+/// A menu fills space where ordinary help could cover nearby commands. The card uses either side's full gap
+/// when it fits and loses its notch when both sides are too narrow.
+#[test]
+fn menu_help_uses_the_right_then_left_edge_before_falling_back() {
+    let area = rect(0., 0., 660., 430.);
+    let card = size(px(180.), px(40.));
+    let target = rect(256., 100., 150., 22.);
+    let menu = rect(230., 56., 200., 240.);
+    let right = place_menu(
+        menu,
+        target,
+        card,
+        area,
+        std::iter::empty(),
+        std::iter::empty(),
+    )
+    .unwrap();
+    assert_eq!(right.side, TooltipSide::Beside);
+    assert_eq!(right.origin.x, menu.right() + px(6.));
+    assert_eq!(right.notch_y, Some(target.center().y));
+
+    let left = place_menu(
+        menu,
+        target,
+        card,
+        rect(0., 0., 580., 430.),
+        std::iter::empty(),
+        std::iter::empty(),
+    )
+    .unwrap();
+    assert_eq!(left.side, TooltipSide::BesideLeft);
+    assert_eq!(left.origin.x + card.width, menu.left() - px(6.));
+    assert_eq!(left.notch_y, right.notch_y);
+
+    let above = place_menu(
+        menu,
+        target,
+        card,
+        rect(60., 0., 520., 430.),
+        std::iter::empty(),
+        std::iter::empty(),
+    )
+    .unwrap();
+    assert_eq!(above.side, TooltipSide::Above);
+    assert_eq!(above.notch_y, None);
+}
+
+/// A submenu that opens to the left has its parent on the preferred side of its help. The card can use
+/// the free side even though the parent is painted below it.
+#[test]
+fn submenu_help_leaves_the_parent_menu_clear() {
+    let area = rect(0., 0., 660., 430.);
+    let submenu = rect(210., 56., 180., 240.);
+    let parent = rect(394., 60., 200., 240.);
+    assert!(submenu.right() < parent.left());
+    let target = rect(220., 100., 150., 22.);
+    let card = size(px(140.), px(40.));
+    let placed = place_menu(
+        submenu,
+        target,
+        card,
+        area,
+        [parent].into_iter(),
+        std::iter::empty(),
+    )
+    .expect("the left edge has room");
+    assert_eq!(placed.side, TooltipSide::BesideLeft);
+    assert!(placed.origin.x + card.width < submenu.left());
 }
 
 /// A window of `viewport` with no frame and no bar of its own, as the old app's page was and as macOS's and a
@@ -304,7 +374,7 @@ fn sidebar_scene(
             .pt(px(down.get()))
             .child(Button::new("target", "Row", help.clone(), Role::Button));
         let column = if edge {
-            column.child(layers::beside_edge(window, cx))
+            column.child(layers::beside_edge("test-sidebar-help-edge", window, cx))
         } else {
             column
         };
@@ -564,7 +634,7 @@ fn the_ring_of_a_control_cut_off_by_its_container_is_painted_only_inside_it(
             .relative()
             .w(px(380.))
             .child(list)
-            .child(layers::beside_edge(window, cx))
+            .child(layers::beside_edge("test-nested-help-edge", window, cx))
             .into_any_element()
     };
     let cx = open(cx, scene);

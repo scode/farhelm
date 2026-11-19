@@ -2654,11 +2654,10 @@ a value is recorded. The same card appears from the title or any unmarked part o
 on keyboard focus. Every session-row hover, including the summary card and notification bell, sits just right of the
 sidebar, vertically centred on its target and shifted only to fit the window. A left-edge notch points back to the
 target's centre, clamped to the box's straight edge, and a thin accent ring identifies that target while its help shows.
-When there is no room to the right, it uses ordinary above/below placement without a notch or ring. Tooltips outside
-session rows, including the actions menu's items, keep their placement without these cues. The summary card names the
-title, status, agent, host, checkout when managed, directory, start and last-activity times, and what a click does;
-meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a short window; the
-session view provides those details in full. Its agent line retains the stored launch facts and adds "YOLO observed"
+When there is no room to the right, it uses ordinary above/below placement without a notch or ring. The summary card
+names the title, status, agent, host, checkout when managed, directory, start and last-activity times, and what a click
+does; meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a short window;
+the session view provides those details in full. Its agent line retains the stored launch facts and adds "YOLO observed"
 when the shield has status-line evidence, including when the launch was already YOLO. The actions-menu header describes
 only the stored launch. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark
 unread toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see
@@ -2690,6 +2689,11 @@ loosen it; agents may change behavior between versions. A custom hover says the 
 not check them and counts the session as YOLO, and shows both the flags and the full stored command under Launched with.
 The launcher's permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
+Hover help keeps neighboring choices visible wherever the window has room. Menu items, dropdown choices and actions in
+the notification and tunnels lists show help just outside the panel, to the right if it fits and to the left otherwise.
+A notch points back to the active control. The same placement follows keyboard focus. If neither side fits, help takes
+its ordinary place above or below the control. An open submenu takes priority over its trigger's help.
+
 Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
 otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.
 These colors say which agent it is, never its activity or permission mode.
@@ -2703,8 +2707,8 @@ technology. Exactly how a row lays out its lines and pixels is an implementation
 than here.
 
 In the web and desktop clients, hover text appears about 300 ms after the pointer rests on a control or icon that has
-it, or keyboard focus reaches one, and at once when moving on to another while one is showing; it sits above the control
-so the pointer does not cover it, except in session rows and host progress, whose hovers sit beside the sidebar. Every
+it, or keyboard focus reaches one. It appears at once when moving on to another while one is showing. Ordinary hover
+help sits above the control when there is room. The desktop placements above keep neighboring choices visible. Every
 clickable control and every icon that carries meaning has hover text saying what it is or does, plain-word buttons
 included, saying more than the label where it can. The one exception is an item in a row's actions menu that already
 shows a description line under its label.

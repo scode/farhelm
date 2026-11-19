@@ -564,7 +564,7 @@ impl Render for NotificationList {
         let clear = Button::new(
             CLEAR_ID,
             "Clear all",
-            HoverHelp::tooltip("Clear: remove these notifications"),
+            HoverHelp::tooltip("Clear: remove these notifications").beside_menu(),
             Role::Button,
         )
         .busy(self.clearing)
@@ -792,7 +792,8 @@ fn docs_link(id: String, url: &str) -> impl IntoElement {
         Button::new(
             id,
             url.to_owned(),
-            HoverHelp::tooltip("Open this page of Farhelm's documentation in your browser"),
+            HoverHelp::tooltip("Open this page of Farhelm's documentation in your browser")
+                .beside_menu(),
             Role::Link,
         )
         .tier(Tier::Link)
