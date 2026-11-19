@@ -475,14 +475,16 @@ fn a_reset_withdraws_the_notice_with_its_launcher(cx: &mut gpui::TestAppContext)
     );
 }
 
-/// SPEC.md's after-close rule ("Opening and closing") guards Enter after the launcher closes. The second tap lands on
-/// whatever regains focus; the focus coordinator neither counts it nor delivers it there. Without that, a double Enter
-/// would keep the new session from opening and type a line break into the terminal. Specified: Enter in the Name field
-/// launches, a second Enter follows at once, and the reply naming b still opens b with its terminal focused; the second
-/// Enter sent no second create.
+/// Another Enter while a launch is pending counts as new input. The fake helm holds the reply so that the user
+/// can tap Enter again immediately after they launch. When the result arrives, the app leaves selection alone.
 #[gpui::test]
-fn a_repeated_enter_on_launch_still_opens_the_session(cx: &mut gpui::TestAppContext) {
-    let (mut helm, cx) = launcher_on(cx, command_draft());
+fn a_second_enter_while_launch_waits_leaves_selection_alone(cx: &mut gpui::TestAppContext) {
+    let snapshot = vec![
+        listing(&["a"], &[session("a")]),
+        super::view_tests::fixture_hosts(&[0]),
+        crate::session_list::tests::preferences(&["a"], Some("a")),
+    ];
+    let (mut helm, cx) = super::view_tests::launcher_over(cx, command_draft(), snapshot);
     creates(&mut helm, cx);
     test_support::click(cx, "launcher-name-row");
     keys(cx, "enter");
@@ -492,20 +494,20 @@ fn a_repeated_enter_on_launch_still_opens_the_session(cx: &mut gpui::TestAppCont
     };
     let id = create.id;
     assert!(!any_open(cx), "the premise: the launcher hid");
+    assert!(
+        test_support::terminal_focused(cx),
+        "a's terminal took focus"
+    );
     keys(cx, "enter");
     assert!(
         creates(&mut helm, cx).is_empty(),
-        "the repeated Enter sent nothing"
+        "the next Enter launched nothing else"
     );
     created(&mut helm, cx, id, "b");
+    assert_eq!(selected(cx).as_deref(), Some("a"));
     assert_eq!(
-        selected(cx).as_deref(),
-        Some("b"),
-        "the repeat did not count as moving on"
-    );
-    assert!(
-        test_support::terminal_focused(cx),
-        "b's terminal took focus"
+        name_of(cx, "launch-started-report").as_deref(),
+        Some("Started “b”")
     );
 }
 

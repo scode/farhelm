@@ -1534,9 +1534,9 @@ impl Render for CaretMenu {
 }
 
 /// Tab or Shift+Tab in `pane`'s open caret menu: close it, which returns focus to its caret, through the layer
-/// manager's Tab close ([`layers::close_on_tab`]) rather than a plain close or a dismissal, because the focus
-/// coordinator then swallows only the key's held repeats: either of the others would also swallow a second Tab pressed
-/// within half a second, which SPEC.md's caret rule means to go on from the caret to the next control.
+/// manager's Tab close ([`layers::close_on_tab`]), which swallows only the key's held repeats. Since the focus
+/// coordinator now swallows fresh presses only for Escape, a plain close or a dismissal would behave the same; the Tab
+/// close is kept so a second Tab still goes on from the caret to the next control, as SPEC.md's caret rule means.
 fn tab_out(pane: &WeakEntity<SessionPane>, window: &mut Window, cx: &mut App) {
     let open = pane
         .upgrade()
