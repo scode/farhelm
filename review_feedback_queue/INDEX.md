@@ -58,10 +58,6 @@ consequences.
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
   when the pointer moves.
 
-- [`terminal-selection-copies-concealed-text.md`](terminal-selection-copies-concealed-text.md) — Selecting a visible
-  line in the terminal can copy hidden text along with it. Pasting it into another shell or application can use more
-  than you selected by sight.
-
 - [`masked-fields-expose-secrets-to-text-services.md`](masked-fields-expose-secrets-to-text-services.md) — Farhelm
   covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
   edit it.

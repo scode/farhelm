@@ -1826,18 +1826,6 @@
   same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## terminal-selection-copies-concealed-text.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism (selection
-  copies concealed characters, crates/gui/farhelm-grid-model/src/selection.rs), but it grants nothing a program cannot
-  already do: SPEC.md accepts programs replacing the clipboard through OSC 52. Matches xterm and the old app. Bucket:
-  other.
-- Decision: the user picked "Concealed text breaks links; selection unchanged" (2026-11-18 highest-bucket triage page,
-  Q4).
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-discards-nov18.md`
-
 ## masked-fields-expose-secrets-to-text-services.md
 
 - Outcome: `discard`.
