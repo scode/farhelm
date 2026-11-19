@@ -84,6 +84,8 @@ pub mod assets;
 pub mod bootstrap;
 pub mod cache;
 pub mod components;
+#[cfg(feature = "agent")]
+mod demo_video;
 pub mod desktop;
 pub mod drafts;
 pub mod environment_ui;
