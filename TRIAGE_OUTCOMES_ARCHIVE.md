@@ -22777,6 +22777,25 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `plan/gui-ux-enter-and-focus/02-enter-falls-through-after`,
   [PR #4231](https://github.com/scode/farhelm/pull/4231/changes).
 
+## irreversible-confirmation-focus-contract.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Two focus rules
+  compete for permanent trash deletion. SPEC.md says trash deletion starts on its confirming answer, then that risky
+  irreversible actions start on Cancel. The app follows each rule in different places. Bucket: other.
+- Decision: the user picked "Confirm-first stays for the named list" (2026-11-18 GUI UX triage page, QG), in their
+  words: "the trash cdeletion case is when the user is already in a flow where the intent is completely obvious and
+  clear so a confirm makes sense. you're not being prompted for a "whatch out, this might be an unexpected risk" (like
+  you are when you try to launch yolo on a box w/o yolo allowed for example)." Principle: Confirm-first applies where
+  the user is already in a flow whose intent is plain; Cancel-first is for prompts warning of an unexpected risk.
+- Completion criteria: SPEC.md's focus rules say which wins: confirmations named in the Confirm-first list (permanent
+  trash deletion among them) start on their confirming answer because the user is already in a flow whose intent is
+  plain, and the Cancel-first rule is for prompts that warn of an unexpected risk (YOLO on a host that does not allow
+  it, for example). No code change (about 2-3 lines). Remove the feedback file and its index entry in the same change.
+- Execution: change `kvszvonzwxkxvynpknnlzzxtsllmuvpl`, bookmark
+  `plan/gui-ux-enter-and-focus/03-irreversible-confirmation-focus-contract`,
+  [PR #4216](https://github.com/scode/farhelm/pull/4216/changes).
+
 ## claude-recreation-test-clears-old-stamp.md
 
 - Outcome: `fix code`.
