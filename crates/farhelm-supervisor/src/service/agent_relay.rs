@@ -33,8 +33,7 @@
 //! meant "request N on THIS connection".
 //!
 //! **Routing.** See [`Supervisor::owning_helm_link`]: the newest connection
-//! whose hello declared it the owning helm's
-//! ([`ControlMsg::Hello::owning_helm`]) is the one asked, whatever session
+//! admitted for the owning helm is the one asked, whatever session
 //! is on screen. Until protocol 73 the relay asked the connection holding
 //! the asking session's terminal attachment instead, and that was wrong: the
 //! UI attaches only the session on screen, so an agent in any other session
@@ -71,7 +70,7 @@
 use super::core::{KeyedGuard, Supervisor};
 use farhelm_proto::{
     AGENT_MUTATION_UNKNOWN_REMEDY, AGENT_UNAVAILABLE_REMEDY, AgentOutcome, AgentVerb, ControlMsg,
-    ErrorKind, Frame,
+    ErrorKind, Frame, HelmHello, HelmOwnerRefusal,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,8 +98,7 @@ pub(crate) const NO_HELM_CONNECTED: &str = "no helm is connected to this host";
 
 /// The owning helm's upward request channel on one of its connections.
 ///
-/// Registered when a full-authority connection finishes a hello that
-/// declares it the owning helm's ([`ControlMsg::Hello::owning_helm`]), and
+/// Registered when a host connection's hello is admitted for the owner, and
 /// dropped from the registry when that connection's loop ends. A
 /// full-authority connection that does not declare (the provisioning probe,
 /// another supervisor's startup check, a test client) gets no link at all,
@@ -124,7 +122,7 @@ pub(crate) struct HelmLink {
     /// writer QUEUE, and closing a queue the connection itself holds a
     /// receiver for stops nothing; the read loop is parked in
     /// `read_frame`. So the connection hands its link a signal on the way
-    /// up (`Supervisor::register_helm_link`) and selects on the matching
+    /// up (`Supervisor::admit_helm`) and selects on the matching
     /// receiver beside its reader.
     shutdown: tokio::sync::watch::Sender<bool>,
     pending: Mutex<Pending>,
@@ -422,10 +420,7 @@ impl HelmLink {
     /// leaves the registry. The connection's tail calls
     /// [`Supervisor::unregister_helm_link`], whose `fail_all` is idempotent.
     ///
-    /// Loud, at `warn`: unlike the late answers [`Self::complete`] silently
-    /// drops, every path here is a protocol violation or a wedged helm, and
-    /// killing a connection that may be carrying live terminals is not
-    /// something to do without saying why.
+    /// The warning records why a connection carrying live terminals ended.
     async fn retire(&self, reason: &str) {
         warn!(reason, "retiring a helm connection's agent relay");
         self.fail_all().await;
@@ -542,26 +537,81 @@ fn unavailable(cause: &str) -> AgentOutcome {
 }
 
 impl Supervisor {
-    /// Register one connection's upward channel; the returned handle is
-    /// the connection's own and must be unregistered when its loop ends.
-    ///
-    /// The caller decides eligibility: production registers only a
-    /// full-authority connection whose hello declared it the owning helm's
-    /// (`connection::handle_connection`), because registering is what makes
-    /// a connection eligible for agent requests and change hints. Tests that
-    /// call this directly stand in for such a connection.
-    ///
-    /// `shutdown` is how the relay asks that connection to END — see
-    /// [`HelmLink::retire`]. It is supplied by the caller rather than
-    /// created here because the receiving half has to be selected on beside
-    /// the connection's reader, which is a place only the connection can
-    /// reach.
+    /// Decide ownership and routing under the same lock. Every registered
+    /// link belongs to the one persisted owner, so a takeover drains them
+    /// all before the new owner's link can receive an upcall.
+    pub(crate) async fn admit_helm(
+        &self,
+        hello: HelmHello,
+        notify: mpsc::Sender<Frame>,
+        shutdown: tokio::sync::watch::Sender<bool>,
+    ) -> anyhow::Result<Result<Option<Arc<HelmLink>>, HelmOwnerRefusal>> {
+        let expected = hello.expected_host_identity.as_deref();
+        let connects = hello.answers_agent_requests;
+        anyhow::ensure!(
+            !(connects && hello.take_over.is_some() && expected.is_none()),
+            "a takeover hello must name the expected host identity"
+        );
+        if expected.is_some() && expected != self.host_identity.as_deref() {
+            // Answer with this installation's actual identity and leave the
+            // caller's Adopt path to handle the mismatch.
+            return Ok(Ok(None));
+        }
+        let mut links = self.helm_links.lock().await;
+        let owner = self.store.read_helm_owner().await?;
+        if let Some(owner) = &owner
+            && owner.id != hello.identity.id
+            && !(connects && hello.take_over.as_deref() == Some(owner.revision.as_str()))
+        {
+            return Ok(Err(HelmOwnerRefusal {
+                tag: owner.tag.clone(),
+                owner_revision: owner.revision.clone(),
+                connected: !links.is_empty(),
+                last_connected_at: owner.last_connected_at,
+            }));
+        }
+        if !connects {
+            return Ok(Ok(None));
+        }
+        anyhow::ensure!(
+            self.owns_state_dir(),
+            "cannot admit a helm without owning the supervisor state directory"
+        );
+        let same_owner = owner.filter(|owner| owner.id == hello.identity.id);
+        let changes_owner = same_owner.is_none();
+        let revision = same_owner
+            .map(|owner| owner.revision)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        self.store
+            .record_helm_connection(hello.identity, revision, changes_owner)
+            .await?;
+        if changes_owner {
+            for link in links.drain(..) {
+                link.retire("another helm took over this supervisor").await;
+            }
+        }
+        let link = Self::new_helm_link(notify, shutdown);
+        links.push(Arc::clone(&link));
+        Ok(Ok(Some(link)))
+    }
+
+    /// Synthetic upward link for tests of routing without a wire client.
+    #[cfg(test)]
     pub(crate) async fn register_helm_link(
         &self,
         notify: mpsc::Sender<Frame>,
         shutdown: tokio::sync::watch::Sender<bool>,
     ) -> Arc<HelmLink> {
-        let link = Arc::new(HelmLink {
+        let link = Self::new_helm_link(notify, shutdown);
+        self.helm_links.lock().await.push(Arc::clone(&link));
+        link
+    }
+
+    fn new_helm_link(
+        notify: mpsc::Sender<Frame>,
+        shutdown: tokio::sync::watch::Sender<bool>,
+    ) -> Arc<HelmLink> {
+        Arc::new(HelmLink {
             notify,
             shutdown,
             pending: Mutex::new(Pending::default()),
@@ -569,9 +619,7 @@ impl Supervisor {
             // keeping the whole protocol's "0 means uncorrelated" convention
             // (see `ControlMsg::Error`) uniform costs nothing.
             next_req: AtomicU64::new(1),
-        });
-        self.helm_links.lock().await.push(Arc::clone(&link));
-        link
+        })
     }
 
     /// Drop a connection's link from the registry and fail whatever it was
@@ -602,9 +650,7 @@ impl Supervisor {
     /// purpose; see this module's "Routing" paragraph for why the old
     /// attachment rule was wrong.
     ///
-    /// `helm_links` is in registration order, because
-    /// [`Supervisor::register_helm_link`] appends, so the last entry is the
-    /// newest.
+    /// Admission appends each new link, so the last entry is the newest.
     pub(crate) async fn owning_helm_link(&self) -> Option<Arc<HelmLink>> {
         self.helm_links.lock().await.last().map(Arc::clone)
     }

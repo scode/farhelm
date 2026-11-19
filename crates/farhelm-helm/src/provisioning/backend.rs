@@ -4,8 +4,10 @@
 use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
 use crate::manager::peer_text;
 use async_trait::async_trait;
-use farhelm_proto::ControlMsg;
-use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake};
+use farhelm_proto::io::{
+    ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake, handshake_as_helm,
+};
+use farhelm_proto::{ControlMsg, HelmHello};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -606,6 +608,9 @@ pub(super) struct SystemBackend {
     pub(super) runtime_units: bool,
     /// Reused preparer names must never ride a previous sandbox's SSH master.
     pub(super) one_shot: bool,
+    /// Serving probes identify their helm. The desktop's pre-registry
+    /// socket discovery only determines if a supervisor is present.
+    pub(super) helm_store: Option<crate::store::HelmStore>,
     #[cfg(test)]
     pub(super) fail_before_rename: bool,
 }
@@ -739,9 +744,16 @@ impl SystemBackend {
             launcher: Arc::new(SystemLauncher),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             #[cfg(test)]
             fail_before_rename: false,
         }
+    }
+
+    /// Make provisioning probes use the same identity as host connections.
+    pub(super) fn with_helm_store(mut self, store: crate::store::HelmStore) -> Self {
+        self.helm_store = Some(store);
+        self
     }
 
     /// Use a new SSH transport for every preparer command, including inspect
@@ -768,6 +780,7 @@ impl SystemBackend {
             launcher: Arc::new(SystemLauncher),
             runtime_units,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         }
     }
@@ -2373,6 +2386,12 @@ impl ProvisioningBackend for SystemBackend {
         self.finish_prepared_install(target, unit, state_dir).await
     }
     async fn probe(&self, target: &ProbeTarget) -> Result<ProbeObservation, BackendFailure> {
+        let identity = match &self.helm_store {
+            Some(store) => Some(store.helm_identity().await.map_err(|error| {
+                BackendFailure::new("reading the helm's identity", error.to_string())
+            })?),
+            None => None,
+        };
         let (mut child, remote) = self.spawn_probe(target).await?;
         // The probe's process group, kept for the path below where the child
         // has already been reaped and `child.id()` no longer answers.
@@ -2389,14 +2408,26 @@ impl ProvisioningBackend for SystemBackend {
             bytes: Arc::clone(&stdout_bytes),
         });
         let mut writer = FrameWriter::new(stdin);
-        // Plain `handshake`, never `handshake_as_owning_helm`: this probe
-        // answers no agent requests and can run while the host connection
-        // is up, and a supervisor routes agent requests to the newest
-        // connection that declared itself the owning helm's.
+        // Probing checks ownership even while a host connection is up.
+        // It never registers an upward link or changes the stored owner.
         let handshake_result = tokio::select! {
             result = tokio::time::timeout(
                 PROBE_TIMEOUT,
-                handshake(&mut reader, &mut writer, "helm"),
+                async {
+                    match identity {
+                        Some(identity) => handshake_as_helm(
+                            &mut reader,
+                            &mut writer,
+                            HelmHello {
+                                identity,
+                                answers_agent_requests: false,
+                                expected_host_identity: None,
+                                take_over: None,
+                            },
+                        ).await,
+                        None => handshake(&mut reader, &mut writer, "helm").await,
+                    }
+                },
             ) => result,
             failure = stderr_signal_rx.recv() => {
                 let failure = failure.expect("probe stderr signal sender disappeared");
@@ -2419,6 +2450,16 @@ impl ProvisioningBackend for SystemBackend {
         // `stop_probe`).
         drop(writer);
         match handshake_result {
+            Ok(Ok(ControlMsg::Hello {
+                helm_owner_refusal: Some(owner),
+                ..
+            })) => {
+                stop_probe(&mut child, stderr_task).await;
+                Err(BackendFailure::new(
+                    format!("the host is managed by another Farhelm ({})", owner.tag),
+                    "",
+                ))
+            }
             Ok(Ok(ControlMsg::Hello {
                 build_version,
                 host_identity,
@@ -4179,6 +4220,7 @@ mod tests {
             }),
             runtime_units: false,
             one_shot: false,
+            helm_store: None,
             fail_before_rename: false,
         };
         let result = tokio::time::timeout(

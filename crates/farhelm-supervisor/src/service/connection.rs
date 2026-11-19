@@ -17,7 +17,7 @@ use super::terminals::{ActiveAttach, AttachmentKey, TerminalId, join_forwarder};
 use super::uploads::{UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal};
 use anyhow::Context;
 use farhelm_proto::io::{
-    FrameReader, FrameWriter, ProgressWrite, handshake_with_host_identity, parse_control,
+    FrameReader, FrameWriter, ProgressWrite, parse_control, read_hello, report_hello_skew,
     write_frame_before_stall,
 };
 use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, DetachCode, ErrorKind, Frame};
@@ -172,69 +172,67 @@ where
     let (w, bytes_written) = ProgressWrite::new(w);
     let mut reader = FrameReader::new(r);
     let mut writer = FrameWriter::new(w);
-    // The one production caller of `handshake_with_host_identity` (see its
-    // own docs): every hello this supervisor sends carries the identity
-    // `Supervisor::new_with_seams` resolved once at construction — `None`
-    // for a claimless construction with nothing yet to report, `Some` once
-    // this process minted or read back a durable one — never a fresh read
-    // per connection; the value is immutable for the process lifetime, so
-    // cloning it here is cheap and there is nothing to race.
-    let peer_hello = handshake_with_host_identity(
-        &mut reader,
-        &mut writer,
-        sup.host_identity.clone(),
-        crate::store::SCHEMA_VERSION,
-    )
-    .await?;
-    // Read before `peer_hello` is consumed below. Meaningful only on a
-    // full-authority connection; see where the link is registered.
-    let declares_owning_helm = matches!(
-        peer_hello,
-        ControlMsg::Hello {
-            owning_helm: true,
-            ..
+    // Report the identity resolved at startup even on refusal. The helm
+    // needs it to tell a different installation from a different owner.
+    let mut reply = ControlMsg::Hello {
+        protocol_version: farhelm_proto::PROTOCOL_VERSION,
+        build_version: farhelm_proto::BUILD_VERSION.to_string(),
+        role: "supervisor".to_string(),
+        host_identity: sup.host_identity.clone(),
+        auth: None,
+        database_schema: Some(crate::store::SCHEMA_VERSION),
+        helm: None,
+        helm_owner_refusal: None,
+    };
+    let (auth, helm) = match read_hello(&mut reader).await {
+        Ok(ControlMsg::Hello { auth, helm, .. }) => (auth, helm),
+        Ok(_) => unreachable!("read_hello accepts only a hello"),
+        Err(error) => {
+            if farhelm_proto::io::VersionSkew::cause_of(&error).is_some() {
+                // Older peers also use our hello for their Update decision.
+                writer.write_control(&reply).await?;
+                report_hello_skew(&mut writer, &error).await;
+            }
+            return Err(error.into());
         }
-    );
-    let restricted_auth = match peer_hello {
-        ControlMsg::Hello {
-            auth: Some(auth), ..
-        } => {
-            let authenticated = sup
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-                .context("validating session authentication");
-            match authenticated {
-                Ok(true) => Some(auth),
-                Ok(false) => {
-                    const MESSAGE: &str =
-                        "the session credential is invalid or its session no longer exists";
-                    writer
-                        .write_control(&ControlMsg::Error {
-                            create_unaccepted: false,
-                            req_id: 0,
-                            message: MESSAGE.to_string(),
-                            kind: ErrorKind::Unauthorized,
-                        })
-                        .await?;
-                    anyhow::bail!(MESSAGE);
-                }
-                Err(error) => {
-                    writer
-                        .write_control(&ControlMsg::Error {
-                            create_unaccepted: false,
-                            req_id: 0,
-                            message: "the supervisor could not validate the session credential"
-                                .to_string(),
-                            kind: ErrorKind::Internal,
-                        })
-                        .await?;
-                    return Err(error);
-                }
+    };
+    let restricted_auth = if let Some(auth) = auth {
+        writer.write_control(&reply).await?;
+        let authenticated = sup
+            .store
+            .authenticates_session(&auth.session_id, &auth.token)
+            .await
+            .context("validating session authentication");
+        match authenticated {
+            Ok(true) => Some(auth),
+            Ok(false) => {
+                const MESSAGE: &str =
+                    "the session credential is invalid or its session no longer exists";
+                writer
+                    .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id: 0,
+                        message: MESSAGE.to_string(),
+                        kind: ErrorKind::Unauthorized,
+                    })
+                    .await?;
+                anyhow::bail!(MESSAGE);
+            }
+            Err(error) => {
+                writer
+                    .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id: 0,
+                        message: "the supervisor could not validate the session credential"
+                            .to_string(),
+                        kind: ErrorKind::Internal,
+                    })
+                    .await?;
+                return Err(error);
             }
         }
-        ControlMsg::Hello { auth: None, .. } => None,
-        _ => unreachable!("the handshake accepts only a peer hello"),
+    } else {
+        None
     };
 
     // Single writer task; everything that wants to send (request
@@ -258,43 +256,45 @@ where
     // bounds bytes, and this shared queue also bounds frames across transfers.
     let (bulk_tx, bulk_rx) = mpsc::channel::<Frame>(super::uploads::UPLOAD_CHUNK_QUEUE);
     let (priority_tx, priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
-    // Only the owning helm's connections get an upward link, and with it
-    // agent upcalls and change hints: a full-authority connection whose
-    // hello declared itself the owning helm (`ControlMsg::Hello::owning_helm`).
-    // A session-authenticated connection never does, whatever its hello
-    // claims, because it is a session's agent and not a helm. A
-    // full-authority connection that did not declare (the provisioning and
-    // update probe, another supervisor's startup check, a test client) gets
-    // none either: it sends the same diagnostic `role` as the helm and
-    // answers nothing, so handing it an agent request would leave the
-    // asking agent waiting out the whole budget. The hello's `role` string
-    // decides nothing here; it is diagnostic free text (see
-    // `ControlMsg::Hello::role`).
-    //
-    // Registering here, before this connection reads any request, is what
-    // guarantees that a session the helm created over this connection can
-    // ask the helm straight away. Which registered link gets a request is
-    // `Supervisor::owning_helm_link`'s rule (the newest); what the asking
-    // session's terminal is attached to plays no part.
-    //
-    // The link is also allowed to END this connection (see
-    // `HelmLink::retire`): a relay that has provably stopped working — a
-    // reply under a `req_id` nobody issued, a mutation's delete fence that
-    // ran out its last bound — leaves pending upcalls that nothing on a
-    // LIVE connection will resolve, and connection loss is the ending the
-    // rest of the relay already knows how to report. The sender is created
-    // here, and kept in scope for the whole function even on a connection
-    // that registers no link, so the `changed()` arm below never fires
-    // merely because the last sender was dropped.
+    // Registered before serving a request, so a session created by this
+    // helm can immediately send upcalls. The link's shutdown signal also
+    // lets a takeover stop this reader without touching transport details.
     let (link_shutdown, mut link_shutdown_rx) = watch::channel(false);
-    let link = if restricted_auth.is_none() && declares_owning_helm {
-        Some(
-            sup.register_helm_link(tx.clone(), link_shutdown.clone())
-                .await,
-        )
-    } else {
-        None
-    };
+    const LINK_RETIRED: &str = "the agent relay retired this connection's upward link";
+    let mut link = None;
+    if restricted_auth.is_none() {
+        let mut hello_only = false;
+        if let Some(helm) = helm {
+            match sup
+                .admit_helm(helm, tx.clone(), link_shutdown.clone())
+                .await?
+            {
+                Ok(admitted) => {
+                    hello_only = admitted.is_none();
+                    link = admitted;
+                }
+                Err(refusal) => {
+                    if let ControlMsg::Hello {
+                        helm_owner_refusal, ..
+                    } = &mut reply
+                    {
+                        *helm_owner_refusal = Some(refusal);
+                    }
+                    writer.write_control(&reply).await?;
+                    return Ok(());
+                }
+            }
+        }
+        if let Err(error) = writer.write_control(&reply).await {
+            if let Some(link) = &link {
+                sup.unregister_helm_link(link).await;
+            }
+            return Err(error.into());
+        }
+        if hello_only {
+            return Ok(());
+        }
+    }
     let (writer_failed_tx, mut writer_failed_rx) = oneshot::channel();
     // The shutdown tail owns the sender. It closes both receiver halves
     // after the last reply-producing task has been reaped, so the writer can
@@ -373,11 +373,15 @@ where
                 // what returning an error from this block runs.
                 changed = link_shutdown_rx.changed() => {
                     changed.expect("this function holds a sender for its own link shutdown");
-                    return Err(anyhow::anyhow!(
-                        "the agent relay retired this connection's upward link"
-                    ));
+                    return Err(anyhow::anyhow!(LINK_RETIRED));
                 }
             };
+            // A queued frame and retirement can be ready together. The
+            // old owner may finish work it already started, but a buffered
+            // request must not enter a handler after its link was retired.
+            if *link_shutdown_rx.borrow() {
+                return Err(anyhow::anyhow!(LINK_RETIRED));
+            }
             let Some(frame) = frame else {
                 break;
             };
@@ -1594,7 +1598,9 @@ mod tests {
     use super::super::core::tests::{StateDir, dummy_exe, host_supervisor};
     use super::*;
     use farhelm_proto::SessionLaunch;
-    use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
+    use farhelm_proto::{
+        HelmHello, HelmIdentity, HelmOwnerRefusal, RestartOffer, SessionInfo, SessionStatus,
+    };
 
     /// The defusal this whole change exists for: an oversized reply must
     /// never reach the writer task, because the writer's fatal-on-any-
@@ -1855,7 +1861,8 @@ mod tests {
                     session_id: parent.id,
                     token: "definitely-not-the-minted-token".to_string(),
                 }),
-                owning_helm: false,
+                helm: None,
+                helm_owner_refusal: None,
             })
             .await
             .expect("send authenticated hello");
@@ -1923,7 +1930,8 @@ mod tests {
                 role: "spawn".to_string(),
                 host_identity: None,
                 auth: None,
-                owning_helm: false,
+                helm: None,
+                helm_owner_refusal: None,
             })
             .await
             .expect("send unauthenticated spawn-role hello");
@@ -2055,7 +2063,8 @@ mod tests {
                     session_id: parent.id,
                     token,
                 }),
-                owning_helm: false,
+                helm: None,
+                helm_owner_refusal: None,
             })
             .await
             .unwrap();
@@ -2111,9 +2120,8 @@ mod tests {
     /// `let _ = server.await;` would silently accept either failure mode —
     /// exactly the shape this helper exists to close off.
     async fn hello_host_identity_over_a_fresh_connection(sup: &Arc<Supervisor>) -> String {
-        let sup = Arc::clone(sup);
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
-        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let server = tokio::spawn(handle_connection(Arc::clone(sup), server_side));
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
@@ -2131,6 +2139,10 @@ mod tests {
         let identity = host_identity.expect("a supervisor's hello must carry an identity");
         // Update's newer-schema refusal reads this; nothing else pins the producer.
         assert_eq!(database_schema, Some(crate::store::SCHEMA_VERSION));
+        assert!(
+            sup.owning_helm_link().await.is_none(),
+            "a hello without a helm field must leave the live routing registry empty"
+        );
         drop(reader);
         drop(writer);
         server
@@ -2141,9 +2153,8 @@ mod tests {
     }
 
     /// PLAN_M6.md item 2's end-to-end proof that host identity actually
-    /// reaches the wire: drives the REAL `handle_connection` (not
-    /// `handshake_with_host_identity` in isolation, which `farhelm-proto`'s
-    /// own tests already cover) over an in-process duplex pipe, and reads
+    /// reaches the wire: drives the real `handle_connection` over an
+    /// in-process duplex pipe, and reads
     /// back the hello it sends. Pinned here rather than only at the store
     /// level (`store::tests`'s own identity tests) because minting a value
     /// and actually PUTTING it on the wire are two different things — a
@@ -2210,6 +2221,242 @@ mod tests {
             first_identity, second_identity,
             "identity must survive a supervisor restart against the same state directory"
         );
+    }
+
+    /// Keep both ends of an owning hello alive so that the test can
+    /// distinguish persisted ownership from a currently connected owner.
+    struct HelmPeer {
+        reply: ControlMsg,
+        reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    }
+
+    impl HelmPeer {
+        async fn dial(sup: &Arc<Supervisor>, hello: HelmHello) -> Self {
+            let (client_side, server_side) = tokio::io::duplex(64 * 1024);
+            let task = tokio::spawn(handle_connection(Arc::clone(sup), server_side));
+            let (r, w) = tokio::io::split(client_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            let reply = tokio::time::timeout(
+                Duration::from_secs(5),
+                farhelm_proto::io::handshake_as_helm(&mut reader, &mut writer, hello),
+            )
+            .await
+            .expect("supervisor should complete the hello")
+            .unwrap();
+            Self {
+                reply,
+                reader,
+                writer,
+                task,
+            }
+        }
+
+        fn refusal(&self) -> Option<&HelmOwnerRefusal> {
+            match &self.reply {
+                ControlMsg::Hello {
+                    helm_owner_refusal, ..
+                } => helm_owner_refusal.as_ref(),
+                other => panic!("expected a hello, got {other:?}"),
+            }
+        }
+
+        /// Close a peer we expect the supervisor still serves, or join a
+        /// hello-only peer that may already have ended on its own.
+        async fn close(self) {
+            drop(self.writer);
+            drop(self.reader);
+            tokio::time::timeout(Duration::from_secs(5), self.task)
+                .await
+                .expect("supervisor should stop serving a closed peer")
+                .unwrap()
+                .unwrap();
+        }
+    }
+
+    /// Only the host connection claims. Taking over replaces the durable
+    /// owner and ends its existing connection, including across a restart.
+    #[farhelm_testtrace::test]
+    async fn helm_owner_admission_probe_and_takeover() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert!(
+            sup.owns_state_dir(),
+            "fixture must be able to claim ownership"
+        );
+        let host_identity = hello_host_identity_over_a_fresh_connection(&sup).await;
+        let first = HelmHello {
+            identity: HelmIdentity {
+                id: "a".repeat(64),
+                tag: "ab12".into(),
+            },
+            answers_agent_requests: true,
+            expected_host_identity: None,
+            take_over: None,
+        };
+        let second = HelmHello {
+            identity: HelmIdentity {
+                id: "b".repeat(64),
+                tag: "cd34".into(),
+            },
+            ..first.clone()
+        };
+        let mut probe = first.clone();
+        probe.answers_agent_requests = false;
+        let discovering = HelmPeer::dial(&sup, probe.clone()).await;
+        assert!(discovering.refusal().is_none());
+        discovering.close().await;
+        assert!(sup.store.read_helm_owner().await.unwrap().is_none());
+        assert!(sup.owning_helm_link().await.is_none());
+
+        let mut old_peer = HelmPeer::dial(&sup, first.clone()).await;
+        assert!(old_peer.refusal().is_none());
+        let owner = sup
+            .store
+            .read_helm_owner()
+            .await
+            .unwrap()
+            .expect("first hello claims the host");
+        assert_eq!(owner.id, first.identity.id);
+        assert!(sup.owning_helm_link().await.is_some());
+
+        let refused = HelmPeer::dial(&sup, second.clone()).await;
+        assert_eq!(
+            refused.refusal(),
+            Some(&HelmOwnerRefusal {
+                tag: first.identity.tag.clone(),
+                owner_revision: owner.revision.clone(),
+                connected: true,
+                last_connected_at: owner.last_connected_at,
+            })
+        );
+        refused.close().await;
+
+        probe.identity = second.identity.clone();
+        probe.take_over = Some(owner.revision.clone());
+        probe.expected_host_identity = Some(host_identity.clone());
+        let probe = HelmPeer::dial(&sup, probe).await;
+        assert!(probe.refusal().is_some(), "a probe cannot take over");
+        probe.close().await;
+
+        let wrong_host = HelmPeer::dial(
+            &sup,
+            HelmHello {
+                take_over: Some(owner.revision.clone()),
+                expected_host_identity: Some("different-installation".into()),
+                ..second.clone()
+            },
+        )
+        .await;
+        assert!(matches!(
+            &wrong_host.reply,
+            ControlMsg::Hello { host_identity: Some(actual), helm_owner_refusal: None, .. }
+                if actual == &host_identity
+        ));
+        wrong_host.close().await;
+        assert_eq!(
+            sup.store.read_helm_owner().await.unwrap().unwrap().id,
+            first.identity.id
+        );
+
+        // The approved peer writes the takeover and loses the reply.
+        // A later retry must not be able to spend the same approval again.
+        let transfer = HelmHello {
+            take_over: Some(owner.revision.clone()),
+            expected_host_identity: Some(host_identity.clone()),
+            ..second.clone()
+        };
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let mut message = ControlMsg::hello("helm");
+        let ControlMsg::Hello { helm, .. } = &mut message else {
+            unreachable!("hello constructor");
+        };
+        *helm = Some(transfer.clone());
+        FrameWriter::new(client)
+            .write_control(&message)
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            handle_connection(Arc::clone(&sup), server),
+        )
+        .await
+        .expect("supervisor should finish the hello whose peer left");
+        assert!(result.is_err(), "the closed peer cannot read a reply");
+        assert_eq!(
+            sup.store.read_helm_owner().await.unwrap().unwrap().id,
+            second.identity.id
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), old_peer.reader.read_frame())
+                .await
+                .expect("takeover must close the old connection")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            old_peer.task.await.unwrap().is_err(),
+            "retirement ends the old loop"
+        );
+        drop(old_peer.writer);
+
+        let replacement = HelmPeer::dial(&sup, transfer.clone()).await;
+        assert!(
+            replacement.refusal().is_none(),
+            "the installed owner can retry"
+        );
+        let refused = HelmPeer::dial(&sup, first.clone()).await;
+        assert_eq!(refused.refusal().unwrap().tag, second.identity.tag);
+        assert!(refused.refusal().unwrap().connected);
+        refused.close().await;
+        replacement.close().await;
+        let second_owner = sup.store.read_helm_owner().await.unwrap().unwrap();
+        drop(sup);
+
+        let restarted = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert!(
+            restarted.owns_state_dir(),
+            "fixture must release the first supervisor's claim"
+        );
+        let refused = HelmPeer::dial(&restarted, first.clone()).await;
+        assert_eq!(
+            refused.refusal(),
+            Some(&HelmOwnerRefusal {
+                tag: second.identity.tag.clone(),
+                owner_revision: second_owner.revision.clone(),
+                connected: false,
+                last_connected_at: second_owner.last_connected_at,
+            })
+        );
+        refused.close().await;
+        let restored = HelmPeer::dial(&restarted, second).await;
+        assert!(restored.refusal().is_none());
+        restored.close().await;
+
+        let back = HelmPeer::dial(
+            &restarted,
+            HelmHello {
+                take_over: Some(second_owner.revision),
+                expected_host_identity: Some(host_identity),
+                ..first
+            },
+        )
+        .await;
+        assert!(
+            back.refusal().is_none(),
+            "ordinary reconnects preserve the owner revision"
+        );
+        let stale = HelmPeer::dial(&restarted, transfer).await;
+        assert_eq!(stale.refusal().unwrap().tag, owner.tag);
+        assert_ne!(stale.refusal().unwrap().owner_revision, owner.revision);
+        stale.close().await;
+        back.close().await;
     }
 
     /// The other half of the shape the RESTART test above deliberately

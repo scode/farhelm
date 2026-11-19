@@ -19,7 +19,20 @@
 use crate::harness::*;
 use farhelm_helm::agent_requests::{AgentRequestHandler, AgentRequestSlot};
 use farhelm_proto::io::handshake_with_session_auth;
-use farhelm_proto::{AgentOutcome, AgentReply, AgentVerb, SessionAuth};
+use farhelm_proto::{AgentOutcome, AgentReply, AgentVerb, HelmHello, HelmIdentity, SessionAuth};
+
+/// Both attachment fixtures model the same helm reconnecting.
+fn fixture_helm_hello() -> HelmHello {
+    HelmHello {
+        identity: HelmIdentity {
+            id: "a".repeat(64),
+            tag: "ab12".into(),
+        },
+        answers_agent_requests: true,
+        expected_host_identity: None,
+        take_over: None,
+    }
+}
 
 /// A helm-side handler under the test's control.
 ///
@@ -166,7 +179,7 @@ pub(crate) async fn connect_helm(
     });
     let (r, w) = tokio::io::split(client_side);
     let slot: AgentRequestSlot = Arc::new(std::sync::OnceLock::from(handler));
-    SupervisorClient::start_for_host(r, w, slot, 1)
+    SupervisorClient::start_for_host(r, w, slot, 1, fixture_helm_hello())
         .await
         .expect("handshake")
 }
@@ -224,7 +237,7 @@ async fn connect_helm_tapping_request_ids(
 
     let (r, w) = tokio::io::split(helm_side);
     let slot: AgentRequestSlot = Arc::new(std::sync::OnceLock::from(handler));
-    let client = SupervisorClient::start_for_host(r, w, slot, 1)
+    let client = SupervisorClient::start_for_host(r, w, slot, 1, fixture_helm_hello())
         .await
         .expect("handshake");
     (client, seen)

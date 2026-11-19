@@ -4725,8 +4725,8 @@ pub struct Supervisor {
     /// lifecycle claim adds one ([`Supervisor::mark_delete_in_progress`]).
     pub(crate) deletes_in_progress:
         std::sync::Mutex<HashMap<String, tokio::sync::watch::Receiver<()>>>,
-    /// The upward request channel of every connection currently served
-    /// whose hello declared it the owning helm's, in registration order —
+    /// The upward request channels admitted for the persisted helm owner,
+    /// in registration order —
     /// see [`super::agent_relay`] for what travels up one and why anything
     /// does.
     ///
@@ -4742,9 +4742,10 @@ pub struct Supervisor {
     /// count on one hand. A key would have to be invented purely to have
     /// one.
     ///
-    /// NOT part of the `attachments`-then-`sessions` lock-ordering rule
-    /// this struct's docs state: every user takes it alone and releases it
-    /// before taking anything else.
+    /// Admission holds this lock while updating the owner record and
+    /// retiring links. Routing and hints see a single owner even when
+    /// a takeover races an old reconnect. It is independent of the
+    /// `attachments`-then-`sessions` lock order.
     pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
     /// Pending and active accepted tunnel sockets share one host-wide cap,
     /// including sockets held by overlapping helm connections during reconnect.
@@ -25403,7 +25404,8 @@ exit 1
                         role: "supervisor".into(),
                         host_identity: None,
                         auth: None,
-                        owning_helm: false,
+                        helm: None,
+                        helm_owner_refusal: None,
                     })
                     .await
                     .expect("fixture: sending the stand-in's hello");

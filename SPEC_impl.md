@@ -2879,9 +2879,11 @@ a terminal's pause deadline and from an upload's progress deadlines.
 SPEC.md (Topology) makes one helm the owner of each supervisor and every session on it. Design for exactly that. Do not
 add code, state or protocol whose purpose is to let a supervisor or session be shared between helms or move from one to
 another, and do not justify a choice by it ("this is the rule that stays correct if several helms connect" is not a
-reason). When the supervisor has to pick a helm connection to send something to, it picks the owning helm's connection;
-which connection a session's terminal happens to be attached through says nothing about ownership. Policy (approvals,
-permissions, templates) belongs to the owning helm, so the supervisor never has to reconcile policy from more than one.
+reason). Take over is not such sharing: it transfers the whole host from one owner to the next. Individual sessions stay
+with their supervisor, and the host serves only one helm at a time. When the supervisor has to pick a helm connection to
+send something to, it picks the owning helm's connection; which connection a session's terminal happens to be attached
+through says nothing about ownership. Policy (approvals, permissions, templates) belongs to the owning helm, so the
+supervisor never has to reconcile policy from more than one.
 
 What a supervisor does see more than one of is connections, all from the same owner or from tools that are not helms:
 the helm's host connection, its previous one while a reconnect leaves the old one half-open, the helm's provisioning and
@@ -2889,9 +2891,24 @@ update probe, other full-authority tools, and session-authenticated peers such a
 Per-connection state (channel ids, request ids, attachments, tunnel claims) stays per connection, and the guards that
 keep a reconnecting helm's overlapping connections apart are correct and stay. They are not multi-helm accommodations.
 
-Ownership is not enforced yet: the supervisor stores no owning-helm identity and treats every full-authority connection
-alike (TODO.md, Near term). Until it is, a second helm connecting is out of scope rather than handled. Code need not
-detect it, defend against it, or degrade gracefully under it.
+Protocol 78 replaces `owning_helm` with an optional `helm` object. Both the host connection and provisioning probe carry
+the helm's owner id and short display tag. The id is a domain-separated SHA-256 hash of the random registry namespace
+and the namespace itself stays in the helm. Only the host connection can claim ownership or answer agent requests. A
+provisioning probe checks ownership. An identity-less local tool keeps its full-authority path without claiming the host
+or becoming eligible for agent requests, and a session credential keeps its restricted authority.
+
+The supervisor reads the peer's hello before replying. It still sends its actual protocol and build on a version
+mismatch, for the other peer's version-skew and Update workflow. With the same protocol, a supervisor that refuses a
+different helm returns a `helm_owner_refusal` in its hello, with the current owner's tag, whether it is connected, its
+last accepted host hello's timestamp, and an opaque ownership revision. The host identity and schema remain in the
+hello. Version 36 of the supervisor database adds the owner record, left empty on upgrade. Probes never populate it.
+
+A known host's helm includes the recorded host identity, so an endpoint that has since changed cannot be claimed or
+taken over by mistake. The takeover hello must match both that identity and the owner revision the user approved. The
+supervisor assigns a new revision when ownership changes, so a retry after a lost reply cannot spend the same approval
+on a later owner. Admission serializes the durable change with registration in the upward link list. The supervisor
+retires the previous owner's links before routing upcalls to the new one. The previous owner sees the refusal on its
+next dial.
 
 ### What the helm believes from a supervisor
 
@@ -2966,37 +2983,29 @@ agent in any other session was refused with "no helm is attached to this session
 time; a monitor session that launches and deletes other sessions in the background could not use agent commands at all,
 and switching the UI away from a session broke its agent's commands within seconds. And several helms per supervisor is
 ruled out by policy rather than left open: one helm owns each supervisor and every session in it, so there is only one
-right helm to ask, and which session it displays says nothing about that. The supervisor now routes by connection. The
-helm's host connection, the only connection built with an agent-request handler, declares itself in its hello
-(`ControlMsg::Hello::owning_helm`), and the supervisor registers an upward link only for a full-authority connection
-that did. Requests go to the newest such link, because the one case with two is a helm reconnecting while its old
-transport is still half-open, and the old one may never answer. With none registered the request is refused at once with
-"no helm is connected to this host". The declaration exists because the supervisor cannot tell a helm from other
-full-authority peers by anything else (`role` is diagnostic text): the provisioning and update probe sends the same
-`role: "helm"`, sends nothing after its hello, and can connect while the host connection is up, so "the newest
-full-authority connection" would hand requests to a probe that never answers them. The field is not additive within a
-version, because a helm that omitted it would silently stop receiving agent requests; hence the bump, and since a
-mismatched peer is refused at the hello there is no older helm to fall back for. Only declaring connections receive
-change hints too (version 33, below), which loses nothing: in production the host connection is the only one that reads
-them.
+right helm to ask, and which session it displays says nothing about that. The supervisor routes to the newest upward
+link admitted for the owner (see "One owning helm per supervisor"). A reconnect may leave the old link half-open, while
+the new link can handle requests. With no link registered the request is refused at once with "no helm is connected to
+this host". A provisioning probe can connect while the host connection is up, so upcall eligibility comes from the
+hello's `helm` object. Its `role` is diagnostic text. Change hints go to these same links.
 
 Version 33 adds a second message in that direction, `ControlMsg::SessionsChanged`: a content-free hint that something a
 user can see about the host's sessions changed. The helm still learns WHAT changed by drain; the hint only moves the
 drain earlier. The supervisor owes a hint whenever a value it would list actually changes (a terminal exiting, a status
 transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
 merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
-hints into at most one per 200 ms and sends each on the ordinary writer queue of every connection that declared itself
-the owning helm's (version 73, above), dropping it rather than blocking when that queue is full. Replies never run a
-capture sweep or commit outcomes; a terminal-exit wake hints before observation and an outcome change hints again. The
-helm refreshes the hinted host at once, unless a refresh that started with a hint pending began less than that same 200
-ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both ends use); then it waits out the rest of the gap,
-and the one refresh that follows answers every hint that arrived meanwhile. Supervisor messages are untrusted, so the
-helm enforces the gap itself rather than relying on the supervisor's spacing. Only a hint's own wake waits: the poll, a
-user's refresh and a nudge do not. A refresh a hint caused always raises a feed event, even when the cache compares
-equal: a tab opened and exited between two refreshes leaves the cache unchanged but a client's optimistic tab behind.
-The three-second poll stays as the backstop and keeps its changed-only rule. A hint stays pending until a refresh that
-STARTED after it completes; a refresh the helm discarded because one of its own seeded writes overtook it is retried as
-soon as the gap allows rather than left to the poll.
+hints into at most one per 200 ms and sends each on the ordinary writer queue of every admitted host connection,
+dropping it when that queue is full. Replies never run a capture sweep or commit outcomes; a terminal-exit wake hints
+before observation and an outcome change hints again. The helm refreshes the hinted host at once, unless a refresh that
+started with a hint pending began less than that same 200 ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate,
+which both ends use); then it waits out the rest of the gap, and the one refresh that follows answers every hint that
+arrived meanwhile. Supervisor messages are untrusted, so the helm enforces the gap itself rather than relying on the
+supervisor's spacing. Only a hint's own wake waits: the poll, a user's refresh and a nudge do not. A refresh a hint
+caused always raises a feed event, even when the cache compares equal: a tab opened and exited between two refreshes
+leaves the cache unchanged but a client's optimistic tab behind. The three-second poll stays as the backstop and keeps
+its changed-only rule. A hint stays pending until a refresh that STARTED after it completes; a refresh the helm
+discarded because one of its own seeded writes overtook it is retried as soon as the gap allows rather than left to the
+poll.
 
 The helm's client closes its transport when its final owning handle drops, even with an unanswered upcall. Answer tasks
 hold writer senders of their own, so closing the client's sender alone cannot make a quiet connection reach EOF. The

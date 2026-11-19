@@ -14,12 +14,12 @@ pub use tcp_relays::TcpTunnelAccepted;
 
 use anyhow::bail;
 use farhelm_proto::io::{
-    FrameReader, FrameWriter, ProgressWrite, handshake, handshake_as_owning_helm, parse_control,
+    FrameReader, FrameWriter, ProgressWrite, handshake, handshake_as_helm, parse_control,
     write_frame_before_stall,
 };
 use farhelm_proto::{
-    ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, TabInfo, TerminalSelector,
-    UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
+    ControlMsg, ErrorKind, Frame, FrameKind, HelmHello, HelmOwnerRefusal, SessionInfo, TabInfo,
+    TerminalSelector, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1314,6 +1314,23 @@ struct AgentTasks {
     retired: bool,
 }
 
+/// Host connections identify the helm and associate any upcalls with the
+/// host they came from. Plain supervisor tools do neither.
+struct HostHandshake {
+    helm: HelmHello,
+    handler: crate::agent_requests::AgentRequestSlot,
+    host: crate::store::HostId,
+}
+
+/// The supervisor finished its hello but refused this helm. Retain the
+/// host identity so recovery can distinguish a new owner from a new host.
+#[derive(Debug, thiserror::Error)]
+#[error("the host is managed by another Farhelm ({})", owner.tag)]
+pub(crate) struct HelmOwnershipRefused {
+    pub(crate) owner: HelmOwnerRefusal,
+    pub(crate) host_identity: Option<String>,
+}
+
 /// What one connection needs to answer an agent's question: the shared
 /// handler slot, who to answer as, and this connection's ration of
 /// concurrent answers.
@@ -1671,8 +1688,7 @@ impl SupervisorClient {
     /// upcalls — the shape the connection manager uses for every real host
     /// (PROTOCOL_VERSION 13).
     ///
-    /// Its hello declares the connection the owning helm's
-    /// (`ControlMsg::Hello::owning_helm`, protocol 73), which is what makes
+    /// The hello carries the helm's durable identity, which lets
     /// the supervisor route its sessions' agent requests here whatever is
     /// on screen.
     ///
@@ -1687,12 +1703,13 @@ impl SupervisorClient {
         w: W,
         handler: crate::agent_requests::AgentRequestSlot,
         host: crate::store::HostId,
+        helm: HelmHello,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        Self::start_for_host_with_heartbeat(r, w, handler, host, false).await
+        Self::start_for_host_with_heartbeat(r, w, handler, host, helm, false).await
     }
 
     /// Tensorlake connections enable `heartbeat`: the writer emits an empty
@@ -1704,6 +1721,7 @@ impl SupervisorClient {
         w: W,
         handler: crate::agent_requests::AgentRequestSlot,
         host: crate::store::HostId,
+        helm: HelmHello,
         heartbeat: bool,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
@@ -1715,7 +1733,11 @@ impl SupervisorClient {
             w,
             WRITER_STALL_TIMEOUT,
             UPLOAD_ACK_STALL_TIMEOUT,
-            Some((handler, host)),
+            Some(HostHandshake {
+                helm,
+                handler,
+                host,
+            }),
             heartbeat.then_some(Duration::from_secs(30)),
         )
         .await
@@ -1724,18 +1746,14 @@ impl SupervisorClient {
     /// Every knob the constructors above vary, in one place, so that the
     /// handshake and task wiring exist exactly once.
     ///
-    /// `agent` arrives as the raw pair rather than a built [`AgentUpcalls`]
-    /// because the connection's own id is minted HERE, and the origin an
-    /// upcall is answered under has to carry it.
+    /// The agent origin also needs this connection's freshly allocated id,
+    /// so it is only constructed after a successful hello.
     async fn start_with_seams<R, W>(
         r: R,
         w: W,
         writer_stall: Duration,
         upload_stall: Duration,
-        agent: Option<(
-            crate::agent_requests::AgentRequestSlot,
-            crate::store::HostId,
-        )>,
+        agent: Option<HostHandshake>,
         heartbeat: Option<Duration>,
     ) -> anyhow::Result<Arc<SupervisorClient>>
     where
@@ -1747,14 +1765,8 @@ impl SupervisorClient {
         let (w, bytes_written) = ProgressWrite::new(w);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
-        // A connection that answers agent requests declares itself the
-        // owning helm's, and the supervisor then sends its sessions' agent
-        // requests here; one that answers none must not, or the supervisor
-        // would route requests to a connection that can only refuse them.
-        // "Has a handler" is exactly the host connection the manager dials,
-        // so no other plumbing is needed (see `ControlMsg::Hello::owning_helm`).
-        let hello = if agent.is_some() {
-            handshake_as_owning_helm(&mut reader, &mut writer).await?
+        let hello = if let Some(agent) = &agent {
+            handshake_as_helm(&mut reader, &mut writer, agent.helm.clone()).await?
         } else {
             handshake(&mut reader, &mut writer, "helm").await?
         };
@@ -1766,6 +1778,17 @@ impl SupervisorClient {
         // silent default so a future change to that guarantee cannot
         // quietly hand every host a `None` identity.
         let peer = match hello {
+            ControlMsg::Hello {
+                host_identity,
+                helm_owner_refusal: Some(owner),
+                ..
+            } => {
+                return Err(HelmOwnershipRefused {
+                    owner,
+                    host_identity,
+                }
+                .into());
+            }
             ControlMsg::Hello {
                 build_version,
                 host_identity,
@@ -1781,7 +1804,7 @@ impl SupervisorClient {
         let (connection_done, _) = watch::channel(false);
 
         let connection_id = NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
-        let agent = agent.map(|(handler, host)| AgentUpcalls {
+        let agent = agent.map(|HostHandshake { handler, host, .. }| AgentUpcalls {
             handler,
             origin: crate::agent_requests::AgentOrigin {
                 host,
@@ -8925,7 +8948,16 @@ mod tests {
             AgentPeer { reader, writer }
         });
         let (r, w) = tokio::io::split(client_side);
-        let client = SupervisorClient::start_for_host(r, w, slot, 1)
+        let helm = HelmHello {
+            identity: farhelm_proto::HelmIdentity {
+                id: "a".repeat(64),
+                tag: "ab12".into(),
+            },
+            answers_agent_requests: true,
+            expected_host_identity: None,
+            take_over: None,
+        };
+        let client = SupervisorClient::start_for_host(r, w, slot, 1, helm)
             .await
             .expect("client handshake");
         (client, peer.await.expect("peer task"))

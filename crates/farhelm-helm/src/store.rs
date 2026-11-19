@@ -5565,7 +5565,7 @@ impl HelmStore {
     /// The durable scope that separates this registry's agent retry keys from
     /// keys minted by another helm database with identical host row IDs.
     ///
-    /// Only keyed request handlers read it. Looking it up at open time would
+    /// Only serving paths read it. Looking it up at open time would
     /// break offline readers that deliberately open older schemas without
     /// migrating them. A serving helm has already created the singleton row;
     /// absence is an error, never a reason to mint a replacement namespace.
@@ -5580,6 +5580,23 @@ impl HelmStore {
                 .context("reading the helm registry namespace")
             })
             .await
+    }
+
+    /// Identify this installation to a supervisor without sending the
+    /// namespace used to scope agent retry keys. The displayed tag and the
+    /// equality token use independent hash domains.
+    pub(crate) async fn helm_identity(&self) -> anyhow::Result<farhelm_proto::HelmIdentity> {
+        use sha2::{Digest, Sha256};
+
+        let namespace = self.registry_namespace().await?;
+        let id = Sha256::new()
+            .chain_update(b"farhelm supervisor owner id\0")
+            .chain_update(namespace.as_bytes())
+            .finalize();
+        Ok(farhelm_proto::HelmIdentity {
+            id: id.iter().map(|byte| format!("{byte:02x}")).collect(),
+            tag: crate::tensorlake::config::helm_tag(&namespace),
+        })
     }
 
     /// Every stored launch template, by name.
@@ -15686,11 +15703,20 @@ mod tests {
         let namespace = store.registry_namespace().await.unwrap();
         assert_eq!(namespace.len(), 32);
         assert!(namespace.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let identity = store.helm_identity().await.unwrap();
+        assert_eq!(identity.id.len(), 64);
+        assert_eq!(
+            identity.tag,
+            crate::tensorlake::config::helm_tag(&namespace)
+        );
+        assert_ne!(identity.id, namespace);
         drop(store);
         let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         assert_eq!(reopened.registry_namespace().await.unwrap(), namespace);
+        assert_eq!(reopened.helm_identity().await.unwrap(), identity);
         let other = HelmStore::open(&dir.path().join("other.db")).await.unwrap();
         assert_ne!(other.registry_namespace().await.unwrap(), namespace);
+        assert_ne!(other.helm_identity().await.unwrap().id, identity.id);
     }
 
     /// Existing registries also gain a namespace, with ordinary stored state

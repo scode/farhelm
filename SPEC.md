@@ -103,17 +103,18 @@ listening) refuses at the app lock as before.
 The desktop app has the same capabilities on both platforms: terminal, attachments, lifecycle operations, host
 registration, and launch-template management in the helm-owned catalog.
 
-The Mac is not architecturally special: it runs a normal supervisor that any helm — the Mac app's embedded one, or the
-one the desktop app embeds on a Linux machine — can register and drive, and the helm that registers it then owns it (see
-the ownership rule below). The supervisor is a plain command-line process on every platform: `farhelm supervisor run` in
-a terminal and you have a working host — that path always exists, on any platform, and is how you try Farhelm without a
-bunch of fuss. System integration is layered on top of that, not baked in. On a remote Linux host, v1 ships that layer
-as user-level systemd units (auto-start at boot, which the durability promises assume) — never system units, never root.
-The desktop app starts its local supervisor and leaves it running when it quits; nothing starts that local supervisor at
-login or restarts it after a crash before the app is opened again. A remote Apple-silicon Mac set up over SSH instead
-gets a per-user launchd job, which runs the supervisor right away and restarts it after a crash. After a reboot,
-reconnecting over SSH does not load the job; choosing Update in the host menu starts it. Automatic loading at screen
-login is unverified. The desktop app has no helmless mode in v1: it always runs its own helm.
+The Mac runs a normal supervisor under the same ownership rule as any other host. A second helm must take it over
+explicitly, and the Mac app's own host row shows that another Farhelm manages it. If the app's registry is lost, that
+row offers the same Take over action. The supervisor is a plain command-line process on every platform:
+`farhelm supervisor run` in a terminal and you have a working host — that path always exists, on any platform, and is
+how you try Farhelm without a bunch of fuss. System integration is layered on top of that, not baked in. On a remote
+Linux host, v1 ships that layer as user-level systemd units (auto-start at boot, which the durability promises assume) —
+never system units, never root. The desktop app starts its local supervisor and leaves it running when it quits; nothing
+starts that local supervisor at login or restarts it after a crash before the app is opened again. A remote
+Apple-silicon Mac set up over SSH instead gets a per-user launchd job, which runs the supervisor right away and restarts
+it after a crash. After a reboot, reconnecting over SSH does not load the job; choosing Update in the host menu starts
+it. Automatic loading at screen login is unverified. The desktop app has no helmless mode in v1: it always runs its own
+helm.
 
 Remote provisioning: the helm can set up a remote supervisor itself, in the style of `herdr --remote`. There is at most
 one supervisor per user per host, and adding a host is discovery-first: the helm connects over SSH and looks for that
@@ -207,8 +208,8 @@ writes `~/Library/LaunchAgents/io.farhelm.supervisor.plist` for the SSH user's l
 floor: inspection refuses a Mac missing a command the path needs, naming that command. Setup, Update (manual, Update all
 and automatic) and uninstall are unsupported when the Farhelm desktop app is installed in `~/Applications/Farhelm.app`
 or `/Applications/Farhelm.app`, and the refusal says so without suggesting starting a supervisor by hand. Discovery
-still adopts a supervisor already running there, including the app's, without restarting or replacing it. The desktop
-app's own local supervisor is unchanged.
+still adopts a supervisor already running there, including the app's, without restarting or replacing it, once the user
+confirms Take over if another helm owns it. The desktop app's own local supervisor is unchanged.
 
 Tensorlake's prepared snapshots include the login-manager and lingering preparation: Farhelm uses passwordless sudo to
 start the login manager and enable lingering for the sandbox user before installing its supervisor in the snapshot.
@@ -219,7 +220,8 @@ snapshots.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
-intact. Losing the helm never strands a provisioned host.
+intact, or, when another helm owns that supervisor, re-registers it only after the user confirms Take over. Losing the
+helm never strands a provisioned host.
 
 Removing Farhelm from a remote host is a host action too, the uninstall item in that host's menu, with no command-line
 counterpart. The helm plans the removal over SSH and shows it before touching the host: the supervisor's user service
@@ -433,23 +435,17 @@ destination change that does not adopt a new identity keeps the host's settings,
 contacted. The identity rules above still hold: adopting a new identity resets all five permissions to asking, and the
 New dialog's default host and recent setups stay tied to the install the user saw.
 
-Exactly one helm owns each supervisor, and every session on it. The helm that registers a host owns that host's
-supervisor and all of its sessions from then on, and a helm that restarts, updates or reconnects is still the same helm.
-Sessions and supervisors do not move between helms. A second helm reaching a supervisor another helm owns is outside the
-design, not a case the rest of the system tolerates, and no behavior is specified or implemented on the assumption that
-it might happen. Policy lives in the owning helm: approvals of agent actions, each host's permission settings, launch
-templates and the helm's other catalogs are that helm's, and the host's supervisor answers to that helm alone. Running
-several helms at once is unsupported in v1. Taking a host over from another helm, if it is ever supported, will be an
-explicit operation the user asks for, never the side effect of a second helm connecting. Adding a host again from a
-brand-new helm whose registry was lost (provisioning doubles as that recovery; see Remote provisioning above) is the
-replacement Farhelm supports today: the new helm registers the host and owns it from then on.
+Exactly one helm can own each supervisor and all of its sessions. A host with no owner records the first helm that
+connects to manage it, including after an upgrade from a version without ownership. A helm keeps its identity across
+updates, restarts and reconnects. The supervisor refuses a different helm and reports who owns it and when that helm
+last connected. Policy lives in the owning helm. Its approvals, host settings and catalogs stay with that helm.
 
-NOTE: ownership is stated, not enforced. Nothing yet stops a second helm from registering a host another helm owns, or
-from driving its sessions once it has. Enforcing it needs each host to store the identity of its owning helm, refuse
-connections from any other helm, and make taking a host over, the lost-registry case above included, an explicit user
-operation. The supervisor's one-viewer-per-session rule (Terminal experience) is about the views of one helm and is
-unchanged: an attach from a new view detaches the previous view's terminals in that session, which is a takeover within
-one helm, not between helms.
+Take over is an explicit user action. It changes which Farhelm manages the host and its existing sessions, and ends the
+previous helm's connection. A new Farhelm can recover a host after the old registry is lost by adding the host again and
+confirming Take over. A host already listed in Farhelm shows Take over in Hosts and refuses Setup, Update and uninstall
+until it is taken over. An agent's request to add a host cannot take it over. Ownership guards against accidentally
+connecting two helms to the same host. Local tools running as the same user retain access to the supervisor socket under
+the existing threat model.
 
 The helm is not a process of its own: it lives and dies with the desktop app, on the Mac and on Linux.
 
