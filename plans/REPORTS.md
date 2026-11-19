@@ -11,3 +11,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`session-group-follow-ups`](reports/session-group-follow-ups.report.md) landed 2026-11-19 in #4135, #4143, #4144, #4146, #4147: Session groups: indent members, mark a collapsed group holding the open session, drag sessions into and out of groups
 - [`model-families`](reports/model-families.report.md) landed 2026-11-19 in #4149, #4152: Known models with a latest model per family, replacing the retired-model special case
 - [`session-limit-notice`](reports/session-limit-notice.report.md) landed 2026-11-19 in #4150: Rail bell notice when a host or the helm hits the 500-session ceiling
+- [`reserved-resource-names`](reports/reserved-resource-names.report.md) landed 2026-11-19 in #4148: SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
