@@ -27,16 +27,22 @@ fn catalog() -> Vec<LaunchCatalogModel> {
     vec![
         LaunchCatalogModel {
             id: "gpt-fast".into(),
+            family: "gpt-fast".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
         },
         LaunchCatalogModel {
             id: "medium-context".into(),
+            family: "medium-context".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Medium],
         },
         LaunchCatalogModel {
             id: "claude".into(),
+            family: "claude".into(),
+            latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::Medium, LaunchEffort::Max],
         },
@@ -538,6 +544,8 @@ fn model_rows_follow_the_chosen_agent() {
     let mut colon = Draft::agent(None);
     colon.catalog = Some(vec![LaunchCatalogModel {
         id: "vendor:model:v2".into(),
+        family: "vendor:model:v2".into(),
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: vec![],
     }]);
@@ -553,11 +561,15 @@ fn model_rows_follow_the_chosen_agent() {
     longer_first.catalog = Some(vec![
         LaunchCatalogModel {
             id: "gpt-fast-x".into(),
+            family: "gpt-fast-x".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
         },
         LaunchCatalogModel {
             id: "gpt-fast".into(),
+            family: "gpt-fast".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
         },
@@ -652,6 +664,8 @@ fn a_path_offers_use_this_path() {
     let mixed = Draft {
         catalog: Some(vec![LaunchCatalogModel {
             id: "org/model".into(),
+            family: "model".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
         }]),
@@ -932,6 +946,8 @@ fn past_models_follow_the_catalogs() {
                 .into_iter()
                 .chain([LaunchCatalogModel {
                     id: "opencode/big".into(),
+                    family: "big".into(),
+                    latest: true,
                     harness: LaunchHarness::OpenCode,
                     efforts: vec![],
                 }])

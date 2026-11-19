@@ -772,10 +772,8 @@ impl LaunchDraft {
         }
     }
 
-    /// A model `owner` launched with before that the catalog does not list (the search's history models). It is chosen
-    /// as a catalog model is, switching to `owner` on purpose when another type is chosen, but kept as `owner`'s custom
-    /// id, as typing it would make it, so a later switch back to `owner` still keeps it. The old launcher chose it the
-    /// same way, with the agent type it ran with as its owner.
+    /// A past launch's model spelling and agent. Recognized older models use the same catalog edit as current models.
+    /// An unrecognized spelling stays a custom ID owned by the agent it ran with.
     pub fn choose_history_model(
         &mut self,
         owner: LaunchHarness,
@@ -783,6 +781,14 @@ impl LaunchDraft {
         catalog: Catalog<'_>,
         remembered_wrapper: Option<&[String]>,
     ) -> Edit {
+        let catalog_id = owner.catalog_model_id(id);
+        if catalog
+            .unwrap_or_default()
+            .iter()
+            .any(|model| model.harness == owner && model.id == catalog_id)
+        {
+            return self.choose_catalog_model(owner, id, catalog, remembered_wrapper);
+        }
         if self.agent.harness != Some(owner) {
             let mut selection = self.choices_for(owner);
             selection.model = Some(id.to_owned());

@@ -251,7 +251,7 @@ impl Launcher {
                     .as_deref()
                     .unwrap_or_default()
                     .iter()
-                    .filter(|model| model.harness == harness)
+                    .filter(|model| model.latest && model.harness == harness)
                     .count();
                 format!("{count} for {}", harness_label(harness))
             }

@@ -18,12 +18,15 @@ const MAX_MODEL_ID_BYTES: usize = 256;
 
 /// A catalog entry whose ID has a known owning harness.
 ///
-/// The catalog is intentionally small. It prevents a known Codex model from
-/// being submitted as Claude, while an unknown but well-formed ID remains a
-/// custom model for the already selected harness.
+/// A matching row supplies that harness's efforts. Only a current model
+/// reserves its ID against use as a custom model on another harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) struct CatalogModel {
     pub(crate) id: &'static str,
+    /// Stable name for models in the same family within a harness.
+    pub(crate) family: &'static str,
+    /// Whether this entry is the family's current suggestion for this harness.
+    pub(crate) latest: bool,
     pub(crate) harness: LaunchHarness,
     pub(crate) efforts: &'static [LaunchEffort],
 }
@@ -86,211 +89,360 @@ const OMP_EFFORTS: &[LaunchEffort] = &[
 /// translation to a provider-specific variant.
 const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
 
-/// The released models the launcher suggests, in the order it shows them.
+/// The known models for this release, ordered within each generation for the launcher.
 ///
-/// Replacing a model here also retires its id: a saved template that names
-/// only the old id no longer finds its agent through this list. The shared
-/// template fold (`farhelm_proto::launcher::apply_template`) keeps a short
-/// table of retired ids and their former agents for that case; add the
-/// replaced ids there when swapping a model.
+/// A replacement takes the latest mark within its harness and family. Keep the previous
+/// entry and its accepted efforts so saved templates and exact IDs can still use it.
+/// Drop an entry deliberately when its model becomes obsolete.
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         id: "auto",
+        family: "auto",
+        latest: true,
         harness: LaunchHarness::Cursor,
         efforts: &[],
     },
     CatalogModel {
         id: "composer-2.5",
+        family: "composer-2.5",
+        latest: true,
         harness: LaunchHarness::Cursor,
         efforts: &[],
     },
     CatalogModel {
         id: "gpt-6-luna",
+        family: "luna",
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
         id: "gpt-5.6-terra",
+        family: "terra",
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
         id: "gpt-6.2-sol",
+        family: "sol",
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
         id: "gpt-6.2-astra",
+        family: "astra",
+        latest: true,
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
     },
     CatalogModel {
         id: "claude-fable-5",
+        family: "claude-fable-5",
+        latest: true,
         harness: LaunchHarness::Claude,
         efforts: CLAUDE_EFFORTS,
     },
     CatalogModel {
         id: "muse-spark-1.3-contributor",
+        family: "muse-spark-1.3-contributor",
+        latest: true,
         harness: LaunchHarness::Muse,
         efforts: MUSE_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
+        family: "glm-5.3-flash",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
+        family: "grok-4.5",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
+        family: "grok-4.6",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
+        family: "glm-5.3",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6-luna",
+        family: "luna",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-5.6-terra",
+        family: "terra",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-sol",
+        family: "sol",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-astra",
+        family: "astra",
+        latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
+        family: "glm-5.3-flash",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
+        family: "grok-4.5",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
+        family: "grok-4.6",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
+        family: "glm-5.3",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6-luna",
+        family: "luna",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-5.6-terra",
+        family: "terra",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-sol",
+        family: "sol",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-astra",
+        family: "astra",
+        latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
+        family: "glm-5.3-flash",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
+        family: "grok-4.5",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
+        family: "grok-4.6",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
+        family: "glm-5.3",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6-luna",
+        family: "luna",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-5.6-terra",
+        family: "terra",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-sol",
+        family: "sol",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "openai/gpt-6.2-astra",
+        family: "astra",
+        latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "opencode/glm-5.3-flash",
+        family: "glm-5.3-flash",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/grok-4.5",
+        family: "grok-4.5",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/grok-4.6",
+        family: "grok-4.6",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/glm-5.3",
+        family: "glm-5.3",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/gpt-6-luna",
+        family: "luna",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/gpt-5.6-terra",
+        family: "terra",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/gpt-6.2-sol",
+        family: "sol",
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/gpt-6.2-astra",
+        family: "astra",
+        latest: true,
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    // Retain the effort vocabularies these IDs accepted as custom models after v0.41.0.
+    CatalogModel {
+        id: "gpt-6.1-sol",
+        family: "sol",
+        latest: false,
+        harness: LaunchHarness::Codex,
+        efforts: CODEX_EFFORTS,
+    },
+    CatalogModel {
+        id: "gpt-6-astra",
+        family: "astra",
+        latest: false,
+        harness: LaunchHarness::Codex,
+        efforts: CODEX_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6.1-sol",
+        family: "sol",
+        latest: false,
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
+        family: "astra",
+        latest: false,
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6.1-sol",
+        family: "sol",
+        latest: false,
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
+        family: "astra",
+        latest: false,
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6.1-sol",
+        family: "sol",
+        latest: false,
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
+        family: "astra",
+        latest: false,
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-6.1-sol",
+        family: "sol",
+        latest: false,
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-6-astra",
+        family: "astra",
+        latest: false,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
@@ -758,21 +910,11 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
         // can equal another harness's catalog id (`LaunchHarness::
         // catalog_model_id`). The messages below keep the text as typed.
         let catalog_id = selection.harness.catalog_model_id(model);
-        let known = CATALOG
-            .iter()
-            .filter(|entry| entry.id == catalog_id)
-            .collect::<Vec<_>>();
-        if !known.is_empty() {
-            if !known.iter().any(|entry| entry.harness == selection.harness) {
-                return Err(format!(
-                    "model {model:?} belongs to a different harness than {:?}",
-                    selection.harness
-                ));
-            }
-            let known = known
-                .into_iter()
-                .find(|entry| entry.harness == selection.harness)
-                .expect("owner checked");
+        let mut known = CATALOG.iter().filter(|entry| entry.id == catalog_id);
+        if let Some(known) = known
+            .clone()
+            .find(|entry| entry.harness == selection.harness)
+        {
             if let Some(effort) = selection.effort
                 && !known.efforts.contains(&effort)
             {
@@ -781,6 +923,12 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
                     effort
                 ));
             }
+        } else if known.any(|entry| entry.latest) {
+            // Retaining an older entry must preserve custom uses of its spelling.
+            return Err(format!(
+                "model {model:?} belongs to a different harness than {:?}",
+                selection.harness
+            ));
         }
     }
     if let Some(effort) = selection.effort
@@ -1066,6 +1214,53 @@ mod tests {
         launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
         session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
     };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// A family lookup needs one current row per harness. Duplicate IDs would
+    /// otherwise make exact lookup and effort validation depend on table order.
+    #[test]
+    fn each_catalog_family_has_one_latest_per_harness() {
+        let mut ids = BTreeSet::new();
+        let mut families = BTreeMap::new();
+        for model in CATALOG {
+            assert!(
+                ids.insert((model.harness, model.id)),
+                "duplicate model: {model:?}"
+            );
+            assert!(!model.family.is_empty(), "unnamed family: {model:?}");
+            let latest = families.entry((model.harness, model.family)).or_insert(0);
+            *latest += usize::from(model.latest);
+        }
+        for ((harness, family), latest) in families {
+            assert_eq!(latest, 1, "{harness:?} {family}");
+        }
+    }
+
+    /// Registering an older name preserves the efforts 0.41.0 accepted on its
+    /// original harness and preserves a deliberate custom selection on another one.
+    #[test]
+    fn an_older_astra_keeps_its_efforts_and_custom_cursor_spelling() {
+        for effort in [LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High] {
+            let codex = compile(LaunchSelection {
+                model: Some("gpt-6-astra".into()),
+                effort: Some(effort),
+                ..selection(LaunchHarness::Codex)
+            })
+            .unwrap();
+            assert_eq!(codex.selection.effort, Some(effort));
+        }
+        let cursor = compile(LaunchSelection {
+            model: Some("gpt-6-astra".into()),
+            ..selection(LaunchHarness::Cursor)
+        })
+        .unwrap();
+        assert!(
+            shell_words::split(&cursor.invocation)
+                .unwrap()
+                .windows(2)
+                .any(|args| args == ["--model", "gpt-6-astra"])
+        );
+    }
 
     /// A compiled agent launch, viewed the way these tests assert on it:
     /// the start command as the text a session displays (Farhelm's
@@ -1530,8 +1725,8 @@ mod tests {
     /// worked. Spec (SPEC.md, OpenCode's bare-name contract): every catalog
     /// OpenCode model launches under either spelling, the selection keeps
     /// the spelling typed, and the argv is provider-qualified. The same bare
-    /// name stays its own harness's model for that harness, and a qualified
-    /// OpenCode id still belongs to OpenCode only.
+    /// name stays its own harness's model for that harness. A current
+    /// qualified name remains reserved for OpenCode.
     #[test]
     fn opencode_accepts_both_spellings_of_names_other_harnesses_also_list() {
         let overlapping = CATALOG
@@ -1542,6 +1737,7 @@ mod tests {
             .collect::<Vec<_>>();
         // Premise: the catalog still has the collisions this test is about.
         assert!(overlapping.contains(&"gpt-6-luna"), "{overlapping:?}");
+        assert!(overlapping.contains(&"gpt-6-astra"), "{overlapping:?}");
         for bare in overlapping {
             for typed in [bare.to_string(), format!("opencode/{bare}")] {
                 let opencode = LaunchSelection {
@@ -1582,14 +1778,26 @@ mod tests {
                 .is_ok(),
                 "{bare} stays a {owner:?} model"
             );
-            assert!(
-                compile(LaunchSelection {
-                    model: Some(format!("opencode/{bare}")),
-                    ..selection(owner)
-                })
-                .unwrap_err()
-                .contains("belongs to a different harness")
-            );
+            let qualified = format!("opencode/{bare}");
+            let result = compile(LaunchSelection {
+                model: Some(qualified.clone()),
+                ..selection(owner)
+            });
+            if CATALOG
+                .iter()
+                .any(|entry| entry.id == qualified && entry.latest)
+            {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .contains("belongs to a different harness")
+                );
+            } else {
+                assert_eq!(
+                    result.unwrap().selection.model.as_deref(),
+                    Some(qualified.as_str())
+                );
+            }
         }
     }
 

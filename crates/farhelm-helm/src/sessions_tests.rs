@@ -560,18 +560,19 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
 
     let (catalog_status, catalog) = get_json(&harness, "/api/launch-catalog").await;
     assert_eq!(catalog_status, axum::http::StatusCode::OK);
-    assert!(
-        catalog
-            .as_array()
-            .expect("catalog array")
-            .iter()
-            .any(|model| {
-                model["id"] == "gpt-6.2-astra"
+    let catalog = catalog.as_array().expect("catalog array");
+    for (id, latest) in [("gpt-6.2-astra", true), ("gpt-6-astra", false)] {
+        assert!(
+            catalog.iter().any(|model| {
+                model["id"] == id
+                    && model["family"] == "astra"
+                    && model["latest"] == latest
                     && model["harness"] == "codex"
                     && model["efforts"] == serde_json::json!(["low", "medium", "high"])
             }),
-        "the endpoint must offer Astra with the helm's full Codex effort list"
-    );
+            "the endpoint must serve {id} with its generation and full Codex effort list"
+        );
+    }
 
     let (history_status, history) =
         get_json(&harness, &format!("/api/launch-history?host={local}")).await;

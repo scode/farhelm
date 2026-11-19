@@ -66,6 +66,8 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         .iter()
         .map(|model| LaunchCatalogModel {
             id: model.id.to_string(),
+            family: model.family.to_string(),
+            latest: model.latest,
             harness: model.harness,
             efforts: model.efforts.to_vec(),
         })
@@ -249,8 +251,8 @@ fn resolve_with(
                 invalid(refusal.to_string())
             }
         })?;
-    // Unnamed on purpose: the shared fold recovers a retired model's agent
-    // only for saved templates, which always have a name, never for flags.
+    // Flag edits have no saved name. The same catalog matches apply whether
+    // the model came from a template or directly from an argument.
     let mut flags = LaunchTemplate {
         name: String::new(),
         fields: edits.clone(),
@@ -285,8 +287,8 @@ fn resolve_with(
         LauncherKind::Agent => {
             let Some(harness) = state.harness else {
                 return Err(invalid(
-                    "--agent is required for an agent launch unless a template sets the agent \
-                     type; pass --command for a command launch"
+                    "--agent is required for an agent launch unless a template or known model \
+                     supplies the agent type; pass --command for a command launch"
                         .to_string(),
                 ));
             };

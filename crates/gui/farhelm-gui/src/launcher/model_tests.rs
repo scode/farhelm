@@ -13,11 +13,15 @@ fn catalog() -> Vec<LaunchCatalogModel> {
     vec![
         LaunchCatalogModel {
             id: "codex-fast".into(),
+            family: "codex-fast".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
         },
         LaunchCatalogModel {
             id: "claude-fast".into(),
+            family: "claude-fast".into(),
+            latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![],
         },
@@ -29,6 +33,39 @@ fn model(id: &str, harness: LaunchHarness) -> ModelOption {
         id: id.into(),
         harness,
     }
+}
+
+/// An older known ID still picks its one agent when typed. With a different explicit agent, it keeps working as
+/// that agent's custom ID. Its absence from the current suggestion rows cannot decide either result.
+#[test]
+fn an_older_id_is_recognized_when_typed_without_reserving_its_spelling() {
+    let older = LaunchCatalogModel {
+        id: "codex-classic".into(),
+        family: "codex-fast".into(),
+        latest: false,
+        harness: LaunchHarness::Codex,
+        efforts: vec![],
+    };
+    let catalog = [older];
+    let options = model_options(&catalog, None, "classic", false);
+    assert_eq!(options, [ModelOption::HarnessDefault]);
+    assert_eq!(
+        model_enter_target(&options, None, "codex-classic", &catalog, None),
+        ModelEnterTarget::Option(model("codex-classic", LaunchHarness::Codex))
+    );
+    assert_eq!(
+        model_enter_target(
+            &options,
+            None,
+            "codex-classic",
+            &catalog,
+            Some(LaunchHarness::Cursor)
+        ),
+        ModelEnterTarget::Custom {
+            id: "codex-classic".into(),
+            harness: LaunchHarness::Cursor
+        }
+    );
 }
 
 /// The list keeps the default row for every agent type and filters only model ids, case-insensitively; with an agent
@@ -146,11 +183,15 @@ fn bare_opencode_names_stay_opencode_models() {
     let catalog = vec![
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
+            family: "luna".into(),
+            latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
         },
         LaunchCatalogModel {
             id: "opencode/gpt-6-luna".into(),
+            family: "luna".into(),
+            latest: true,
             harness: LaunchHarness::OpenCode,
             efforts: vec![],
         },
@@ -197,6 +238,8 @@ fn bare_opencode_names_stay_opencode_models() {
 fn a_bare_opencode_name_in_another_case_is_its_catalog_row() {
     let catalog = vec![LaunchCatalogModel {
         id: "opencode/gpt-6-luna".into(),
+        family: "luna".into(),
+        latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: vec![],
     }];

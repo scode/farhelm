@@ -8553,9 +8553,9 @@ hand does (an effort the new model does not offer goes), the custom model's owni
 change of agent type clears it, and with no agent type chosen a model only one agent type offers picks that type. Models
 are compared in the agent type's own catalog spelling, as the launcher and the helm's compiler compare them. The
 function refuses a field that does not apply to the launch kind then active, an agent-launch choice with no agent type
-(other than that single-owner model), a model another agent type owns, an effort or permission the agent type does not
-offer, a host the caller holds fixed, and a host no known install has (a host row in the identity-mismatch phase does
-not count, exactly as for the create default); any refusal leaves the launcher unchanged. Before that fold, the UI
+(other than that single-owner model), an ID reserved by the model catalog, an effort or permission the agent type does
+not offer, a host the caller holds fixed, and a host no known install has (a host row in the identity-mismatch phase
+does not count, exactly as for the create default); any refusal leaves the launcher unchanged. Before that fold, the UI
 removes template assignments equal to the opening's held values: host in Replace with, and kind, active-kind agent,
 host, folder and raw title in Restart with. Host equality needs a usable recorded identity; folder equality ignores
 trailing slashes without expanding or resolving paths. Equal name and name kind are removed together. Remaining held
@@ -8563,11 +8563,13 @@ assignments refuse in template order. An equal agent must never reach reconcilia
 permissions or clear model and effort. Prompt and command-resume removal remain refused; search results and recents
 retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host flag.
 
-The shared template fold also implements SPEC.md's saved-template model compatibility rule. When a loaded catalog has no
-exact match and no agent type is chosen, a named template can recover the former owner of an exact retired ID. Its model
-stays custom. The CLI applies its flag edits as an unnamed template, and every save path refuses an empty name
-(`check_template_shape`), so only saved templates reach this recovery. The retired IDs are listed in the fold itself,
-because the desktop app receives the catalog over the wire; retiring another catalog model needs an entry there.
+`farhelm-helm/src/launches.rs` owns the release catalog served by `GET /api/launch-catalog`. It records each model's
+family, harness, latest marker and accepted efforts. When a family gets a new model, move the latest marker to the
+replacement on that harness and keep the previous row and its effort list. Removing an obsolete ID is an explicit
+catalog edit. The shared fold uses the whole catalog for model-only templates and the CLI's flag edits. An explicit
+harness uses its own row when it has one. A foreign latest model reserves its spelling, while a foreign older entry
+allows the same explicit custom spelling the harness accepted before it was recognized. The GUI and helm compiler apply
+that rule to typed models and launches as well.
 
 The launcher's "Save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from

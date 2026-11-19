@@ -482,9 +482,8 @@ fn replay(
     // 3. The agent launch's choices. The fold has refused any of these on the command kind.
     match &fields.model {
         Some(Some(id)) => {
-            // Replay the fold's agent choice even if the template named only a model. A retired model can infer
-            // its former agent without a catalog row, so use the same edit as a custom model from launch history.
-            // That edit can set the agent and keeps the model as a custom ID.
+            // A known model can pick its agent even when the template named only the model. A custom ID already
+            // has an agent from the template or draft, so it takes the same edit as typing it in that agent's field.
             if let Some(harness) = applied.harness {
                 let spelled = harness.catalog_model_id(id);
                 let listed = context.catalog.is_some_and(|catalog| {
@@ -495,7 +494,7 @@ fn replay(
                 let edit = if listed {
                     draft.choose_catalog_model(harness, id, context.catalog, remembered(harness))
                 } else {
-                    draft.choose_history_model(harness, id, context.catalog, remembered(harness))
+                    draft.choose_custom_model(id, context.catalog)
                 };
                 *notice = Some(edit.notice);
             }
