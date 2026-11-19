@@ -75,3 +75,78 @@ can no longer point to the source's directory. A scope check supported retaining
 folder check. The second review caught the distinction between Replace's archive and a separate environment Delete's
 discard, and tightened the test and docs to match. Two independent scope checks and the final reviews agreed that the
 resulting changes are limited to display and documentation.
+
+### Landing
+
+#### What landed with it
+
+It landed in a round of three plans: covered-link-refusal, demo-video-capture and replace-with-checkout-hint. Since its
+base, main gained the previous round's nine plans (among them session group dragging, model families, the session-limit
+notice and compare-on-save checkout settings), bookkeeping and docs screenshot tooling. When stacked, it conflicted with
+main on one import line in the launcher, which compare-on-save checkout settings had changed; I kept main's imports and
+added the plan's. Main's launcher changes do not touch what the hint reads, and the reviews found no other interaction.
+
+At your request this landing was reviewed with extra skepticism, by me and by independent reviewers, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The behavior is conservative
+and correct: the launch dialog says the checkout will be kept only after the folder check confirms the new session's
+folder is the same directory as the replaced session's managed checkout, and the warning names that replaced session's
+checkout. Nothing is bigger than the plan needs.
+
+#### Fixes made while landing
+
+- **A docs page lost a fact.** The Stop, restart and resume page had said that Replace with keeps the existing sandbox
+  or container; the plan's edit replaced that clause with the checkout text. It is back.
+- **Both docs pages made the warning sound conditional.** They said "If you replace the last session…, the warning under
+  Where explains…", but the warning always shows once Managed checkout is chosen; only what happens to the old checkout
+  depends on it being the last session. Both now say so.
+
+#### Things you should know that the report does not say
+
+- The folder check's module comment still says it only asks whether a path is a usable directory; its answer now also
+  carries the resolved path the hint relies on.
+
+#### Checks
+
+The three plans change the desktop app's GUI crate, a patch to the vendored GPUI core, the demo video tooling and its
+documents, AGENTS.md and the specs. The landing ran the lints, the GUI crate's whole suite, the vendored GPUI core's own
+tests, the video tooling's tests, the app's end-to-end smoke and the reference screenshots (goldens). Builds ran
+locally; the GUI suite and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plans as delivered, stacked on main as it stood when the round started:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `python3 -B scripts/test-readme-video.py`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings` and
+  `python3 -B scripts/check-gui-lints.py`: passed.
+- The vendored GPUI core's tests (`cargo test --manifest-path vendor/gpui-pre/Cargo.toml --features test-support` with
+  the native-key, driver-record and new hit-test occlusion tests), locally: passed
+  (`3130bce8-b268-4c31-977b-5bc1afe5a949`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`01c51026-2b44-41af-9830-f4c6eb0e081a`).
+- The boat runs did not happen: every remote command on all four boats ended without reporting its result, and the
+  harness deleted the boats as unsafe to reuse. That looked like a problem on the boat service's side; nothing ran.
+
+On the fixed tree (the covered-link refusal fix and its test, a screenshot scene's staging, and documents), on four
+fresh boats and locally:
+
+- `cargo nextest run -p farhelm-gui`, from a locally built archive, split in three across boats: 1085, 1033 and 1022
+  passed, 3140 in all, with no runtime skips (`71d71daf-a7e6-4aab-9dc6-39032f010643`,
+  `176070d9-503b-4ea8-a89c-39c3f0062335`, `3d8609ce-34b9-431e-821c-e4ed78423b3d`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed and the clipboard
+  paste step was skipped, as always on Linux (`409e2e23-c47f-4c6d-9d19-5355b3103ec2`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`29aca505-d814-43b8-b492-c29f1eea2d14`).
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 scripts/check-agents-md.py` and `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings`, once
+  without and once with `--features agent`: passed.
+
+Reused for the fixed tree: the vendored GPUI core's tests and the video tooling's tests, whose code did not change, and
+the GUI lint check, the workspace and desktop clippy runs and the changelog format check, since the fixes changed only
+the GUI crate (covered by its clippy runs above) and documents, and no lint configuration or changelog fragment.
+
+Skipped:
+
+- The rest of the Rust workspace and the desktop process's tests: the plans stay in the GUI crate and the vendored GPUI
+  core.
+- A full capture of the demo video: the executor captured the sample and handed it over; the landing changed none of the
+  capture code.
+- The Mac-only checks: no Mac-specific code changed.
