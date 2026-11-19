@@ -55,6 +55,20 @@ MARGIN = 16
 
 
 @dataclass(frozen=True)
+class LayoutTheme:
+    """Dimensions that affect placement. Paint colors and stroke styles belong to the renderer."""
+
+    text_px: float
+    box_max: float
+    gap: float
+    head: float
+
+
+DOCS_LAYOUT = LayoutTheme(TEXT_PX, BOX_MAX, GAP, HEAD)
+VIDEO_LAYOUT = LayoutTheme(20, 420, 80, 16)
+
+
+@dataclass(frozen=True)
 class Callout:
     """A text box beside `target`, with an arrow from the box to it.
 
@@ -142,17 +156,19 @@ def wrap(text: str, width_chars: int) -> list[str]:
     return lines
 
 
-def box_size(text: str) -> tuple[float, float, list[str]]:
+def box_size(text: str, theme: LayoutTheme = DOCS_LAYOUT) -> tuple[float, float, list[str]]:
     """The callout box's width and height and its text's lines: shrink-to-fit up to `BOX_MAX`, like the old CSS box."""
-    chrome = 2 * (PAD_X + BORDER)
-    lines = wrap(text, int((BOX_MAX - chrome) // ADVANCE))
+    advance = theme.text_px * 0.6
+    chrome = 2 * (theme.text_px * 0.9 + BORDER)
+    lines = wrap(text, int((theme.box_max - chrome) // advance))
     # CSS shrink-to-fit: text that has to wrap makes the box take its whole max-width, even when no line fills it.
-    width = BOX_MAX if len(lines) > 1 else min(BOX_MAX, len(lines[0]) * ADVANCE + chrome)
-    height = len(lines) * LINE + 2 * (PAD_Y + BORDER)
+    width = theme.box_max if len(lines) > 1 else min(theme.box_max, len(lines[0]) * advance + chrome)
+    height = len(lines) * theme.text_px * 1.4 + 2 * (theme.text_px * 0.7 + BORDER)
     return width, height, lines
 
 
-def place(target: Rect, bw: float, bh: float, wanted: str, dx: float, dy: float, view_w: float, view_h: float):
+def place(target: Rect, bw: float, bh: float, wanted: str, dx: float, dy: float, view_w: float, view_h: float,
+          theme: LayoutTheme = DOCS_LAYOUT):
     """Place a `bw` x `bh` box beside `target` on `wanted`'s side, shifted and kept inside the view.
 
     Returns the box's origin and the arrow's two ends: from the middle of the box edge facing the target to the nearest
@@ -170,11 +186,11 @@ def place(target: Rect, bw: float, bh: float, wanted: str, dx: float, dy: float,
         return min(max(value, low), max(low, high))
 
     if side in ("right", "left"):
-        x = target.right + GAP if side == "right" else target.x - GAP - bw
+        x = target.right + theme.gap if side == "right" else target.x - theme.gap - bw
         y = target.y + target.h / 2 - bh / 2
     else:
         x = target.x + target.w / 2 - bw / 2
-        y = target.bottom + GAP if side == "bottom" else target.y - GAP - bh
+        y = target.bottom + theme.gap if side == "bottom" else target.y - theme.gap - bh
     x = clamp(x + dx, MARGIN, view_w - bw - MARGIN)
     y = clamp(y + dy, MARGIN, view_h - bh - MARGIN)
     inset = 6
@@ -193,7 +209,7 @@ def place(target: Rect, bw: float, bh: float, wanted: str, dx: float, dy: float,
     return x, y, start, end
 
 
-def arrow(start, end):
+def arrow(start, end, theme: LayoutTheme = DOCS_LAYOUT):
     """The arrow's curve and open head: a gentle quadratic bend, the head along its final tangent (the old `arrowPath`).
 
     Returns the control point and the head's two outer points, so callers can both draw the arrow and bound it.
@@ -206,8 +222,9 @@ def arrow(start, end):
     tx, ty = x2 - cx, y2 - cy
     tl = math.hypot(tx, ty) or 1
     ux, uy = tx / tl, ty / tl
-    head1 = (x2 - ux * HEAD - uy * HEAD * 0.6, y2 - uy * HEAD + ux * HEAD * 0.6)
-    head2 = (x2 - ux * HEAD + uy * HEAD * 0.6, y2 - uy * HEAD - ux * HEAD * 0.6)
+    head = theme.head
+    head1 = (x2 - ux * head - uy * head * 0.6, y2 - uy * head + ux * head * 0.6)
+    head2 = (x2 - ux * head + uy * head * 0.6, y2 - uy * head - ux * head * 0.6)
     return (cx, cy), head1, head2
 
 
@@ -232,7 +249,8 @@ def overlaps(a: Rect, b: Rect) -> bool:
             and b.y < a.bottom + SPACING)
 
 
-def layout(annotations, targets: dict[str, Rect], view_w: float, view_h: float) -> list[Drawn]:
+def layout(annotations, targets: dict[str, Rect], view_w: float, view_h: float,
+           theme: LayoutTheme = DOCS_LAYOUT) -> list[Drawn]:
     """Lay out every annotation against its target's box, in declaration order, within a `view_w` x `view_h` view.
 
     A callout box that would cover an earlier one moves down below it, or up above it when there is no room below, so a
@@ -247,21 +265,21 @@ def layout(annotations, targets: dict[str, Rect], view_w: float, view_h: float) 
             pad = annotation.pad
             drawn.append(Drawn("ring", Rect(target.x - pad, target.y - pad, target.w + 2 * pad, target.h + 2 * pad)))
             continue
-        bw, bh, lines = box_size(annotation.text)
+        bw, bh, lines = box_size(annotation.text, theme)
         dy = annotation.dy
-        x, y, start, end = place(target, bw, bh, annotation.side, annotation.dx, dy, view_w, view_h)
+        x, y, start, end = place(target, bw, bh, annotation.side, annotation.dx, dy, view_w, view_h, theme)
         boxes = [item.bounds for item in drawn if item.kind == "callout"]
         for direction in (1, -1):
             shift = dy
             while (clash := next((b for b in boxes if overlaps(Rect(x, y, bw, bh), b)), None)) is not None:
                 shift += (clash.bottom + SPACING - y) if direction > 0 else (clash.y - SPACING - bh - y)
-                moved = place(target, bw, bh, annotation.side, annotation.dx, shift, view_w, view_h)
+                moved = place(target, bw, bh, annotation.side, annotation.dx, shift, view_w, view_h, theme)
                 if moved[1] == y:
                     break  # clamped at the view's edge: try the other way
                 x, y, start, end = moved
             if not any(overlaps(Rect(x, y, bw, bh), b) for b in boxes):
                 break
-            x, y, start, end = place(target, bw, bh, annotation.side, annotation.dx, dy, view_w, view_h)
+            x, y, start, end = place(target, bw, bh, annotation.side, annotation.dx, dy, view_w, view_h, theme)
         drawn.append(Drawn("callout", Rect(x, y, bw, bh), tuple(lines), start, end))
     return drawn
 
