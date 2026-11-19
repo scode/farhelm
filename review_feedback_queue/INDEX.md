@@ -2944,9 +2944,6 @@ consequences.
 - [`trash-repeats-animation-and-focus-wiring.md`](trash-repeats-animation-and-focus-wiring.md) — Trash repeats the
   spinner's timer and independently looks up the same focus destination on confirmation and cancellation.
 
-- [`launcher-model-height-test-accepts-collapsed-list.md`](launcher-model-height-test-accepts-collapsed-list.md) — The
-  launcher model list's height test can pass if the list collapses to zero height.
-
 - [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
   macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
 

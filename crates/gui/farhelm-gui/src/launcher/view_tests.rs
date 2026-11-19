@@ -2118,6 +2118,7 @@ fn the_model_error_lasts_until_a_pick_or_escape(cx: &mut TestAppContext) {
 
 /// The model list stops at 260 pixels and scrolls, as the old one did; a full catalog lists dozens of models, and a
 /// list taller than the window would hide its lower rows and float over the field being typed in.
+/// A populated list needs enough height to show a row before its cap matters.
 #[gpui::test]
 fn the_model_list_stops_at_260_pixels(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
@@ -2126,8 +2127,18 @@ fn the_model_list_stops_at_260_pixels(cx: &mut TestAppContext) {
         .collect();
     answer_catalog(&mut helm, cx, Some(serde_json::Value::Array(rows)));
     test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(
+        name_of(cx, "launcher-model-hint").as_deref(),
+        Some("30 for Codex"),
+        "the test needs a populated model catalog"
+    );
     test_support::click(cx, "launcher-model-row");
     let list = test_support::bounds(cx, "launcher-model-list");
+    let first = test_support::bounds(cx, "launcher-model-default");
+    assert!(
+        first.size.height > gpui::px(0.) && list.size.height >= first.size.height,
+        "the model list has room to show its first row: list {list:?}, row {first:?}"
+    );
     assert!(
         list.size.height <= gpui::px(262.),
         "the list is capped: {list:?}"
