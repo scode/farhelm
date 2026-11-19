@@ -1251,8 +1251,8 @@ test-automation bridge that lets an agent drive the running app.
 
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
-frame-wake counter for one test), plus the change notices below, two layers of Farhelm's own, `frame-source` and
-`no-kde-blur`, and one addition of Farhelm's to the bridge layer (an element's selected state).
+frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur` and
+`hitbox-occlusion` layers, and one addition to the bridge layer (an element's selected state).
 
 ### What is here
 
@@ -1289,13 +1289,13 @@ retained. So is its small test app (`gpui/testapp/`): the in-app crate inherits 
 ### Licenses
 
 The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license file (`LICENSE-APACHE`, and
-`gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so, so the last layer, `modified-notices`, puts a
-one-line `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the
-bridge's `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates
-use, so one search finds every modified vendored file. Unlike the terminal crates' patches, these layers do not mark
-each patched spot with a `Farhelm patch` comment: they were carried over from the prototype as they were, and the patch
-files themselves are the record of what changed. `THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide
-icons GPUI Kit bundles.
+`gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so. The `modified-notices` layer puts a one-line
+`Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the bridge's
+`gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates use, so
+one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test. Unlike the
+terminal crates' patches, these layers do not mark each patched spot with a `Farhelm patch` comment: they were carried
+over from the prototype as they were, and the patch files themselves are the record of what changed.
+`THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide icons GPUI Kit bundles.
 
 Zed's crates other than `gpui`, `gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are treated as
 GPL unless checked; none of their code is here, and none may be copied in. The `gpui-pre-*` utility crates in this graph
@@ -1317,8 +1317,9 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `frame-source`         | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
 | `no-kde-blur`          | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
 | `modified-notices`     | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
+| `hitbox-occlusion`     | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,351 added and 177 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,476 added and 177 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1381,6 +1382,10 @@ included.
   workspace's `gpui/Cargo.lock`, so `cargo metadata --locked` on that workspace still succeeds. Removed by the
   maintainer's decision (2026-11-13); a TODO.md entry revisits it. Drop the layer if an upstream GPUI stops depending on
   the crate.
+- **hitbox-occlusion.** Farhelm needs to know whether a terminal link's destination panel was fully visible when the
+  user clicked. GPUI's pointer query tests just one point. `HitboxId::is_occluded` uses the last rendered frame's hitbox
+  order and content masks to check for any mouse-blocking overlap across the panel. A hitbox missing from that frame has
+  no answer. The `hitbox_occlusion` test covers stacking, clipping, shared edges, and pass-through hitboxes.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1428,6 +1433,7 @@ git apply --directory=vendor/gpui-pre-linux patches/gpui/modified-notices/gpui-p
 git apply --directory=vendor/gpui-pre-wgpu patches/gpui/modified-notices/gpui-pre-wgpu-0.3.12.patch
 git apply --directory=vendor/gpui-pre-macos patches/gpui/modified-notices/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent.patch
+git apply --directory=vendor/gpui-pre patches/gpui/hitbox-occlusion/gpui-pre-0.3.12.patch
 ```
 
 - Remove `vendor/gpui-agent/docs/`, `vendor/gpui-agent/scripts/`, `vendor/gpui-agent/patches/` and
@@ -1435,9 +1441,9 @@ git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent
 - `diff -r vendor/<tree> <checkout>/vendor/<tree>` prints nothing for each of the five trees (for `gpui-agent`, apart
   from a `target/` left by building its CLI in the checkout).
 
-Every layer applies without offsets. The sequence was checked end to end on 2026-11-14. On 2026-11-13 it was also
-checked against the prototype: its trees equal these minus the notices, `frame-source`, `no-kde-blur` and the bridge
-layer's selected state (added later), with its two measurement layers added back for `gpui-pre`.
+The sequence through `modified-notices` was checked end to end on 2026-11-14. On 2026-11-13 it was also checked against
+the prototype. Its trees equal these with the notices, `frame-source`, `no-kde-blur`, `hitbox-occlusion` and the bridge
+layer's selected state omitted, and its two measurement layers added back for `gpui-pre`.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.
@@ -1447,9 +1453,9 @@ later layer in a disposable copy.
 Upgrade only as a dedicated change, at a milestone, with GPUI Kit: Kit pins its gpui-pre exactly, so the two move
 together. Unpack the new crates twice, as `a/<name>` (as published) and `b/<name>`, apply each layer to `b` in order
 with `git apply`, and fix rejected hunks by hand; a three-way merge (`git apply -3` inside a scratch git repository
-holding the old pristine, old patched and new pristine trees) does most of it. Regenerate each patch after each layer,
-and the notices layer last, with `git diff --no-index --no-prefix a b` run where that tree's copies from before and
-after the layer sit as `a` and `b`, so the patch's paths start at the tree's root as `git apply --directory` expects
+holding the old pristine, old patched and new pristine trees) does most of it. Regenerate each patch in the documented
+application order, with `git diff --no-index --no-prefix a b` run where that tree's copies from before and after the
+layer sit as `a` and `b`, so the patch's paths start at the tree's root as `git apply --directory` expects
 (`git diff --no-index --no-prefix a/<name> b/<name>` puts `<name>/` into every path, and the result does not apply). The
 prototype's bump from 0.3.9 to 0.3.12 took about half an hour and found one silently non-compiling line from a three-way
 merge, so build every tree, on Linux and on a Mac, before trusting the result. Then update the checksums above, the
@@ -1466,11 +1472,11 @@ require newer versions: the `icu_*` crates from 2.3 to 2.4, with `tinystr`, `yok
 
 ### Running their tests
 
-The native-key layer's and the bridge layer's tests of the core, outside the workspace like the terminal crates' tests
+The native-key, bridge and hitbox-occlusion tests of the core, outside the workspace like the terminal crates' tests
 (minutes, since it builds GPUI on its own; `.agents/validation.md` has the recorded form):
 
 ```sh
-cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record
+cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record --test hitbox_occlusion
 ```
 
 ### Staying out of the workspace's checks

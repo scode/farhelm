@@ -827,6 +827,26 @@ impl HitboxId {
         window.mouse_hit_test.ids.contains(&self)
     }
 
+    /// Whether any part of this hitbox is behind a mouse-blocking hitbox in the last rendered frame.
+    /// The check uses the same content masks and front-to-back order as mouse hit testing. A shared
+    /// edge does not count as overlap. Returns `None` if this hitbox is absent from that frame.
+    pub fn is_occluded(self, window: &Window) -> Option<bool> {
+        let hitboxes = &window.rendered_frame.hitboxes;
+        let index = hitboxes.iter().position(|hitbox| hitbox.id == self)?;
+        let hitbox = &hitboxes[index];
+        let bounds = hitbox.bounds.intersect(&hitbox.content_mask.bounds);
+        Some(hitboxes[index + 1..].iter().any(|other| {
+            if other.behavior == HitboxBehavior::Normal {
+                return false;
+            }
+            let overlap = other
+                .bounds
+                .intersect(&other.content_mask.bounds)
+                .intersect(&bounds);
+            overlap.size.width > px(0.) && overlap.size.height > px(0.)
+        }))
+    }
+
     fn next(self) -> HitboxId {
         HitboxId(self.0.wrapping_add(1))
     }
