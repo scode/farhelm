@@ -79,3 +79,94 @@ group screenshot's list height, pin insertion across a gap left by unpinning, th
 after a focused row scrolls out of view. The marked-drag scope review kept reply pacing inside the session list, using
 the app's existing per-row operation handling. The single-session PR generalized the existing grip, so the optional
 standalone refactor was unnecessary.
+
+### Landing
+
+#### What landed with it
+
+It landed in a round of nine plans: session-group-follow-ups, model-families, session-limit-notice,
+reserved-resource-names, secrets-logs-and-screen, checkout-settings-stale-save, concealed-link-target, triage-misc-nov18
+and triage-discards-nov18. Since its base, main gained the previous round's plans (submenus that open on hover, Clone
+keeping invisible characters, the retired old-terminal announcement, quick switcher screenshot folders, the update
+survival wording) and docs screenshot tooling. None of it touches the session list's groups, pins or drag code, and the
+reviews found no interaction.
+
+At your request this landing was reviewed with extra skepticism, by me and by independent reviewers, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The plan delivered what it
+asked for without a second drag path: the new moves use the drag handle pinned rows already had, and Move to group from
+the menu and dragging go through the same move logic. The tests check the exact requests the helm receives. I looked at
+the new reference pictures of the groups: members of an expanded group are indented with a thin guide line beside them,
+and a collapsed group holding the open session has a blue stripe down its left edge; global pins and ungrouped rows are
+not indented. The end-to-end smoke's new step drags an unpinned session into a group.
+
+#### Fixes made while landing
+
+- **A code comment lost its contract.** The stripe now shared by marked rows and collapsed group headers had a comment
+  saying it is drawn over everything in the row and takes no presses; the plan cut that, though it matters more now that
+  the stripe sits over a collapsed header's grip. It is back.
+- **An uncommented branch that read like a bug.** A drag of a single marked pin whose mark is cleared mid-drag does
+  nothing on release; that is deliberate (the same rule the marked-rows move uses for rows no longer marked), and a
+  comment now says so.
+
+#### Things you should know that the report does not say
+
+- **Only Move to group is paced.** As the report says, moving many marked sessions now sends one request at a time,
+  because the helm drops the app window's connection when more than 64 requests are waiting behind the one being
+  handled. Pin, Mute, Unmute and Mark read on a marked selection still send every request at once, so using one of them
+  on more than about 65 marked sessions still drops the connection. This is not new. The plan also added a second pacing
+  mechanism instead of reusing the one bulk Stop and Delete already use. Possible follow-up: one paced path for every
+  marked-rows action.
+- **Edge scrolling stops past the list's edge.** While dragging, the list scrolls only while the pointer is inside the
+  strip near its top or bottom edge. A quick drag upward usually overshoots onto the heading and the scrolling stops
+  until the pointer comes back. Possible follow-up: keep scrolling while the pointer is beyond the edge within the
+  list's column.
+- **The docs page does not mention any of this.** The session list page has nothing about dragging an unpinned session
+  into a group, the "Drop here to remove from group" strip, the indent or the collapsed group's stripe. Nothing on it is
+  wrong.
+- A test checks that the collapsed header's hover help names the open session, but not its accessible description, which
+  SPEC.md also requires.
+
+#### Checks
+
+This round landed nine plans together, so these checks cover all nine on one tree: the nine stacks one after another on
+main. Between them the plans change the desktop app's GUI crates, the helm and its client, the shared protocol, the
+supervisor, the desktop process, SPEC.md, SPEC_impl.md and the triage records. The landing ran the lints, the whole Rust
+workspace suite, the desktop process's own tests, the app's end-to-end smoke and the reference screenshots (goldens).
+Builds ran locally; the workspace suite and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plans as delivered, stacked on main as it stood when the round started:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, `python3 -B scripts/test-gui-e2e-smoke.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`, once without and once with `--features agent`: passed.
+- `dprint check`: failed on `TRIAGE_OUTCOMES_ARCHIVE.md`, which triage-misc-nov18 wrote unformatted. Fixed.
+- `cargo nextest run --workspace --exclude farhelm-desktop`, from a locally built archive, split in three across boats:
+  2744, 2653 and 2625 tests, 8022 in all (`1ffb9472-9f12-4890-b0d5-032dd87718d0`,
+  `7c3ef63b-2e2b-4903-acff-22cbe9409601`, `7c539d75-d409-48c7-901b-391169215c11`). One failed: the macro
+  compile-contract test, which builds a small crate offline from this machine's cargo cache, which a boat does not have,
+  so it fails there every time; it passed locally (below). No runtime skips.
+- `cargo nextest run -p farhelm-desktop`, locally: 176 passed (`59017e5e-7626-4dca-9c45-0b4972a89aca`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed, the new step that
+  drags an unpinned session into a group included, and the clipboard paste step was skipped, as always on Linux
+  (`b1164f8b-3d55-4cac-9fb1-a76e9a8da60c`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`da0dca91-646f-483a-a436-b10b43ffafe2`), the new groups
+  pictures included.
+
+On the fixed tree (comments, SPEC.md, SPEC_impl.md, changelog fragments, the triage archive's formatting, and one
+notice's wording changed):
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, `cargo clippy --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`: passed.
+- The bell notices' tests in the GUI and the helm, locally: 26 passed (`80fb276d-1ba3-4b09-a84a-370aef2b9605`).
+- `cargo nextest run -p farhelm-testtrace-macros`, locally: 2 passed, the compile-contract test included
+  (`a8a9bf1f-6dc9-4e24-8831-e5d4b7f5dbc0`).
+
+The boat suites, the smoke and the goldens were reused for the fixed tree: after them only comments, documents,
+changelog fragments, formatting and one notice's wording changed, which the focused runs above cover.
+
+Skipped:
+
+- The Linux app lifecycle: startup and quit are untouched.
+- The Mac-only checks: no Mac-specific code changed.
