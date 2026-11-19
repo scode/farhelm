@@ -2641,6 +2641,11 @@
       "reference": null
     },
     {
+      "golden": "session-missing-terminal-card",
+      "title": "Recovery when a session's terminal is gone, with Restart and Replace for a resumable conversation and Replace alone when Farhelm never captured it",
+      "reference": null
+    },
+    {
       "golden": "session-unavailable",
       "title": "The unavailable card over the terminal area of a session whose host cannot be reached, with the band above it holding the last-known status and age: a running session on a host that does not answer, and an exited one on a host that needs an update",
       "reference": "session-unavailable"

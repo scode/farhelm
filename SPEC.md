@@ -2222,8 +2222,10 @@ an exited agent stays viewable with its scrollback — because a tab's shell exi
 A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
 error.
 
-When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
-metadata and says why there is no terminal, rather than an empty pane.
+When a reachable host reports that a session has no agent terminal, the pane shows its metadata and a recovery card. The
+card explains the missing terminal and offers Restart when the session can resume, plus Replace (or Replace with for a
+legacy launch). The pane makes no attach attempt and hides the terminal tab strip while the card shows. An Interrupted
+session keeps its explanation about the reboot or update.
 
 Container sessions' tabs, file links and downloads use the ordinary supervisor rules inside their container. Retired
 containerized sessions offer no terminal or tab access.
@@ -2773,11 +2775,11 @@ and age in exactly one band. A terminal already open keeps its last screen and t
 card, clearly no longer live. A session opened while unreachable has no terminal or tab strip. When the host returns,
 retained terminals retry promptly and automatically. A rebooted session still shows its interrupted card. A dropped
 terminal stream between the window and the helm uses the same card with `Session unavailable — reconnecting` and a
-neutral `Reconnect now` button; recoverable drops show no red detach banner. Stall decisions retain their explicit
-banners, and a window displaced from the seat says so in place of everything else (One GUI at a time). Changes made
-outside the window — by the command line, an agent or the sessions themselves: creates, renames, stops, deletes, status
-transitions — appear in it automatically; the agent-spawn behavior below is one instance of this general rule, not a
-special case.
+neutral `Reconnect now` button. The recovery card takes over when a reachable host reports no agent terminal.
+Recoverable drops show no red detach banner. Stall decisions retain their explicit banners, and a window displaced from
+the seat says so in place of everything else (One GUI at a time). Changes made outside the window — by the command line,
+an agent or the sessions themselves: creates, renames, stops, deletes, status transitions — appear in it automatically;
+the agent-spawn behavior below is one instance of this general rule, not a special case.
 
 ### Status
 

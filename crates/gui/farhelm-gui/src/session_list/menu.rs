@@ -694,7 +694,7 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// ([`delete::busy`]), and so is its host's Suspend or Resume, with its activity read and the provider's change after
 /// it, and its environment being deleted ([`environment::held`]). The other two are the inline questions, which a press
 /// elsewhere does not close: the YOLO question a Replace of the session met ([`super::replace_yolo::open`]), and the
-/// Replace question the session's interrupted card asked ([`crate::session_pane::card::asks`]), each while it is open.
+/// Replace question the session's recovery card asked ([`crate::session_pane::card::asks`]), each while it is open.
 /// The row's and the header's own questions are anchored, so a press elsewhere closes them, and they refuse through
 /// their buttons, which are inert while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {

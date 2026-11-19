@@ -626,6 +626,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "session-missing-terminal-card",
+        size: (1036., 324.),
+        draw: session_missing_terminal_cards,
+        setup: no_setup,
+    },
+    Scene {
         name: "session-unavailable",
         size: (1036., 348.),
         draw: session_unavailable_cards,
