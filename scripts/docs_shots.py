@@ -261,7 +261,9 @@ def reset(bridge: Bridge):
     """Dismiss layers before each shot so one shot's dialogs cannot become the next shot's starting state.
 
     The Hosts panel is not a layer: it takes the session list's place until its rail button is pressed again, so a shot
-    that showed it would otherwise leave it up for every shot after it.
+    that showed it would otherwise leave it up for every shot after it. Focus goes back to the open session's terminal
+    last: a dialog closed with Escape hands focus back to the button that opened it, and a focused button shows its
+    tooltip, so the Trash dialog's shot left the Trash button's tooltip in the next shot's picture.
     """
     for attempt in range(7):
         entries = json.loads(bridge._call("snapshot", "-a", "--json", "--no-source"))["entries"]
@@ -269,6 +271,8 @@ def reset(bridge: Bridge):
         if not any(name.startswith("layer-") for name in names):
             if "hosts-panel" in names:
                 bridge.click("id:hosts-panel-toggle")
+            if "session-terminal-tab-agent" in names:
+                bridge.click("id:session-terminal-tab-agent")
             return
         if attempt == 6:
             raise RuntimeError("layers remain after 6 Escape presses")
@@ -296,10 +300,13 @@ def stage_add_host(gui, run: Path, plan: dict):
 
 
 def crop_rect(boxes: list[dict], window: dict, frame: int = 0, title_bar: int = 0,
-              max_width: int | None = None, max_height: int | None = None) -> tuple[int, int, int, int]:
+              max_width: int | None = None, max_height: int | None = None,
+              keep: list[dict] = ()) -> tuple[int, int, int, int]:
     """Enclose the padded union in captured pixels. Bridge boxes are relative to the decorated window on Linux.
 
-    `max_width` and `max_height` (logical pixels) narrow the result from the right and the bottom, keeping its top left.
+    `max_width` and `max_height` (logical pixels) narrow the regions' union from the right and the bottom, keeping its
+    top left. `keep` (the annotations' extents) then grows the result to hold them whole, past those caps: a cap is for a
+    region that runs to the window's foot, never a reason to cut a callout in half.
     """
     scale = window["scale"]
     content_top = frame + title_bar
@@ -311,6 +318,12 @@ def crop_rect(boxes: list[dict], window: dict, frame: int = 0, title_bar: int = 
     bottom = min(window["height"] - frame, max(box["y"] + box["h"] for box in boxes) + 16) - content_top
     if max_height is not None:
         bottom = min(bottom, top + max_height)
+    if keep:
+        left = max(0, min([left, *(box["x"] - frame - 16 for box in keep)]))
+        top = max(0, min([top, *(box["y"] - content_top - 16 for box in keep)]))
+        right = min(window["width"] - 2 * frame, max([right, *(box["x"] + box["w"] + 16 - frame for box in keep)]))
+        bottom = min(window["height"] - 2 * frame - title_bar,
+                     max([bottom, *(box["y"] + box["h"] + 16 - content_top for box in keep)]))
     return math.floor(left * scale), math.floor(top * scale), math.ceil(right * scale), math.ceil(bottom * scale)
 
 
@@ -375,12 +388,12 @@ def capture_pages(gui, batch, run: Path, pages, out: Path, *, frame: int = 0, ti
                 bridge.forget_tree()
                 boxes = [bridge.box(region) for region in shot.regions]
                 window = json.loads(bridge._call("windows", "--json"))[0]
-                boxes += annotate(bridge, batch, shot, full, window, frame, title_bar)
+                kept = annotate(bridge, batch, shot, full, window, frame, title_bar)
                 if guard and session_ids(gui, run) != before:
                     raise RuntimeError("the shot's steps started, replaced or deleted a session")
                 target = out / page / f"{shot.name}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                rect = crop_rect(boxes, window, frame, title_bar, shot.max_width, shot.max_height)
+                rect = crop_rect(boxes, window, frame, title_bar, shot.max_width, shot.max_height, kept)
                 batch.crop_png(full, rect, target)
             except Exception as error:
                 failures[f"{page}/{shot.name}"] = str(error)
