@@ -32,6 +32,41 @@ use crate::boot_id_durable_outcome::{
     harness_believing_boot, listed, supervisor_believing_boot, supervisor_reading_boot,
 };
 
+/// A folder whose metadata is readable can still forbid chdir. The create
+/// refusal must name it before there is a session or any agent runs elsewhere.
+#[farhelm_testtrace::test]
+async fn create_refuses_a_directory_it_cannot_enter() {
+    // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("SKIPPED: root bypasses directory search permissions");
+        return;
+    }
+    let (h, starts) = crate::terminal_tabs::harness_counting_host_starts().await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let witness = farhelm_teststate::tempdir().unwrap();
+    let marker = witness.path().join("agent-ran");
+    let command = format!(
+        "printf started > {}",
+        farhelm_proto::text::shell_quote(marker.to_str().unwrap())
+    );
+    let _denied = crate::terminal_tabs::DeniedDirectory::new(work.path());
+    let error = h
+        .client
+        .create_session(work.path().to_str().unwrap(), &command, None, 80, 24)
+        .await
+        .expect_err("an unenterable working directory must refuse the create");
+    let error = error.downcast_ref::<SupervisorError>().unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidRequest);
+    let expected = format!("working directory is not usable: {}", work.path().display());
+    assert!(error.message().starts_with(&expected), "{error:#}");
+    assert_eq!(starts.load(Ordering::Relaxed), 0, "no agent host started");
+    assert!(h.client.list_sessions().await.unwrap().sessions.is_empty());
+    assert!(
+        !marker.exists(),
+        "the requested program must never run in a fallback directory"
+    );
+}
+
 // ---------------------------------------------------------------------
 // PLAN_M3.md item 3: error status via the launch shim's sentinel.
 // ---------------------------------------------------------------------

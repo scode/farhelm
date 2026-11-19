@@ -1892,11 +1892,12 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the
   arguments), so those tests fail by name rather than run on another kind of terminal. Those that need a real terminal
   run on such hosts (`tests::host_supervisor`); the tests of ending the old terminals build an earlier release's tmux
-  server by hand. The README and docs media stacks run the bare `farhelm supervisor run`, so they test what ships. Known
-  gaps, behaviors terminal hosts showed differently from what this document says, found when their tests moved to hosts
-  and reported rather than fixed: a create or a tab open in a directory that cannot be entered is refused by the host's
-  own start rather than recorded as a launch error (or a refused open) naming the directory, and a 0x0 attach leaves the
-  terminal at its size.
+  server by hand. The README and docs media stacks run the bare `farhelm supervisor run`, so they test what ships. A
+  known gap found when the tests moved to hosts is that a 0x0 attach leaves the terminal at its size.
+- **Working-directory admission.** Create, Restart and tab open check search permission for the working directory as the
+  host's effective user before starting a terminal and name the folder in the refusal. A create refused by the check
+  adds no session. If permissions change after the check, the host can still fail to enter it and report its own launch
+  error.
 - **Creating agents in hosts** (`service/core/host_launch.rs`): every create starts its agent in a host, and a new tab
   opens in one ("Tabs in hosts" below). A create commits the kind with the launching row, before anything starts, so a
   crash between the start and its confirmation leaves a row that says where to look. A retried keyed create whose
