@@ -1,0 +1,197 @@
+diff --git a/src/elements/text.rs b/src/elements/text.rs
+index ed64384..7dfd251 100644
+--- a/src/elements/text.rs
++++ b/src/elements/text.rs
+@@ -1,9 +1,11 @@
++// Modified for Farhelm: verify end ellipses against the shaped width of mixed-font lines.
+ use crate::{
+     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
+     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
+     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
+     TextRun, TextStyle, TooltipId, TruncateFrom, WhiteSpace, Window, WrappedLine,
+-    WrappedLineLayout, register_tooltip_mouse_handlers, set_tooltip_on_window,
++    WindowTextSystem, WrappedLineLayout, line_end_candidate, register_tooltip_mouse_handlers,
++    set_tooltip_on_window,
+ };
+ use anyhow::Context as _;
+ use gpui_util::ResultExt;
+@@ -630,6 +632,68 @@ struct TextLayoutInner {
+     bounds: Option<Bounds<Pixels>>,
+ }
+
++/// Fit an end ellipsis in the same fonts and decoration runs the text will be painted with.
++///
++/// The full line's shaped glyph positions give an initial cut without walking the whole input again. At a
++/// font or direction boundary the affix can inherit another face and the prefix can shape differently, so
++/// only accept a candidate after measuring the complete string that will actually be drawn.
++fn fit_mixed_font_ellipsis(
++    line: &WrappedLine,
++    text_system: &WindowTextSystem,
++    width: Pixels,
++    font_size: Pixels,
++    affix: &str,
++    runs: &[TextRun],
++) -> (SharedString, Vec<TextRun>) {
++    let measure = |(text, runs): &(SharedString, Vec<TextRun>)| {
++        if text.is_empty() {
++            return Some(crate::px(0.));
++        }
++        text_system
++            .shape_text(text.clone(), font_size, runs, None, None)
++            .log_err()?
++            .first()
++            .map(|line| line.unwrapped_layout.width)
++    };
++    let mut best = line_end_candidate(&line.text, 0, affix, runs);
++    let Some(affix_width) = measure(&best).filter(|measured| *measured <= width) else {
++        return ("".into(), Vec::new());
++    };
++
++    // A visual position gives a useful byte offset only when glyphs stay in logical order. RTL runs can map the
++    // far end of a run to its first byte, so search logical prefixes in that case.
++    let layout = &line.unwrapped_layout;
++    let mut high = line.text.len().saturating_sub(1);
++    if layout
++        .runs
++        .iter()
++        .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.index))
++        .is_sorted()
++        && let Some(seed) = layout.index_for_x(width - affix_width)
++    {
++        let candidate = line_end_candidate(&line.text, seed, affix, runs);
++        if measure(&candidate).is_some_and(|measured| measured <= width) {
++            return candidate;
++        }
++        high = seed.saturating_sub(1);
++    }
++
++    // Search bytes with character-boundary cuts. A multibyte character at a midpoint cannot stall the search.
++    let mut low = 1;
++    while low <= high {
++        let mid = low + (high - low) / 2;
++        let end = line.text.floor_char_boundary(mid);
++        let candidate = line_end_candidate(&line.text, end, affix, runs);
++        if measure(&candidate).is_some_and(|measured| measured <= width) {
++            best = candidate;
++            low = mid + 1;
++        } else {
++            high = mid - 1;
++        }
++    }
++    best
++}
++
+ impl TextLayout {
+     fn layout(
+         &self,
+@@ -713,29 +777,42 @@ impl TextLayout {
+                             &runs,
+                             truncate_from,
+                         )
+-                    } else if let Some(unclipped) = window
+-                        .text_system()
+-                        .shape_text(text.clone(), font_size, &runs, None, None)
+-                        .log_err()
+-                        && unclipped
+-                            .iter()
+-                            .all(|line| line.size(line_height).width <= truncate_width)
+-                    {
+-                        // The truncation decision below sums per-character advances,
+-                        // which overestimates the shaped width (no kerning), truncating
+-                        // text that fits exactly in its measured width. Skip truncation
+-                        // whenever the honestly-shaped text fits; the shaping result
+-                        // comes from the line layout cache when the same text was
+-                        // already measured untruncated this frame.
+-                        (text.clone(), Cow::Borrowed(&*runs))
+                     } else {
+-                        line_wrapper.truncate_line(
+-                            text.clone(),
+-                            truncate_width,
+-                            &truncation_affix,
+-                            &runs,
+-                            truncate_from,
+-                        )
++                        let text_system = window.text_system();
++                        let unclipped = text_system
++                            .shape_text(text.clone(), font_size, &runs, None, None)
++                            .log_err();
++                        if unclipped.as_ref().is_some_and(|lines| {
++                            lines.iter().all(|line| line.size(line_height).width <= truncate_width)
++                        }) {
++                            // Per-character advances omit kerning. Keep text that fits once shaped.
++                            (text.clone(), Cow::Borrowed(&*runs))
++                        } else if truncate_from == TruncateFrom::End
++                            && text_style.white_space == WhiteSpace::Nowrap
++                            && text_style.line_clamp.is_none()
++                            && !text.contains('\n')
++                            && !truncation_affix.contains('\n')
++                            && let Some([line]) = unclipped.as_deref()
++                            && runs.windows(2).any(|pair| pair[0].font.family != pair[1].font.family)
++                        {
++                            let (text, runs) = fit_mixed_font_ellipsis(
++                                line,
++                                text_system,
++                                truncate_width,
++                                font_size,
++                                &truncation_affix,
++                                &runs,
++                            );
++                            (text, Cow::Owned(runs))
++                        } else {
++                            line_wrapper.truncate_line(
++                                text.clone(),
++                                truncate_width,
++                                &truncation_affix,
++                                &runs,
++                                truncate_from,
++                            )
++                        }
+                     }
+                 } else {
+                     (text.clone(), Cow::Borrowed(&*runs))
+diff --git a/src/text_system/line_wrapper.rs b/src/text_system/line_wrapper.rs
+index fea2c79..b2b2705 100644
+--- a/src/text_system/line_wrapper.rs
++++ b/src/text_system/line_wrapper.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: mixed-font end truncation reuses the ordinary end-cut rules.
+ use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
+ use collections::HashMap;
+ use std::{borrow::Cow, iter, sync::Arc};
+@@ -383,11 +384,10 @@ impl LineWrapper {
+                     "{truncation_affix}{}",
+                     &line[line.ceil_char_boundary(truncate_ix + 1)..]
+                 )),
+-                TruncateFrom::End => SharedString::from(format!(
+-                    "{}{truncation_affix}",
+-                    line[..truncate_ix]
+-                        .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+-                )),
++                TruncateFrom::End => {
++                    let (text, runs) = line_end_candidate(&line, truncate_ix, truncation_affix, runs);
++                    return (text, Cow::Owned(runs));
++                }
+                 TruncateFrom::Middle => unreachable!("Middle truncation is handled above"),
+             };
+             let mut runs = runs.to_vec();
+@@ -584,6 +584,20 @@ fn width_for_char(
+     }
+ }
+
++/// Apply the end ellipsis policy to a cut at a character boundary, keeping the text-run lengths in sync.
++pub(crate) fn line_end_candidate(
++    text: &str,
++    end: usize,
++    affix: &str,
++    runs: &[TextRun],
++) -> (SharedString, Vec<TextRun>) {
++    let prefix = text[..end].trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
++    let result = SharedString::from(format!("{prefix}{affix}"));
++    let mut runs = runs.to_vec();
++    update_runs_after_truncation(&result, affix, &mut runs, TruncateFrom::End);
++    (result, runs)
++}
++
+ fn update_runs_after_truncation(
+     result: &str,
+     ellipsis: &str,

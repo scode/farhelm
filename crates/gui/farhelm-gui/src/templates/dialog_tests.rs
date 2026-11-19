@@ -253,7 +253,7 @@ fn row_names(cx: &mut VisualTestContext) -> Vec<String> {
 
 /// SPEC.md: "A list of names and summaries sits beside the selected template's editor". The Templates button opens one
 /// dialog titled Templates whose list shows every template in the helm's order, each name over its summary, with the
-/// count under the list. This is what every later piece of the dialog builds on.
+/// count under the list. The full summary is available as an accessible label even when the painted line is shortened.
 #[gpui::test]
 fn the_button_opens_the_list_of_names_and_summaries(cx: &mut TestAppContext) {
     let (_helm, cx) = open_header(cx, &templates(), None);
@@ -264,13 +264,23 @@ fn the_button_opens_the_list_of_names_and_summaries(cx: &mut TestAppContext) {
     for expected in [
         "Templates",
         "Saved edits to combine in the session launcher",
-        "Codex · gpt-6-luna",
-        "Command launch · Command",
         "2 templates",
     ] {
         assert!(
             text.contains(expected),
             "{expected:?} is painted in {text:?}"
+        );
+    }
+    let nodes = frame(cx);
+    for (id, expected) in [
+        ("template-summary-my-codex", "Codex · gpt-6-luna"),
+        ("template-summary-webbuilder", "Command launch · Command"),
+    ] {
+        assert!(
+            nodes.iter().any(|node| {
+                node.element_id.as_deref() == Some(id) && node.label.as_deref() == Some(expected)
+            }),
+            "{id} names its full summary as {expected:?}"
         );
     }
     assert!(
@@ -289,8 +299,11 @@ fn the_list_follows_the_store_while_open(cx: &mut TestAppContext) {
     grown.insert(0, template("aaa-review", TemplateFields::default()));
     push(&mut helm, &grown, Availability::Available, cx);
     assert_eq!(row_names(cx), vec!["aaa-review", "my-codex", "webbuilder"]);
+    assert!(frame(cx).iter().any(|node| {
+        node.element_id.as_deref() == Some("template-summary-aaa-review")
+            && node.label.as_deref() == Some("Sets nothing yet")
+    }));
     let text = painted(cx);
-    assert!(text.contains("Sets nothing yet"), "{text}");
     assert!(text.contains("3 templates"), "{text}");
 }
 
@@ -907,18 +920,34 @@ fn a_second_click_on_the_key_button_closes_its_menu(cx: &mut TestAppContext) {
     assert!(any_open(cx), "the dialog stays");
 }
 
-/// A summary longer than its row must be cut at the row's edge (a recorded deviation: no ellipsis), or the row's opener
-/// would grow with its text and run under the editor beside the list (the old "long summaries stay reachable …"). The
-/// row itself always takes the list's width, so it is the opener, the element that would overflow, whose bounds are
-/// checked. Specified: a command template whose command is 400 characters long draws its opener, bolt and key button
-/// inside the `templates-list` column.
-#[gpui::test]
-fn a_long_summary_stays_inside_its_row(cx: &mut TestAppContext) {
+/// A long summary fits the row's available width and signals the cut with an ellipsis.
+/// Its label retains the complete wrapper prefix, and the opener, bolt and key button still fit the list column.
+/// The bundled-font layout exercises the actual width available beside those controls.
+#[test]
+fn a_long_summary_stays_inside_its_row() {
     let mut list = templates();
-    list[1].fields.command = Some("x".repeat(400));
-    let (_helm, cx) = open_header(cx, &list, None);
-    click(cx, "templates-button");
-    let nodes = frame(cx);
+    let wrapper = format!("CACHE_KEY={}", "i".repeat(400));
+    list[0].fields = TemplateFields {
+        wrapper_prefix: Some(Some(vec!["env".into(), wrapper.clone()])),
+        ..TemplateFields::default()
+    };
+    let (_app, nodes) = laid_out_dialog(&list, Preferences::default());
+    let id = "template-summary-my-codex";
+    let summaries: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.element_id.as_deref() == Some(id))
+        .collect();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].role, Some(Role::Label));
+    let expected = format!("Wrapper prefix env {wrapper}");
+    assert_eq!(summaries[0].label.as_deref(), Some(expected.as_str()));
+    let painted = texts_within(&nodes, id);
+    assert_eq!(painted.len(), 1);
+    assert!(painted[0].text.ends_with('…'), "{painted:?}");
+    assert!(
+        painted[0].bounds.right() <= summaries[0].visible_bounds.right() + px(1.),
+        "the ellipsis must fit inside the visible summary: {painted:?}"
+    );
     let bounds_of = |id: &str| {
         nodes
             .iter()
@@ -928,9 +957,9 @@ fn a_long_summary_stays_inside_its_row(cx: &mut TestAppContext) {
     };
     let column = bounds_of("templates-list");
     for control in [
-        "template-open-webbuilder",
-        "template-bolt-webbuilder",
-        "template-key-webbuilder",
+        "template-open-my-codex",
+        "template-bolt-my-codex",
+        "template-key-my-codex",
     ] {
         let bounds = bounds_of(control);
         assert!(bounds.right() <= column.right(), "{control}: {bounds:?}");

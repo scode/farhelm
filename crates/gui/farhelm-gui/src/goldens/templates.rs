@@ -70,12 +70,12 @@ pub(super) fn templates_dialog_setup(state: &SceneState, window: &mut Window, cx
 }
 
 /// The reference set's templates for the editor scenes (references `template-editor` and `template-number-menu`): a
-/// placement-only template, the one the editor opens, and a Claude one, with number keys 1 and 8 bound as the
-/// reference stack bound them.
+/// placement template with a long wrapper summary, the one the editor opens, and a Claude one, with number keys
+/// 1 and 8 bound as the reference stack bound them. The launcher scene shows the ellipsis in the wrapper's face.
 const EDITOR_SCENE_TEMPLATES: [(&str, &str); 3] = [
     (
         "api-repo",
-        r#"{"host": "install-build-box", "destination": {"folder": "/src/api"}}"#,
+        r#"{"host": "install-build-box", "destination": {"folder": "/src/api"}, "wrapper_prefix": ["env", "CACHE_DIR=/var/cache/agent-builds", "WORKSPACE_MODE=review-only-with-template-preflight-checks"]}"#,
     ),
     (
         "codex-deep",

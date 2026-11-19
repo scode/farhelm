@@ -1252,8 +1252,8 @@ test-automation bridge that lets an agent drive the running app.
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
 frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur`,
-`wayland-drop-position` and `hitbox-occlusion` layers, and one addition to the bridge layer (an element's selected
-state).
+`wayland-drop-position`, `hitbox-occlusion` and `mixed-font-ellipsis` layers, and one addition to the bridge layer (an
+element's selected state).
 
 ### What is here
 
@@ -1293,10 +1293,11 @@ The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license 
 `gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so. The `modified-notices` layer puts a one-line
 `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the bridge's
 `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates use, so
-one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test. Unlike the
-terminal crates' patches, these layers do not mark each patched spot with a `Farhelm patch` comment: they were carried
-over from the prototype as they were, and the patch files themselves are the record of what changed.
-`THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide icons GPUI Kit bundles.
+one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test, and
+`mixed-font-ellipsis` the two files it changes. Unlike the terminal crates' patches, these layers do not mark each
+patched spot with a `Farhelm patch` comment: they were carried over from the prototype as they were, and the patch files
+themselves are the record of what changed. `THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide icons
+GPUI Kit bundles.
 
 Zed's crates other than `gpui`, `gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are treated as
 GPL unless checked; none of their code is here, and none may be copied in. The `gpui-pre-*` utility crates in this graph
@@ -1320,8 +1321,9 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `wayland-drop-position` | gpui-pre-linux 57 / 21                                                              | Keep motion while Wayland reads the drag's file list       |
 | `modified-notices`      | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
 | `hitbox-occlusion`      | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
+| `mixed-font-ellipsis`   | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line     |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,533 added and 198 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,652 added and 226 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1392,6 +1394,12 @@ included.
   user clicked. GPUI's pointer query tests just one point. `HitboxId::is_occluded` uses the last rendered frame's hitbox
   order and content masks to check for any mouse-blocking overlap across the panel. A hitbox missing from that frame has
   no answer. The `hitbox_occlusion` test covers stacking, clipping, shared edges, and pass-through hitboxes.
+- **mixed-font-ellipsis.** Template summaries mix interface words with monospace flags and wrapper prefixes. The
+  inherited font can make a run look narrower during truncation than it really is, leaving the ellipsis outside the
+  clip. For an overflowing one-line end ellipsis with more than one font family, the text element measures the shortened
+  line with its actual fonts before painting it. This is also the layout used by the Recent setup destination in
+  launcher search. The Farhelm template dialog test checks that the ellipsis falls within the visible summary and the
+  accessible label retains the full text.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1441,6 +1449,7 @@ git apply --directory=vendor/gpui-pre-wgpu patches/gpui/modified-notices/gpui-pr
 git apply --directory=vendor/gpui-pre-macos patches/gpui/modified-notices/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent.patch
 git apply --directory=vendor/gpui-pre patches/gpui/hitbox-occlusion/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/mixed-font-ellipsis/gpui-pre-0.3.12.patch
 ```
 
 - Remove `vendor/gpui-agent/docs/`, `vendor/gpui-agent/scripts/`, `vendor/gpui-agent/patches/` and

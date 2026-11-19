@@ -915,12 +915,13 @@ impl TemplatesDialog {
             .child(
                 div()
                     .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
                     .text_size(metrics::TEXT_SM)
                     .line_height(px(SMALL_LINE_HEIGHT))
                     .text_color(theme::color(row_detail_ink(palette, open, palette.fg_1)))
-                    .child(summary::line(&summary::parts(&template.fields))),
+                    .child(summary::line(
+                        format!("template-summary-{}", template.name),
+                        &summary::parts(&template.fields),
+                    )),
             );
         if marked {
             lines = lines.child(
