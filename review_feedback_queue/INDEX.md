@@ -1500,10 +1500,6 @@ consequences.
   Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
   presentation copy.
 
-- [`peer-text-normalization-contract-overstates-retained-scope.md`](peer-text-normalization-contract-overstates-retained-scope.md)
-  — The specification's universal normalization rule for retained peer text contradicts its explicit raw-byte identity
-  and diagnostic exceptions.
-
 - [`escaped-token-path-display-collision-unresolved.md`](escaped-token-path-display-collision-unresolved.md) — Escaped
   and literal token-file paths can look identical in approval text. A supported harmful pair of real files remains
   unverified after investigation.

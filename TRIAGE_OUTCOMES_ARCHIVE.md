@@ -23964,6 +23964,22 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `rolqrsllunxtonrotumznovpwqsutkww`, bookmark `plan/gui-ux-wording/08-bash-source-admission-retains`,
   [PR #4260](https://github.com/scode/farhelm/pull/4260/changes).
 
+## peer-text-normalization-contract-overstates-retained-scope.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "All host text is
+  normalized the same way" is too broad. Same section keeps raw bytes for diagnostics and identities. Spec text only.
+  Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec (~2)). Size gate: about 100 lines of diff (code, tests and docs,
+  not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
+  the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `nrstxrkvtsoxvymuvqrnnllxvosmlskv`, bookmark
+  `plan/gui-ux-wording/09-peer-text-normalization-contract`,
+  [PR #4261](https://github.com/scode/farhelm/pull/4261/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.
