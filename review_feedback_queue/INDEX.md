@@ -1578,9 +1578,6 @@ consequences.
   can make its terminal detach with an input-failure notice instead of the Delete's notice or its cleanup-failure
   explanation. The landed notice fix misses the reader's direct failure path.
 
-- [`transition-accessor-comment.md`](transition-accessor-comment.md) — A maintainer following the test's explanation
-  encounters an accessor name that no longer exists. No product behavior or lifecycle guarantee is shown to be wrong.
-
 - [`grid-row-is-not-program-line.md`](grid-row-is-not-program-line.md) — The new terminal transcript can make a
   partially rendered program line appear complete to a test. Agent checks can then reject correct behavior; one
   direct-signal caller could instead use a process-number prefix and terminate unrelated work. The exact short-line
