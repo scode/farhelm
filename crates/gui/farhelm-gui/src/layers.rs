@@ -126,10 +126,9 @@
 //! cached view, which on a 200-row session list is every row each time the pointer crosses a control.
 //!
 //! Terminal destination panels ask [`pointer_covers`] whether a later surface blocks input over any of their bounds.
-//! Pass-through and display-only surfaces leave that hit test alone. Menu items are plain buttons
-//! until the session row's menu brings the menu item component, so the popover golden shows centered item labels,
-//! which the old menus did not have; it is captured again with that component. The tooltip's own deviations and gaps
-//! are in the [`tooltip`] submodule's NOTE.
+//! Pass-through and display-only surfaces leave that hit test alone. The popover supplies the surface, while each
+//! menu supplies its items. Session row menus use the shared menu item component. The tooltip's own deviations and
+//! gaps are in the [`tooltip`] submodule's NOTE.
 //!
 //! # The z-order ladder
 //!

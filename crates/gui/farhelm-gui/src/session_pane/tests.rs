@@ -4,10 +4,9 @@
 //!
 //! The window is the real main view over the helm client's fake channel, and its connection hands out the fake terminal
 //! (`Connection::serve_terminals`), which plays the helm's side of every stream the pane opens and records it. The
-//! exceptions are the two tests about a text field that holds focus while a terminal arrives: the main screen has no
-//! text field yet (the session filter is a later area's), so those tests draw the session list and the pane beside a
-//! field of their own. Every step ends in one of the shared harness's step helpers, so the focus and layer invariants
-//! are checked after each.
+//! tests about a text field holding focus while a terminal arrives use a field of their own beside the list and pane.
+//! This lets them exercise typing across the terminal handoff. The shared step helpers check the focus and layer
+//! invariants after each step.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -332,8 +331,7 @@ fn a_click_focuses_the_terminal_and_typed_keys_reach_its_program(cx: &mut TestAp
     assert_eq!(fleet.attached(), ["a", "b"], "and opens nothing");
 }
 
-/// A root view with a text field above the session list, and the pane beside them: what the main screen will be once
-/// the session filter exists, which is the field SPEC.md's case is about.
+/// A root view with its own text field for testing that a newly live terminal leaves focus where the user is typing.
 struct WithField {
     list: Entity<SessionList>,
     pane: Entity<SessionPane>,

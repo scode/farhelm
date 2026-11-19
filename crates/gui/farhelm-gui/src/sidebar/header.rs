@@ -15,8 +15,8 @@
 //! - **The version** is this window's build in the monospace face at 12 pixels in `--fg-1`, pushed to the row's right
 //!   end and cut short with an ellipsis when it does not fit. Its hover help says what kind of build it is: a
 //!   development build ("not a release") or a release by number. The old app showed the helm's build instead when the
-//!   helm reported a different one, with hover help naming both; the GUI does not learn the helm's build yet, so that
-//!   case waits (the parity file records its wording).
+//!   helm reported a different one, with hover help naming both; this window does not learn the helm's build, so it
+//!   always shows its own (the parity file records the deviation).
 
 use farhelm_proto::{BUILD_VERSION, is_development_build};
 use gpui::{

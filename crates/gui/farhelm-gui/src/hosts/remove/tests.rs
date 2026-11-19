@@ -487,9 +487,8 @@ fn the_helms_success_closes_the_question_without_a_host_list(cx: &mut TestAppCon
 }
 
 /// With "Remove hosts without asking" on there is no question to hold a refusal, so the store's record under the
-/// host's row stays the report (the old app's short refusal dialog is not ported yet, a recorded deviation). Specified:
-/// with the preference on, the helm's 409 to the menu's Remove shows its words under `build-box`'s row, and nothing
-/// opens.
+/// host's row stays the place to report it. The old app used a short refusal dialog. With the preference on, a 409
+/// to Remove shows its reason under `build-box` and leaves no dialog open.
 #[gpui::test]
 fn without_asking_a_refused_removal_shows_under_the_hosts_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx, vec![preferences(true)]);

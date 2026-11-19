@@ -23,7 +23,7 @@
 //! The marks are pictures. What they say is in the avatar's accessible name and hover help ([`state_words`]), and for
 //! the Hosts control in its name and help ([`hosts_name`]), so none of them is a node of its own.
 //!
-//! NOTE: Not drawn yet, waiting for the Suspend and Resume piece: a changing sandbox's spinner in place of its dot.
+//! A changing sandbox keeps its status dot over the dimmed host icon.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::prelude::FluentBuilder as _;

@@ -57,11 +57,6 @@
 //! measured the help's 6-pixel gap from outside the column's 1-pixel right border, so drawing it on the column itself
 //! would put help a pixel nearer than the old app did. Without it, help that asks to sit beside the sidebar shows at
 //! the pointer.
-//!
-//! NOTE: Not built here, each with its own area: the macOS title band (the 48-pixel app bar with room for the window
-//! buttons and the window drag on its empty background, the desktop-integration area's) and the updater's states and
-//! actions in the version readout (the same area's). The version readout shows this window's build: the GUI does not
-//! learn the helm's build, so it cannot yet say when the two differ (the parity file records the wording that waits).
 
 mod header;
 

@@ -44,15 +44,14 @@
 //! - [`harness`]: the GUI's per-harness vocabulary: which mark an agent type draws, its picture and identity color,
 //!   the agent's product name, and its status-line words for a mode without checks.
 //! - [`launcher`]: the session launcher (New, Clone, Replace with, Restart with).
-//! - [`templates`]: launch templates and what launches from them (applying templates to the launcher's draft, so far).
+//! - [`templates`]: launch templates and what launches from them.
 //! - [`desktop`]: the desktop integration: the menu bar, quitting when the main window closes, the window's saved
 //!   frame, its title band and decorations, and the open-source notices.
 //! - [`update_readout`]: the desktop updater's state as the words and marks the version readout shows, pure so its
 //!   rules are tested without a window.
 //! - [`announcements`]: the Announcements dialog, updates and information from Farhelm the helm queues.
 //! - [`sounds`]: the status sounds: the rules for which one an observation plays and the three sounds synthesized into
-//!   WAV bytes, both plain Rust, the owner that observes the store and decides, and the seam a platform player plugs
-//!   into (none is installed yet, so nothing plays).
+//!   WAV bytes, the owner that observes the store and decides, and the platform player that startup installs when available.
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
 //! - [`shortcuts`]: the Keyboard shortcuts overview, every app-wide shortcut in this client's form, from its chord
 //!   or the Help menu.
@@ -63,8 +62,6 @@
 //! - [`rail_notices`]: the notices bell at the top of the host rail's foot and its panel of notices about hosts.
 //! - [`welcome`]: the Welcome card, and the owner of the dialogs a window opens by itself when it starts or resets
 //!   (the card, then the first batch of announcements).
-//!
-//! Still to come, each under its own module: the rest of actions and keys.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
 //! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance, start

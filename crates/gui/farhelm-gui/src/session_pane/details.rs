@@ -22,7 +22,7 @@
 //!   actions are unavailable, as the row does, and no age, as the old bar's `if … else if` chain drew one of the three.
 //! - **What a status cannot claim, it leaves out.** An unclassified session has no badge but keeps its age (SPEC.md,
 //!   "Status": a session nothing has classified "shows no status and still shows its age"). A stale session (its host is
-//!   not connected) has neither: its last-known status and age belong in the stale band, a later piece, and SPEC.md says
+//!   not connected) has neither: its last-known status and age belong in the stale band, and SPEC.md says
 //!   "a stale session's status appears only in its stale notice, not again in the bottom bar".
 //! - **Who gives way.** The bar never wraps. A live mark, the host mark and the age never shrink. The ended words, the
 //!   title and the host name shrink as the old bar's flex items did (`flex: 0 1 auto; min-width: 0`, GPUI's default

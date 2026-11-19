@@ -38,8 +38,8 @@
 //!   edits ([`draft::LaunchDraft::escalation_since`] from the draft before it), not edit by edit (SPEC_impl.md, "Launch
 //!   templates").
 //! - **What a mode holds.** [`draft::LaunchDraft::holds`] is the one presence check for the fields Restart with and
-//!   Replace with hold fixed. The equality rules a template needs beside it (a held value repeated as a no-op) are the
-//!   templates work's to add next to it.
+//!   Replace with hold fixed. [`crate::templates::apply`] treats a template's matching assignment to a held field
+//!   as a no-op.
 //! - **One submit path.** [`request`] turns a complete draft into its one request body, and [`launch`] sends it and
 //!   deals with the reply; a launch started without showing the launcher goes through the same check, body and reply
 //!   handling.
