@@ -45,8 +45,8 @@
 //!   session, and a reset drops them with the store and its holds.
 //! - **A finished batch clears its own targets** (refused ones included), only if no marking choice was made since it
 //!   was accepted ([`super::marking::Marks::revision`]: a gesture, Clear, the marked menu or a bulk question opening);
-//!   otherwise it leaves every mark alone. When that empties the bar while focus was on it, focus goes to the order's
-//!   title, as Clear's does.
+//!   otherwise it leaves every mark alone. When a focused control disappears with the bar, the focus coordinator
+//!   recovers to the open session's terminal or the window's other resting place.
 //! - **A bulk Delete holds the automatic selection back** until every admitted Delete has settled, queued ones and
 //!   other hosts' included: a queued Delete is held in the operation store as a Delete, which the list's settle
 //!   already counts as one in flight, so it never opens a session still waiting to be deleted. A Stop batch holds
@@ -648,7 +648,7 @@ impl SessionList {
             },
         );
         if hosts.is_empty() {
-            self.finish_batch(id, window, cx);
+            self.finish_batch(id, cx);
         }
         for host in hosts {
             self.advance(id, host, window, cx);
@@ -669,7 +669,7 @@ impl SessionList {
             let Some(target) = queue.pop_front() else {
                 batch.queues.remove(&host);
                 if batch.queues.is_empty() {
-                    self.finish_batch(id, window, cx);
+                    self.finish_batch(id, cx);
                 }
                 return;
             };
@@ -736,9 +736,7 @@ impl SessionList {
 
     /// Batch `id` has nothing left in flight or queued: forget it, clear its own targets unless a marking choice came
     /// since it was accepted, and settle, since its Deletes may have been what held the automatic selection back.
-    fn finish_batch(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let shown = self.marking.shown();
-        let in_bar = self.marking.holds_focus(window);
+    fn finish_batch(&mut self, id: u64, cx: &mut Context<Self>) {
         let current = self.current.current(cx);
         let Some(batch) = current.bulk.batches.remove(&id) else {
             return;
@@ -747,10 +745,6 @@ impl SessionList {
             current
                 .marks
                 .prune(|key| batch.targets.iter().any(|target| target == key));
-            // The bar goes when every mark it showed was the batch's; focus on it goes to the title, as Clear's does.
-            if in_bar && shown.iter().all(|key| batch.targets.contains(key)) {
-                focus::focus_control(&self.order_focus, &Mark::take(cx), window, cx);
-            }
             cx.notify();
         }
         self.settle(cx);

@@ -38,10 +38,8 @@
 //! - **Escape** in the list's column clears the marks and lets the key go on, so the window's own Escape (a tooltip
 //!   put away) still happens. A menu, a dialog, an inline question or the terminal that holds focus takes Escape before
 //!   it reaches the list, and keeps the marks.
-//! - **Focus.** Clear, Escape and a metadata action hand focus to the order's title when it was inside the bar or its
-//!   menu, since the control that held it goes with the bar, as the old bar's did; a press made elsewhere since leaves
-//!   focus alone. Marks that go for another reason (a filter hides them all) move no focus; the focus coordinator's
-//!   recovery takes over.
+//! - **Focus.** When Clear, Escape or a listing change removes the bar, the focus coordinator recovers focus if its
+//!   control disappeared. A metadata action from the marked menu hands focus to the order's title.
 //!
 //! An interaction counter ([`Marks::revision`]) moves with every marking choice, so a bulk Stop or Delete accepted
 //! earlier can tell whether the user has made a newer one since, and clears its own targets only if not.
@@ -417,7 +415,7 @@ pub(super) struct Kept {
     /// "N marked"'s handle. Not a tab stop: Tab skips the count, as the old `tabindex="-1"` did, but the app moves
     /// focus there when the bulk question is confirmed.
     count_focus: FocusHandle,
-    /// Stop's and Delete's handles, tab stops, owned here so that the bar knows when focus is on them.
+    /// Stop's and Delete's tab stops also give the question a return target when the marked menu is absent.
     stop_focus: FocusHandle,
     delete_focus: FocusHandle,
     /// The ⋯ toggle's handle, a tab stop.
@@ -479,20 +477,6 @@ impl Kept {
         self.projection
             .as_ref()
             .map_or(&[], |projection| &projection.offers)
-    }
-
-    /// Whether one of the bar's own controls holds focus, which then goes to the order's title when the bar goes
-    /// (the module docs, "Focus"), whichever way the bar goes: Clear, Escape, or a bulk batch clearing its targets.
-    pub(super) fn holds_focus(&self, window: &Window) -> bool {
-        [
-            &self.count_focus,
-            &self.stop_focus,
-            &self.delete_focus,
-            &self.menu_focus,
-            &self.clear_focus,
-        ]
-        .into_iter()
-        .any(|handle| handle.is_focused(window))
     }
 
     /// "N marked"'s focus handle, where a confirmed bulk question sends focus.
@@ -600,20 +584,9 @@ impl SessionList {
     /// to the window's own Escape (SPEC.md: Escape clears marks "without preventing default handling"). Anything that
     /// owns Escape inside the column (an inline question) takes it before it gets here, and layers and the terminal are
     /// outside the column.
-    pub(super) fn escape_in_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.clear_from_bar(window, cx);
-        cx.propagate();
-    }
-
-    /// Clear or Escape: clear the marks, and hand focus to the order's title if it was on one of the bar's controls,
-    /// which go with the bar. The focus is read before the marks go, while the bar is still the one drawn.
-    fn clear_from_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mark = Mark::take(cx);
-        let hand_back = self.marking.holds_focus(window);
+    pub(super) fn escape_in_list(&mut self, cx: &mut Context<Self>) {
         self.clear_marks(cx);
-        if hand_back {
-            focus::focus_control(&self.order_focus, &mark, window, cx);
-        }
+        cx.propagate();
     }
 }
 
@@ -756,8 +729,8 @@ impl SessionList {
         .tier(Tier::Ghost)
         .square(px(HEADING_ICON_SIDE))
         .focus(&self.marking.clear_focus)
-        .on_click(move |_, window, cx| {
-            let _ = cleared.update(cx, |list, cx| list.clear_from_bar(window, cx));
+        .on_click(move |_, _, cx| {
+            let _ = cleared.update(cx, |list, cx| list.clear_marks(cx));
         });
         Some(
             div()

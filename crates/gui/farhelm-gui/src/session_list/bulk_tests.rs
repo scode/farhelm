@@ -657,7 +657,7 @@ fn a_stop_batch_holds_no_automatic_selection_back(cx: &mut TestAppContext) {
 /// the marked count". Specified: Stop of a lone tabless a asks nothing; Stop of a, b (two tabs) and c (ended, no tabs)
 /// asks "Stop 3 sessions?" with focus on its Confirm and each row's own consequence; Confirm sends a's Stop refusing a
 /// new tab, then b's with no precondition, then c's refusing a new tab and a running agent, with focus on "N marked"
-/// meanwhile and on the order's title once the batch has cleared the marks and the bar.
+/// meanwhile and in the terminal once the batch has cleared the marks and the bar.
 #[gpui::test]
 fn a_bulk_stop_asks_about_tabs_and_freezes_each_rows_preconditions(cx: &mut TestAppContext) {
     let (mut fake, _list, cx) = open_list(
@@ -719,12 +719,11 @@ fn a_bulk_stop_asks_about_tabs_and_freezes_each_rows_preconditions(cx: &mut Test
         ]
     );
     assert_eq!(count(cx), None, "the batch cleared its targets");
-    assert_eq!(focused_id(cx).as_deref(), Some("session-order"));
+    assert!(test_support::terminal_focused(cx));
 }
 
 /// The old `session-action-completion.spec.ts`, "bulk Stop completion leaves the bystander terminal focused": a batch
-/// that finishes while the open session's terminal holds focus must leave the keyboard there, since the order's title
-/// takes focus only when the emptied bar held it; taking it would send the user's next key nowhere they chose. Under
+/// that finishes while the open session's terminal holds focus must leave the keyboard there. Under
 /// the macOS click rule the marking click and the bar's Stop leave focus where it was, which keeps it on the terminal
 /// without a click into the grid. Specified, under that rule: with c open and its terminal focused, a marked and its
 /// Stop sent from the bar, focus is still on the terminal; the Stop's answer clears a's mark and the bar, and c stays

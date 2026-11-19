@@ -1857,10 +1857,6 @@ consequences.
   the user has clicked elsewhere, if that click left focus on empty page space. Farhelm already knows the user pressed
   something and still moves focus.
 
-- [`bulk-completion-focuses-sort.md`](bulk-completion-focuses-sort.md) — When a completed bulk action removes the
-  focused toolbar, keyboard focus can move to the list's sorting heading instead of the selected session's terminal,
-  even when the user waited without pressing anything.
-
 - [`replace-selection-focus-contract.md`](replace-selection-focus-contract.md) — The specifications give conflicting
   answers about opening a replacement after the user types while its source remains selected. Current code follows the
   explicit Replace selection rule. Whether that violates the new focus policy remains unverified after investigation and

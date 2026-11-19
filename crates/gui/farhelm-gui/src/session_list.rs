@@ -790,7 +790,7 @@ impl Render for SessionList {
             .role(Role::List)
             .aria_label("Sessions")
             // Escape inside the column clears the marks without claiming the key ([`marking`]).
-            .on_action(cx.listener(|list, _: &Dismiss, window, cx| list.escape_in_list(window, cx)))
+            .on_action(cx.listener(|list, _: &Dismiss, _, cx| list.escape_in_list(cx)))
             .flex_1()
             .min_w_0()
             .h_full()

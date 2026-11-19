@@ -749,10 +749,21 @@ fn resting_place(window: &Window, cx: &App) -> Option<FocusHandle> {
 /// enabled again once the launch is answered. It never takes focus from a control that holds it, as [`set_home`] does
 /// not.
 ///
+/// GPUI can miss a loss when a control takes focus and disappears between frames with empty focus paths.
+/// Recover if the handle we drew for is still current and the finished frame does not contain it.
 /// The root view's own element queues it while every frame is prepared ([`root`]), so it runs once that frame is drawn
 /// and reads it. The focus move asks for the frame that shows it, as every focus move does.
-fn settle_home(window: &mut Window, cx: &mut App) {
-    if !holds_nothing(window, cx) || layers::focus_layer_open(window, cx) {
+fn settle_home(frame_focus: Option<FocusHandle>, window: &mut Window, cx: &mut App) {
+    if layers::focus_layer_open(window, cx) {
+        return;
+    }
+    if !holds_nothing(window, cx) {
+        if frame_focus
+            .is_some_and(|focus| focus.is_focused(window) && !is_drawn(&focus, window, cx))
+        {
+            recover(window, cx);
+            reveal_focused(window, cx);
+        }
         return;
     }
     let Some(home) = drawn_home(window, cx) else {
@@ -801,7 +812,10 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
         .child(
             canvas(
                 // Prepared on every frame, since the root view is never replayed from a cache.
-                |_, window, cx| window.defer(cx, settle_home),
+                |_, window, cx| {
+                    let frame_focus = window.focused(cx);
+                    window.defer(cx, move |window, cx| settle_home(frame_focus, window, cx));
+                },
                 |_, _, window, _| {
                     window.on_mouse_event(|_: &MouseDownEvent, phase, window, cx| {
                         if phase == gpui::DispatchPhase::Capture {
