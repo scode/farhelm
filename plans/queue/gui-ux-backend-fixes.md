@@ -338,30 +338,49 @@ about 200 lines, block again rather than widening the fix. The other six fixes s
 
 If the maintainer later prefers the split, that is a follow-up, not a reason to stop the plan.
 
-## Blocked
+### 2026-11-19: answer to a blocked question
 
-Blocked on 2026-11-19 (claim ce1220).
+The question, as the executor put it:
 
-### Land the six backend fixes while the Tensorlake pause fix waits?
+> Blocked on 2026-11-19 (claim ce1220).
+>
+> ### Land the six backend fixes while the Tensorlake pause fix waits?
+>
+> If you suspend a Tensorlake host in Farhelm, resume it outside Farhelm, and then Tensorlake pauses it again, Hosts can
+> still say “Suspended from Farhelm” with the first pause's time. Triage approved clearing the old time once Tensorlake
+> reports Running. The last plan decision allowed a single draft of about 200 changed lines including tests and required
+> a new Suspend from Farhelm to keep its own time.
+>
+> The second trial reached 265 changed lines, including a test of Hosts reading an older record alongside a newer
+> connection state. Source review found that the trial still has a race. If you click Suspend while Farhelm is recording
+> that the sandbox ran, and Tensorlake has already paused it again, that Suspend can reuse the first pause's time. Retry
+> can also expose the old time if the clear fails and Farhelm subsequently reconnects. The trial has no draft.
+>
+> I recommend landing the six reviewed fixes and scheduling pause attribution separately with room for the ordering
+> changes and their tests. That gets the six independent fixes to users sooner. The other option is to allow the single
+> pause draft to exceed the current size limit and hold the six drafts until it is ready.
+>
+> - Refuse port tunnels for retired sessions. [#4234](https://github.com/scode/farhelm/pull/4234/changes)
+> - Avoid a false shutdown warning after terminal recovery. [#4236](https://github.com/scode/farhelm/pull/4236/changes)
+> - Accept at-signs in agent endpoint paths. [#4237](https://github.com/scode/farhelm/pull/4237/changes)
+> - Quote literal words in displayed agent commands. [#4239](https://github.com/scode/farhelm/pull/4239/changes)
+> - Keep a stalled shell-tab reply from resetting the desktop connection.
+>   [#4243](https://github.com/scode/farhelm/pull/4243/changes)
+> - Return a refusal when an approval answer arrives too late.
+>   [#4250](https://github.com/scode/farhelm/pull/4250/changes)
 
-If you suspend a Tensorlake host in Farhelm, resume it outside Farhelm, and then Tensorlake pauses it again, Hosts can
-still say “Suspended from Farhelm” with the first pause's time. Triage approved clearing the old time once Tensorlake
-reports Running. The last plan decision allowed a single draft of about 200 changed lines including tests and required a
-new Suspend from Farhelm to keep its own time.
+The maintainer's answer:
 
-The second trial reached 265 changed lines, including a test of Hosts reading an older record alongside a newer
-connection state. Source review found that the trial still has a race. If you click Suspend while Farhelm is recording
-that the sandbox ran, and Tensorlake has already paused it again, that Suspend can reuse the first pause's time. Retry
-can also expose the old time if the clear fails and Farhelm subsequently reconnects. The trial has no draft.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks"; it is not a huge question.
 
-I recommend landing the six reviewed fixes and scheduling pause attribution separately with room for the ordering
-changes and their tests. That gets the six independent fixes to users sooner. The other option is to allow the single
-pause draft to exceed the current size limit and hold the six drafts until it is ready.
+Decision: deliver the plan with the six reviewed fixes and take the Tensorlake pause attribution fix (a later Tensorlake
+pause showing the earlier "Suspended from Farhelm" label and time) out of this plan, as recommended. Push no pause
+attribution draft. Leave that outcome unexecuted in the triage ledger, with its feedback file and index line in place,
+and note in its ledger entry that it was taken out of this plan on 2026-11-19 because a correct fix needs the ordering
+changes review found (a Suspend racing the record of the sandbox running, and Retry after a failed clear) and more room
+than the plan's size limit, so that it can be scheduled again as a plan of its own. Say this in the report's things you
+should know, with the race review found.
 
-- Refuse port tunnels for retired sessions. [#4234](https://github.com/scode/farhelm/pull/4234/changes)
-- Avoid a false shutdown warning after terminal recovery. [#4236](https://github.com/scode/farhelm/pull/4236/changes)
-- Accept at-signs in agent endpoint paths. [#4237](https://github.com/scode/farhelm/pull/4237/changes)
-- Quote literal words in displayed agent commands. [#4239](https://github.com/scode/farhelm/pull/4239/changes)
-- Keep a stalled shell-tab reply from resetting the desktop connection.
-  [#4243](https://github.com/scode/farhelm/pull/4243/changes)
-- Return a refusal when an approval answer arrives too late. [#4250](https://github.com/scode/farhelm/pull/4250/changes)
+This replaces the previous answer's 200-line allowance. If the maintainer later prefers holding the six fixes for a
+single larger pause draft, that is a follow-up, not a reason to stop the plan.
