@@ -6,3 +6,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`submenus-open-on-hover`](reports/submenus-open-on-hover.report.md) landed 2026-11-19 in #4139: Submenus open on hover, keeping their parent item highlighted
 - [`clone-keeps-invisible-characters`](reports/clone-keeps-invisible-characters.report.md) landed 2026-11-19 in #4131, #4132: Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
 - [`retire-old-terminal-announcement`](reports/retire-old-terminal-announcement.report.md) landed 2026-11-19 in #4140: Remove the stale 0.37.0 old-terminal in-app announcement
+- [`update-survival-wording`](reports/update-survival-wording.report.md) landed 2026-11-19 in #4145: General survival statements stay general: SPEC.md records the principle and the old-terminal update note
