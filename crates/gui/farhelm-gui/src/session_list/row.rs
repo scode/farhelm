@@ -122,6 +122,9 @@ pub(super) const ENDED_ID_SUFFIX: &str = "-ended";
 /// The id suffix of a row's age, after the row's open control id (`session-row-<key>-age`).
 pub(super) const AGE_ID_SUFFIX: &str = "-age";
 
+/// The docs callout targets the host and directory line of a normal row, using the session's stable key.
+const PLACE_ID_SUFFIX: &str = "-place";
+
 /// The id suffix of a stale row's cause, after the row's open control id (`session-row-<key>-cause`): the words on a
 /// noncompact row's ended line, and the clock after a compact row's title, so either is found the same way.
 pub(super) const CAUSE_ID_SUFFIX: &str = "-cause";
@@ -483,7 +486,7 @@ pub(crate) fn row(
             &id, ended, cause, suspended, deleting, palette, selected, inks,
         ));
     }
-    if !compact && let Some(meta) = meta_line(session, collections, inks) {
+    if !compact && let Some(meta) = meta_line(&id, session, collections, inks) {
         control = control.line(meta);
     }
     let (press_list, press_key) = (list.clone(), session.key.to_owned());
@@ -906,8 +909,14 @@ fn detail_line(
 /// end of the path stays visible; the directory is in the monospace face, like the age. With no host name the line is
 /// the directory alone, and with no directory the host alone, never a dangling separator; with neither there is no line
 /// at all (`None`), since an empty line would only add height. SPEC.md, "Session list": the row shows only the
-/// directory "rather than inventing a local identity or a dangling separator".
-fn meta_line(session: Listed, collections: &Collections, inks: Inks) -> Option<impl IntoElement> {
+/// directory "rather than inventing a local identity or a dangling separator". The docs capture points at this line's
+/// own bounds so the callout follows it when other content changes the row's height.
+fn meta_line(
+    row_id: &str,
+    session: Listed,
+    collections: &Collections,
+    inks: Inks,
+) -> Option<impl IntoElement> {
     let row = session.row;
     let (host, cwd) = meta_parts(row, collections.get::<HostView>(&HostView::key(row.host)));
     // An environment session's host goes by its environment's name ("dev sandbox"), not the registry's.
@@ -922,6 +931,7 @@ fn meta_line(session: Listed, collections: &Collections, inks: Inks) -> Option<i
     let separator = host.is_some() && cwd.is_some();
     Some(
         div()
+            .id(SharedString::from(format!("{row_id}{PLACE_ID_SUFFIX}")))
             .flex()
             .flex_row()
             .min_w_0()

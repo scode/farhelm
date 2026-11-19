@@ -229,7 +229,7 @@ impl Choice {
             }
             Choice::ColorTerminalFrames => "Color each terminal's frame to match its host icon",
             Choice::AutoUpdateRemoteHosts => {
-                "Update remote hosts as soon as an update is available, even with no window open; never update the \
+                "Update remote hosts as soon as an update is available, while Farhelm is open; never update the \
                  helm's own machine"
             }
             Choice::SkipHostSetupConfirmation => {
@@ -278,7 +278,7 @@ impl Choice {
                  agent show here right away."
             }
             Choice::AutoUpdateRemoteHosts => {
-                "Update remote hosts as soon as an update is available, even with no window open. This never updates \
+                "Update remote hosts as soon as an update is available, while Farhelm is open. This never updates \
                  the helm's own machine."
             }
             Choice::SkipHostSetupConfirmation if on => {
