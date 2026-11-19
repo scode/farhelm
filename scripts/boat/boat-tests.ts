@@ -20,6 +20,10 @@
  *                                       hash partitions of a nextest archive over n members
  *   gui --out <dir> [--no-build] [smoke] [lifecycle]
  *                                       the GPUI app's end-to-end smoke and/or Linux lifecycle on one member
+ *   docs --out <dir> [--no-build] [--only <page>]... [--members <n>] | docs --out <dir> --build-there
+ *                                       the docs website's screenshots (`scripts/docs-screenshots.sh`): the whole
+ *                                       capture on one member, or the named pages spread over up to n members;
+ *                                       --build-there builds on the member, for a publishable capture
  *   status | extend [--ttl <s>] | down  list, push out deadlines, delete every member
  *
  * Sandboxes are created with --no-env (no account secrets reach them), --no-snapshots and --no-monitoring, and only
@@ -30,7 +34,7 @@ import { parseArgs } from "jsr:@std/cli@1.0.32/parse-args";
 import { assertEquals } from "jsr:@std/assert@1.0.19";
 
 const HERE = import.meta.dirname!;
-const SANDBOX_SCRIPTS = ["bootstrap.sh", "reset.sh", "run-rust-shard.sh", "run-gui.sh"];
+const SANDBOX_SCRIPTS = ["bootstrap.sh", "reset.sh", "run-rust-shard.sh", "run-gui.sh", "run-docs.sh"];
 const H = "/home/user";
 // The checkout whose build is tested; `--repo` overrides it for a copy of this script run from elsewhere.
 let REPO = Deno.realPathSync(`${HERE}/../..`);
@@ -304,10 +308,21 @@ async function collect(m: Member, label: string, files: string[], r: ExecResult,
 // --- packing the tree
 
 /** The tracked source, and a one-commit clone for the scripts that read git metadata. The tree is unpacked on the
- * sandbox at this checkout's own absolute path, since test binaries have it compiled in. */
-async function packSource(out: string) {
-  await $`git ls-files -z --cached | tar --null -czf ${out}/src.tar.gz -T -`.cwd(REPO).pipefail();
-  await $`git clone -q --depth 1 ${"file://" + REPO} ${out}/shallow`;
+ * sandbox at this checkout's own absolute path, since test binaries have it compiled in. `untracked` adds files git
+ * does not track yet but would not ignore, for a docs capture of page modules still being written. `withMain` deepens
+ * the clone down to where HEAD leaves main and records main as `origin/main` there, for a docs capture that checks the
+ * app code it builds against main's (`scripts/docs-screenshots.sh`). */
+async function packSource(out: string, untracked = false, withMain = false) {
+  const others = untracked ? ["--others", "--exclude-standard"] : [];
+  await $`git ls-files -z --cached ${others} | tar --null -czf ${out}/src.tar.gz -T -`.cwd(REPO).pipefail();
+  let depth = "1";
+  let main = "";
+  if (withMain) {
+    main = (await $`git merge-base HEAD refs/remotes/origin/main`.cwd(REPO).text()).trim();
+    depth = String(Number((await $`git rev-list --count ${main + "..HEAD"}`.cwd(REPO).text()).trim()) + 1);
+  }
+  await $`git clone -q --depth ${depth} ${"file://" + REPO} ${out}/shallow`;
+  if (withMain) await $`git -C ${out}/shallow update-ref refs/remotes/origin/main ${main}`;
   await $`tar -czf ${out}/git.tar.gz -C ${out}/shallow .git`;
   await $`rm -rf ${out}/shallow`;
 }
@@ -448,8 +463,9 @@ async function runRust(a: Record<string, string>, filter: string[]) {
  * command line come out exactly as a local run builds them), relative to the checkout. */
 const GUI_BINARIES = ["farhelm-desktop", "farhelm", "farhelm-fixtures", "gpui-agent"].map((b) => `target/debug/${b}`);
 
-async function packGui(build: boolean) {
-  const out = `${SCRATCH}/gui-pack`;
+async function packGui(build: boolean, untracked = false, buildThere = false) {
+  // One pack directory per process: concurrent docs runs from several agents must not repack over each other.
+  const out = `${SCRATCH}/gui-pack-${Deno.pid}`;
   await $`rm -rf ${out}`;
   await $`mkdir -p ${out}`;
   if (build) {
@@ -457,9 +473,85 @@ async function packGui(build: boolean) {
       "m = u.module_from_spec(s); s.loader.exec_module(m); m.build(m.target_dir())";
     await $`python3 -c ${py} scripts/gui-agent.py`.cwd(REPO);
   }
-  await packSource(out);
-  await $`tar -czf ${out}/bin.tar.gz ${GUI_BINARIES}`.cwd(REPO);
+  await packSource(out, untracked, buildThere);
+  // A run that builds on the sandbox gets no binaries from here: what it builds is what it vouches for.
+  if (buildThere) await $`tar -czf ${out}/bin.tar.gz --files-from /dev/null`;
+  else await $`tar -czf ${out}/bin.tar.gz ${GUI_BINARIES}`.cwd(REPO);
   return out;
+}
+
+/** Splits `pages` round-robin over `members` lists, in page order within each, so the pages a run names spread evenly
+ * over the members it got. */
+export function spread(pages: string[], members: number): string[][] {
+  const lists: string[][] = Array.from({ length: Math.max(1, Math.min(members, pages.length)) }, () => []);
+  pages.forEach((page, i) => lists[i % lists.length].push(page));
+  return lists;
+}
+
+/** Claims up to `n` free members, settling for fewer (at least one) when the rest of the budget is busy: a docs run with
+ * several pages runs them on whatever members it can get rather than failing. */
+async function claimUpTo(n: number, type: string): Promise<Member[]> {
+  for (let k = n; k > 1; k--) {
+    try {
+      return await claim(k, type);
+    } catch { /* fewer */ }
+  }
+  return await claim(1, type);
+}
+
+/** One member's share of a docs run: its pages one after the other (`sandbox/run-docs.sh`), or the whole capture when
+ * `pages` is empty. Each page's PNGs come back into `<out>/docs/shots/<page>/`, and its summary, log and exec output
+ * into `<out>/docs/<page or "all">/`. Returns whether every page captured cleanly. */
+async function docsOnMember(m: Member, pack: string, pages: string[], out: string, mode: string): Promise<boolean> {
+  await pushScripts(m);
+  await bexecOk(m, ["bash", `${H}/bin/reset.sh`]);
+  Deno.writeTextFileSync(RUST_STAGE(), JSON.stringify(rustStage().filter((nm) => nm !== m.name)));
+  for (const f of ["src.tar.gz", "git.tar.gz", "bin.tar.gz"]) await put(m, `${pack}/${f}`, `${H}/stage/${f}`);
+  await unpack(m, ["bin.tar.gz"]);
+  let ok = true;
+  for (const page of pages.length ? pages : [""]) {
+    const r = await bexec(m.id, ["bash", `${H}/bin/run-docs.sh`, REPO, mode, ...(page ? [page] : [])]);
+    const dir = `${out}/docs/${page || "all"}`;
+    await $`rm -rf ${dir}`;
+    await $`mkdir -p ${dir} ${out}/docs/shots`;
+    await Deno.writeTextFile(`${dir}/exec.log`, r.out.slice(-20000));
+    for (const f of ["summary.txt", "docs.log", "shots.tar.gz"]) await get(m, `${H}/out/docs/${f}`, `${dir}/${f}`);
+    await $`tar -xzf ${dir}/shots.tar.gz -C ${out}/docs/shots`.noThrow();
+    console.log(`${m.name} ${page || "all pages"}: ${r.code === 0 ? "captured" : `FAILED (exit ${r.code})`}`);
+    console.log(r.out.trim().split("\n").slice(-12).join("\n"));
+    if (!r.sawExit) {
+      await markDirty(m);
+      return false;
+    }
+    ok &&= r.code === 0;
+  }
+  return ok;
+}
+
+/** The docs screenshots on the pool: the whole capture on one member, or the pages named with `--only` (repeatable)
+ * spread over up to `--members` members (default: one per page, within the budget), each running its share one page
+ * at a time. The PNGs come back into `<out>/docs/shots/<page>/<shot>.png`. A run from shipped binaries is never
+ * publishable, since `scripts/docs-screenshots.sh` writes its record only when it built the binaries itself; so
+ * `--build-there` (whole capture only) ships no binaries and has the member build them from the shipped source, with
+ * main recorded beside it for the capture's check that the app code is main's. Its record comes back as
+ * `<out>/docs/shots/capture.json`, ready to publish. */
+async function runDocs(a: Record<string, string>, pages: string[]) {
+  const buildThere = Boolean(a["build-there"]);
+  if (buildThere && (pages.length || a["no-build"])) throw new Error("--build-there takes neither --only nor --no-build");
+  const pack = await packGui(!a["no-build"] && !buildThere, true, buildThere);
+  const want = pages.length ? Math.min(pages.length, Number(a.members ?? pages.length), BUDGET) : 1;
+  const members = await claimUpTo(want, a.type ?? "large");
+  try {
+    const shares = pages.length ? spread(pages, members.length) : [[]];
+    const mode = buildThere ? "build" : "shipped";
+    const results = await Promise.all(shares.map((share, i) => docsOnMember(members[i], pack, share, a.out, mode)));
+    const ok = results.every(Boolean);
+    console.log(ok ? `DOCS SHOTS CAPTURED into ${a.out}/docs/shots` : "DOCS SHOTS FAILED (see the lines above)");
+    if (!ok) Deno.exitCode = 1;
+  } finally {
+    members.forEach(unlock);
+    await $`rm -rf ${pack}`;
+  }
 }
 
 async function runGui(a: Record<string, string>, suites: string[]) {
@@ -480,6 +572,7 @@ async function runGui(a: Record<string, string>, suites: string[]) {
     console.log(r.code === 0 ? "GUI SUITES PASSED" : `GUI SUITES FAILED (exit ${r.code})`);
   } finally {
     unlock(m);
+    await $`rm -rf ${pack}`;
   }
 }
 
@@ -516,8 +609,9 @@ async function down() {
 
 if (import.meta.main) {
   const args = parseArgs(Deno.args, {
-    string: ["scratch", "count", "type", "shards", "out", "archive", "ttl", "repo", "prefix", "budget"],
-    boolean: ["reuse-stage", "no-build"],
+    string: ["scratch", "count", "type", "shards", "out", "archive", "ttl", "repo", "prefix", "budget", "members"],
+    collect: ["only"],
+    boolean: ["reuse-stage", "no-build", "build-there"],
     "--": true,
   });
   const [cmd, ...rest] = args._.map(String);
@@ -528,19 +622,20 @@ if (import.meta.main) {
   PREFIX = a.prefix ?? defaultPrefix(REPO);
   if (a.budget) BUDGET = Number(a.budget);
   await $`mkdir -p ${SCRATCH}`;
-  if ((cmd === "rust" || cmd === "gui") && !a.out) throw new Error("--out <dir> is required");
+  if ((cmd === "rust" || cmd === "gui" || cmd === "docs") && !a.out) throw new Error("--out <dir> is required");
   if (cmd === "up") {
     const ms = await claim(Number(a.count ?? "1"), a.type ?? "large");
     ms.forEach(unlock);
     await status();
   } else if (cmd === "rust") await runRust(a, (args["--"] ?? []).map(String));
   else if (cmd === "gui") await runGui(a, rest);
+  else if (cmd === "docs") await runDocs(a, (args.only ?? []).map(String));
   else if (cmd === "status") await status();
   else if (cmd === "extend") {
     for (const m of readPool()) await $`boat extend ${m.id} --ttl ${a.ttl ?? String(MIN_TTL_S)}`.quiet();
     await status();
   } else if (cmd === "down") await down();
-  else throw new Error("usage: boat-tests.ts up|rust|gui|status|extend|down --scratch <dir> ... (see the header)");
+  else throw new Error("usage: boat-tests.ts up|rust|gui|docs|status|extend|down --scratch <dir> ... (see the header)");
 }
 
 /** Shards consume staged payloads through nextest's scoped setup environment and cannot run Cargo. Exercise the shard
@@ -577,6 +672,12 @@ Deno.test("the shard config removes only the local fixture builder and keeps the
   } finally {
     await Deno.remove(scratch, { recursive: true });
   }
+});
+
+Deno.test("a docs run's pages spread round-robin over the members it got, in page order within each", () => {
+  assertEquals(spread(["a", "b", "c", "d", "e"], 3), [["a", "d"], ["b", "e"], ["c"]]);
+  assertEquals(spread(["a", "b"], 3), [["a"], ["b"]]);
+  assertEquals(spread(["a"], 0), [["a"]]);
 });
 
 Deno.test("the default prefix is derived from the checkout's directory name", () => {

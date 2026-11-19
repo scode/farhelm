@@ -1098,10 +1098,11 @@ systemd or SSH substrate ran.
   retaining the scoped prebuilt-Podman setup while removing only the local fixture build. Run them, with `deno check`,
   when the harness changes; seconds, no sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
 - `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
-  `shellcheck scripts/boat/sandbox/*.sh` — the boat harness's own checks (the Rust shard and GPUI runner and its pool):
-  the shard configuration dropping only the local fixture build and keeping the scoped Podman setup, how an exec's
-  output frames are read (an exec without its exit frame is never trusted), and the default sandbox name prefix. Run
-  them when the harness changes; seconds, no sandbox. Using the harness itself is described in `.agents/boat.md`.
+  `shellcheck scripts/boat/sandbox/*.sh` — the boat harness's own checks (the Rust shard, GPUI and docs screenshot
+  runner and its pool): the shard configuration dropping only the local fixture build and keeping the scoped Podman
+  setup, how an exec's output frames are read (an exec without its exit frame is never trusted), how a docs run's pages
+  spread over its members, and the default sandbox name prefix. Run them when the harness changes; seconds, no sandbox.
+  Using the harness itself is described in `.agents/boat.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,

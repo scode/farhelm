@@ -118,6 +118,8 @@ Before reading `refreshed_through`, read these in full:
 - `docs/docs-shots/SPEC.md`
 - `docs/readme-hero/SPEC.md` (its staging rules govern the docs shots too)
 - `.agents/docs-media.md` (root; the docs refresh and docs screenshots sections)
+- `.agents/boat.md` (root), when the request asks for boats ("with N boats"; `website/.agents/refreshing.md`, "With N
+  boats")
 - the `jjstack` skill
 - `AGENTS.md`, "Tests and validation" (root, already in context for agents started at the checkout root)
 - `.agents/validation.md`
