@@ -3,7 +3,7 @@
 //! Adapted from Farhelm's `assets/grid-buffer.js` at the pinned revision. Its
 //! selection rules derive from xterm.js 6.0.0 (MIT); see LICENSE-PORTED.
 
-use crate::{GridModel, GridRow};
+use crate::{GridModel, GridRow, style_flags};
 use std::ops::Range;
 
 // Keep byte-identical to grid-buffer.js's pinned WORD_SEPARATORS (xterm's
@@ -118,7 +118,7 @@ impl GridModel {
     pub fn word_range(&self, position: Position) -> Option<Selection> {
         self.selection_line(position.line)?;
         let (first, last) = self.wrapped_span(position.line, usize::MAX, 2048);
-        let cells = self.word_cells(first, last);
+        let cells = self.word_cells(first, last, false);
         let at = cells.iter().position(|cell| {
             cell.position.line == position.line
                 && position.col >= cell.position.col
@@ -238,9 +238,10 @@ impl GridModel {
         (first, last)
     }
 
-    /// Map a caller-bounded word or URL window to UTF-16 cell owners. Uncovered
-    /// wide-wrap padding is not text and cannot become a spurious boundary.
-    pub(crate) fn word_cells(&self, first: u64, last: u64) -> Vec<WordCell> {
+    /// Map a bounded text window to UTF-16 cell owners, omitting unused wide-wrap padding.
+    /// Printed URL detection blanks concealed runs so they break a match without joining the text on either side.
+    /// Word selection reads the original text, including concealed runs.
+    pub(crate) fn word_cells(&self, first: u64, last: u64, blank_concealed: bool) -> Vec<WordCell> {
         let mut cells = Vec::new();
         for line in first..=last {
             let Some((cols, row)) = self.selection_line(line) else {
@@ -256,7 +257,9 @@ impl GridModel {
             };
             for run in &row.runs {
                 blank(&mut cells, col, run.col);
-                if run.is_plain_flow() {
+                if blank_concealed && run.style.flags & style_flags::HIDDEN != 0 {
+                    blank(&mut cells, run.col, run.col + run.width);
+                } else if run.is_plain_flow() {
                     cells.extend(run.text.bytes().enumerate().map(|(offset, byte)| WordCell {
                         position: Position {
                             line,

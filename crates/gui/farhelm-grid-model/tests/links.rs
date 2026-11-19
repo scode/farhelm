@@ -5,7 +5,9 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
-use farhelm_grid_model::{GridModel, GridOutput, LinkKind, Position, tunnel_port, web_target};
+use farhelm_grid_model::{
+    GridModel, GridOutput, LinkKind, Position, SelectionMode, style_flags, tunnel_port, web_target,
+};
 use serde_json::{Value, json};
 
 /// Explicit cell rows pass the actual wire encoder/checker before lookup. This
@@ -66,6 +68,47 @@ fn plain_urls_join_wraps_and_keep_unicode_cell_offsets() {
     let link = wide.link_at(Position { line: 0, col: 3 }).unwrap();
     assert_eq!(link.ranges[0].start.col, 3);
     assert!(!link.covers(Position { line: 0, col: 2 }));
+}
+
+/// A hidden suffix cannot extend the address opened by a click on the visible prefix.
+#[test]
+fn a_printed_link_ends_before_a_concealed_suffix() {
+    let model = model(
+        32,
+        vec![json!({"w":false,"r":[
+            [0,20,"https://example.test",[0,-1,-1]],
+            [20,7,".hidden",[style_flags::HIDDEN,-1,-1]]
+        ]})],
+        vec![],
+    );
+    let link = model.link_at(Position { line: 0, col: 8 }).unwrap();
+    assert_eq!(link.kind, LinkKind::Text);
+    assert_eq!(link.uri, "https://example.test");
+    assert_eq!(link.ranges[0].end, Position { line: 0, col: 20 });
+    assert!(model.link_at(Position { line: 0, col: 20 }).is_none());
+}
+
+/// A concealed run across a soft wrap breaks the link without changing what copying that range yields.
+#[test]
+fn concealed_text_breaks_a_wrapped_link_but_remains_in_selection() {
+    let model = model(
+        20,
+        vec![
+            ascii("https://example.test", true, None),
+            json!({"w":false,"r":[[0,5,"/mask",[style_flags::HIDDEN,-1,-1]],[5,5,"/tail",[0,-1,-1]]]}),
+        ],
+        vec![],
+    );
+    let word = model.word_range(Position { line: 0, col: 8 }).unwrap();
+    assert_eq!(word.mode, SelectionMode::Linear);
+    assert_eq!(
+        model.selection_text(word.start, word.end, word.mode),
+        "https://example.test/mask/tail",
+    );
+    let link = model.link_at(Position { line: 0, col: 8 }).unwrap();
+    assert_eq!(link.uri, "https://example.test");
+    assert_eq!(link.ranges.len(), 1);
+    assert!(model.link_at(Position { line: 1, col: 5 }).is_none());
 }
 
 /// Explicit OSC ownership defeats prose recognition even for an inert scheme;
