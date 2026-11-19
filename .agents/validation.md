@@ -754,16 +754,17 @@ systemd or SSH substrate ran.
   where drawn, the size check quoting the window's points and scale, and against a stand-in bridge the order of park,
   focus click, park and shot, with nothing written on a failed check, and `--keep-focus` retaining the parks and leak
   probes without a click or transcript wait, and `--park` hovering its named id without searching and naming a refused
-  target), the wait for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply
-  without a body read as none, that a recorded pid whose start time no longer matches is never signalled (from /proc on
-  Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by
-  `stop` while part of the run may still be running, given up by a holder whose `start` was killed while it waited, and
-  a lock path that cannot be opened failing at once), and on Linux the private scaling keyfile and cleanup of a
-  compositor that fails to start. Seconds; builds nothing and starts no app (the sshd tests start a private sshd on
-  127.0.0.1); runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then
-  `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the
-  same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the bridge's wiring
-  in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
+  target), a capture's settling, which leaves the terminal's contents out of what must stop changing, the wait for a
+  fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply without a body read as none,
+  that a recorded pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the
+  C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may
+  still be running, given up by a holder whose `start` was killed while it waited, and a lock path that cannot be opened
+  failing at once), and on Linux the private scaling keyfile and cleanup of a compositor that fails to start. Seconds;
+  builds nothing and starts no app (the sshd tests start a private sshd on 127.0.0.1); runs on Linux and macOS. The
+  harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`,
+  `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the
+  script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or
+  the app's startup changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits

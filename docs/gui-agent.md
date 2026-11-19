@@ -309,7 +309,10 @@ hero, and `scripts/docs_shots.py` uses it for docs screenshots. The demo video c
   until it shows the last line its transcript prints;
 - parks the pointer on an element whose centre is outside everything that reacts to a resting pointer (the bridge's
   `hover` and `tooltip` flags), before the click and again after it, and waits until the window stops changing. On a Mac
-  the pointer is the real one, and resting on a terminal link it opens a tooltip naming the link's real target;
+  the pointer is the real one, and resting on a terminal link it opens a tooltip naming the link's real target. The wait
+  reads the bridge's raw frame itself and leaves the terminal's contents out (`settle`): a running agent redraws a clock
+  in its terminal every second, and on a loaded machine, where one read of the frame takes that long, the bridge's own
+  `wait --idle` never saw two reads match and timed out;
 - checks for leaks before and after the shot, in the bridge's raw frame (`tree`) and the terminal's text. Machine paths
   (the run directory, the checkout, the build directory, the account's home) are refused anywhere, accessible labels and
   text out of view included. The account's ssh spelling (`$USER@localhost`, `$USER@`) and the hostname are refused only
