@@ -5299,10 +5299,10 @@ than the one deleted. A number-key change re-reads the bindings before it saves 
 agent's or the command line's binding change that lands between that read and the write can be undone (Creation). That
 overwriting is accepted.
 
-Decided 2026-10-22: a GUI save that fails, for any reason, is reported to the user and then discarded. The GUI does not
-keep the change it tried to save, does not treat it as the current state, and does not retry or replay it later; the
-next view or save starts from what the helm reports, and the user redoes the change if they still want it. Reporting the
-failure keeps the rule that an action is never lost silently (see Losing the connection to the helm).
+By default (decided 2026-10-22), the GUI reports a failed save, discards the attempted change, and starts the next view
+or save from what the helm reports. Best-effort saves follow the exceptions in Errors and diagnostics. Where this
+specification keeps a draft editable, as in the Templates editor and Credentials, the user can correct it and save
+again. The GUI never retries or replays a failed save on its own.
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
 behind another, may be carried out as delivered. A pointer or keyboard action uses the target, consent and preconditions
