@@ -199,10 +199,6 @@ consequences.
   — An old open page requires reload after the grid-only update. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`header-questions-follow-anchor-across-sessions.md`](header-questions-follow-anchor-across-sessions.md) — A Restart
-  or similar question can stay under the next session's button even though answering it still acts on the original
-  session.
-
 - [`omitted-session-row-drops-live-tabs.md`](omitted-session-row-drops-live-tabs.md) — A list update can take away the
   shell tab you’re using and make the agent terminal receive your next typing. The shell on the host can keep running.
 

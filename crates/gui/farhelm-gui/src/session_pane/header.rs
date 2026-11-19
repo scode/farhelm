@@ -646,7 +646,8 @@ impl SessionPane {
         } else {
             &Action::ALL
         };
-        // Each control's anchor, and each split's choices and caret, once: both looks of the actions share them.
+        // Questions and caret menus belong to the session that opened them. A new session's controls must not
+        // provide an anchor for a layer that still targets the previous session.
         let mut anchors = HashMap::new();
         let mut carets = HashMap::new();
         let mut slots = Vec::new();
@@ -654,14 +655,14 @@ impl SessionPane {
             // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
             if action == Action::Stop && shown.offer.environment.is_some() {
                 let anchor = Anchor::for_element(
-                    SharedString::from(format!("{ENVIRONMENT_ID}-anchor")),
+                    SharedString::from(format!("{ENVIRONMENT_ID}-anchor-{key}")),
                     window,
                     cx,
                 );
                 anchors.insert(Control::Environment, anchor);
             }
             let anchor = Anchor::for_element(
-                SharedString::from(format!("{}-anchor", action.id())),
+                SharedString::from(format!("{}-anchor-{key}", action.id())),
                 window,
                 cx,
             );
@@ -937,8 +938,9 @@ impl SessionPane {
     }
 
     /// Ask the question `question` builds for `asking`'s control about its session, hung under the action's button as
-    /// last drawn (centered if it was not drawn), returning focus home on Escape. Nothing opens when the user has moved
-    /// on since `asking`'s mark. The question closes when the session is gone. Returns whether it opened.
+    /// last drawn (centered if it was not drawn), returning focus home on Escape. Nothing opens after the selection
+    /// changes or the user moves on from the gesture. The question closes when its session goes away. Returns whether
+    /// it opened.
     fn ask<T: Clone + 'static>(
         &mut self,
         asking: Asking,
@@ -948,6 +950,10 @@ impl SessionPane {
         cx: &mut Context<Self>,
     ) -> bool {
         let Asking { control, key, mark } = asking;
+        // Suspend can wait for an activity read. Its answer must still belong to the session shown in the pane.
+        if self.open_key(cx).as_deref() != Some(key) {
+            return false;
+        }
         let question = question().returns_home_on_escape();
         let subject = Subject::session(key, cx);
         let asked = match self.header.anchors.get(&control).cloned() {
