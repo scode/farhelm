@@ -250,6 +250,7 @@ pub struct Question<T> {
     on_alternatives: Vec<Action<T>>,
     confirm_enabled: bool,
     starts_on_cancel: bool,
+    wait_until_shown: bool,
     keeps_focus_on_empty_click: bool,
     returns_to: ReturnTo,
     /// Drawn inline in the loud look ([`Question::loud`]).
@@ -302,6 +303,7 @@ impl<T: Clone + 'static> Question<T> {
             on_alternatives: Vec::new(),
             confirm_enabled: true,
             starts_on_cancel: false,
+            wait_until_shown: false,
             keeps_focus_on_empty_click: false,
             returns_to: ReturnTo::Opener,
             loud: false,
@@ -342,6 +344,13 @@ impl<T: Clone + 'static> Question<T> {
     /// started earlier finished, rather than in direct answer to what they just did.
     pub fn starts_on_cancel(mut self) -> Self {
         self.starts_on_cancel = true;
+        self
+    }
+
+    /// Require the first wording to reach the screen before accepting a consequential answer. Use this when a
+    /// background reply can open the question during keyboard input. Cancel is available immediately.
+    pub(crate) fn wait_until_shown(mut self) -> Self {
+        self.wait_until_shown = true;
         self
     }
 
@@ -730,9 +739,9 @@ pub struct Prompt<T: 'static> {
     /// attempt runs, or when nothing held focus then, in which case the refusal leaves focus alone; a centered
     /// question's focus trap keeps focus inside it, so that case does not arise there today.
     focus_at_attempt: Option<WeakFocusHandle>,
-    /// How many times the question has been reworded ([`Open::reword`]), and the count as of the last frame shown on
-    /// screen. While the two differ, the user has not yet seen the words the answers would act on, and only Cancel
-    /// answers.
+    /// The current wording's revision and the revision of the last wording shown on screen. A question that waits
+    /// for presentation starts at revision 1. A reword increments the revision. Only Cancel answers while the
+    /// revisions differ, since the user has yet to see the words the other answers would act on.
     wording: u32,
     drawn_wording: u32,
     confirm_focus: FocusHandle,
@@ -789,7 +798,7 @@ impl<T: Clone + 'static> Prompt<T> {
     /// Run `which`, if no answer has run yet and no attempt is in flight: close the question (returning focus to its
     /// opener), then, for Confirm or an extra answer, hand the frozen value to its action. A fallible answer instead
     /// starts an attempt and leaves the question open, frozen, until the attempt settles. Every answer but Cancel does
-    /// nothing between a reword and the frame that shows it (see the module docs). `clicked` is the mark of the click
+    /// nothing while waiting for the current wording to be shown. `clicked` is the mark of the click
     /// that pressed the answer, `None` for a key.
     fn answer(
         &mut self,
@@ -1712,6 +1721,7 @@ fn build<T: Clone + 'static>(
     } else {
         confirm_focus.clone()
     };
+    let wording = u32::from(question.wait_until_shown);
     let prompt = cx.new(|_| Prompt {
         question,
         on_confirm: Some(on_confirm),
@@ -1725,7 +1735,7 @@ fn build<T: Clone + 'static>(
         opener: None,
         clicked: None,
         focus_at_attempt: None,
-        wording: 0,
+        wording,
         drawn_wording: 0,
         confirm_focus,
         cancel_focus,

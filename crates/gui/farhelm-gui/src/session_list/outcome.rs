@@ -105,6 +105,7 @@ pub(super) fn prefix(work: Work) -> Option<&'static str> {
         | Work::UninstallHost
         | Work::RetryHost
         | Work::AdoptHost
+        | Work::TakeOverHost { .. }
         | Work::TrashDelete
         | Work::TabClose => None,
     }
@@ -215,6 +216,7 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::UninstallHost
         | Work::RetryHost
         | Work::AdoptHost
+        | Work::TakeOverHost { .. }
         | Work::TrashDelete
         | Work::TabOpen
         | Work::TabClose

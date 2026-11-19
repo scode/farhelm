@@ -208,18 +208,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
-- **Enforce that one helm owns each supervisor.** SPEC.md (Topology) says the helm that registers a host owns its
-  supervisor and every session on it, and that neither moves between helms, but nothing enforces that: a supervisor
-  treats every full-authority connection alike, so a second helm can register a host another helm owns and drive its
-  sessions. Enforcing it needs each host to store the identity of its owning helm, refuse connections from any other
-  helm, and make taking a host over an explicit operation the user asks for. That takeover has to cover what SPEC.md
-  already supports implicitly, adding a host again from a brand-new helm whose registry was lost, so that losing the
-  helm still never strands a host; and the stored identity has to stay the same across everything that does not change
-  the owner (restarts, updates, reconnects, and the desktop app and a standalone helm taking turns on one state
-  directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
-  because the supervisor's routing was built on the assumption that several helms might share one supervisor. Plan:
-  `plans/queue/one-helm-per-supervisor.md`.
-
 - **Cut the new desktop app's idle CPU with a large running fleet.** With the session list now drawing only the rows on
   screen, idle CPU no longer depends on how many sessions are listed, and typing stays at about 30 ms at any fleet size.
   But it still grows with how many sessions are running: on the test Mac, 1.6% with 5 sessions, 3.3-3.5% with 179 of 200

@@ -177,6 +177,9 @@ pub enum Work {
     /// showed: the helm records that identity for the entry, resets the host's five permissions to asking and
     /// connects again (`hosts::remedies`). Not supersedable. It changes the registry's entry for the host.
     AdoptHost,
+    /// Confirm management of a host. Add host registers the discovered
+    /// entry. A frozen row only asks its existing connection to retry.
+    TakeOverHost { registers: bool },
     /// The session's Pin to top or Unpin (`PUT /api/sessions/{id}/pin`), from its row's menu (`session_list::pins`),
     /// on the session's own key like Mark read, so its other actions are unavailable while it runs. Not supersedable.
     Pin,
@@ -261,6 +264,7 @@ impl Work {
             Work::TabClose => false,
             Work::RetryHost => false,
             Work::AdoptHost => false,
+            Work::TakeOverHost { .. } => false,
             Work::Pin => false,
             Work::Mute => false,
             Work::MovePin => false,
@@ -302,6 +306,7 @@ impl Work {
             Work::TabClose => false,
             Work::RetryHost => false,
             Work::AdoptHost => true,
+            Work::TakeOverHost { registers } => registers,
             Work::Pin => false,
             Work::Mute => false,
             Work::MovePin => false,

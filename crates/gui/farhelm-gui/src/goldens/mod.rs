@@ -973,6 +973,12 @@ static SCENES: &[Scene] = &[
         setup: hosts_panel_host_unreachable_setup,
     },
     Scene {
+        name: "hosts-panel-owned-elsewhere",
+        size: (640., 418.),
+        draw: host_menu_scene,
+        setup: hosts_panel_owned_elsewhere_setup,
+    },
+    Scene {
         name: "hosts-panel-credentials-not-delivered",
         size: (364., 924.),
         draw: tall_hosts_panels,
@@ -1049,6 +1055,12 @@ static SCENES: &[Scene] = &[
         size: (600., 1000.),
         draw: empty,
         setup: host_add_setup_plan_setup,
+    },
+    Scene {
+        name: "host-add-takeover",
+        size: (600., 418.),
+        draw: empty,
+        setup: host_add_takeover_setup,
     },
     Scene {
         name: "host-setup-running-hosts-panel",

@@ -521,10 +521,14 @@ pub(crate) fn evidence(
             .text("; the destination now reports ")
             .host(&install_id(reported))
             .text(", so nothing is connected until this is decided"),
-        HostStateView::OwnedElsewhere { owner, .. } => line
-            .text("Managed by another Farhelm (")
-            .mono(&pushed(&owner.tag))
-            .text(")"),
+        HostStateView::OwnedElsewhere { owner, .. } => {
+            let line = line.text("Helm ").mono(&pushed(&owner.tag));
+            if owner.connected {
+                line.text(", connected now")
+            } else {
+                line.text(format!(", last connected {}", local_time::stamp(owner.last_connected_at, zone)))
+            }
+        }
         HostStateView::IdentityUnverified { recorded } => line
             .text(
                 "The host answered without an identity, so this helm cannot confirm it is still the install \

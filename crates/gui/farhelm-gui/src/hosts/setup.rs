@@ -777,6 +777,7 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
                     // The pushed hosts and host progress already show what the helm did.
                     Reply::Added => return,
                     Reply::Show(problem) => Err(problem),
+                    Reply::TakeOver { owner, .. } => Err(add::ownership_problem(&owner)),
                     Reply::Setup {
                         probe_id,
                         confirmation,

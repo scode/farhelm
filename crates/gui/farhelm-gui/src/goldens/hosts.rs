@@ -175,6 +175,22 @@ pub(super) fn host_add_setup_plan_setup(state: &SceneState, window: &mut Window,
     keep.push(Box::new(watch));
 }
 
+/// Add host found a supervisor whose owner last connected three days ago.
+/// Use the production question with a frozen age for the screenshot.
+pub(super) fn host_add_takeover_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    let now = ticker::wall_now(cx)
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("golden clock follows Unix epoch")
+        .as_secs() as i64;
+    let owner = farhelm_proto::HelmOwnerRefusal {
+        tag: "ab12".into(),
+        owner_revision: "owner-1".into(),
+        connected: false,
+        last_connected_at: now - 3 * 24 * 60 * 60,
+    };
+    crate::hosts::add::ask_takeover("devbox", &owner, &Mark::take(cx), |_, _| {}, window, cx);
+}
+
 /// The removal confirmation for the reference screens' `build-box` (reference `host-remove-confirmation`), as its menu's
 /// Remove opens it: the host's mark, name, phase and build, its destination and what removal keeps, the footer note and
 /// the three answers, focus on Remove. The question opens once the connection has a UI session, whose store the
@@ -267,6 +283,37 @@ pub(super) fn hosts_panel_host_unreachable_setup(state: &SceneState, _: &mut Win
         "reference-capture.invalid",
     );
     hosts_panel_scene(state, &listed, true, cx);
+}
+
+/// With Details off, the frozen row shows its owner. Open its action menu
+/// to capture Take over next to Retry and Remove.
+pub(super) fn hosts_panel_owned_elsewhere_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{aliased, host, reference_hosts};
+    use farhelm_proto::ui_channel::HostStateView;
+
+    let mut listed = reference_hosts();
+    listed[1] = aliased(
+        host(
+            2,
+            "ssh",
+            HostStateView::OwnedElsewhere {
+                host_identity: "install-2".into(),
+                owner: farhelm_proto::HelmOwnerRefusal {
+                    tag: "cd34".into(),
+                    owner_revision: "owner-2".into(),
+                    connected: true,
+                    last_connected_at: 42,
+                },
+            },
+        ),
+        "build-box",
+        "dev@buildbox.example",
+    );
+    hosts_panel_scene(state, &listed, false, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
 }
 
 /// Details on with a Tensorlake sandbox, `gpu-sandbox`, whose credentials the helm could not deliver, below the

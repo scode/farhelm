@@ -1,5 +1,5 @@
-//! Tests of the host menu's Retry and Adopt over the helm client's fake: what each sends under which key, the identity
-//! Adopt carries, where a refusal shows, the launch refusal, and fixing the destination instead through Settings.
+//! Tests of the host menu's Retry, Adopt and Take over over the helm client's fake: what each sends, which installation
+//! or owner the menu can authorize, where a refusal shows, and fixing the destination through Settings.
 //!
 //! Every test starts from the Hosts panel's harness (`hosts/tests.rs`) in a column of the sidebar's width and a window
 //! as large as the reference screens', and every step ends in one of the shared harness's step helpers, so the focus
@@ -108,6 +108,81 @@ fn retry_sends_one_attempt_under_the_hosts_key(cx: &mut TestAppContext) {
     assert_eq!(focused_id(cx).as_deref(), Some("host-refusal-done"));
     assert_eq!(label(cx, "host-error-2"), None, "nothing under the row");
     assert!(!details_switch(&frame(cx)), "Details is still off");
+}
+
+/// The menu can authorize only the owner it named when it opened. A push before Enter redraws the row for a new
+/// owner, but the menu still shows and sends the older owner so the helm can reject the stale choice. Retry and
+/// Remove remain available while provisioning is refused.
+#[gpui::test]
+fn a_frozen_row_sends_the_owner_the_user_saw(cx: &mut TestAppContext) {
+    let state = HostStateView::OwnedElsewhere {
+        host_identity: "installation-1".into(),
+        owner: farhelm_proto::HelmOwnerRefusal {
+            tag: "cd34".into(),
+            owner_revision: "owner-1".into(),
+            connected: true,
+            last_connected_at: 42,
+        },
+    };
+    let (mut helm, cx) = panel(cx, &listed_with(state));
+    assert_eq!(
+        label(cx, "host-status-2").as_deref(),
+        Some("Managed by another Farhelm")
+    );
+    click(cx, "host-menu-toggle-2");
+    assert_eq!(
+        label(cx, "host-menu-owner").as_deref(),
+        Some("Managed by helm cd34")
+    );
+    assert_eq!(label(cx, "host-menu-retry").as_deref(), Some("Retry"));
+    assert_eq!(label(cx, "host-menu-remove").as_deref(), Some("Remove"));
+    assert_eq!(label(cx, "host-menu-update"), None);
+    assert_eq!(label(cx, "host-menu-uninstall"), None);
+    let changed = listed_with(HostStateView::OwnedElsewhere {
+        host_identity: "installation-1".into(),
+        owner: farhelm_proto::HelmOwnerRefusal {
+            tag: "ef56".into(),
+            owner_revision: "owner-2".into(),
+            connected: true,
+            last_connected_at: 43,
+        },
+    })
+    .remove(1);
+    helm.push(CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["1", "2", "3"]),
+        upsert: vec![KeyedEntry {
+            key: "2".into(),
+            value: serde_json::to_value(&changed).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-detail-2-1").as_deref(),
+        Some("Helm ef56, connected now"),
+        "the row has received the new owner before the key press"
+    );
+    assert_eq!(
+        label(cx, "host-menu-owner").as_deref(),
+        Some("Managed by helm cd34")
+    );
+    keys(cx, "down");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-take-over"));
+    keys(cx, "enter");
+    let (id, body) = one_command(&mut helm, Method::Post, "/api/hosts/2/take-over");
+    assert_eq!(
+        body,
+        json!({
+            "host_identity": "installation-1",
+            "owner_revision": "owner-1",
+        })
+    );
+    assert_eq!(work(cx), Some(Work::TakeOverHost { registers: false }));
+    let refusal = "The host's owner changed. Review the current owner and try again.";
+    helm.reply(id, 409, Some(json!(refusal)));
+    settle(cx);
+    assert_eq!(label(cx, "host-refusal-reason").as_deref(), Some(refusal));
 }
 
 /// The old "identity-mismatch-surfaced" and "adopt-requires-current-identity": the decision is between the two

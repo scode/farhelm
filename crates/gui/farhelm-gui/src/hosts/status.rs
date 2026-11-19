@@ -173,6 +173,7 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         Work::UninstallHost
         | Work::RetryHost
         | Work::AdoptHost
+        | Work::TakeOverHost { .. }
         | Work::Probe
         | Work::RemoveHost
         | Work::Save
