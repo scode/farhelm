@@ -713,9 +713,6 @@ consequences.
   — A template repeating the current agent and model can change a session's historical agent-owned permission setting to
   Guarded without containing a permission edit, making an otherwise unchanged Restart draft count as edited.
 
-- [`selected-template-state-contrast.md`](selected-template-state-contrast.md) — Dark appearance gives the selected
-  template a weak persistent state indicator; the approved palette's coverage remains ambiguous.
-
 - [`selected-template-shortcut-contrast.md`](selected-template-shortcut-contrast.md) — A selected quick-launch
   template's keyboard hint keeps muted ink, leaving little contrast against its filled background.
 

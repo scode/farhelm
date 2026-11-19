@@ -397,7 +397,8 @@ fn another_pressed_tier_keeps_the_hover_accent_under_keyboard_focus() {
 /// that, so the ring alone shows focus.
 ///
 /// Spec, in both palettes: a chosen row or icon draws the resting accent at rest and focused, and the hover accent
-/// hovered and focused under the pointer; an unchosen one draws its own resting look under focus too.
+/// hovered and focused under the pointer; an unchosen one draws its own resting look under focus too. Only a chosen
+/// template gets the stronger edge so it remains identifiable after focus moves to its editor.
 #[test]
 fn a_template_row_or_host_icon_keeps_its_resting_look_under_keyboard_focus() {
     let choice = |tier: Tier, pressed: bool| {
@@ -418,6 +419,16 @@ fn a_template_row_or_host_icon_keeps_its_resting_look_under_keyboard_focus() {
             );
             assert_eq!(chosen.fill(palette, true, false), hover, "{tier:?} hovered");
             let unchosen = choice(tier, false);
+            let edge = if tier == Tier::TemplateRow {
+                palette.accent
+            } else {
+                palette.accent_edge
+            };
+            assert_eq!(chosen.colors(palette).2, Some(edge));
+            assert_eq!(
+                unchosen.colors(palette).2,
+                (tier == Tier::IconChoice).then_some(palette.border_dim)
+            );
             assert_eq!(
                 unchosen.fill(palette, false, true),
                 unchosen.fill(palette, false, false),

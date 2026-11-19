@@ -216,12 +216,12 @@ linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e
 linux/tab-strip--light.png 3646e8f9c7dff120d426435c698ff01563d55764
-linux/template-editor--dark.png 99a8a7d0d96bbc56800ae707aee5ec91c492aaaf
-linux/template-editor--light.png 1ee2114943de8e46d08262372d2862240b4a8a9b
+linux/template-editor--dark.png e76fffdde02b8192cfb21073cdf1908b9705e79b
+linux/template-editor--light.png 34891e8c16707678c4bc74ab67cb4e917e028890
 linux/template-launcher--dark.png 6b084b309a28f1d1cdcd5ea174554614a4195916
 linux/template-launcher--light.png b3f07e91baca6c0eafaf9ae9a6382f30abfea0b9
-linux/template-leave-question--dark.png 3b5db2a0fd4b2cb360b065fc4c9defe81029c378
-linux/template-leave-question--light.png 082e92902bec05f37c79fba2b68b27814536d89a
+linux/template-leave-question--dark.png bd91d037712e18728e1b9a7cc086672f03ed4232
+linux/template-leave-question--light.png 9b3ccb22fc9459bb8cc9168269a289496572534c
 linux/template-number-menu--dark.png 2c5ed5cf67321290f38eba392d396aea4d98be7a
 linux/template-number-menu--light.png 5c71e027d22f09f1f6d28963e8374e1c761de0c7
 linux/templates-dialog--dark.png 8dfdf8cc25742fc465aacbb5163bba51a4346589

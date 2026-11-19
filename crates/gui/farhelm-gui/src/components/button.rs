@@ -133,7 +133,7 @@ pub enum Tier {
     /// `.templates-row`: a template's row in the Templates list, a ghost as wide as its row (`width: 100%`) whose
     /// content (the template's name over its summary, given as [`Button::content`]) sits at its left, 10 by 12 pixels
     /// in, in the primary ink, with the control hover fill under the pointer. The row whose template the editor holds is
-    /// drawn through [`Button::pressed`] as the old sheet drew it: the accent fill inside the accent edge, one step up
+    /// drawn through [`Button::pressed`] with the accent fill and a more visible accent ink edge, one step up
     /// the accent family under the pointer, and the inverse ring inside the edge over the resting accent
     /// ([`Button::fill`]). The content draws its own lines, so a pressed row's summary takes `--on-accent-dim` there,
     /// not here. The Templates editor's "+ Add field" menu draws its entries in this tier too, left-aligned with the
@@ -687,10 +687,17 @@ impl Button {
             );
         }
         if self.pressed == Some(true) && matches!(self.tier, Tier::IconChoice | Tier::TemplateRow) {
+            // In Dark appearance the usual edge is the same color as the fill. The stronger edge keeps the
+            // selected template distinct from the dialog even when its editor has keyboard focus.
+            let edge = if self.tier == Tier::TemplateRow {
+                palette.accent
+            } else {
+                palette.accent_edge
+            };
             return (
                 Some(palette.accent_fill),
                 palette.accent_fill_hover,
-                Some(palette.accent_edge),
+                Some(edge),
                 palette.on_fill,
             );
         }
