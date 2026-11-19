@@ -54,3 +54,70 @@ The Mid term TODO records the decision still to make about a Select All shortcut
 The required independent review found two omissions. The spec and shortcut page now state the loss of Linux Select All
 explicitly, and the test now checks that Ctrl+A, Ctrl+E and Ctrl+K work within the middle line of a text area. The
 review found no input routing defect.
+
+### Landing
+
+#### What landed with it
+
+It landed alone in its round. Since its base, main gained antigravity-support (an Antigravity agent type, with a
+launcher chip and hook-based conversation tracking). The independent reviewer checked it against this plan: it adds no
+key bindings and no use of Select All, so they do not interact. Your plan for SSH sign-in prompts (#4284) merged during
+the landing and touches only TODO.md and `plans/`.
+
+At your request this landing was reviewed with extra skepticism, by me and by an independent reviewer, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The change is one nine-row
+table of key bindings, and the reviewer confirmed it does what the report says:
+
+- On Linux the new keys win over the text-field library's own, so Ctrl+A moves to the start of the line.
+- None of them collides with a Farhelm shortcut, since every Linux shortcut uses Ctrl+Shift.
+- A focused terminal still gets all nine keys.
+- Where a field drives a suggestion list, Ctrl+N and Ctrl+P move through it as the arrows do.
+- Nothing in the specs or docs still says Ctrl+A selects all in a Linux text field.
+
+#### Fixes made while landing
+
+Three wording fixes, no behavior change:
+
+- **SPEC.md** said "On Linux, this removes the Select All shortcut in text fields", which describes a change rather than
+  the product. It now says "Linux text fields therefore have no Select All shortcut."
+- **The tests' select-all helper** gained the reason it must stay an action rather than a keystroke. Linux text fields
+  no longer have a Select All key, so a test pressing Ctrl+A there would quietly type at the start of the line instead
+  of replacing the text.
+- **The keymap module's overview** said every binding lives in Farhelm's own key context. It now names the new
+  text-editing bindings and why they are registered after the library's defaults.
+
+#### Checks
+
+The plan changes only the desktop app's GUI crate (key bindings and its tests), SPEC.md, a docs page and a changelog
+fragment, so the landing ran the GUI crate's whole test suite and the app's end-to-end smoke, which types into the app's
+text fields. Builds ran locally; the suite and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plan as delivered, rebased on main:
+
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format`,
+  `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings`,
+  `cargo clippy --locked -p farhelm-gui --all-targets --features agent -- -D warnings` and the website build
+  (`cd website && bun install --frozen-lockfile && bun run build`): passed.
+- `cargo nextest run -p farhelm-gui`, from a locally built archive, split in three across boats
+  (`aebd7a63-aa68-422a-8620-551ed0678c08`, `84987687-7c51-420f-ae51-e4ee5fd77cc0`,
+  `c9f05c2e-7a34-47ff-9eb7-6a720d958eab`): all 3177 passed, with no runtime skips.
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed, and the clipboard
+  paste step was skipped, as always on Linux (`7f03baf8-e82b-4b22-96ce-f1921b4acf61`).
+
+On the fixed tree: `cargo fmt --all -- --check` and `dprint check SPEC.md` passed. The fixes change only a SPEC.md
+sentence and two comments, so the runs above were reused.
+
+Skipped:
+
+- The reference screenshots (goldens): nothing draws differently.
+- The rest of the workspace suite: nothing outside the GUI crate changed.
+- Anything on a Mac: the Mac's Cmd+A Select All and its Control keys were not tried on macOS.
+
+#### Things you should know that the report does not say
+
+- At the very end or start of a field's text, Ctrl+F, Ctrl+B and Ctrl+H have nothing to do. The text-field library then
+  hands the key to its next binding: its own Search for Ctrl+F and Replace for Ctrl+H. No Farhelm field turns those
+  features on, so nothing happens today. If one ever does, Ctrl+F at the end of the text would open the library's search
+  panel.
+- The changelog fragment is a `fixed` entry, but it also takes away Linux text fields' Select All key; the release
+  curation may want to say so plainly.
