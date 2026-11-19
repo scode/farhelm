@@ -43,6 +43,8 @@ export const agents = [
     tip: { trust: 'An off-by-default setting trusts managed checkouts for each new launch, without editing Codex’s saved configuration.', effort: 'Low, medium, or high.', resume: 'Available once you submit your first prompt.' } },
   { name: 'Claude', href: '/docs/agents/claude/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'p', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { trust: 'For new managed checkouts only, an off-by-default setting can answer the question by editing Claude’s own settings file. Best effort, with caveats explained in Settings.', effort: 'Low to max.', resume: 'Available a few seconds after it starts.' } },
+  { name: 'Antigravity', href: '/docs/agents/antigravity/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'n', farhelm: 'n' },
+    tip: { trust: 'Farhelm has no workspace trust setting for Antigravity.', status: basic, resume: 'Install its hooks and submit a prompt. A subagent’s report can change what Restart opens.' } },
   { name: 'Goose', href: '/docs/agents/goose/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; also approve, smart approve, and chat.', status: basic, resume: 'Available as soon as it starts.' } },
   { name: 'OMP', href: '/docs/agents/omp/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
@@ -110,7 +112,7 @@ The session launcher's **Agent** tab also accepts a **Wrapper prefix** for every
 agent's command and runs it through those words; see [Agent wrappers](/docs/agents/agent-wrappers/) for the wrapper's
 requirements. The prefix does not change which permission mode you chose.
 
-Choose **Custom** to supply your own permission flags for Claude, Codex, Grok, Muse, Cursor or OMP. They replace
+Choose **Custom** to supply your own permission flags for Antigravity, Claude, Codex, Grok, Muse, Cursor or OMP. They replace
 Farhelm's permission flags; you are responsible for making sure they only change permissions. Farhelm does not check
 what they do, so the session gets the amber YOLO shield and hosts that ask before YOLO launches still ask.
 
@@ -126,6 +128,7 @@ choice Farhelm started it with; its hover names the agent's mode and the command
 | Agent | Guarded mode | Flags Farhelm passes |
 | --- | --- | --- |
 | Claude | Auto mode: its classifier approves or blocks actions | `--permission-mode auto` |
+| Antigravity | Auto mode: commands run in its sandbox and it evaluates requests to leave it; its default mode where your account or host lacks auto mode | `--mode auto` |
 | Codex | Sandboxed auto: workspace commands run in a sandbox; requests to leave it follow your approval policy | `-a on-request -s workspace-write` |
 | Grok | Auto-review: its classifier approves or blocks actions | `--permission-mode auto` |
 | Muse | Auto-review: its AI reviewer checks eligible actions, with a workspace sandbox | `--permission-profile :auto-review` |

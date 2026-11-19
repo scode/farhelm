@@ -4074,22 +4074,22 @@ usual notices collection delivers additions and resolutions to the rail.
   The first admitted selecting report pins its emitter and records the Codex-image ancestors above it, each by PID and
   kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
   separately from the conversation locator. The historical SQL name and JSON shape are retained for the shared
-  `ReportPin` used by Claude, Codex and Muse; a session has only one agent kind, so no migration or vendor tag is
-  needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture claim and
-  writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the complete prior
-  binding and exact previous pin. The writer takes the replacement ownership version explicitly: Codex passes 1, while
-  Claude and Muse pass 0; the previous version remains an independent CAS precondition. No in-memory pin mirror is
-  needed. Relaunch clears it, and abort does not restore it. Later reports must come from the pinned emitter, preserving
-  the original stored ancestry rather than replacing it with a later snapshot. A recorded Codex ancestor takes
-  precedence: its verified record independently selects and corrects both pin and conversation, never inheriting the
-  child's file or persistent thread. A correction records the once-per-launch Codex correction notification in the same
-  transaction as adoption; notification-write failure rolls back the correction, and reload restores it even if
-  publication was interrupted. It does not resolve on capture because it records the prior mistaken target. An
-  unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin whose process is gone,
-  reused or non-running releases for a fresh emitter only if the pin is absent from the new report's chain; descendants
-  cannot inherit authority after its exit. Unavailable process evidence does not release it. Rows already running across
-  an upgrade start unpinned: a nested child's first selecting report after upgrade may pin it, and the root's next
-  report corrects and notifies. There is no upgrade suppression.
+  `ReportPin` used by Claude, Codex, Muse and Antigravity; a session has only one agent kind, so no migration or vendor
+  tag is needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture
+  claim and writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the
+  complete prior binding and exact previous pin. The writer takes the replacement ownership version explicitly: Codex
+  passes 1, while the positional integrations pass 0; the previous version remains an independent CAS precondition. No
+  in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later reports must come from the
+  pinned emitter, preserving the original stored ancestry rather than replacing it with a later snapshot. A recorded
+  Codex ancestor takes precedence: its verified record independently selects and corrects both pin and conversation,
+  never inheriting the child's file or persistent thread. A correction records the once-per-launch Codex correction
+  notification in the same transaction as adoption; notification-write failure rolls back the correction, and reload
+  restores it even if publication was interrupted. It does not resolve on capture because it records the prior mistaken
+  target. An unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin whose
+  process is gone, reused or non-running releases for a fresh emitter only if the pin is absent from the new report's
+  chain; descendants cannot inherit authority after its exit. Unavailable process evidence does not release it. Rows
+  already running across an upgrade start unpinned: a nested child's first selecting report after upgrade may pin it,
+  and the root's next report corrects and notifies. There is no upgrade suppression.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -4167,24 +4167,24 @@ usual notices collection delivers additions and resolutions to the rail.
   anchored chain — only the reporter plus a narrow trampoline between runtime and reporter; any other session-hosting
   runtime or unclassified intermediary below the emitter refuses. Codex attributes its hook-shaped reporter through
   shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry above it, and applies its durable
-  process pin. Claude and Muse select their emitter by position through the same narrow hook trampolines, accepts
-  arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to correct it. Grok retains exactly
-  one native image with the required `--no-leader` option. Admission runs five steps: cheap envelope/kind/generation
-  gating with no vendor I/O (the report file's discriminator check re-applied against the fenced resolution, plus raw
-  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
-  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
-  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
-  mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the report was made
-  cannot change during verification, so there is no repeat walk); the atomic generation-plus-complete-binding CAS
-  committing identity, locator, provenance, source, readiness reset, and, for pinned kinds, the replacement pin and any
-  correction notification together, with the exact prior pin as an additional fence; and the mirror of only the
-  committed result into the matching current-generation entry under the same claim. Rejection at any pre-write step
-  changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation passes take the same
-  claim and reload before mirroring, carrying the row's version beside the identity, so memory-derived offers apply the
-  same gate as row-derived ones without a second lookup — and a rejected report never triggers a readiness withdrawal
-  through them. Restart verification and lifecycle resets retain their durable generation/binding fences; they do not
-  all acquire this capture claim. The report claim has no time limit because every operation under it is local and no
-  hook waits on it; a slow wait is logged for diagnostics.
+  process pin. Claude, Muse and Antigravity select their emitter by position through the same narrow hook trampolines,
+  accept arbitrary ancestry above it, and use the shared pin with every recorded ancestor eligible to correct it. Grok
+  retains exactly one native image with the required `--no-leader` option. Admission runs five steps: cheap
+  envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
+  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the unbounded
+  capture claim (one shared session-keyed `capture_locks` registry for report admission and readiness refresh, never the
+  lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind, generation, and the complete
+  prior binding; the mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the
+  report was made cannot change during verification, so there is no repeat walk); the atomic
+  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness reset, and, for
+  pinned kinds, the replacement pin and any correction notification together, with the exact prior pin as an additional
+  fence; and the mirror of only the committed result into the matching current-generation entry under the same claim.
+  Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only
+  reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside the identity,
+  so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
+  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
+  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
+  every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
@@ -4198,45 +4198,46 @@ usual notices collection delivers additions and resolutions to the rail.
   restart claim compares the version alongside the identity, so a provenance change under an unchanged conversation
   still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator that the doorway
   gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness variants. Protocol
-  65 adds Muse's agent kind and report discriminator; its launch harness already existed. Senders predating either
-  required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds `omp_reporter_asset`
-  (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as installed by the
-  session's current launch, written pre-spawn — after the launch spec publishes, before its terminal host can start
-  anything — from the one place that decides injection and fenced on the launch generation, so no report of the
-  generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that
-  launch's argv started, retained beside the marker so admission classifies the current launch rather than the resume
-  template (a future resume's command). OMP admission requires the marker to name the current binary's asset with the
-  file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
-  running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
-  every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
+  65 adds Muse's agent kind and report discriminator; its launch harness already existed. Protocol 80 adds Antigravity
+  to all three vocabularies. Senders predating a required variant fail closed at decode and at the missing CLI flag
+  alike. Migration 21 adds `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated
+  reporter asset's file name as installed by the session's current launch, written pre-spawn — after the launch spec
+  publishes, before its terminal host can start anything — from the one place that decides injection and fenced on the
+  launch generation, so no report of the generation can arrive ahead of its provenance. Migration 22 adds
+  `omp_launch_program` the same way: the program that launch's argv started, retained beside the marker so admission
+  classifies the current launch rather than the resume template (a future resume's command). OMP admission requires the
+  marker to name the current binary's asset with the file's bytes re-verified, so changing the asset breaks reporting
+  for every OMP session already running (see "What running sessions hold across versions"); pre-21 rows adopt `NULL` and
+  fail closed. OMP takes no Codex-style exception: every older OMP row has Restart unavailable (`not_captured`) until
+  its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs apply to Claude, Codex, Muse, Grok, and OMP. Goose and Pi retain their existing acceptance behind
-  the discriminator gate, and new framework entry points default to deny rather than allow. Claude admission runs under
-  the shared capture claim, reloading the complete binding and pin before attribution and committing them in one CAS.
-  The report's anchored chain (`procs::positional_corridor`), skipping the hook's narrow `sh -c` trampolines, identifies
-  the first remaining process as the emitter at any depth below the terminal's root process; that anchor itself ends
-  that search. Every process above the emitter through the root process is retained as a correction ancestor. It is
-  positional on purpose: no executable, command-line, or environment rule recognizes Claude. Claude's native binary is
-  named after its version and npm installs run under `node`, so an image rule would have to track install layouts, and
-  the injected `--settings` hook is a vendor detail that may change on its own; the closed attempt in PR #830 shows
-  where following either leads. Claude's first admitted selecting report pins the emitter by pid and start token.
-  Reports from that emitter preserve the original stored ancestors. A recorded ancestor takes precedence over liveness
-  checks and corrects the pin and plain conversation ID, recording `ClaudePinCorrected` once per launch in the same
-  transaction. Notification-write failure rolls the correction back; reload restores a committed correction even if
-  publication was interrupted. Like `CodexPinCorrected`, it remains unresolved because it records the earlier mistaken
-  target. A gone, reused, or non-running pin releases only when its identity is absent from the incoming report's
-  complete chain; a descendant cannot inherit authority after the pinned process exits. Unavailable process evidence
-  never releases it. Relaunch clears the shared pin, and abort does not restore it. Running sessions start unpinned
-  after upgrade: if a parent's report was lost, a nested Claude carrying a reporting hook can report first and be
-  followed until an ancestor reports at start, resume, clear, compact, or the end of a turn. That gap is accepted
-  without upgrade machinery. Claude adds no transcript verification, stays at ownership version 0, and leaves its
-  per-kind offer predicate false: changing it would withdraw existing Restart offers, and the pin needs no versioned
-  offer gate. Codex, Grok, and OMP require version 1 through the single per-kind predicate every surface consults; Goose
-  and Pi keep their existing offer behavior. There is no general report epoch. Grok's locator carries only its
-  vendor-specific selection timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences,
-  not cross-reporter chronology. Pre-discriminator senders and outdated OMP reporter assets fail closed; neither is
-  grandfathered.
+  Attribution checks apply to Claude, Codex, Muse, Grok, OMP and Antigravity. Goose and Pi retain their existing
+  acceptance behind the discriminator gate, and new framework entry points default to deny rather than allow. Claude
+  admission runs under the shared capture claim, reloading the complete binding and pin before attribution and
+  committing them in one CAS. The report's anchored chain (`procs::positional_corridor`), skipping the hook's narrow
+  `sh -c` trampolines, identifies the first remaining process as the emitter at any depth below the terminal's root
+  process; that anchor itself ends that search. Every process above the emitter through the root process is retained as
+  a correction ancestor. It is positional on purpose: no executable, command-line, or environment rule recognizes
+  Claude. Claude's native binary is named after its version and npm installs run under `node`, so an image rule would
+  have to track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the
+  closed attempt in PR #830 shows where following either leads. Claude's first admitted selecting report pins the
+  emitter by pid and start token. Reports from that emitter preserve the original stored ancestors. A recorded ancestor
+  takes precedence over liveness checks and corrects the pin and plain conversation ID, recording `ClaudePinCorrected`
+  once per launch in the same transaction. Notification-write failure rolls the correction back; reload restores a
+  committed correction even if publication was interrupted. Like `CodexPinCorrected`, it remains unresolved because it
+  records the earlier mistaken target. A gone, reused, or non-running pin releases only when its identity is absent from
+  the incoming report's complete chain; a descendant cannot inherit authority after the pinned process exits.
+  Unavailable process evidence never releases it. Relaunch clears the shared pin, and abort does not restore it. Running
+  sessions start unpinned after upgrade: if a parent's report was lost, a nested Claude carrying a reporting hook can
+  report first and be followed until an ancestor reports at start, resume, clear, compact, or the end of a turn. That
+  gap is accepted without upgrade machinery. Claude adds no transcript verification, stays at ownership version 0, and
+  leaves its per-kind offer predicate false: changing it would withdraw existing Restart offers, and the pin needs no
+  versioned offer gate. Codex, Grok, and OMP require version 1 through the single per-kind predicate every surface
+  consults; Goose and Pi keep their existing offer behavior. There is no general report epoch. Grok's locator carries
+  only its vendor-specific selection timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation
+  fences, not cross-reporter chronology. Pre-discriminator senders and outdated OMP reporter assets fail closed; neither
+  is grandfathered.
 
   Claude's `Stop` is an ordinary selecting report carrying the current conversation ID, not a confirmation of a prior
   `SessionStart`. It can establish the first pin, select from the pinned process, or correct from a recorded ancestor,
@@ -4367,16 +4368,16 @@ usual notices collection delivers additions and resolutions to the rail.
   `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
   complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
   directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
-  replaced by rename: `latest.json` for the single-report integrations, including Claude and Muse. Their SessionStart
-  and Stop both select the current conversation under the pin, so the newest report suffices without a separate
-  confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's
-  later events), drained selection first. Enrichment is refused without its selection, and the separate slot keeps a
-  long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or
-  eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names a
-  sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then be
-  refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, whose hooks are
-  global) can still take that slot, within one pass while the supervisor runs or across an outage, and is then refused,
-  which is an accepted gap.
+  replaced by rename: `latest.json` for the single-report integrations, including Claude, Muse and Antigravity. Their
+  SessionStart and Stop both select the current conversation under the pin, so the newest report suffices without a
+  separate confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop;
+  Grok's later events), drained selection first. Enrichment is refused without its selection, and the separate slot
+  keeps a long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue,
+  cap, or eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names
+  a sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then
+  be refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, or any `agy`
+  run inside a Farhelm session, whose user-installed hooks are global) can still take that slot, within one pass while
+  the supervisor runs or across an outage, and is then refused, which is an accepted gap.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
@@ -4414,6 +4415,19 @@ usual notices collection delivers additions and resolutions to the rail.
   `--announce`. The tracked launch supplies the credential in the inherited environment; the configuration contains no
   Farhelm token or session identity. Missing configuration leaves the Grok session usable but unable to gain a new exact
   resume target.
+
+  Antigravity likewise uses manual configuration, with `SessionStart` and `Stop` entries in
+  `~/.gemini/config/hooks.json` invoking `farhelm internal hook --vendor antigravity`. The adapter accepts the camelCase
+  `conversationId` and `hookEventName` and checks that any vendor discriminator agrees. Each event can independently
+  select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt, ignores
+  `--announce`, and exits zero, keeping stderr quiet. The launch adds no reporter arguments and starts no silent-hook
+  tripwire. Farhelm shares positional attribution, the version-0 process pin and ancestor correction with Claude and
+  Muse. A correction records `AntigravityPinCorrected` once per launch.
+
+  The process pin cannot distinguish Antigravity's main conversation from a child that shares its process. In CLI 1.5.12
+  a subagent sent both events with its own ID, the same emitter and no child marker. Farhelm accepts those reports as
+  explicitly allowed in SPEC.md, so the newest accepted child report can become the Restart target. The user can supply
+  the main conversation's ID to select it explicitly. Farhelm uses no vendor record lookup here.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
@@ -4940,10 +4954,10 @@ repository suggestions with its other history; ordinary history rows retain thei
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
 before validation and still refuses unsupported explicit choices; every harness that offers Guarded defaults to it,
 including OMP. Draft reconciliation uses `request_permission`. Stored launches use `stored_permission` instead: missing
-fields keep their historical no-flag meaning on Claude, Codex, Grok, Muse and Cursor, and their historical YOLO meaning
-on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO for admission but get a grey dashed shield rather
-than a positive bypass claim. Protocol 48 adds the closed `Guarded` permission variant; older supervisors cannot decode
-it, and older releases cannot read new stored guarded launches. `LaunchHarness::guarded_flags` supplies both the
+fields keep their no-flag meaning on Claude, Codex, Grok, Muse, Cursor and Antigravity, and their historical YOLO
+meaning on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO for admission but get a grey dashed shield
+rather than a positive bypass claim. Protocol 48 adds the closed `Guarded` permission variant; older supervisors cannot
+decode it, and older releases cannot read new stored guarded launches. `LaunchHarness::guarded_flags` supplies both the
 compiler's argv and the launcher's help, so the two cannot describe different flags. A resume copies these before its
 selector, including before Codex's subcommand. The helm's remembered permission discards a permission equal to the
 harness's omitted mode, as the old browser app's local mirror did; the desktop app keeps no mirror and starts New from
@@ -5068,17 +5082,21 @@ installation it is on, so it follows an open session the sidebar's filter hides
   `grok --no-leader --permission-mode auto` for guarded and `grok --no-leader --always-approve` for YOLO, refuses model
   and effort choices, and retains those flags before `--resume {conversation} {farhelm_args}` as argv elements. The
   dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity
-  classifier while the manually configured reporter supplies ownership-proven conversation capture. OMP is also a
-  structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model
-  and provider flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>`
-  (provider intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification
-  is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and
-  `:suffix` interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
-  `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
-  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission selects
-  Guarded for new launches. Older stored launches with no permission keep their historical YOLO meaning. SmartApprove
-  and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at
-  sidebar size.
+  classifier while the manually configured reporter supplies ownership-proven conversation capture. Antigravity launches
+  `agy` with optional `--model` and `--effort` and defaults new requests to `--mode auto`. YOLO compiles to
+  `--dangerously-skip-permissions`, while Custom uses the submitted words. Both named starts and Restart use
+  `--conversation {conversation}` with a literal ID. The supervisor appends one `--prompt-interactive=<prompt>` argument
+  for a fresh or named start with an initial prompt. Attaching the value keeps leading dashes in the prompt from being
+  parsed as options. The generic activity classifier supplies its status. OMP is also a structured harness only at
+  launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the
+  harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit;
+  a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
+  upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
+  id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
+  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask|write`
+  carries the YOLO/Approve/Guarded choices. An omitted permission selects Guarded for new launches. Older stored
+  launches with no permission keep their historical YOLO meaning. SmartApprove and Chat are refused for OMP; the row
+  glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
@@ -5519,45 +5537,45 @@ installation it is on, so it follows an open session the sidebar's filter hides
   after the withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's
   final check before a Restart both record it), an OMP launch whose recorded reporter is older than this build's or
   whose installed reporter file is there with different contents (a missing or unreadable file records nothing), and a
-  Claude, Codex or Muse process pin corrected after a recorded ancestor replaces a child-first conversation (verified
-  against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected` and
-  `MusePinCorrected` kinds. Each correction records the consequence for Restart before adoption and remains unresolved,
-  giving one notification per launch. The old-terminal kind (`old_terminal`, `NotificationKind::OldTerminal`) was the
-  one about the session rather than a launch, recorded by earlier releases while something in the session ran in an old
-  terminal; every supervisor start now resolves every unresolved row of it in one update fenced by neither session,
-  generation nor conversation (`SessionStore::resolve_notifications_of_kind`). Its successor, `old_terminal_ended`
-  (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted launch's generation, for each session
-  whose agent the startup's ending of the old terminals converted to interrupted ("Ending the old private tmux server");
-  nothing resolves it, so a later start, which resolves `old_terminal` rows, leaves it as it is. The capture pass
-  touches neither. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
-  captured conversation, checked in the same statement as the insert, which is also what closes the race between a
-  report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number,
-  time, text and an additive `resolved` bool (false omitted and the decode default): the kind and generation stay
-  private to the store and supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer
-  supervisor extended would make the whole record fail to decode in an older helm, which drops a session it cannot
-  decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor sends
-  none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a session-scoped
-  cell beside the activity time, seeded from the store when an entry is built from a row and replaced after each
-  recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the silent-hook and
-  resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a captured conversation
-  exists. This includes reports admitted before startup publishes the entry. An unresolved non-resolving kind or an
-  earlier launch's warning remains history; clearing in the helm does not remove it from the store. The in-memory
-  snapshot retains kind and generation beside the wire fields, so a pass with no unresolved, resolving kind for the
-  current launch skips the store call entirely. An eligible pass uses two indexed updates in one transaction. The
-  resolve SQL compares the exact captured conversation and generation on the session row, so an earlier Resume
-  observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then resolved
-  count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the sequence.
-  Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors refuse the
-  upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two per-session
-  sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside `session_seen`,
-  keyed and cleaned up the same way, set by the two endpoints `PUT /api/sessions/{id}/notifications/read` and
-  `PUT /api/sessions/{id}/notifications/cleared`, each taking `{"through": N}`. A mark never moves backwards and is
-  clamped to the newest sequence number the helm's cached row holds, so a mark can never cover an entry that arrives
-  later; the fleet-events revision is bumped only when a mark moved. Building rows for the UI, the helm keeps at most
-  the 10 newest entries whatever a supervisor sent, drops cleared ones, and reports the read mark so the UI can tell
-  unread from read. Clearing deletes nothing in the supervisor; the cap ages records out there. The UI renders each text
-  as peer text, marks resolved entries grey with a "Resolved" word, and excludes them from unread counts and "new"
-  styling without moving the helm's read mark.
+  Claude, Codex, Muse or Antigravity process pin corrected after a recorded ancestor replaces a child-first conversation
+  (verified against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected`,
+  `MusePinCorrected` and `AntigravityPinCorrected` kinds. Each correction records the consequence for Restart before
+  adoption and remains unresolved, giving one notification per launch. The old-terminal kind (`old_terminal`,
+  `NotificationKind::OldTerminal`) was the one about the session rather than a launch, recorded by earlier releases
+  while something in the session ran in an old terminal; every supervisor start now resolves every unresolved row of it
+  in one update fenced by neither session, generation nor conversation (`SessionStore::resolve_notifications_of_kind`).
+  Its successor, `old_terminal_ended` (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted
+  launch's generation, for each session whose agent the startup's ending of the old terminals converted to interrupted
+  ("Ending the old private tmux server"); nothing resolves it, so a later start, which resolves `old_terminal` rows,
+  leaves it as it is. The capture pass touches neither. The first two say Restart cannot resume, so they are refused
+  whenever the launch's row holds a captured conversation, checked in the same statement as the insert, which is also
+  what closes the race between a report's commit and the tripwire. The listing carries the last 10 on
+  `SessionInfo::notifications` as sequence number, time, text and an additive `resolved` bool (false omitted and the
+  decode default): the kind and generation stay private to the store and supervisor's in-memory notification snapshot,
+  because an enum on `SessionInfo` that a newer supervisor extended would make the whole record fail to decode in an
+  older helm, which drops a session it cannot decode. The field is additive with a decode default, so an older helm
+  shows no bell and an older supervisor sends none, and needed no protocol bump. Replies are built from immutable
+  entries, so the list lives in a session-scoped cell beside the activity time, seeded from the store when an entry is
+  built from a row and replaced after each recording or resolution, which then sends the `SessionsChanged` hint. Each
+  capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic restart offer is Resume, rather
+  than merely when a captured conversation exists. This includes reports admitted before startup publishes the entry. An
+  unresolved non-resolving kind or an earlier launch's warning remains history; clearing in the helm does not remove it
+  from the store. The in-memory snapshot retains kind and generation beside the wire fields, so a pass with no
+  unresolved, resolving kind for the current launch skips the store call entirely. An eligible pass uses two indexed
+  updates in one transaction. The resolve SQL compares the exact captured conversation and generation on the session
+  row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by newest
+  sequence and then resolved count: with the newest sequence fixed, only resolution changes, and it only grows;
+  reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history;
+  older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and
+  cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
+  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
+  `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
+  holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
+  moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
+  cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
+  supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
+  "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the
@@ -8193,15 +8211,16 @@ and skew".) So the following are a compatibility surface, held to the same care 
 
 - The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
   injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's `-c hooks=…`, and as the user installs
-  it for Grok (see "The per-launch identity hook" under Supervisor internals), and the outer timeouts those declarations
-  carry, which bound how long a newer hook, and anything in front of it, may take. Sessions launched before an earlier
-  upgrade still hold Claude's or Codex's old five-second limit, which a hook that only writes a file fits easily; only a
-  vendor holding stdin open could push one past it. The supervisor's recognition of those shapes counts too: hook
-  attribution for Claude, Codex, Muse, Grok and OMP matches the reporter's `<farhelm> internal hook …` argv and its
-  `sh -c` trampoline syntactically, never by path, so that an upgraded supervisor still accepts an older hook. Those
-  command lines run whatever binary is installed when they fire, so an already-running session's hooks start writing
-  report files after an update with nothing re-issued; the report file format is versioned, and a supervisor refuses a
-  version it does not read (the brief update gap described under "Report files").
+  it for Grok and Antigravity (see "The per-launch identity hook" under Supervisor internals), and the outer timeouts
+  those declarations carry, which bound how long a newer hook, and anything in front of it, may take. Sessions launched
+  before an earlier upgrade still hold Claude's or Codex's old five-second limit, which a hook that only writes a file
+  fits easily; only a vendor holding stdin open could push one past it. The supervisor's recognition of those shapes
+  counts too: hook attribution for Claude, Codex, Muse, Grok, OMP and Antigravity matches the reporter's
+  `<farhelm> internal hook …` argv and its `sh -c` trampoline syntactically, never by path, so that an upgraded
+  supervisor still accepts an older hook. Those command lines run whatever binary is installed when they fire, so an
+  already-running session's hooks start writing report files after an update with nothing re-issued; the report file
+  format is versioned, and a supervisor refuses a version it does not read (the brief update gap described under "Report
+  files").
 - Goose's stored reporter declaration, in full: the extension name `farhelm-reporter`, its
   `sh -c 'exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook'` command, and the fallback to `farhelm` on
   `PATH`. Goose replays it on every resume, including a manual one long after the Farhelm session is gone: Farhelm adds

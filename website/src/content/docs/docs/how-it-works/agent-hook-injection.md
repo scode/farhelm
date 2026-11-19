@@ -12,11 +12,11 @@ details of how it works, and what is and is not supported, may change.
 
 :::
 
-Farhelm learns which conversation you are in from Claude, Codex, Muse, Goose, Pi, OMP, and Grok, so **Restart** can
-resume the last conversation it learned of. Restarting after `/clear` or `/new`, before Farhelm has learned of the new
-conversation, can bring back the earlier one; for some agents that happens only at your next prompt or reply. Claude,
-Codex, Muse, Goose, Pi, and OMP get their reporter from the launch Farhelm builds. Grok requires three user-installed
-hook entries because its supported hook surface is configuration-based. Farhelm never edits that configuration for you.
+Farhelm learns which conversation you are in from Claude, Codex, Muse, Goose, Pi, OMP, Grok and Antigravity, so
+**Restart** can resume the last conversation it learned of. Restarting after `/clear` or `/new`, before Farhelm has
+learned of the new conversation, can bring back the earlier one; for some agents that happens only at your next prompt
+or reply. Claude, Codex, Muse, Goose, Pi, and OMP get their reporter from the launch Farhelm builds. For Grok and
+Antigravity, you install the hooks in the agent's configuration.
 
 For Claude, Codex and Muse, the hook arguments ride on one command line and die with the process. On a Codex launch that
 gets the flags, Codex prints one warning line about hook trust, and with that bypass in place any hook of your own in
@@ -44,6 +44,9 @@ tracking, so its sessions cannot be restarted; replace starts one over.
 
 [Grok's integration](/docs/agents/grok/) documents the required `SessionStart`, `UserPromptSubmit`, and `Stop` entries,
 the `--no-leader` ownership requirement, and exact two-file verification. It has no scanning fallback.
+
+[Antigravity's setup](/docs/agents/antigravity/#set-up-restart) uses `SessionStart` and `Stop` hooks. Each reports the
+conversation ID that Antigravity was using.
 
 ## Why hooks at all
 
@@ -82,9 +85,9 @@ comes from the session events it subscribes to.
 
 ## The no-errors policy
 
-The reporter must never be something you notice. The Claude, Codex, Muse, and manually configured Grok hooks, Goose's
-reporter, and the Pi and OMP reporting subprocesses print nothing to your terminal, always exit successfully, and do no
-identity reporting outside a Farhelm session. A report never waits for Farhelm: the reporter saves it in Farhelm's state
+The reporter must never be something you notice. The Claude, Codex, Muse, Grok and Antigravity hooks, Goose's reporter,
+and the Pi and OMP reporting subprocesses print nothing to your terminal, always exit successfully, and do no identity
+reporting outside a Farhelm session. A report never waits for Farhelm: the reporter saves it in Farhelm's state
 directory and is done in a moment, whether or not the host's supervisor is running. The supervisor picks saved reports
 up within about two seconds, or when it next starts, so a report the agent makes while the host's supervisor is not
 running (while it restarts for an update, say) still decides what a restart resumes (see
@@ -119,6 +122,8 @@ requirements in [the Grok guide](/docs/agents/grok/#setup).
   from a command line which agent it runs.
 - **Grok** reports through the three hooks you configure yourself in [the Grok guide](/docs/agents/grok/#setup); Farhelm
   injects no Grok hook.
+- **Antigravity** reports through the two hooks in [its setup guide](/docs/agents/antigravity/#set-up-restart),
+  including when you declare Antigravity for a custom command.
 
 These rules also apply inside [container sessions](/docs/agents/containerized-sessions/), where Farhelm's supervisor
 runs alongside the agent.
@@ -133,42 +138,43 @@ with a bare `--`.
 The farhelm binary itself is the hook, invoked as `farhelm internal hook --vendor <adapter> --announce` by an absolute
 path for injected session-start hooks — the announce flag is present by default; see "Turning it off" below for the
 switch that removes it. Claude's, Codex's and Muse's end-of-turn commands use `--vendor claude`, `--vendor codex` and
-`--vendor muse` respectively, without `--announce`. Grok's manual command is `farhelm internal hook --vendor grok`
-without `--announce`. The `--vendor` flag names which adapter this hook invocation is (Claude, Codex or Muse from an
+`--vendor muse` respectively, without `--announce`. The manually configured commands use `--vendor grok` or
+`--vendor antigravity`. The `--vendor` flag names which adapter this hook invocation is (Claude, Codex or Muse from an
 injected command, Pi or OMP from Farhelm's extension, which runs it without `--announce` and passes the pointer to those
-agents as a launch argument instead, and Grok from its manual configuration; the Goose helper supplies its own
-internally), so the supervisor can refuse a report addressed to a session of another kind before consulting any vendor
-state. It reads one callback payload from stdin and saves the conversation id, the vendor's `source`, and any transcript
-path and event name (a report naming a sub-agent is dropped instead; see below). Claude uses the source for diagnostics.
-Its `SessionStart` and `Stop` both report the current conversation; either can be the first report Farhelm accepts. A
-`Stop` from another Claude started inside the one Farhelm already follows is acknowledged without changing the
-conversation or logging a refusal warning. Muse uses the same rules: `SessionStart` and `Stop` both report the current
-conversation, and a nested Muse's `Stop` cannot replace its parent's conversation. Its session-start report arrives at
-the first prompt, with `startup` or `resume` as its source; its end-of-turn report has no source. Codex requires
-`SessionStart` with source `startup`, `resume`, `clear`, or `compact` to select a conversation; its source-less `Stop`
-can confirm that same conversation after a pending `/clear`, or correct an earlier conversation reported by a Codex
-process it started. Both Codex callbacks require process attribution and exact-record validation. Grok requires
+agents as a launch argument instead, and Grok or Antigravity from the manual configuration; the Goose helper supplies
+its own internally), so the supervisor can refuse a report addressed to a session of another kind before consulting any
+vendor state. It reads one callback payload from stdin and saves the conversation id, the vendor's `source`, and any
+transcript path and event name. The hook drops reports carrying a recognized child marker. Claude uses the source for
+diagnostics. Its `SessionStart` and `Stop` both report the current conversation; either can be the first report Farhelm
+accepts. A `Stop` from another Claude started inside the one Farhelm already follows is acknowledged without changing
+the conversation or logging a refusal warning. Muse uses the same rules: `SessionStart` and `Stop` both report the
+current conversation, and a nested Muse's `Stop` cannot replace its parent's conversation. Its session-start report
+arrives at the first prompt, with `startup` or `resume` as its source; its end-of-turn report has no source. Codex
+requires `SessionStart` with source `startup`, `resume`, `clear`, or `compact` to select a conversation; its source-less
+`Stop` can confirm that same conversation after a pending `/clear`, or correct an earlier conversation reported by a
+Codex process it started. Both Codex callbacks require process attribution and exact-record validation. Grok requires
 `SessionStart`, `UserPromptSubmit`, or `Stop`; its selecting event also carries source `new` or `load` and a timestamp
-used to reject delayed replacement reports.
+used to reject delayed replacement reports. Antigravity's `SessionStart` and `Stop` each report a complete conversation
+ID and receive an empty JSON response. The hook still replies if the report fails or runs outside Farhelm.
 
 The hook does not talk to the supervisor. It saves the report as a small file under `hook-reports/<session id>/` in the
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
 including on a panic. The supervisor applies saved reports on its regular pass every two seconds, and when it starts. It
 uses the record of processes to check that the report came from your session's terminal, under the launch Farhelm made
-there last, so a report left over from before a restart is refused. For Claude, Codex, Muse, Grok, and OMP it also
-checks which agent process can report for the session; see [What you will see](#what-you-will-see). Each session keeps
-only its newest report, except Codex and Grok. For Claude and Muse, that is enough because their end-of-turn reports
-name the current conversation too. Codex and Grok keep the report that starts a conversation apart from the latest
-report that confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when you submit a
-prompt. This keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so the
-directory stays tiny however long the supervisor is away. Outside a farhelm session there is no session environment, so
-identity reporting exits immediately and saves nothing — though if `--announce` was passed on the command line, the
-pointer line described below still prints regardless, since it needs no credential at all.
+there last, so a report left over from before a restart is refused. For Claude, Codex, Muse, Grok, OMP and Antigravity
+it also checks which agent process can report for the session; see [What you will see](#what-you-will-see). Each session
+keeps only its newest report, except Codex and Grok. For Claude, Muse and Antigravity, that is enough because their
+end-of-turn reports name the current conversation too. Codex and Grok keep the report that starts a conversation apart
+from the latest report that confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when
+you submit a prompt. This keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so
+the directory stays tiny however long the supervisor is away. Outside a farhelm session there is no session environment,
+so identity reporting exits immediately and saves nothing. The Antigravity callback still returns its empty JSON object.
+Other callbacks can still output the line described below if passed `--announce`.
 
-It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
-that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
-`farhelm agent instructions` explains it. Claude, Codex and Muse feed a `SessionStart` hook's plain-text stdout into the
-model's context, which is the whole delivery mechanism — nothing is written to disk and nothing reaches your terminal.
+The hook writes diagnostics to Farhelm's log. For Claude, Codex and Muse, `--announce` adds a line to stdout telling the
+agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that `farhelm agent instructions` explains
+it. Those agents feed a `SessionStart` hook's plain-text stdout into the model's context, which is the whole delivery
+mechanism — nothing is written to disk and nothing reaches your terminal.
 [Approve what agents do](/docs/using/approve-agent-requests/) covers what an agent can do with that command, and
 `FARHELM_AGENT_INSTRUCTIONS` below turns the pointer off.
 
@@ -228,6 +234,10 @@ Grok: the manually configured `SessionStart` selects the UUID, normally leaving 
 sibling `summary.json` both identify the selected UUID. See [the Grok guide](/docs/agents/grok/) for setup, the
 timestamp ordering rule, and the accepted `/new` delivery race.
 
+Antigravity reports after your first prompt. A subagent in the same process can take over the tracked conversation until
+the main conversation reports again. The [Antigravity guide](/docs/agents/antigravity/#gotchas-and-quirks) explains how
+to open the main conversation by ID.
+
 ## Turning it off
 
 `FARHELM_AGENT_HOOKS` in the supervisor's environment, read once when the supervisor starts:
@@ -235,8 +245,7 @@ timestamp ordering rule, and the accepted `/new` delivery race.
 - unset, empty, or `all` — every automatically configured kind gets its reporter. The default.
 - `none` — no automatically configured kind gets its reporter.
 - a comma-separated list of agents, `claude`, `codex`, `muse`, `goose`, `pi`, and/or `omp` — only those agents get it.
-  Whitespace around each name is trimmed and case does not matter. Grok is absent because this switch does not own its
-  manual configuration.
+  Whitespace around each name is trimmed and case does not matter. Grok and Antigravity use manual configuration.
 
 An unrecognized value is not honored in part: the supervisor warns, names the token it did not recognize, and behaves as
 if the variable were unset. An opt-out with a typo in it must not quietly become "opt out of everything".
@@ -255,8 +264,8 @@ Turning `FARHELM_AGENT_HOOKS` off prevents new conversations from being saved fo
 Goose, Pi, and OMP. A session with no saved conversation cannot be restarted. Turning the switch off does not erase a
 conversation already saved for the current launch, but a **Restart with** that names another conversation forgets it,
 because no report can replace it: plain **Restart** is then unavailable, and **Restart with** can still open a
-conversation you name ([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Grok's manual
-hooks are independent of this switch; remove or disable those entries in Grok itself when you want them off.
+conversation you name ([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Grok and
+Antigravity's manual hooks are independent of this switch. Remove or disable the entries in the agent's hooks file.
 
 ## When something goes wrong
 
@@ -281,10 +290,11 @@ The hook writes one line each time it runs, saying what it did:
 - `bad-payload` — nothing usable came out of stdin. The detail says where it went wrong: `oversized` or `unreadable` for
   the read itself, `no-reader: <error>` when the reader thread could not even be started, and `unparsable`,
   `missing-session-id`, `session-id-not-a-string`, `empty-session-id`, or `oversized-session-id` for the JSON. A vendor
-  renaming the field shows up as `missing-session-id`. Grok adds precise reasons for conflicting dual spellings and
-  malformed event, source, timestamp, path, or child fields. `subagent-report` is not a failure: the callback came from
-  one of the agent's own sub-agents, which never count, and the hook drops it rather than let it replace the session's
-  own report. (`agent-id-not-a-string` is the same check meeting a marker of the wrong type.)
+  renaming the field shows up as `missing-session-id` or, for Antigravity, `missing-conversation-id`. Grok adds precise
+  reasons for conflicting dual spellings and malformed event, source, timestamp, path, or child fields.
+  `subagent-report` means the hook recognized a child marker and dropped that report. The Antigravity CLI sends its
+  subagent reports without a child marker. See
+  [Antigravity's Restart caveat](/docs/agents/antigravity/#gotchas-and-quirks).
 - `timeout stdin` — the agent never finished handing the hook its payload within 30 seconds.
 - `panic` — a bug in the hook. Worth reporting, and harmless to the session.
 
@@ -307,14 +317,13 @@ has no `acked` or `refused` after it has the supervisor not looked yet: it is no
 records, the session's terminal, or the saved file and will try again on its next pass, or the session is in the middle
 of a restart.
 
-No file at all usually means the vendor never ran the hook: check that injected flags reached the process (step 3), or
-that Grok loaded all three manual entries, and for Codex or Muse check whether you have typed a prompt yet. Two other
-things also leave no file. The path is derived from the session id and the supervisor's socket path, so a run missing
-either of those from its environment has nowhere to write and cannot even leave its `no-credential` line. (A run missing
-only the token still writes one, which is deliberate: that is exactly the half-configured case someone comes to this
-file for.) And logging is best-effort by contract — an uncreatable directory, an unwritable path, or a full disk is
-ignored rather than turned into a failure. Pi and OMP can also lose the hook's line when the agent's own two-second
-timer stops the reporter first.
+No file at all usually means the vendor never ran the hook. Check that injected flags or manual entries loaded (step 3).
+For Codex, Muse or Antigravity, check whether you have typed a prompt yet. Two other things also leave no file. The path
+is derived from the session id and the supervisor's socket path, so a run missing either of those from its environment
+has nowhere to write and cannot even leave its `no-credential` line. (A run missing only the token still writes one,
+which is deliberate: that is exactly the half-configured case someone comes to this file for.) And logging is
+best-effort by contract — an uncreatable directory, an unwritable path, or a full disk is ignored rather than turned
+into a failure. Pi and OMP can also lose the hook's line when the agent's own two-second timer stops the reporter first.
 
 **2. The supervisor log.** Every line here carries the session id.
 
@@ -348,7 +357,8 @@ timer stops the reporter first.
 `--no-daemon --dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`,
 and `hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary.
 For Grok, use `/hooks` inside Grok and confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the
-absolute Farhelm binary.
+absolute Farhelm binary. For Antigravity, use `/hooks` to confirm the two entries in the
+[Antigravity setup guide](/docs/agents/antigravity/#set-up-restart).
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
 offer points at. Without an accepted report, a new session cannot be restarted, but if you know the conversation's id

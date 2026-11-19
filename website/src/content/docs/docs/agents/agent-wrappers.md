@@ -117,6 +117,9 @@ resumed before that switch. If the followed Muse exits, a fresh Muse in the same
 conversation. See [Muse](/docs/agents/muse/#restarting-a-conversation) for when it reports after a new conversation or
 resume.
 
+Antigravity also works through wrappers that stay running. Pass on the session's environment so the hooks can report
+from inside Farhelm. See [Antigravity](/docs/agents/antigravity/#set-up-restart) for the hooks you need to install.
+
 Codex also works through a wrapper that stays running, including one named `codex` itself. Farhelm follows the first
 Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another
 Codex process started inside the session reports first, Farhelm may briefly follow its conversation. When the Codex
@@ -136,7 +139,7 @@ unavailable. The same process rule applies when you write a custom command.
 
 A compound command or prefix can keep Bash running above the wrapper. That extra process can prevent Farhelm from
 following Grok's or OMP's conversation when the wrapper also stays running, leaving **Restart** unavailable. Claude,
-Muse and Codex tolerate that extra process.
+Muse, Codex and Antigravity tolerate that extra process.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that

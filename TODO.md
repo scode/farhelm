@@ -310,8 +310,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   points at the row's bottom edge instead of the line; `session-row-<key>-place` on the row's meta line
   (`session_list/row.rs`) would let it point there. Plan: `plans/queue/docs-shot-desktop-fixes.md`.
 
-- **Support Antigravity.** add support for antigravity. Plan: `plans/queue/antigravity-support.md`.
-
 - **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
   launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
   0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least

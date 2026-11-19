@@ -21,16 +21,20 @@ action and **Restart with…** or **Replace with…**.
   alt="The action buttons at the right of the row above the terminal, with stop, restart, replace, and clone explained."
 />
 
-Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
+Restart continues the conversation Farhelm is following for the session. When Farhelm has no
 conversation it can resume, because the agent cannot report one or none was captured, **Restart** is greyed out and
 hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex or [Muse](/docs/agents/muse/) conversation once
 you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
-seconds after it starts, a Goose conversation as soon as it starts, and a Grok conversation after your first prompt,
-once [its hooks](/docs/agents/grok/#setup) are installed; **Restart** can take a couple of seconds more to become
+seconds after it starts, and a Goose conversation as soon as it starts. [Grok](/docs/agents/grok/#setup) and
+[Antigravity](/docs/agents/antigravity/#set-up-restart) require hooks you install and report after your first prompt.
+**Restart** can take a couple of seconds more to become
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
 agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
 [Custom commands](/docs/agents/custom-commands/). These rules also apply inside
 [container sessions](/docs/agents/containerized-sessions/).
+
+Antigravity can report a subagent's conversation as well as its main one. See the
+[Antigravity guide](/docs/agents/antigravity/#gotchas-and-quirks) for how to open the main conversation by ID.
 
 **Restart with…**, in the menu beside **Restart**, resumes the conversation the same way, with different settings. It opens the
 [session launcher](/docs/using/start-a-session/) filled in with this session's choices, where you can change the model,
@@ -47,10 +51,10 @@ For Codex, Muse and Pi in a managed checkout, **Replace with** and **Clone** use
 Plain **Restart** and **Replace** keep the trust carried by the saved launch.
 
 The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
-Farhelm keeps the previous conversation until the agent reports the new one. Codex and Muse report at your first prompt, so
+Farhelm keeps the previous conversation until the agent reports the new one. Codex, Muse and Antigravity report at your first prompt, so
 Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
-hooks are turned off with `FARHELM_AGENT_HOOKS`, except Grok, whose hooks are the ones you install.
+hooks are turned off with `FARHELM_AGENT_HOOKS`. The Grok and Antigravity hooks you install are independent of that setting.
 
 **Replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
