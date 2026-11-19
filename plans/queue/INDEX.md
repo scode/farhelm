@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 7e75ca] `one-helm-per-supervisor.md` — Each host records its owning helm, refuses others, and is taken over only on request (protocol bump)
 - [complete] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
 - [complete] `unusable-folder-refusals.md` — A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
-- [in-flight 7a00a8] `gui-ux-discards.md` — Fifty discards from the 2026-11-18 GUI UX triage, in one PR
+- [complete] `gui-ux-discards.md` — Fifty discards from the 2026-11-18 GUI UX triage, in one PR
 - [in-flight 503dac] `gui-ux-backend-test-gaps.md` — Fifteen small supervisor, terminal-host and e2e test fixes from the 2026-11-18 GUI UX triage
 - [pending] `gui-ux-gui-test-gaps.md` — Five small desktop app, helm and release-test fixes from the 2026-11-18 GUI UX triage
 - [pending] `gui-ux-wording.md` — Comment, spec and docs corrections from the 2026-11-18 GUI UX triage, two spec acceptances and the user's-own-configuration principle
