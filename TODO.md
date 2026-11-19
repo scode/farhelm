@@ -351,6 +351,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Support Antigravity.** add support for antigravity. Plan: `plans/queue/antigravity-support.md`.
 
+- **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
+  launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
+  0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least
+  once after having typed in it, and then hitting cmd-p. Findings, 2026-11-18: code reading (no change to the path since
+  0.40.0) found no ordinary cause. The maintainer did not recall a "Started" pill, which the designed "moved on" path
+  shows. One rare helm-side corner case matches every symptom: the helm's best-effort cache write of a newly created
+  session (`record_session`, called from `accept_created_session`) can fail when the host reconnected during the create,
+  so the list pushed with the reply is complete but lacks the new session; the desktop app opens it, sees it proven gone
+  (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
+  the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
+  keep watching for it.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
@@ -380,20 +392,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Cmd-P quick launch sometimes leaves the previous session active.** there is a bug whereby when i use Cmd-P to quick
-  launch, sometimes, i'm not sure when, it just creates the session without making it the active session. observed on
-  0.39.0. i cannot reproduce consistently, but twice it happened when i had an active codex agent. visigle, at least
-  once after having typed in it, and then hitting cmd-p. Findings, 2026-11-18: code reading (no change to the path since
-  0.40.0) found no ordinary cause. The maintainer did not recall a "Started" pill, which the designed "moved on" path
-  shows. One rare helm-side corner case matches every symptom: the helm's best-effort cache write of a newly created
-  session (`record_session`, called from `accept_created_session`) can fail when the host reconnected during the create,
-  so the list pushed with the reply is complete but lacks the new session; the desktop app opens it, sees it proven gone
-  (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
-  the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
-  keep watching for it.
-
 - **Show the version in Settings > App.** add the current version of farhelm in the settings -> app dialog in addition
-  to the header of the app (user feedback, someone looked for it there).
+  to the header of the app (user feedback, someone looked for it there). Plan: `plans/queue/settings-app-version.md`.
 
 - **Emacs C-f and C-b in text fields.** emacs c-f and c-b keyboard shortcuts dont work in text fields (c-a and c-e do
   work). fix it. also consider other common ones like skipping words etc.
