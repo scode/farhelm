@@ -1736,27 +1736,6 @@
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `pending`.
 
-## stalled-tab-request-resets-healthy-helm-channel.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. The
-  helm's `open_tab` and `close_tab` routes (crates/farhelm-helm/src/sessions.rs) wait on the supervisor with no bound,
-  and the supervisor request documents "There is no timeout" (crates/farhelm-helm/src/client.rs). The desktop app's
-  channel watchdog fires after 30 s with a command in flight (crates/farhelm-helm-client/src/channel.rs), and the reset
-  closes every layer, a half-typed launcher draft included (crates/gui/farhelm-gui/src/session.rs). SPEC_impl.md says
-  "every host-waiting route the GUI sends is bounded" and "N is set above the helm's own bound on host waits". The
-  hung-systemd filter does not apply: the whole window and every host are affected. Unverified: which real host
-  conditions stall these requests that long. Bucket: high (one slow host resets the whole window; a lost draft can be
-  retyped).
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
-- Completion criteria: the tab open and close routes answer within the helm's host-reply bound through the existing
-  `within_host_reply_bound_saying` helper, with a timeout reply saying the operation carries on, and a paused-clock test
-  that a stalled supervisor answer no longer trips the desktop channel's watchdog. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
-
 ## old-suspension-stamp-labels-later-external-pause.md
 
 - Outcome: `fix code`.

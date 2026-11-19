@@ -336,6 +336,11 @@ async fn drive(routes: Arc<TestRoutes>) -> (Driven, ServerMessage) {
         HeaderValue::from_static("Bearer test"),
         vec![test_collection()],
     );
+    drive_channel(channel).await
+}
+
+/// Exercise command timing without a network socket on the GUI side.
+async fn drive_channel(channel: Channel) -> (Driven, ServerMessage) {
     let (to_channel, incoming) = mpsc::channel(16);
     let (outgoing, from_channel) = mpsc::channel(16);
     let (displace, displaced) = oneshot::channel();
@@ -934,6 +939,53 @@ async fn the_reply_bound_answers_a_slow_host_with_a_timeout_and_keeps_the_work()
         .send(())
         .expect("the work is still running after the reply");
     finished.await.expect("the work runs to completion");
+}
+
+/// A supervisor that holds a tab reply must leave the channel responsive.
+/// Each request reaches the peer, the channel replies before the desktop's
+/// 30-second watchdog, and later commands can still use the same channel.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn stalled_tab_requests_reply_before_the_ui_watchdog() {
+    use farhelm_proto::ControlMsg;
+    let (client, supervisor) = tokio::io::duplex(64 * 1024);
+    let (harness, mut peer) = tokio::join!(
+        rest_harness::spliced_helm(client),
+        rest_harness::FakeSupervisor::accept(supervisor)
+    );
+    let secret = harness.state.auth.mint_device().unwrap();
+    let channel = Channel::new(
+        crate::api_router(Arc::clone(&harness.state)),
+        HeaderValue::from_str(&format!("Bearer {secret}")).unwrap(),
+        vec![],
+    );
+    let (mut driven, _) = drive_channel(channel).await;
+    let session = harness.local_session_ref("sess-1");
+    for (id, method, tab) in [(1, "POST", None), (2, "DELETE", Some("tab-1"))] {
+        let watchdog = tokio::time::Instant::now() + Duration::from_secs(30);
+        let mut segments = vec!["sessions", &session, "tabs"];
+        segments.extend(tab);
+        let path = farhelm_proto::ui_channel::ApiPath::api(&segments).unwrap();
+        let request = command(id, method, path.as_str(), None);
+        driven.to_channel.try_send(request).unwrap();
+        let request = tokio::time::timeout_at(watchdog, peer.recv())
+            .await
+            .expect("the request reaches the supervisor");
+        assert!(matches!(
+            (id, request),
+            (1, ControlMsg::OpenTab { .. }) | (2, ControlMsg::CloseTab { .. })
+        ));
+        let Some(ServerMessage::Reply(reply)) =
+            tokio::time::timeout_at(watchdog, driven.from_channel.recv())
+                .await
+                .expect("the tab command replies before the watchdog")
+        else {
+            panic!("expected the tab command's reply");
+        };
+        assert!(tokio::time::Instant::now() < watchdog);
+        assert_eq!((reply.id, reply.status), (id, 504));
+        let body = reply.body.as_ref().and_then(Value::as_str).unwrap();
+        assert!(body.contains("still being carried out"));
+    }
 }
 
 /// The bound is on the real routes, not only on the helper: a rename, an
