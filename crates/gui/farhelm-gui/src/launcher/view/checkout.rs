@@ -82,7 +82,7 @@ use crate::launcher::draft::{
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
 use crate::launcher::search::{Scope, scoped};
-use crate::settings::{CheckoutField, FolderScope, Saved};
+use crate::settings::{CheckoutField, CheckoutUpdated, FolderScope};
 use crate::theme::{self, metrics};
 use crate::{operations, ticker};
 
@@ -222,10 +222,10 @@ pub(super) struct CheckoutState {
     /// `needs_checkout_root`, the helm's reading of the host's effective configuration). Kept across a re-read, so the
     /// setup field stays put, with its draft and focus, while a save is checked.
     needs_root: Option<(HostKey, bool)>,
-    /// Set by a save in the setup field until the next suggestions answer: whether the host needs a folder is to be
+    /// Set by a checkout setup update until the next suggestions answer: whether the host needs a folder is to be
     /// asked again, even with a repository chosen.
     root_recheck: bool,
-    /// Set by a save in the setup field, to the save's moment: if the re-check then finds the host no longer needs a
+    /// Set by a checkout setup update: if the re-check then finds the host no longer needs a
     /// folder and the field goes, focus moves on to the repository field (the next thing to fill in) unless the user has
     /// moved on since. Without it, focus would fall to whatever the focus coordinator recovers to, rows further down.
     focus_after_setup: Option<Mark>,
@@ -1001,6 +1001,15 @@ impl Launcher {
         let setup = self.setup_field(window, cx);
         let setup_shown = setup.is_some();
         rows.extend(setup);
+        if !setup_shown
+            && let Some((field, _)) = &self.checkout.setup
+            && let Some(reason) = field.read(cx).refusal()
+        {
+            // The refresh can take away inline setup. Keep its refusal in the same part of the form.
+            let id = "launcher-checkout-setup-refused";
+            let message = HostSentence::new(id).host(reason);
+            rows.push(super::refusal_alert(id, message, palette));
+        }
         rows.push(
             row("launcher-repository-row", "Repository", control, palette).into_any_element(),
         );
@@ -1023,10 +1032,10 @@ impl Launcher {
     /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
     /// field over the default folder (SPEC.md: "When the selected host has no checkout folder in effect, the launcher's
     /// managed-checkout destination offers the same explicit-save field"), in the control column. Made the first time it
-    /// shows; a save it reports asks for the suggestions and the preview again.
+    /// shows. A successful save or a value found changed after refusal refreshes the suggestions and preview.
     fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.needs_root(cx) != Some(true) {
-            // The field just went after a save: focus moves on to the repository field (see `focus_after_setup`).
+            // Setup just went after a refresh: focus moves on to the repository field (see `focus_after_setup`).
             if let Some(mark) = self.checkout.focus_after_setup.take() {
                 let handle = self.checkout.repository.focus_handle(cx);
                 cx.defer_in(window, move |_, window, cx| {
@@ -1038,14 +1047,17 @@ impl Launcher {
         if self.checkout.setup.is_none() {
             let field =
                 cx.new(|cx| CheckoutField::folder(FolderScope::Default, SETUP_NOTE, window, cx));
-            let saved = cx.subscribe(&field, |launcher: &mut Launcher, _, _: &Saved, cx| {
-                launcher.checkout.reread += 1;
-                launcher.checkout.retry += 1;
-                launcher.checkout.root_recheck = true;
-                launcher.checkout.focus_after_setup = Some(Mark::take(cx));
-                cx.notify();
-            });
-            self.checkout.setup = Some((field, saved));
+            let updated = cx.subscribe(
+                &field,
+                |launcher: &mut Launcher, _, _: &CheckoutUpdated, cx| {
+                    launcher.checkout.reread += 1;
+                    launcher.checkout.retry += 1;
+                    launcher.checkout.root_recheck = true;
+                    launcher.checkout.focus_after_setup = Some(Mark::take(cx));
+                    cx.notify();
+                },
+            );
+            self.checkout.setup = Some((field, updated));
         }
         let (field, _) = self.checkout.setup.as_ref()?;
         // The same name as an id and as a debug selector, as `row` does: the in-process tests find the field by the

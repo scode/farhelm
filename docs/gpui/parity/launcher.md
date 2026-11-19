@@ -298,8 +298,8 @@ deviation below says
 - "Escape dismisses repository suggestions before closing the composer" (1267), whose old case used the search box's
   results: `launcher::search_view_tests::escape_closes_the_results_and_keeps_the_query`.
 - "inline checkout folder setup refreshes discovery and preview and respects host overrides" (212), its refused relative
-  folder: `settings::tests::a_refused_folder_keeps_its_draft_and_reason_across_sections` (the launcher reuses Settings'
-  checkout folder field).
+  folder: `settings::tests::a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections` (the launcher
+  reuses Settings' checkout folder field).
 - "a fresh-checkout replace-with retry carries the precondition shown at that press" (976), its non-key half:
   `launcher::replace_with_tests::replace_with_follows_the_source_and_sends_the_guard_it_shows`.
 

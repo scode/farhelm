@@ -1700,10 +1700,11 @@ session snapshots default the new hint evidence to absent; the legacy Claude hin
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed later in
-Settings → Checkouts or overridden in each host's settings. Refusal keeps the draft editable; success refreshes
-repository suggestions and the checkout preview without reopening the launcher. Selecting a repository before setup does
-not hide the field. A host with its own folder keeps that folder and is never offered this setup. The template editor
-keeps its ordinary destination control.
+Settings → Checkouts or overridden in each host's settings. A refusal discards the edit and reloads the stored folder. A
+successful save or a reload that finds a different folder refreshes the repository suggestions and checkout preview
+without reopening the launcher. The refusal stays visible even if that refresh removes the setup field. Selecting a
+repository before setup does not hide the field. A host with its own folder keeps that folder and is never offered this
+setup. The template editor keeps its ordinary destination control.
 
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
@@ -5252,7 +5253,9 @@ it, unless the host's setting says not to ask; see Agent-spawned sessions): oper
 GUI must behave correctly.
 
 A GUI write must not undo a change an agent or the command line made while that view was open; the view's display may
-lag until the next interaction.
+lag until the next interaction. A save of a checkout folder or the post-clone command carries the stored value the
+editor loaded. This includes Use default on a host's folder. The helm refuses the save if that field has changed, and
+the editor reports the refusal and reloads the stored value before another save.
 
 Confirmed 2026-10-21, one exception: GUI saves of launch templates and of number-key bindings are last-write-wins
 against agent and command-line edits too. The Templates editor saves its whole draft of a template, so saving any field

@@ -1784,10 +1784,10 @@ pub(crate) fn is_known_terminal_link_click_word(word: &str) -> bool {
     matches!(word, "intercept" | "both" | "program")
 }
 
-/// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
+/// Deserialize a PRESENT nullable patch or precondition field. Serde only calls
 /// this when the key exists, so wrapping the inner `Option` in `Some` is
 /// exactly what distinguishes `"x": null` from no `"x"` at all.
-fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+pub(crate) fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: serde::Deserialize<'de>,

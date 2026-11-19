@@ -946,11 +946,13 @@ mod claude_trust_tests {
 /// The folder route's configuration surface, deliberately narrower than
 /// [`CheckoutConfigSnapshot`]. A missing field is not a request to clear it;
 /// callers must send `root: null` explicitly, and cannot supply hook/host keys.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CheckoutRootBody {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     root: Option<String>,
+    #[serde(default, deserialize_with = "crate::store::double_option")]
+    expected: Option<Option<String>>,
 }
 
 /// Read only the all-hosts folder, never the effective configuration of a host.
@@ -961,16 +963,17 @@ pub(crate) async fn get_checkout_root(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     match state.store.checkout_config_snapshot(None).await {
-        Ok(snapshot) => axum::Json(CheckoutRootBody {
-            root: snapshot.global_root,
-        })
+        Ok(snapshot) => axum::Json(serde_json::json!({
+            "root": snapshot.global_root,
+            "compare_on_save": true,
+        }))
         .into_response(),
         Err(error) => crate::http_error(error),
     }
 }
 
 /// Explicitly save or clear the all-hosts folder, with the CLI's validation.
-/// Refusals reach the user; the saving client refetches after success. The
+/// Refusals reach the user; a guarded write can fail even at a valid path. The
 /// revision watcher remains the sole feed publisher, avoiding duplicate or
 /// misattributed notifications when HTTP and CLI writes race. Nothing here
 /// expands paths, contacts a host, creates a folder or changes its override.
@@ -978,34 +981,13 @@ pub(crate) async fn put_checkout_root(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::Json(body): axum::Json<CheckoutRootBody>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    if let Some(root) = &body.root
-        && let Err(error) = validate_root(root)
-    {
-        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
-    }
-    let result = match body.root {
-        Some(root) => state.store.set_checkout_root(None, &root).await,
-        None => state.store.clear_checkout_root(None).await,
-    };
-    if let Err(error) = result {
-        return crate::http_error(error);
-    }
-    axum::http::StatusCode::NO_CONTENT.into_response()
-}
-
-/// The host editor needs the stored override and the default separately:
-/// an inherited folder stays an empty draft even when the default is set.
-/// Hook configuration must never become part of this client reply.
-#[derive(serde::Serialize)]
-struct HostCheckoutRootState {
-    root: Option<String>,
-    default: Option<String>,
+    put_setting(&state.store, None, Field::Root, body.root, body.expected).await
 }
 
 /// Read a registered host's own folder and the global default in one snapshot.
 /// Registry existence, rather than a connected actor, decides whether the host
-/// is configurable. No path is expanded or checked on the target machine.
+/// is configurable. The default is only a placeholder in the editor. Saves
+/// compare the stored override because a change to the default is independent.
 pub(crate) async fn get_host_checkout_root(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::extract::Path(host): axum::extract::Path<HostId>,
@@ -1015,10 +997,11 @@ pub(crate) async fn get_host_checkout_root(
         return crate::http_error(error);
     }
     match state.store.checkout_config_snapshot(Some(host)).await {
-        Ok(snapshot) => axum::Json(HostCheckoutRootState {
-            root: snapshot.host_override.and_then(|value| value.root),
-            default: snapshot.global_root,
-        })
+        Ok(snapshot) => axum::Json(serde_json::json!({
+            "root": snapshot.host_override.and_then(|value| value.root),
+            "default": snapshot.global_root,
+            "compare_on_save": true,
+        }))
         .into_response(),
         Err(error) => crate::http_error(error),
     }
@@ -1033,33 +1016,29 @@ pub(crate) async fn put_host_checkout_root(
     axum::extract::Path(host): axum::extract::Path<HostId>,
     axum::Json(body): axum::Json<CheckoutRootBody>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     if let Err(error) = crate::hosts::registry_row(&state, host).await {
         return crate::http_error(error);
     }
-    if let Some(root) = &body.root
-        && let Err(error) = validate_root(root)
-    {
-        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
-    }
-    let result = match body.root {
-        Some(root) => state.store.set_checkout_root(Some(host), &root).await,
-        None => state.store.clear_checkout_root(Some(host)).await,
-    };
-    match result {
-        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
-        Err(error) => crate::http_error(error),
-    }
+    put_setting(
+        &state.store,
+        Some(host),
+        Field::Root,
+        body.root,
+        body.expected,
+    )
+    .await
 }
 
 /// Preserve unset and explicitly disabled commands as distinct stored states.
 /// A missing key is invalid rather than an implicit clear; this route never
 /// accepts or serializes a host override.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CheckoutPostCloneBody {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     command: Option<String>,
+    #[serde(default, deserialize_with = "crate::store::double_option")]
+    expected: Option<Option<String>>,
 }
 
 /// Read the all-hosts command verbatim without resolving host inheritance.
@@ -1070,9 +1049,10 @@ pub(crate) async fn get_checkout_post_clone(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     match state.store.checkout_config_snapshot(None).await {
-        Ok(snapshot) => axum::Json(CheckoutPostCloneBody {
-            command: snapshot.global_post_clone,
-        })
+        Ok(snapshot) => axum::Json(serde_json::json!({
+            "command": snapshot.global_post_clone,
+            "compare_on_save": true,
+        }))
         .into_response(),
         Err(error) => crate::http_error(error),
     }
@@ -1086,21 +1066,51 @@ pub(crate) async fn put_checkout_post_clone(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::Json(body): axum::Json<CheckoutPostCloneBody>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    if let Some(command) = &body.command
-        && let Err(error) = validate_post_clone(command)
-    {
-        return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
-    }
-    let result = match body.command {
-        Some(command) => state.store.set_checkout_post_clone(None, &command).await,
-        None => state.store.clear_checkout_post_clone(None).await,
-    };
-    if let Err(error) = result {
-        return crate::http_error(error);
-    }
-    axum::http::StatusCode::NO_CONTENT.into_response()
+    put_setting(
+        &state.store,
+        None,
+        Field::PostClone,
+        body.command,
+        body.expected,
+    )
+    .await
 }
+
+/// The comparison is opt-in for older clients. A missing expected key uses
+/// the legacy unconditional write, while an explicit null requires an unset
+/// field. GET advertises support because older helms reject extra PUT keys.
+async fn put_setting(
+    store: &HelmStore,
+    host: Option<HostId>,
+    field: Field,
+    value: Option<String>,
+    expected: Option<Option<String>>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    if let Some(value) = value.as_deref() {
+        let validation = match field {
+            Field::Root => validate_root(value),
+            Field::PostClone => validate_post_clone(value),
+        };
+        if let Err(error) = validation {
+            return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+        }
+    }
+    match store.write_setting(host, field, value, expected).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) if error.is::<CheckoutSettingChanged>() => {
+            (StatusCode::CONFLICT, error.to_string()).into_response()
+        }
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// A refusal can be displayed without revealing the current value or echoing
+/// what was sent, especially for a post-clone command.
+#[derive(Debug, thiserror::Error)]
+#[error("This checkout setting changed elsewhere. Review the current value before saving again.")]
+struct CheckoutSettingChanged;
 
 /// Publish committed external configuration changes through the ordinary
 /// invalidation feed. The CLI writes SQLite directly, so an in-process setter
@@ -1313,7 +1323,8 @@ impl HelmStore {
     /// directory, or runs anything.
     pub async fn set_checkout_root(&self, host: Option<HostId>, root: &str) -> anyhow::Result<()> {
         validate_root(root)?;
-        self.write_setting(host, Field::Root, Some(root)).await
+        self.write_setting(host, Field::Root, Some(root.to_owned()), None)
+            .await
     }
 
     /// Set the post-clone shell command for one scope. Stored verbatim; an
@@ -1327,37 +1338,37 @@ impl HelmStore {
         command: &str,
     ) -> anyhow::Result<()> {
         validate_post_clone(command)?;
-        self.write_setting(host, Field::PostClone, Some(command))
+        self.write_setting(host, Field::PostClone, Some(command.to_owned()), None)
             .await
     }
 
     /// Clear the checkout root for one scope: on a host, remove the
     /// override so the field inherits again; globally, unset it.
     pub async fn clear_checkout_root(&self, host: Option<HostId>) -> anyhow::Result<()> {
-        self.write_setting(host, Field::Root, None).await
+        self.write_setting(host, Field::Root, None, None).await
     }
 
     /// Clear the post-clone setting for one scope, with the same
     /// clear-to-inherit / global-unset split as [`Self::clear_checkout_root`].
     pub async fn clear_checkout_post_clone(&self, host: Option<HostId>) -> anyhow::Result<()> {
-        self.write_setting(host, Field::PostClone, None).await
+        self.write_setting(host, Field::PostClone, None, None).await
     }
 
-    /// The one write path for every setter: read the current stored value
-    /// and the revision inside one IMMEDIATE transaction, skip entirely
-    /// (no revision bump) when the value already equals the target, and
-    /// otherwise write the value and bump the revision in that same
-    /// transaction. A named host must exist in the registry — a typo'd id
+    /// Compare the exact stored field and write within one IMMEDIATE
+    /// transaction, so even a CLI using another connection cannot land between
+    /// the check and the write. Check before the no-op path: a stale save
+    /// still needs to tell the editor to reload. Only a changed value bumps
+    /// the revision. A named host must exist in the registry — a typo'd id
     /// is a typed not-found error, never a silent write against nothing, even
     /// when the host was removed after an HTTP route checked its existence.
     async fn write_setting(
         &self,
         host: Option<HostId>,
         field: Field,
-        value: Option<&str>,
+        value: Option<String>,
+        expected: Option<Option<String>>,
     ) -> anyhow::Result<()> {
         let conn = self.conn();
-        let value = value.map(str::to_string);
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut conn = conn.lock();
             let tx = conn
@@ -1377,6 +1388,9 @@ impl HelmStore {
                 }
             }
             let current = read_field(&tx, host, field)?;
+            if expected.is_some_and(|expected| current != expected) {
+                return Err(CheckoutSettingChanged.into());
+            }
             if current == value {
                 tx.commit()
                     .context("committing no-op checkout config write")?;
@@ -1834,7 +1848,10 @@ mod root_route_tests {
     #[farhelm_testtrace::test]
     async fn get_exposes_only_global_root() {
         let harness = rest_harness::idle_helm().await;
-        assert_eq!(read(&harness).await, serde_json::json!({"root": null}));
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"root": null, "compare_on_save": true})
+        );
         let host = harness
             .store
             .add_ssh_host("checkout-route.invalid", None, None)
@@ -1884,7 +1901,7 @@ mod root_route_tests {
         );
         assert_eq!(
             read(&harness).await,
-            serde_json::json!({"root": "~/global-checkouts"})
+            serde_json::json!({"root": "~/global-checkouts", "compare_on_save": true})
         );
     }
 
@@ -1910,7 +1927,10 @@ mod root_route_tests {
             .set_checkout_post_clone(None, "private-hook-marker")
             .await
             .unwrap();
-        assert_eq!(read(&harness).await, serde_json::json!({"root": null}));
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"root": null, "compare_on_save": true})
+        );
         let mut revision = harness.manager.events().revision();
         let mut observed = harness
             .store
@@ -1929,7 +1949,10 @@ mod root_route_tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::NO_CONTENT);
-            assert_eq!(read(&harness).await, serde_json::json!({"root": root}));
+            assert_eq!(
+                read(&harness).await,
+                serde_json::json!({"root": root, "compare_on_save": true})
+            );
             assert_eq!(
                 harness.manager.events().revision(),
                 revision,
@@ -1978,6 +2001,33 @@ mod root_route_tests {
         );
     }
 
+    /// A default folder set after the editor opened must survive a save based
+    /// on its earlier unset state. Even a stale no-op needs to signal a reload.
+    #[farhelm_testtrace::test]
+    async fn a_stale_global_folder_save_cannot_overwrite_a_cli_edit() {
+        let harness = rest_harness::idle_helm().await;
+        let expected = read(&harness).await["root"].clone();
+        assert!(expected.is_null(), "the editor loaded an unset folder");
+        harness.store.set_checkout_root(None, "/cli").await.unwrap();
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        assert_eq!(before.global_root.as_deref(), Some("/cli"));
+        for root in ["/dialog", "/cli"] {
+            let response = harness
+                .router()
+                .oneshot(request(
+                    "PUT",
+                    serde_json::json!({"root": root, "expected": expected}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(
+                harness.store.checkout_config_snapshot(None).await.unwrap(),
+                before
+            );
+        }
+    }
+
     /// Path refusals are user-visible 400s and leave the prior value and
     /// revision intact. The same setter contract serves the GUI and CLI.
     #[farhelm_testtrace::test]
@@ -1991,7 +2041,7 @@ mod root_route_tests {
         let before = harness.store.checkout_config_snapshot(None).await.unwrap();
         assert_eq!(
             read(&harness).await,
-            serde_json::json!({"root": "/saved-checkouts"})
+            serde_json::json!({"root": "/saved-checkouts", "compare_on_save": true})
         );
         let feed_before = harness.manager.events().revision();
         for (value, message) in [
@@ -2050,7 +2100,7 @@ mod root_route_tests {
             assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
             assert_eq!(
                 read(&harness).await,
-                serde_json::json!({"root": "/saved-checkouts"})
+                serde_json::json!({"root": "/saved-checkouts", "compare_on_save": true})
             );
         }
     }
@@ -2105,6 +2155,82 @@ mod host_root_route_tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    /// Use default is a write against the override the editor loaded, even
+    /// when its draft is untouched. A new global default is unrelated to the
+    /// host override and must not make a fresh save stale.
+    #[farhelm_testtrace::test]
+    async fn host_folder_save_and_clear_compare_only_the_override() {
+        let harness = rest_harness::idle_helm().await;
+        let host = disconnected_host(&harness).await;
+        harness
+            .store
+            .set_checkout_root(Some(host), "/old")
+            .await
+            .unwrap();
+        let expected = read(&harness, host).await["root"].clone();
+        assert_eq!(expected, "/old");
+        harness
+            .store
+            .set_checkout_root(Some(host), "/cli")
+            .await
+            .unwrap();
+        let before = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(
+            before.host_override.as_ref().unwrap().root.as_deref(),
+            Some("/cli")
+        );
+        for root in [Some("/dialog"), None] {
+            let response = harness
+                .router()
+                .oneshot(request(
+                    host,
+                    "PUT",
+                    serde_json::json!({"root": root, "expected": expected}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(
+                harness
+                    .store
+                    .checkout_config_snapshot(Some(host))
+                    .await
+                    .unwrap(),
+                before
+            );
+        }
+
+        let refreshed = read(&harness, host).await;
+        assert_eq!(refreshed["root"], "/cli");
+        harness
+            .store
+            .set_checkout_root(None, "/independent-default")
+            .await
+            .unwrap();
+        let response = harness
+            .router()
+            .oneshot(request(
+                host,
+                "PUT",
+                serde_json::json!({"root": null, "expected": refreshed["root"]}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let after = harness
+            .store
+            .checkout_config_snapshot(Some(host))
+            .await
+            .unwrap();
+        assert_eq!(after.host_override, None);
+        assert_eq!(after.global_root.as_deref(), Some("/independent-default"));
+        assert_eq!(after.revision, before.revision + 2);
+    }
+
     /// Host settings distinguish an unset override from its current default,
     /// including a host whose only override is private hook text. Reading this
     /// editor must never reveal either scope's post-clone command.
@@ -2114,7 +2240,7 @@ mod host_root_route_tests {
         let host = disconnected_host(&harness).await;
         assert_eq!(
             read(&harness, host).await,
-            serde_json::json!({"root": null, "default": null})
+            serde_json::json!({"root": null, "default": null, "compare_on_save": true})
         );
         harness
             .store
@@ -2146,7 +2272,7 @@ mod host_root_route_tests {
         );
         assert_eq!(
             read(&harness, host).await,
-            serde_json::json!({"root": null, "default": "~/default"})
+            serde_json::json!({"root": null, "default": "~/default", "compare_on_save": true})
         );
         harness
             .store
@@ -2155,7 +2281,7 @@ mod host_root_route_tests {
             .unwrap();
         assert_eq!(
             read(&harness, host).await,
-            serde_json::json!({"root": "/host-folder", "default": "~/default"})
+            serde_json::json!({"root": "/host-folder", "default": "~/default", "compare_on_save": true})
         );
     }
 
@@ -2202,7 +2328,7 @@ mod host_root_route_tests {
             assert_eq!(response.status(), StatusCode::NO_CONTENT);
             assert_eq!(
                 read(&harness, host).await,
-                serde_json::json!({"root": root, "default": "~/default"})
+                serde_json::json!({"root": root, "default": "~/default", "compare_on_save": true})
             );
             let snapshot = harness
                 .store
@@ -2224,7 +2350,7 @@ mod host_root_route_tests {
             .unwrap();
         assert_eq!(
             read(&harness, host).await,
-            serde_json::json!({"root": null, "default": "/new-default"})
+            serde_json::json!({"root": null, "default": "/new-default", "compare_on_save": true})
         );
         assert!(harness.manager.state(host).is_none());
         assert_eq!(harness.fleet.dials(host), 0);
@@ -2380,6 +2506,61 @@ mod post_clone_route_tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    /// An explicit disable and an unset command look the same in Settings.
+    /// Treating them as equal lets an editor silently undo a CLI change.
+    #[farhelm_testtrace::test]
+    async fn post_clone_compares_unset_and_disabled_as_distinct_values() {
+        let harness = rest_harness::idle_helm().await;
+        let expected = read(&harness).await["command"].clone();
+        assert!(expected.is_null(), "the editor loaded an unset command");
+        harness
+            .store
+            .set_checkout_post_clone(None, "")
+            .await
+            .unwrap();
+        let before = harness.store.checkout_config_snapshot(None).await.unwrap();
+        assert_eq!(before.global_post_clone.as_deref(), Some(""));
+        let response = harness
+            .router()
+            .oneshot(request(
+                "PUT",
+                serde_json::json!({"command": "private-hook", "expected": expected}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let reason = axum::body::to_bytes(response.into_body(), 8192)
+            .await
+            .unwrap();
+        assert!(
+            std::str::from_utf8(&reason)
+                .unwrap()
+                .contains("changed elsewhere")
+        );
+        assert!(
+            !std::str::from_utf8(&reason)
+                .unwrap()
+                .contains("private-hook")
+        );
+        assert_eq!(
+            harness.store.checkout_config_snapshot(None).await.unwrap(),
+            before
+        );
+
+        let refreshed = read(&harness).await;
+        assert_eq!(refreshed["command"], "");
+        let response = harness
+            .router()
+            .oneshot(request(
+                "PUT",
+                serde_json::json!({"command": "  new-hook  ", "expected": refreshed["command"]}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(read(&harness).await["command"], "  new-hook  ");
+    }
+
     /// Each saved state survives reads verbatim, while global command writes
     /// leave folders and host commands alone. Changed-only revision publication
     /// remains the watcher's responsibility, including after a no-op save.
@@ -2420,7 +2601,10 @@ mod post_clone_route_tests {
             before.host_override.as_ref().unwrap().post_clone.as_deref(),
             Some("host-command-marker")
         );
-        assert_eq!(read(&harness).await, serde_json::json!({"command": null}));
+        assert_eq!(
+            read(&harness).await,
+            serde_json::json!({"command": null, "compare_on_save": true})
+        );
         let mut observed = before.revision;
         let mut feed = harness.manager.events().revision();
         for (command, changed) in [
@@ -2447,7 +2631,7 @@ mod post_clone_route_tests {
             assert_eq!(snapshot.revision, observed + i64::from(changed));
             assert_eq!(
                 read(&harness).await,
-                serde_json::json!({"command": command})
+                serde_json::json!({"command": command, "compare_on_save": true})
             );
             assert_eq!(
                 harness
@@ -2531,7 +2715,7 @@ mod post_clone_route_tests {
         assert_eq!(reply.status(), StatusCode::NO_CONTENT);
         assert_eq!(
             read(&harness).await,
-            serde_json::json!({"command": accepted})
+            serde_json::json!({"command": accepted, "compare_on_save": true})
         );
         let before = harness.store.checkout_config_snapshot(None).await.unwrap();
         let feed = harness.manager.events().revision();

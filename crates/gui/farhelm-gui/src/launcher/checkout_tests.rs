@@ -1589,15 +1589,9 @@ fn a_lost_race_takes_a_new_preview_and_sends_nothing(cx: &mut TestAppContext) {
     assert!(to(&after, "/api/sessions").is_empty(), "nothing sent again");
 }
 
-/// SPEC.md: "When the selected host has no checkout folder in effect, the launcher's managed-checkout destination
-/// offers the same explicit-save field ... success refreshes repository suggestions and the checkout preview without
-/// reopening the launcher", and "Selecting a repository before setup does not hide the field". Specified: a suggestions
-/// answer saying the host needs a folder shows the field, which reads the default folder; choosing a repository keeps
-/// it; saving `~/checkouts` sends `PUT /api/checkout-root`, and once done both the suggestions and the preview are
-/// asked for again; when the suggestions then say the host needs no setup, the field goes and focus moves on to the
-/// repository field rather than wherever focus recovery would put it.
-#[gpui::test]
-fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
+/// Submit the inline setup with a repository already chosen and its preview refused for lack of a folder.
+/// This is the state the launcher has to recover from after either a save or a CLI change.
+fn submit_inline_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, u64) {
     let (mut helm, cx) = checkout_open(cx);
     test_support::advance(cx, Duration::from_millis(160));
     let reads = to(&sent(&mut helm, cx), REPOSITORIES);
@@ -1614,7 +1608,11 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
     let [get] = &to(&field_read, "/api/checkout-root")[..] else {
         panic!("the field reads the default folder");
     };
-    helm.reply(get.id, 200, Some(json!({"root": null})));
+    helm.reply(
+        get.id,
+        200,
+        Some(json!({"root": null, "compare_on_save": true})),
+    );
     settle(cx);
     edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
     answer_preview(
@@ -1634,8 +1632,19 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
     let [save] = &to(&put, "/api/checkout-root")[..] else {
         panic!("one save");
     };
-    assert_eq!(save.body, Some(json!({"root": "~/checkouts"})));
-    helm.reply(save.id, 200, Some(json!({"root": "~/checkouts"})));
+    assert_eq!(
+        save.body,
+        Some(json!({"root": "~/checkouts", "expected": null}))
+    );
+    (helm, cx, save.id)
+}
+
+/// This one launcher must be usable as soon as its setup succeeds. Saving must check the preview and
+/// suggestions again, then move focus to the repository field if it finds setup can go away.
+#[gpui::test]
+fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppContext) {
+    let (mut helm, cx, save) = submit_inline_setup(cx);
+    helm.reply(save, 204, None);
     settle(cx);
     test_support::advance(cx, Duration::from_millis(160));
     let after = sent(&mut helm, cx);
@@ -1650,7 +1659,7 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
         let body = match command.path.as_str() {
             PREVIEW => preview_reply("/home/user/checkouts/bar-1", "bar-1", 3),
             REPOSITORIES => repositories(&[], false, None),
-            "/api/checkout-root" => json!({"root": "~/checkouts"}),
+            "/api/checkout-root" => json!({"root": "~/checkouts", "compare_on_save": true}),
             other => panic!("unexpected command after the save: {other}"),
         };
         helm.reply(command.id, 200, Some(body));
@@ -1664,6 +1673,52 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
         read(cx, |launcher, window, cx| launcher
             .repository_focused(window, cx)),
         "focus moved on to the repository field"
+    );
+}
+
+/// A CLI change can resolve a failed preview while the launcher is open. The stale save must be refused,
+/// but the folder discovered by the refetch still lets the launcher refresh that preview and dismiss setup.
+#[gpui::test]
+fn a_stale_inline_checkout_save_refreshes_the_preview_and_keeps_the_refusal(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, save) = submit_inline_setup(cx);
+    let reason = "This checkout setting changed elsewhere.";
+    helm.reply(save, 409, Some(json!(reason)));
+    settle(cx);
+    let reads = sent(&mut helm, cx);
+    let [get] = reads.as_slice() else {
+        panic!("one refetch should follow the refusal: {reads:?}");
+    };
+    assert_eq!(get.path, "/api/checkout-root");
+    helm.reply(
+        get.id,
+        200,
+        Some(json!({"root": "~/cli", "compare_on_save": true})),
+    );
+    settle(cx);
+    test_support::advance(cx, Duration::from_millis(160));
+    let mut refreshed = sent(&mut helm, cx);
+    assert_eq!(
+        to(&refreshed, PREVIEW).len(),
+        1,
+        "the old failed preview was replaced"
+    );
+    assert_eq!(to(&refreshed, REPOSITORIES).len(), 1, "setup was rechecked");
+    refreshed.sort_by_key(|command| command.id);
+    for command in refreshed {
+        let body = match command.path.as_str() {
+            PREVIEW => preview_reply("/home/user/cli/bar-1", "bar-1", 3),
+            REPOSITORIES => repositories(&[], false, None),
+            other => panic!("unexpected command after a refetch: {other}"),
+        };
+        helm.reply(command.id, 200, Some(body));
+    }
+    settle(cx);
+    assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
+    assert_eq!(
+        test_support::label(cx, "launcher-checkout-setup-refused").as_deref(),
+        Some(reason)
     );
 }
 
