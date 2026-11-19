@@ -207,6 +207,23 @@ pub(crate) struct Checkout {
     pub(crate) in_environment: bool,
 }
 
+impl Checkout {
+    /// The checkout a session uses now. The launcher and details bar both need the
+    /// session's actual folder and the host's cleanup rule when explaining it.
+    pub(crate) fn of(row: &SessionRow, collections: &Collections) -> Option<Self> {
+        let copy = row.info.working_copy.as_ref()?;
+        let cwd = row.info.cwd.as_str();
+        Some(Self {
+            repo: HostText::from_host(format!("{}/{}", copy.repo.owner, copy.repo.name)),
+            path: HostText::from_host(copy.canonical_path.as_str()),
+            folder: (cwd != copy.canonical_path).then(|| HostText::from_host(cwd)),
+            in_environment: collections
+                .get::<HostView>(&HostView::key(row.host))
+                .is_some_and(|host| host.is_session_owned && host.environment.is_some()),
+        })
+    }
+}
+
 /// The badge: a live mark, or an ended status's words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -263,14 +280,6 @@ impl Details {
             age::of(row.info.effective_activity(), now, zone)
         };
         let cwd = row.info.cwd.as_str();
-        let checkout = row.info.working_copy.as_ref().map(|copy| Checkout {
-            repo: HostText::from_host(format!("{}/{}", copy.repo.owner, copy.repo.name)),
-            path: HostText::from_host(copy.canonical_path.as_str()),
-            folder: (cwd != copy.canonical_path).then(|| HostText::from_host(cwd)),
-            in_environment: collections
-                .get::<HostView>(&HostView::key(row.host))
-                .is_some_and(|host| host.is_session_owned && host.environment.is_some()),
-        });
         Details {
             status,
             title: HostText::from_host(row.info.title.as_str()),
@@ -278,7 +287,7 @@ impl Details {
             age,
             suspended: environment.is_some_and(|environment| environment.suspended()),
             deleting,
-            checkout,
+            checkout: Checkout::of(row, collections),
             directory: CopyValue::new(directory_label(cwd), cwd),
             command: CopyValue::new(row.info.invocation.clone(), &row.info.invocation),
         }
@@ -419,7 +428,7 @@ pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Di
         .children(
             details
                 .checkout
-                .map(|checkout| checkout_mark(checkout, palette)),
+                .map(|checkout| checkout_mark(CHECKOUT_ID, checkout, palette)),
         )
         .child(copy_fields(details.directory, details.command, copies));
     div()
@@ -432,12 +441,12 @@ pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Di
 /// The managed-checkout mark: the branch glyph in the quiet ink, which never shrinks, named for the repository, with the
 /// old mark's explanation as its hover help and description (`ManagedCheckoutMark` in `icons.rs` at the reference
 /// commit, which said each host value escaped and kept the session's own folder in view when it was not the checkout's).
-fn checkout_mark(checkout: Checkout, palette: &Palette) -> Div {
-    let name = HostSentence::new(CHECKOUT_ID)
+pub(crate) fn checkout_mark(id: &'static str, checkout: Checkout, palette: &Palette) -> Div {
+    let name = HostSentence::new(id)
         .text("Managed checkout of ")
         .host(&checkout.repo)
         .accessible_name();
-    let mut help = HostSentence::new(format!("{CHECKOUT_ID}-help"))
+    let mut help = HostSentence::new(format!("{id}-help"))
         .text("Managed checkout of ")
         .host(&checkout.repo)
         .text(" at ")
@@ -455,14 +464,7 @@ fn checkout_mark(checkout: Checkout, palette: &Palette) -> Div {
          checkout moves to the trash."
     });
     div().flex_none().child(
-        StatusMark::new(
-            CHECKOUT_ID,
-            name,
-            HoverHelp::sentence(help),
-            Role::Label,
-            "",
-        )
-        .content(
+        StatusMark::new(id, name, HoverHelp::sentence(help), Role::Label, "").content(
             div().flex().items_center().child(
                 svg()
                     .path(Icon::Branch.path())

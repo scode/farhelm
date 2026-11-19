@@ -35,7 +35,7 @@
 use std::time::Duration;
 
 use farhelm_helm_client::{ApiPath, Method};
-use farhelm_proto::session_requests::BrowseDirectoryBody;
+use farhelm_proto::session_requests::{BrowseDirectoryBody, BrowseDirectoryReply};
 use farhelm_proto::ui_channel::HostStateView;
 use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, div, px};
 
@@ -94,8 +94,8 @@ pub(super) struct CheckKey {
 }
 
 /// The launcher's folder check: what it last asked about, the deadline that will ask, and the last conclusive answer:
-/// a problem, or `None` for a usable folder.
-pub(super) type FolderCheck = Latest<CheckKey, Option<FolderProblem>>;
+/// the path a usable folder resolves to, or the problem the host confirmed.
+pub(super) type FolderCheck = Latest<CheckKey, Result<String, FolderProblem>>;
 
 impl Launcher {
     /// What the folder check is about now: the chosen host on its current connection and the folder as it stands, or
@@ -164,12 +164,14 @@ impl Launcher {
             cx,
             move |answer, cx| {
                 let found = match answer {
-                    Ok(_) => Some(None),
+                    Ok(body) => body
+                        .and_then(|body| serde_json::from_value::<BrowseDirectoryReply>(body).ok())
+                        .map(|listing| Ok(listing.cwd)),
                     // Only the supervisor's own folder words are conclusive, and of those not "not usable", which is
                     // how a permission error reads (see the module docs); anything else says nothing.
                     Err(words) => FolderProblem::recognize(words.raw())
                         .filter(|problem| *problem != FolderProblem::Unusable)
-                        .map(Some),
+                        .map(Err),
                 };
                 let _ = launcher.update(cx, |launcher, cx| {
                     let finished = launcher.folder_check.finish(&key, found);
@@ -189,12 +191,20 @@ impl Launcher {
         }
     }
 
+    /// The latest conclusive observation for this path on the selected host's current connection.
+    pub(super) fn current_folder_check(
+        &self,
+        cx: &gpui::App,
+    ) -> Option<&Result<String, FolderProblem>> {
+        self.folder_check.answer_for(&self.check_key(cx)?)
+    }
+
     /// What is wrong with the folder as the launcher now names it, if anything is known to be: the last check's answer
     /// while it is about the current host, connection and folder, else a refused launch's words naming its folder.
     pub(super) fn folder_problem(&self, cx: &gpui::App) -> Option<FolderProblem> {
         let checked = self
-            .check_key(cx)
-            .and_then(|key| self.folder_check.answer_for(&key).copied().flatten());
+            .current_folder_check(cx)
+            .and_then(|answer| answer.as_ref().err().copied());
         checked.or_else(|| {
             self.refusal_words(cx)
                 .and_then(|words| FolderProblem::recognize(words.raw()))

@@ -70,18 +70,21 @@ use gpui::{
 
 use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, row};
+use super::{
+    LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, help_line_container, row,
+};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::destination_rows::destination_choice;
 use crate::launcher::draft::{
-    AgentChoices, CommandChoices, DestinationKind, Field, Tab, repo_identifier,
+    AgentChoices, CommandChoices, DestinationKind, Field, Mode, Tab, repo_identifier,
 };
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
 use crate::launcher::search::{Scope, scoped};
+use crate::session_pane::details::{Checkout as SessionCheckout, checkout_mark};
 use crate::settings::{CheckoutField, CheckoutUpdated, FolderScope};
 use crate::theme::{self, metrics};
 use crate::{operations, ticker};
@@ -959,6 +962,53 @@ impl Launcher {
             },
         );
         Some(row("launcher-where-row", "Where", group, palette).into_any_element())
+    }
+
+    /// A Replace with keeps the source's checkout when the folder is still the
+    /// source's working directory. The check can confirm a spelling that
+    /// resolves to that directory or show that a symlink now leads elsewhere.
+    pub(super) fn replacement_folder_hint(
+        &self,
+        palette: &theme::Palette,
+        cx: &App,
+    ) -> Option<Div> {
+        let Mode::ReplaceWith { source } = &self.draft.mode else {
+            return None;
+        };
+        let collections = self.store.read(cx).collections();
+        let row = collections.get::<farhelm_proto::ui_channel::SessionRow>(source)?;
+        if self.draft.checkout.is_some() {
+            return None;
+        }
+        let recorded = row.info.canonical_cwd.as_deref();
+        let expected = recorded.unwrap_or(&row.info.cwd);
+        let same_directory = match self.current_folder_check(cx) {
+            Some(Ok(resolved)) if recorded.is_some() => resolved == expected,
+            Some(Err(_)) => false,
+            // For an alias, wait for the current check when the session
+            // supplied a canonical path. The spelling may have been repointed.
+            _ => self.draft.folder.value() == expected,
+        };
+        if !same_directory {
+            return None;
+        }
+        let checkout = SessionCheckout::of(row, collections)?;
+        let sentence = HostSentence::new("launcher-replacement-checkout-folder")
+            .text("This session's managed checkout of ")
+            .host(&checkout.repo)
+            .text(". The replacement keeps working in it, with its changes.");
+        Some(
+            help_line_container(palette)
+                .flex()
+                .items_start()
+                .gap(px(6.))
+                .child(checkout_mark(
+                    "launcher-replacement-checkout-mark",
+                    checkout,
+                    palette,
+                ))
+                .child(sentence),
+        )
     }
 
     /// The managed checkout's rows, under the host: the repository field, the note on an incomplete scan, the preview

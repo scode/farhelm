@@ -4,6 +4,8 @@
 //! The fleet is the entry tests' (`entry_tests::window_with`): session `a` runs on host9 as its recorded install, and is
 //! the open session unless a test opens another.
 
+use std::time::Duration;
+
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
@@ -12,7 +14,7 @@ use super::draft::Mode;
 use super::entry::open_replace_with;
 use super::entry_tests::{destination, window_with};
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{draft, name_of, shown_refusal};
+use super::view_tests::{Field, SELECT_ALL, draft, focused, name_of, shown_refusal};
 use crate::local_state;
 use crate::session_list::tests::{change, listing_meta, session};
 use crate::test_support::{self, any_open, keys, settle};
@@ -100,6 +102,123 @@ fn replace_with_prefills_the_source_and_holds_its_host(cx: &mut TestAppContext) 
             .any(|node| node.element_id.as_deref() == Some("launcher-host")),
         "the host picker is not offered; the host is held"
     );
+}
+
+/// Give the live Replace source a checkout whose working directory is below
+/// its root. The hint follows the directory the launch would actually use.
+fn source_in_checkout(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    let source = session("a").host(9).cwd("/linked/widget/lib");
+    let mut pushed = change(
+        listing_meta(&["a", "b", "c", "d"], 5, false),
+        &[source],
+        &[],
+    );
+    pushed.upsert[0].value["host_identity"] = json!("identity9");
+    pushed.upsert[0].value["canonical_cwd"] = json!("/work/widget/lib");
+    pushed.upsert[0].value["working_copy"] = json!({
+        "id": "checkout-1",
+        "repo": {"owner": "acme", "name": "widget"},
+        "canonical_path": "/work/widget",
+        "origin_session_id": "a"
+    });
+    helm.push(pushed);
+    settle(cx);
+}
+
+/// Answer the existing membership-only check, without browsing the directory.
+/// The launcher must get the answer about the path it will actually send.
+fn answer_folder_check(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    path: &str,
+    resolved: &str,
+) {
+    assert!(replaces(helm, cx).is_empty());
+    test_support::advance(cx, Duration::from_millis(160));
+    let commands = helm.commands();
+    let [check] = &commands[..] else {
+        panic!("expected just the folder check, got {commands:?}");
+    };
+    assert_eq!(check.path, "/api/browse-directory");
+    let body = check.body.as_ref().expect("the folder check sends a path");
+    assert_eq!(body["cwd"], json!(path));
+    assert_eq!(body["membership_only"], json!(true));
+    helm.reply(
+        check.id,
+        200,
+        Some(json!({"cwd": resolved, "parent": null, "children": [], "truncated": false})),
+    );
+    settle(cx);
+}
+
+/// Keeping the source's subdirectory also keeps its checkout changes. The
+/// mark and named help disappear when the Folder field is edited elsewhere
+/// and return for the canonical spelling Browse would use.
+#[gpui::test]
+fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    source_in_checkout(&mut helm, cx);
+    assert!(replace_with(cx, "a"));
+    assert_eq!(destination(cx), (Some(9), "/linked/widget/lib".into()));
+    let folder = "launcher-replacement-checkout-folder";
+    let mark = "launcher-replacement-checkout-mark";
+    let help = "This session's managed checkout of acme/widget. The replacement keeps working in it, with its changes.";
+    assert_eq!(name_of(cx, folder), None, "the source alias needs checking");
+    answer_folder_check(&mut helm, cx, "/linked/widget/lib", "/work/widget/lib");
+    assert_eq!(name_of(cx, folder).as_deref(), Some(help));
+    assert_eq!(
+        name_of(cx, mark).as_deref(),
+        Some("Managed checkout of acme/widget")
+    );
+
+    test_support::click(cx, "launcher-folder-row");
+    assert!(focused(cx, Field::Folder), "the edit goes to Folder");
+    keys(cx, "end");
+    cx.simulate_input("/tmp");
+    settle(cx);
+    assert_eq!(draft(cx).folder.value(), "/linked/widget/lib/tmp");
+    assert_eq!(name_of(cx, folder), None);
+    assert_eq!(name_of(cx, mark), None);
+
+    keys(cx, SELECT_ALL);
+    cx.simulate_input("/work/widget/lib");
+    settle(cx);
+    assert_eq!(draft(cx).folder.value(), "/work/widget/lib");
+    assert_eq!(name_of(cx, folder).as_deref(), Some(help));
+    assert_eq!(
+        name_of(cx, mark).as_deref(),
+        Some("Managed checkout of acme/widget")
+    );
+}
+
+/// A source's recorded alias can now name some other directory. In that
+/// case leaving Folder as it opened would not preserve the source checkout.
+#[gpui::test]
+fn replace_with_does_not_promise_a_repointed_checkout_folder(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    source_in_checkout(&mut helm, cx);
+    assert!(replace_with(cx, "a"));
+    assert_eq!(destination(cx), (Some(9), "/linked/widget/lib".into()));
+    answer_folder_check(&mut helm, cx, "/linked/widget/lib", "/unrelated/lib");
+    assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
+    assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
+}
+
+/// Launch provenance alone does not tell us that the source still uses a
+/// managed checkout. Offer only the ordinary Folder controls in this case.
+#[gpui::test]
+fn replace_with_of_an_unmanaged_source_has_no_checkout_hint(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window_with(cx, Some("a"));
+    let source = session("a").host(9).unmanaged();
+    helm.push(change(
+        listing_meta(&["a", "b", "c", "d"], 5, false),
+        &[source],
+        &[],
+    ));
+    settle(cx);
+    assert!(replace_with(cx, "a"));
+    assert_eq!(name_of(cx, "launcher-replacement-checkout-folder"), None);
+    assert_eq!(name_of(cx, "launcher-replacement-checkout-mark"), None);
 }
 
 /// The launch button is the confirmation of the source's delete, so it must say what that delete stops, and the request
