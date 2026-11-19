@@ -1862,11 +1862,11 @@ class CaptureTest(unittest.TestCase):
         self.assertLess(hovers[0], click, "parked before the click, which a tooltip could otherwise cover")
         self.assertLess(click, verbs.index("probe", click), "the terminal is waited on after the click")
         self.assertLess(click, hovers[1], "parked again after the click")
-        last_wait = max(index for index, verb in enumerate(verbs) if verb == "wait")
-        self.assertLess(hovers[1], last_wait)
         shot = verbs.index("screenshot")
-        self.assertIn("tree", verbs[last_wait:shot])
+        # The settling reads the tree after the second park; the bridge's own idle wait is not used (`settle`).
+        self.assertIn("tree", verbs[hovers[1]:shot])
         self.assertIn("tree", verbs[shot:])
+        self.assertNotIn("wait", verbs)
         self.assertEqual(output.read_bytes(), (run / gui_agent.CAPTURE_FILE).read_bytes())
 
     def test_capture_writes_nothing_when_a_check_fails(self):
@@ -1901,8 +1901,31 @@ class CaptureTest(unittest.TestCase):
         # Only the two leak checks may read the terminal; a readiness poll would add reads and time out on null.
         self.assertEqual(asked.count(["get", "probe", "terminal_text"]), 2)
         self.assertEqual(asked.count(["hover", "id:brand"]), 2)
-        self.assertEqual(asked.count(["wait", "--idle", "--timeout", str(gui_agent.IDLE_MILLISECONDS)]), 2)
+        self.assertFalse(any(args[0] == "wait" for args in asked), "settled from the tree, not the bridge's wait")
         self.assertEqual(output.read_bytes(), (run / gui_agent.CAPTURE_FILE).read_bytes())
+
+    def test_settling_ignores_the_terminal_and_nothing_else(self):
+        """A running session's agent redraws a clock in its terminal every second, so a capture that also waited for
+        the terminal to stop changing timed out whenever reading the window took longer than a second. Specified: text
+        painted inside the terminal's element changes nothing the capture compares, while any other element's text
+        does; settling returns once the rest has held still long enough and fails after the timeout otherwise."""
+        def tree(clock: str, title: str) -> dict:
+            nodes = [{"id": "root", "parent": None}, {"id": gui_agent.TERMINAL_ELEMENT, "parent": 0},
+                     {"id": None, "parent": 1}, {"id": "title", "parent": 0}]
+            return {"nodes": nodes, "texts": [{"text": clock, "node": 2}, {"text": title, "node": 3}]}
+
+        self.assertEqual(gui_agent.settled_hash(tree("(2m 16s)", "A")), gui_agent.settled_hash(tree("(2m 17s)", "A")))
+        self.assertNotEqual(gui_agent.settled_hash(tree("(2m 16s)", "A")), gui_agent.settled_hash(tree("(2m 16s)", "B")))
+
+        now = [0.0]
+        ticks = iter(range(1000))
+        gui_agent.settle(lambda: tree(f"({next(ticks)}s)", "A"), timeout=5, clock=lambda: now[0],
+                         pause=lambda seconds: now.__setitem__(0, now[0] + 0.1))
+        self.assertLess(now[0], 1)
+        now[0] = 0.0
+        with self.assertRaisesRegex(RuntimeError, "did not stop changing"):
+            gui_agent.settle(lambda: tree("x", f"{next(ticks)}"), timeout=2, clock=lambda: now[0],
+                             pause=lambda seconds: now.__setitem__(0, now[0] + 0.1))
 
     def test_capture_refuses_a_run_without_a_scenario(self):
         """Only a scenario says what the picture's size and open session are."""
@@ -1919,7 +1942,11 @@ class CaptureTest(unittest.TestCase):
         run, _ = self.capture_with(bridge, "--keep-focus", "--park", "id:title")
         self.assertEqual([args for args in asked if args[0] == "hover"], [["hover", "id:title"]] * 2)
         self.assertFalse(any(args[0] == "snapshot" for args in asked))
-        self.assertEqual(asked.count(["wait", "--idle", "--timeout", str(gui_agent.IDLE_MILLISECONDS)]), 2)
+        # Each park is followed by the settling's tree reads (`settle`), before the next park and before the shot.
+        verbs = [args[0] for args in asked]
+        hovers = [index for index, verb in enumerate(verbs) if verb == "hover"]
+        self.assertIn("tree", verbs[hovers[0]:hovers[1]])
+        self.assertIn("tree", verbs[hovers[1]:verbs.index("screenshot")])
         shutil.rmtree(run)
 
         def refused(run, record, args, capture=False):

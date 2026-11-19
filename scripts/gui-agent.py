@@ -1584,6 +1584,52 @@ CAPTURE_FILE = "capture.png"
 # How long the open session's terminal gets to show its transcript's last line, and the window to stop changing.
 TRANSCRIPT_SECONDS = 30
 IDLE_MILLISECONDS = 15000
+# How long the window's drawing must stay the same before a capture counts it as settled: the bridge's own idle wait.
+IDLE_STILL_SECONDS = 0.3
+
+
+def settled_hash(tree: dict, skip: str = TERMINAL_ELEMENT) -> str:
+    """What a capture compares to tell that the window stopped changing: every element and text run of the bridge's
+    raw tree (`gpui-agent tree`), as the bridge's own `wait --idle` hashes them, except the elements inside `skip`'s
+    element and the text they paint.
+
+    The bridge's idle wait hashes the terminal's contents too, and a running session's agent redraws a clock in its
+    terminal every second ("Verifying… (2m 16s)"). Where reading the tree takes a second, as on a loaded machine, two
+    reads never match, and every capture of a scenario with a running open session timed out waiting for idle. The
+    terminal is waited on separately, for its transcript's last line, so leaving its contents out loses nothing a
+    picture depends on; the rest of the window (dialogs settling, layout, the list) is still waited for.
+    """
+    nodes = tree.get("nodes", [])
+    inside: set[int] = set()
+    for index in range(len(nodes)):
+        at = index
+        while at is not None and 0 <= at < len(nodes):
+            if nodes[at].get("id") == skip:
+                inside.add(index)
+                break
+            at = nodes[at].get("parent")
+    kept_nodes = [node for index, node in enumerate(nodes) if index not in inside]
+    kept_texts = [text for text in tree.get("texts", []) if text.get("node") not in inside]
+    return json.dumps([kept_nodes, kept_texts], sort_keys=True)
+
+
+def settle(read_tree: Callable[[], dict], timeout: float, still: float = IDLE_STILL_SECONDS,
+           clock: Callable[[], float] = time.monotonic, pause: Callable[[float], None] = time.sleep) -> None:
+    """Wait until the window's drawing apart from the terminal (`settled_hash`) has stayed the same for `still`
+    seconds, reading it with `read_tree`; a RuntimeError after `timeout` seconds of change. The bridge's `wait --idle`
+    with the terminal left out."""
+    start = clock()
+    last, since = None, start
+    while True:
+        current = settled_hash(read_tree())
+        now = clock()
+        if current != last:
+            last, since = current, now
+        elif now - since >= still:
+            return
+        if now - start > timeout:
+            raise RuntimeError(f"the window did not stop changing (its terminal aside) within {timeout:g}s")
+        pause(0.05)
 
 
 def last_transcript_line(path: Path) -> str:
@@ -1774,7 +1820,7 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
                     break
             else:
                 raise RuntimeError("no spot in the window is clear of hover and tooltip reactions to park the pointer on")
-        bridge("wait", "--idle", "--timeout", str(IDLE_MILLISECONDS))
+        settle(lambda: json.loads(bridge("tree")), IDLE_MILLISECONDS / 1000)
 
     # Park first: on a Mac the pointer is the real one, wherever it was left on the screen, and resting on a link in the
     # terminal it opens a tooltip naming the link's real target, which covers the terminal and refuses the click.
