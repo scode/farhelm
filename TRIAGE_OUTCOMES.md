@@ -1889,20 +1889,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-discards-nov18.md`
 
-## websocket-trace-logs-desktop-credential.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The desktop app's internal
-  helm credential travels in a WebSocket header (crates/farhelm-helm-client/src/ws.rs); tungstenite 0.29.0 logs the
-  whole handshake request at trace level, and the desktop app honors RUST_LOG and forwards that library's logs
-  (crates/farhelm-desktop/src/lib.rs). Opt-in (default levels are info/debug); harm needs the log plus local access
-  while the app runs. Whether the helm's server side logs the header was not checked. Bucket: high (highest arguable as
-  security-impacting).
-- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
-- Completion criteria: the library's handshake trace is always off whatever RUST_LOG says (about 5-10 lines), and the
-  helm side is checked for the same header in its logs. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/secrets-logs-and-screen.md`
-
 ## codex-login-file-rendered-in-cleartext.md
 
 - Outcome: `fix code`.
