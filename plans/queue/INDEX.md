@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `settings-search.md` — Search field in Settings: section list narrows to matches, pane lists matches, jump to the setting (after `docs-shot-desktop-fixes.md`)
 - [complete] `emacs-text-field-keys.md` — Emacs Control-key editing (Ctrl+F/B/N/P/A/E/D/H/K) in text fields on macOS and Linux
 - [in-flight 078eaa] `stop-agent-podman-containers.md` — Stop agent- and tab-started Podman containers through Podman before the scope kill, with notices on failure
-- [in-flight 12c35c] `persist-environment-seal.md` — Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
+- [complete] `persist-environment-seal.md` — Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
