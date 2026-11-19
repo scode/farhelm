@@ -273,11 +273,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Settings search.** support search in settings dialog.
 
-- **Drag sessions into groups.** Drag and drop any session, pinned or not, into a session group, out of one, or between
-  groups in the session list. The session groups plan adds groups with a row-menu "Move to group" action and lets only
-  pinned sessions cross between pin areas by dragging; this extends dragging to every row. Recorded by the maintainer on
-  2026-11-17 while planning session groups. Plan: `plans/queue/session-group-follow-ups.md`.
-
 - **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
   preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
   job, while holding Farhelm's own exclusive cache lock (`clear_git_locks` in
@@ -356,14 +351,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
   Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
-
-- **Show the open session in a collapsed group, and indent group members.** Since session-groups (#4110 to #4114), when
-  the open session belongs to a collapsed group, nothing in the sidebar shows which session is open until the group is
-  expanded; the header's status dot shows only the most urgent member. Make the selection visible on the collapsed group
-  (details to be decided; marking the header that holds the open session is one option). Separately, group members are
-  not indented, so in a long group only the header and the heavier separator after the last group mark where it ends;
-  indent members under their header. Recorded by the maintainer on 2026-11-18 from the plan's review. Plan:
-  `plans/queue/session-group-follow-ups.md`.
 
 - **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
   field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete

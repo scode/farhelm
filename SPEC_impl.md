@@ -5596,8 +5596,9 @@ installation it is on, so it follows an open session the sidebar's filter hides
   Drops include the expected source area for pins. The helm pushes order and membership before replying. A successful
   cross-area drop moves the held slot on that reply. An unpinned arrival goes after the leading pins and a pin append
   goes after the last pinned slot, even across a held gap left by an unpin. Other membership changes keep their held
-  slots. Interrupted capture, a hidden or unavailable list, or a source that ceases to be movable cancels the gesture
-  without a write.
+  slots. A lifted drag's edge deadline scrolls the existing virtualized list state in bounded steps and resamples the
+  measured targets. The source can leave the viewport while it stays in its movable band. Interrupted capture, a hidden
+  or unavailable list, or a source that ceases to be movable cancels the gesture and its deadline without a write.
 
   Replace copies a source pin and its position to the new id before requesting the source's deletion, so a pin write
   failure leaves the source intact. If deletion fails, both survivors can be pinned at the same position. Positions have

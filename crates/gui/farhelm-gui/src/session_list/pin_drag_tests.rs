@@ -13,6 +13,8 @@
 //! The pointer is driven as the platform delivers it: a press, moves with the primary button held, a release. The press
 //! takes the order hold, so a drop always lands with the hold on, as it does for a user.
 
+use std::time::Duration;
+
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::Availability;
@@ -64,6 +66,15 @@ fn bounds_of(cx: &mut VisualTestContext, id: &str) -> Bounds<Pixels> {
         .find(|node| node.element_id.as_deref() == Some(id))
         .unwrap_or_else(|| panic!("{id} was not drawn"))
         .bounds
+}
+
+/// The painted part of a list item. A row GPUI draws only to keep its keyboard focus can still have a node.
+fn visible_bounds(cx: &mut VisualTestContext, id: &str) -> Option<Bounds<Pixels>> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| node.visible_bounds)
+        .filter(|bounds| bounds.size.height > px(0.))
 }
 
 /// `key`'s row item, the whole row a drop is judged against.
@@ -628,6 +639,102 @@ fn a_group_drag_names_the_header_neighbor(cx: &mut TestAppContext) {
             json!({"neighbor": 10, "placement": "before"})
         )]
     );
+}
+
+/// The lift still owns the pointer after its source leaves the viewport. Stationary ticks must bring a previously
+/// undrawn group within reach, and releasing on that header must use its newly measured bounds.
+#[gpui::test]
+fn a_stationary_edge_drag_reaches_a_group_beyond_the_viewport(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let mut rows = vec![
+        session("source").grouped(10),
+        session("hidden").grouped(30),
+        session("loose"),
+    ];
+    rows.extend((0..22).map(|index| session(format!("filler-{index}").leak()).grouped(20)));
+    let roster = vec![
+        group(10, "Start", 1, false),
+        group(20, "Middle", 22, false),
+        group(30, "Destination", 1, true),
+    ];
+    let (mut fake, cx) = open_main(cx, grouped_snapshot(&rows, roster));
+    away(cx);
+    sent(&mut fake);
+    let view = bounds_of(cx, "session-rows");
+    let source = item(cx, "source");
+    assert!(view.contains(&source.center()));
+    assert!(
+        visible_bounds(cx, "session-group-30").is_none(),
+        "the far group begins beyond the viewport"
+    );
+    press_grip(cx, "source");
+    let edge = point(view.center().x, view.bottom() - px(23.));
+    drag_to(cx, edge);
+    test_support::advance(cx, Duration::from_millis(50));
+    assert!(
+        item(cx, "source").top() < source.top(),
+        "the stationary pointer scrolled the list"
+    );
+    let reached = (0..100).any(|_| {
+        test_support::advance(cx, Duration::from_millis(32));
+        visible_bounds(cx, "session-group-30").is_some_and(|bounds| bounds.contains(&edge))
+            && drawn(cx, "session-membership-drop-group/30")
+    });
+    assert!(
+        reached,
+        "the stationary pointer never highlighted the group (viewport {view:?}, destination {:?})",
+        visible_bounds(cx, "session-group-30")
+    );
+    assert!(
+        visible_bounds(cx, "session-item-source").is_none(),
+        "the captured source is now clipped"
+    );
+    release(cx, edge);
+    assert_eq!(
+        sent(&mut fake),
+        vec![(
+            Method::Put,
+            "/api/sessions/source/group".into(),
+            json!({"target": {"group": 30}})
+        )]
+    );
+    assert!(!drawn(cx, "session-membership-drop-group/30"));
+}
+
+/// Once a focused source is clipped, GPUI keeps a synthetic layout for it after the viewport. It must not put
+/// the start of the logical pin band below the viewport or block a drop beside a far-away pin in that same band.
+#[gpui::test]
+fn an_edge_drag_reorders_pins_after_its_focused_source_scrolls_away(cx: &mut TestAppContext) {
+    let mut rows = vec![(session("source").pinned(1), 0)];
+    rows.extend((0..20).map(|index| (session(format!("pin-{index}").leak()).pinned(index + 2), 0)));
+    rows.push((session("last").pinned(22), 0));
+    let (mut fake, cx) = open_main(cx, snapshot(&rows, false));
+    away(cx);
+    sent(&mut fake);
+    let view = bounds_of(cx, "session-rows");
+    assert!(visible_bounds(cx, "session-item-last").is_none());
+    press_grip(cx, "source");
+    assert_eq!(focused_id(cx), grip_focus("source"));
+    drag_to(cx, point(view.center().x, view.bottom() - px(4.)));
+    let reached = (0..100).any(|_| {
+        test_support::advance(cx, Duration::from_millis(32));
+        visible_bounds(cx, "session-item-last").is_some_and(|bounds| bounds.size.height > px(14.))
+    });
+    assert!(reached, "the last pin did not reach the viewport {view:?}");
+    assert!(
+        visible_bounds(cx, "session-item-source").is_none(),
+        "the source is clipped"
+    );
+    assert_eq!(
+        focused_id(cx),
+        grip_focus("source"),
+        "the clipped grip still holds focus"
+    );
+    let target = near_top(cx, "last");
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-pin-drop-last:before"));
+    release(cx, target);
+    assert_eq!(sent(&mut fake), vec![move_put("source", "last", "before")]);
 }
 
 /// The other side of the drop line: a release below the last pin's middle puts the dragged pin after it, the route's
