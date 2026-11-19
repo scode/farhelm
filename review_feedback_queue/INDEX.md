@@ -37,10 +37,6 @@ consequences.
   — Host-backed fixture cleanup can SIGKILL a recycled, unrelated process group. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md`](trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md)
-  — Natural detach can leave old viewer input live after replacement admission. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md)
   — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.

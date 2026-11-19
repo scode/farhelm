@@ -1778,25 +1778,6 @@
   feedback file and its index entry in the same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed as an ordering regression.
-  detach_naturally in crates/farhelm-supervisor/src/service/connection.rs releases the attachments lock before the old
-  attachment (and the input side whose drop cancels its pump) is dropped, while detach_stalled drops it first and the
-  version before the reviewed range did too. SPEC_impl.md: "An attachment that ends drops the input its pump had not
-  handed to the runtime and stops the pump at once; what the pump handed over is written before anything a replacement
-  attachment sends." FILTER.md "A displaced input task resumes inside an in-progress handoff" does not match (it covers
-  only an already-polled send). The trigger is not established for shipped clients (it needs the output stream to fail
-  while the terminal lives, and there is no await in the gap), so the bucket is other; it would move to highest if a
-  shipped producer were shown.
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
-- Completion criteria: Natural detach drops the old attachment's input side before releasing the lock, as detach_stalled
-  does (about 5 lines, optional test). Size gate: about 100 lines of diff (code, tests and docs, not counting
-  TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
-  to the user. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/triage-misc-nov18.md`
-
 ## header-actions-follow-unseen-session.md
 
 - Outcome: `fix code`.
