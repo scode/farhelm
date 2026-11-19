@@ -1065,10 +1065,6 @@ consequences.
   replacement host can be ended; failed cleanup of processes the replacement started is another ambiguous path, leaving
   no displayed terminal.
 
-- [`stderr-readiness-lacks-live-holder-premise.md`](stderr-readiness-lacks-live-holder-premise.md) — The regression
-  intended to keep terminal opens from waiting on unrelated stderr holders can report success without its held-open-pipe
-  premise.
-
 - [`late-listener-blocks-start-test-cleanup.md`](late-listener-blocks-start-test-cleanup.md) — A delayed test listener
   can turn the cleanup regression into a five-minute runner timeout instead of a bounded fixture failure.
 
