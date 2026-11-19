@@ -1041,9 +1041,6 @@ async fn an_interrupted_start_of_a_missing_session_is_settled_and_its_host_left(
         )
         .await
         .expect_err("the interrupted attempt fails");
-    let kept_work = farhelm_teststate::tempdir().expect("workdir");
-    let kept = keeper(&client, kept_work.path()).await;
-    let kept_socket = agent_host(&sup, &kept.id).await.socket().to_path_buf();
     let id = store_of(state)
         .await
         .reservation("missing-start")
@@ -1053,6 +1050,11 @@ async fn an_interrupted_start_of_a_missing_session_is_settled_and_its_host_left(
         .session_id;
     let record = agent_record(state, &id);
     let starter = recorded_starter(&record);
+    let _held = PidKillGuard::arm(starter);
+    wait_for_interrupted_start_gate(fixture.path(), starter).await;
+    let kept_work = farhelm_teststate::tempdir().expect("workdir");
+    let kept = keeper(&client, kept_work.path()).await;
+    let kept_socket = agent_host(&sup, &kept.id).await.socket().to_path_buf();
     let recorded_socket = recorded_socket(state, &record);
     retire(state, sup, client).await;
     forget_session(state, &id).await;
@@ -1124,10 +1126,6 @@ async fn an_interrupted_start_that_never_finishes_is_fenced_and_its_record_clear
         )
         .await
         .expect_err("the interrupted attempt fails");
-    let kept_work = farhelm_teststate::tempdir().expect("workdir");
-    let kept = keeper(&client, kept_work.path()).await;
-    let kept_socket = agent_host(&sup, &kept.id).await.socket().to_path_buf();
-    let kept_pid = host_process(&kept_socket).expect("the keeper's host runs");
     let id = store_of(state)
         .await
         .reservation("stuck-start")
@@ -1137,6 +1135,12 @@ async fn an_interrupted_start_that_never_finishes_is_fenced_and_its_record_clear
         .session_id;
     let record = agent_record(state, &id);
     let starter = recorded_starter(&record);
+    let _held = PidKillGuard::arm(starter);
+    wait_for_interrupted_start_gate(fixture.path(), starter).await;
+    let kept_work = farhelm_teststate::tempdir().expect("workdir");
+    let kept = keeper(&client, kept_work.path()).await;
+    let kept_socket = agent_host(&sup, &kept.id).await.socket().to_path_buf();
+    let kept_pid = host_process(&kept_socket).expect("the keeper's host runs");
     retire(state, sup, client).await;
     forget_session(state, &id).await;
     assert!(
@@ -1161,6 +1165,22 @@ async fn an_interrupted_start_that_never_finishes_is_fenced_and_its_record_clear
     client.delete_session(&kept.id).await.expect("delete");
     serving.stop().await;
     retire(state, sup, client).await;
+}
+
+/// The first-stage script claims the one-shot gate after reading its spec. Wait for that claim before starting a
+/// keeper so the keeper cannot become the held invocation. The caller must own cleanup of the starter while it waits.
+async fn wait_for_interrupted_start_gate(fixture: &Path, starter: u32) {
+    let held = fixture.join("held");
+    wait_for_condition("the interrupted starter claims its gate", || async {
+        held.is_dir().then_some(()).ok_or_else(|| {
+            format!(
+                "{} is absent, starter {starter} gone: {}",
+                held.display(),
+                process_is_gone(starter)
+            )
+        })
+    })
+    .await;
 }
 
 /// A launch directory that cannot be listed, at its open or partway through,
