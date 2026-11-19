@@ -1592,9 +1592,8 @@ fn enter_and_space_activate_a_focused_button_and_a_held_key_does_not(cx: &mut Te
 
 // ---- "The user moved on" ---------------------------------------------------------------------------------------------
 
-/// The moved-on counter is what lets work that finishes later decide whether it may move focus. A key press or click
-/// counts; a held key, the same key again on the same control, a double click's second click, scrolling and pointer
-/// movement do not (SPEC.md, "Who may move focus": "any key press or any click inside Farhelm").
+/// A result that finishes later must respect each fresh tap or click, including a second one on the same control.
+/// Held repeats, scrolling and pointer movement leave the original mark valid (SPEC.md, "Who may move focus").
 ///
 /// "Any key press" includes the keys a binding handles, which GPUI never shows an ordinary key listener: Farhelm's own
 /// Tab, Shift+Tab and Escape, and the editing keys GPUI Kit's text input binds (Backspace, the arrows). A user who
@@ -1657,10 +1656,8 @@ fn what_counts_as_the_user_moving_on(cx: &mut TestAppContext) {
     assert!(moved(cx, &before), "a key press is");
     let after_key = mark(cx);
     keys(cx, "a");
-    assert!(
-        !moved(cx, &after_key),
-        "the same key again on the same control is a repeat"
-    );
+    assert!(moved(cx, &after_key), "a fresh tap of the same key counts");
+    let after_key = mark(cx);
     cx.simulate_event(KeyDownEvent {
         native_key: None,
         keystroke: Keystroke::parse("b").unwrap(),
@@ -1677,9 +1674,10 @@ fn what_counts_as_the_user_moving_on(cx: &mut TestAppContext) {
         ..Default::default()
     });
     assert!(
-        !moved(cx, &before_click),
-        "a double click's second click is a repeat"
+        moved(cx, &before_click),
+        "the second click of a double click counts"
     );
+    let before_click = mark(cx);
     cx.simulate_click(point(px(50.), px(50.)), Modifiers::none());
     assert!(moved(cx, &before_click), "a click is moving on");
 
