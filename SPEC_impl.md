@@ -5075,9 +5075,10 @@ installation it is on, so it follows an open session the sidebar's filter hides
   is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and
   `:suffix` interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
   `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
-  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission normalizes to
-  YOLO, as for Pi, OpenCode and Goose; explicit Approve and Guarded remain explicit. SmartApprove and Chat are refused
-  for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size.
+  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission selects
+  Guarded for new launches. Older stored launches with no permission keep their historical YOLO meaning. SmartApprove
+  and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at
+  sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
