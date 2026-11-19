@@ -105,41 +105,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
 
-- **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
-  podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
-  container's host-side helpers (podman's conmon and its network helper, pasta) stay in the scope of whatever started
-  them and inherit its `FARHELM_*` markers. Killing conmon that way leaves podman's record of the container stuck
-  ("stopping", or "running" with nothing behind it), and only `podman rm -f` clears it; a `--rm` container is never
-  cleaned up. Stop such containers through podman first, then run the existing sweep as the backstop. Findings from
-  2026-10-28, checked against rootless podman 4.9.3:
-  - Find them without scanning every process: read the operation's own scope (`cgroup.procs` of the agent's scope, a
-    tab's scope, or for Delete every scope of the session, which Delete already lists by name) and keep the processes
-    that are conmon. The scope is the attribution; no environment read is needed, so it also works for a process that
-    rewrote its environment.
-  - A container's main conmon names the container on its command line (`-c <id>`, `-n <name>`) and carries podman's
-    exact storage settings in its `--exit-command-arg` list (`--root`, `--runroot`, `--cgroup-manager`, `--tmpdir`, and
-    so on). Run `podman stop` with those settings so a container in non-default storage is still found.
-  - A conmon with `--exec` belongs to a `podman exec` session, not to a container the session started: the container may
-    be the user's own long-lived one. Never stop that container; ending the exec's conmon (as the sweep already does) is
-    the right cleanup there. An exec with a terminal ends by hangup when its conmon dies; one without a terminal does
-    not, which is a residual to state.
-  - Run podman with the `FARHELM_*` markers removed from its environment. Podman's shared per-user pause process
-    inherits the environment of whichever podman command recreates it, and it is shared with every rootless podman use
-    on the account. Killing it is safe (verified: podman recreates it on the next command, joining a running container's
-    namespaces, or making fresh ones when nothing runs), but a marked pause process gets swept for no reason.
-  - Stop in parallel, under a time bound, and treat podman's reported state rather than its exit status as the result:
-    `podman stop` can exit non-zero after a killed exec session even though the container stopped. A stop that fails or
-    hangs falls through to today's sweep, so the worst case stays today's messy state, never a stuck operation.
-  - Which operation stops which containers follows the scope: Stop stops what the agent started, tab close what that tab
-    started, Delete everything the session started. Containers started outside Farhelm, by systemd units or the user's
-    own shell, are never in a session's scope.
-  - Out of reach, unchanged: Docker containers (started by the root daemon, not by the agent's processes) and podman run
-    under `sudo` (root's conmon). On a host without a usable systemd user manager there are no scopes; the cheap
-    fallback is `podman ps` and checking each listed container's conmon for the session's markers, which costs one read
-    per container and covers only podman's default storage.
-  - Farhelm manages a container session's own container. This entry covers containers an agent starts itself, in any
-    session. Plan: `plans/queue/stop-agent-podman-containers.md`.
-
 - **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
   for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
   Farhelm cannot know such a tool's details, so the user brings the integration and Farhelm defines the contract. A

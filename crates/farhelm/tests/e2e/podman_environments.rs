@@ -120,7 +120,7 @@ fn control_command(program: &str, args: &[&str]) -> tokio::process::Command {
 /// Every command belongs to this test and has bounded capture and lifetime.
 /// Dropping a timed-out child kills the Podman client. Cleanup independently
 /// checks the preselected owned names because a mutator's outcome may be lost.
-async fn engine(args: &[&str]) -> anyhow::Result<Output> {
+pub(super) async fn engine(args: &[&str]) -> anyhow::Result<Output> {
     let mut child = control_command("podman", args)
         .spawn()
         .context("start the test's Podman client")?;
