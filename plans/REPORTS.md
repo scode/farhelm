@@ -25,3 +25,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`unusable-folder-refusals`](reports/unusable-folder-refusals.report.md) landed 2026-11-19 in #4188, #4190, #4194: A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
 - [`drawn-frame-actions`](reports/drawn-frame-actions.report.md) landed 2026-11-19 in #4176, #4193, #4204, #4181, #4183: Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
 - [`one-helm-per-supervisor`](reports/one-helm-per-supervisor.report.md) landed 2026-11-19 in #4187, #4195, #4200: Each host records its owning helm, refuses others, and is taken over only on request (protocol bump)
+- [`gui-ux-discards`](reports/gui-ux-discards.report.md) landed 2026-11-19 in #4203: Fifty discards from the 2026-11-18 GUI UX triage, in one PR
