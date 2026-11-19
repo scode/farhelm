@@ -1237,6 +1237,12 @@ static SCENES: &[Scene] = &[
         setup: focus_ring_setup,
     },
     Scene {
+        name: "scroll-box-pointer-help",
+        size: (820., 340.),
+        draw: scroll_box_help,
+        setup: scroll_box_help_setup,
+    },
+    Scene {
         name: "host-uninstall-refusal",
         size: (640., 600.),
         draw: empty,

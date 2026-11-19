@@ -460,6 +460,7 @@ pub(crate) fn draw(
                 HoverHelp::tooltip(wait.map_or_else(|| restart::hover_help(row), str::to_owned)),
                 Role::Button,
             )
+            .help_below()
             .tier(Tier::Primary)
             // The visible word matches the text's "Restart or Replace"; the name keeps the conversation's promise.
             .accessible_name(restart::offer_label(row.info.restart_offer))
@@ -479,6 +480,7 @@ pub(crate) fn draw(
             )),
             Role::Button,
         )
+        .help_below()
         // The launcher holds one launch at a time, so a pending launch keeps it from opening as a host change does; the
         // entry point refuses then anyway (`launcher::entry::new_available`), and this says why rather than look ready.
         .busy(launcher_wait.is_some())
@@ -500,6 +502,7 @@ pub(crate) fn draw(
             HoverHelp::tooltip(wait.unwrap_or(replace::MENU_HELP)),
             Role::Button,
         )
+        .help_below()
         .busy(wait.is_some())
         .expanded(asking)
         .on_click(move |_, window, cx| {

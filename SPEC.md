@@ -2700,12 +2700,18 @@ and a thin ring identify the target in both cases. An open panel keeps its space
 
 Controls in the top rows of the sidebar and session pane, main-pane banners, the version readout and the drawn title bar
 show help below the control first. Dialog footer buttons and question answers also prefer below, keeping the text above
-them readable. Help can appear above a control when the space below is too small or an open menu needs it.
+them readable. Approval answers and the actions under a session or connection status message follow the same rule. Help
+can appear above a control when the space below is too small or an open menu needs it.
 
 Launcher suggestions, recent setups and browsed folders, the quick switcher, Templates, Trash, queued approvals, and the
 Settings navigation, recipe and credential lists show help just to the right of the list when it fits. A notch and ring
 identify the control. Help uses its ordinary placement when there is too little room at the right. Open menus keep their
 space.
+
+Help follows the pointer's height along tall controls. It appears to the right of the sidebar divider, to the left of
+the terminal history scrollbar, and on the roomier side of an approval's scroll box. Keyboard focus puts the card at the
+middle of the visible control. Form controls, a dialog's close button and small marks outside lists use ordinary
+placement, above first and below when needed.
 
 Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
 otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.

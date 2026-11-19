@@ -15,7 +15,8 @@ use gpui::{
     Window, div, point, px, size,
 };
 
-use super::beside::{Placed, around_target, at_pointer, place, place_menu};
+use super::TallSide;
+use super::beside::{Placed, around_target, at_pointer, place, place_menu, place_tall};
 use crate::components::{Button, HoverHelp, Role};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, TooltipSide};
@@ -118,6 +119,85 @@ fn below_first_help_respects_the_footer_and_window_edges() {
     let above = around_target(control, card, short, true);
     assert_eq!(above.side, TooltipSide::Above);
     assert_eq!(above.origin.y + card.height, control.top() - px(6.));
+}
+
+/// A divider and a terminal bar have fixed sides. A scroll box uses the side with more room, with its clipped
+/// center for keyboard help. A card near the bottom keeps its notch on a straight edge.
+#[test]
+fn tall_help_follows_pointer_height_and_uses_the_roomier_box_side() {
+    let area = rect(0., 0., 720., 400.);
+    let right = rect(600., 60., 18., 300.);
+    let left = rect(250., 60., 12., 300.);
+    let card = size(px(124.), px(44.));
+    let divider = place_tall(TallSide::Right, left, Some(px(100.)), card, area, &[]).unwrap();
+    assert_eq!(divider.origin, point(left.right() + px(6.), px(78.)));
+    assert_eq!(divider.notch_y, Some(px(100.)));
+    let bar = place_tall(TallSide::Left, right, Some(px(350.)), card, area, &[]).unwrap();
+    assert_eq!(
+        bar.origin,
+        point(right.left() - card.width - px(6.), px(328.))
+    );
+    assert_eq!(bar.side, TooltipSide::BesideLeft);
+    let focused = place_tall(TallSide::Roomier, right, None, card, area, &[]).unwrap();
+    assert_eq!(focused.side, TooltipSide::BesideLeft);
+    assert_eq!(focused.notch_y, Some(right.center().y));
+
+    let reaching_bottom = rect(250., 60., 12., 340.);
+    let near_bottom = place_tall(
+        TallSide::Right,
+        reaching_bottom,
+        Some(px(389.)),
+        card,
+        area,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(near_bottom.origin.y + card.height, area.bottom() - px(4.));
+    assert_eq!(near_bottom.notch_y, Some(px(384.)));
+
+    let narrow = rect(0., 0., 350., 400.);
+    let fallback = place_tall(TallSide::Right, left, Some(px(100.)), card, narrow, &[]).unwrap();
+    assert_eq!(fallback.side, TooltipSide::Above);
+    assert_eq!(fallback.origin.y + card.height, px(94.));
+    assert_eq!(fallback.notch_y, None);
+
+    let clipped = rect(250., 60., 12., 0.);
+    assert!(place_tall(TallSide::Roomier, clipped, None, card, area, &[]).is_none());
+}
+
+/// A divider is still hoverable just outside a menu. Keep its help near the pointer without covering the choices.
+#[test]
+fn tall_help_gives_an_open_menu_its_space() {
+    let area = rect(0., 0., 720., 400.);
+    let strip = rect(250., 60., 12., 300.);
+    let card = size(px(124.), px(44.));
+    let panel = Rc::new(Cell::new(Some(rect(268., 95., 200., 70.))));
+    let at = Some(px(100.));
+    let beside = place_tall(TallSide::Right, strip, at, card, area, &[]).unwrap();
+    assert!(
+        panel
+            .get()
+            .unwrap()
+            .intersects(&Bounds::new(beside.origin, card))
+    );
+    let above = place_tall(
+        TallSide::Right,
+        strip,
+        at,
+        card,
+        area,
+        std::slice::from_ref(&panel),
+    )
+    .unwrap();
+    assert_eq!(above.side, TooltipSide::Above);
+    assert!(
+        !panel
+            .get()
+            .unwrap()
+            .intersects(&Bounds::new(above.origin, card))
+    );
+    panel.set(Some(rect(220., 40., 250., 130.)));
+    assert!(place_tall(TallSide::Right, strip, at, card, area, &[panel]).is_none());
 }
 
 /// A window of `viewport` with no frame and no bar of its own, as the old app's page was and as macOS's and a

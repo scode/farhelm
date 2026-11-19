@@ -623,7 +623,7 @@ fn late_notice(notice: Notice, height: Rc<Cell<Pixels>>, cx: &App) -> AnyElement
             Button::new(
                 "approval-late-dismiss",
                 "Dismiss",
-                HoverHelp::tooltip("Dismiss: hide this notice"),
+                HoverHelp::tooltip("Dismiss: hide this notice").below(),
                 Role::Button,
             )
             .tier(Tier::Neutral)

@@ -22,7 +22,9 @@ use gpui::{
     Styled, Window, div, point, px,
 };
 
-use super::{SceneState, press_tab, rest_pointer_on_control};
+use super::{
+    Pending, SceneState, press_tab, rest_pointer_at, rest_pointer_on_control, take_pending,
+};
 
 /// A dialog list with help beside its selected row. Both the row above and the row below stay readable.
 pub(super) fn dialog_list_help(_: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -664,6 +666,62 @@ pub(super) fn scroll_boxes(_: &SceneState, _: &mut Window, _: &mut App) -> AnyEl
                 .max_height(px(96.)),
         ))
         .into_any_element()
+}
+
+/// An approval's scroll box with help near its lower rows, where the pointer has come to rest.
+pub(super) fn scroll_box_help(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    if take_pending(state) {
+        window.defer(cx, |window, cx| {
+            let shown = layers::shown_tooltip(window, cx).expect("the scroll box shows help");
+            assert_eq!(shown.text.as_ref(), "Scroll to read the whole command");
+            assert!(
+                matches!(
+                    shown.side(),
+                    layers::TooltipSide::Beside | layers::TooltipSide::BesideLeft
+                ),
+                "the scroll box has room beside it, got {:?}",
+                shown.side()
+            );
+        });
+    }
+    div()
+        .ml(px(60.))
+        .mt(px(30.))
+        .w(px(240.))
+        .child(
+            ScrollBox::new(
+                "command-scroll",
+                "Command",
+                HoverHelp::tooltip("Scroll to read the whole command"),
+                Role::Region,
+                div().children((1..=14).map(|n| div().child(format!("--option-{n} value")))),
+            )
+            .max_height(px(206.))
+            .monospace(),
+        )
+        .into_any_element()
+}
+
+/// Place the pointer well below the box's center to distinguish pointer height from keyboard placement.
+pub(super) fn scroll_box_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
+    window.draw(cx).clear(cx);
+    let target = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("command-scroll"))
+        .expect("the scroll box is drawn")
+        .bounds;
+    rest_pointer_at(
+        state,
+        point(target.center().x, target.bottom() - px(28.)),
+        window,
+        cx,
+    );
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(std::cell::Cell::new(true))));
 }
 
 /// The tab strip as the launcher draws it: Agent chosen, Command not (`.launch-kind-tabs`).

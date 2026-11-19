@@ -5,13 +5,53 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui::{IntoElement, ParentElement as _, Styled as _, TestAppContext, div, px};
+use gpui::{
+    IntoElement, Modifiers, ParentElement as _, Styled as _, TestAppContext, div, point, px,
+};
 
 use crate::components::{Button, HoverHelp, Role, ScrollBox};
 use crate::focus::TabReach;
-use crate::test_support::{bounds, click, focused, focused_id, follow, keys, open};
+use crate::test_support::{bounds, click, focused, focused_id, follow, keys, open, settle};
 
 use super::{each_scroll_key_scrolls, lines, role_and_name};
+
+/// When Tab reaches a box whose pointer help is already visible, the card centers even with the pointer still
+/// off-center. The focus handoff schedules its own frame, so this observes the card before any forced redraw.
+#[gpui::test]
+fn keyboard_focus_centers_existing_scroll_box_help(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        div()
+            .w(px(240.))
+            .ml(px(100.))
+            .child(
+                ScrollBox::new(
+                    "command",
+                    "Command",
+                    HoverHelp::tooltip("Read the rest of the command"),
+                    Role::Region,
+                    lines(40, "argument"),
+                )
+                .max_height(px(180.)),
+            )
+            .into_any_element()
+    });
+    let target = bounds(cx, "command");
+    assert!(
+        bounds(cx, "line-39").bottom() > target.bottom(),
+        "the box really scrolls"
+    );
+    let at = point(target.center().x, target.bottom() - px(35.));
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    settle(cx);
+    super::wait_hover_delay(cx);
+    assert!((bounds(cx, "tooltip-card").center().y - at.y).abs() <= px(1.));
+
+    keys(cx, "tab");
+    settle(cx);
+    let centered = bounds(cx, "tooltip-card").center().y;
+    assert_eq!(focused_id(cx).as_deref(), Some("command"));
+    assert!((centered - target.center().y).abs() <= px(1.));
+}
 
 /// Why this matters: SPEC.md, "Reaching everything by keyboard", gives a region whose content holds nothing focusable
 /// "its own tab stop with an accessible name", in every engine Farhelm ships on. An approval card's command and prompt

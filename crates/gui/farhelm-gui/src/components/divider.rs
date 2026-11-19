@@ -62,6 +62,7 @@ use gpui::{
 
 use super::HoverHelp;
 use crate::focus::{self, Mark};
+use crate::layers::TallSide;
 use crate::theme;
 
 /// What a drag on the divider did, in window coordinates.
@@ -130,7 +131,7 @@ impl Divider {
         Divider {
             id: id.into(),
             label: label.into(),
-            help,
+            help: help.beside_tall(TallSide::Right),
             role,
             value,
             range,

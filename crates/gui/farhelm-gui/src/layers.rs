@@ -190,11 +190,11 @@ mod tooltip_tests;
 
 pub use beside::beside_edge;
 // The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
-pub(crate) use tooltip::HelpPlacement;
 pub use tooltip::{
     BesideCues, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner, TooltipSide,
     focus_drawn, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed, shown_tooltip,
 };
+pub(crate) use tooltip::{HelpPlacement, TallSide};
 use tooltip::{Hovered, tooltip_card};
 #[cfg(test)]
 pub(crate) use tooltip::{TRACKER, show_tooltip_at};

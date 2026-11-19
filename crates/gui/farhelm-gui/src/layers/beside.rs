@@ -48,7 +48,8 @@ use gpui::{
 };
 
 use super::tooltip::{
-    Drawn, DrawnRing, HelpPlacement, HelpTarget, POINTER_OFFSET, ShownTooltip, TooltipSide,
+    Drawn, DrawnRing, HelpPlacement, HelpTarget, POINTER_OFFSET, ShownTooltip, TallSide,
+    TooltipSide,
 };
 use super::{Anchor, AnchorBounds, stack};
 use crate::theme;
@@ -112,10 +113,13 @@ impl HelpEdges {
         target: Drawn,
         size: Size<Pixels>,
         area: Bounds<Pixels>,
+        pointer_y: Option<Pixels>,
     ) -> Option<Placed> {
         let ordinary = || around_target(target.bounds, size, area, false);
         let visible = target.bounds.intersect(&target.clip);
-        if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
+        if !matches!(placement, HelpPlacement::Tall(_))
+            && (visible.size.width <= px(0.) || visible.size.height <= px(0.))
+        {
             return Some(ordinary());
         }
         let center = visible.center();
@@ -178,6 +182,9 @@ impl HelpEdges {
                     _ => Some(placed),
                 }
             }
+            HelpPlacement::Tall(side) => {
+                place_tall(side, visible, pointer_y, size, area, &self.panels)
+            }
             HelpPlacement::Ordinary | HelpPlacement::Below => Some(ordinary()),
         }
     }
@@ -205,6 +212,47 @@ fn clears_panels(placed: Placed, size: Size<Pixels>, panels: &[AnchorBounds]) ->
         .iter()
         .filter_map(|surface| surface.get())
         .all(|panel| !panel.intersects(&card))
+}
+
+/// Place help at the pointer's height within the visible part of a tall control. Keyboard focus uses the middle of
+/// that same part. If that side is too narrow or an open menu needs it, ordinary help stays near the same height.
+/// A card that still crosses a menu waits for a frame with enough room. A fully clipped control has no height to use.
+pub(super) fn place_tall(
+    side: TallSide,
+    visible: Bounds<Pixels>,
+    pointer_y: Option<Pixels>,
+    size: Size<Pixels>,
+    area: Bounds<Pixels>,
+    panels: &[AnchorBounds],
+) -> Option<Placed> {
+    let visible = visible.intersect(&area);
+    if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
+        return None;
+    }
+    let y = pointer_y
+        .unwrap_or(visible.center().y)
+        .clamp(visible.top(), visible.bottom());
+    let right = match side {
+        TallSide::Right => true,
+        TallSide::Left => false,
+        TallSide::Roomier => area.right() - visible.right() >= visible.left() - area.left(),
+    };
+    let (side, left) = if right {
+        (TooltipSide::Beside, visible.right() + GAP)
+    } else {
+        (TooltipSide::BesideLeft, visible.left() - size.width - GAP)
+    };
+    let clear = |placed: &Placed| clears_panels(*placed, size, panels);
+    beside_at(side, left, y, size, area)
+        .filter(clear)
+        .or_else(|| {
+            let at_height = Bounds::new(
+                point(visible.left(), y),
+                gpui::size(visible.size.width, px(0.)),
+            );
+            let fallback = around_target(at_height, size, area, false);
+            clear(&fallback).then_some(fallback)
+        })
 }
 
 /// Where a tooltip goes: its card's origin, which side that is, and for beside placement the height of the notch's
@@ -561,7 +609,9 @@ impl Element for PlacedBeside {
                 ..
             } => {
                 if let Some(target) = target.drawn() {
-                    let Some(placed) = edges.place(*placement, target, size, area) else {
+                    let pointer_y = focus.is_none().then(|| window.mouse_position().y);
+                    let Some(placed) = edges.place(*placement, target, size, area, pointer_y)
+                    else {
                         return Painting::Nothing;
                     };
                     (placed, Some(target))
@@ -569,7 +619,18 @@ impl Element for PlacedBeside {
                     let Some(bounds) = crate::focus::control_bounds(focus, window, cx) else {
                         return Painting::Nothing;
                     };
-                    (around_target(bounds, size, area, false), None)
+                    let placed = match placement {
+                        HelpPlacement::Tall(side) => {
+                            let Some(placed) =
+                                place_tall(*side, bounds, None, size, area, &edges.panels)
+                            else {
+                                return Painting::Nothing;
+                            };
+                            placed
+                        }
+                        _ => around_target(bounds, size, area, false),
+                    };
+                    (placed, None)
                 } else {
                     (at_pointer(*at, size, area), None)
                 }
