@@ -1155,9 +1155,6 @@ consequences.
 - [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
   input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
 
-- [`stale-reply-test-lacks-processing-witness.md`](stale-reply-test-lacks-processing-witness.md) — The regression for
-  cancelling a terminal-host Info request does not prove that a late reply cannot satisfy the next request.
-
 - [`shift-enter-test-lacks-reader-readiness.md`](shift-enter-test-lacks-reader-readiness.md) — This integration test can
   report success without establishing the already-waiting reader its documentation requires.
 

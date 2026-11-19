@@ -22769,6 +22769,23 @@ prior terminal output" (rebased revision)
 - Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
 - Execution: complete; removed during the 2026-11-18 GUI UX triage.
 
+## stale-reply-test-lacks-processing-witness.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Late-reply test
+  can't tell matched reply from newest reply. Terminal-host Info: the test sends both replies back to back, so a broken
+  "newest reply wins" client also passes. Confirmed; production is correct. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: send reply 1, assert the second call still waits, then reply 2 (~10-15 lines). At execution,
+  fix the test only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism);
+  otherwise treat this as a discard and say so in the execution record. Either way, remove the feedback file and its
+  index entry.
+- Execution: complete in jj change `qlsksrountsknvrytmwnpyruoxqszqws`, bookmark
+  `plan/gui-ux-backend-test-gaps/01-stale-reply-test-lacks`,
+  [PR #4211](https://github.com/scode/farhelm/pull/4211/changes).
+
 ## held-start-test-lacks-prelaunch-fencing-witness.md
 
 - Outcome: `discard`.

@@ -685,8 +685,8 @@ async fn records_read_while_waiting_for_a_reply_are_kept() {
 /// sent; the host still answers it, and the next request of the same kind
 /// would otherwise take the stale answer for its own. Spec: an `info` that
 /// is dropped after its request went out, then a second `info`; the
-/// stand-in answers the first with `host_pid` 1 and the second with 2, and
-/// the second call returns 2.
+/// stand-in answers the dropped call with `host_pid` 1. Once that reply is
+/// decoded, the second call must still send its request and wait for 2.
 #[farhelm_testtrace::test]
 async fn a_dropped_requests_reply_is_skipped() {
     let mut pair = connected().await;
@@ -702,11 +702,24 @@ async fn a_dropped_requests_reply_is_skipped() {
         buf,
         ..
     } = &mut pair;
-    let (info, ()) = tokio::join!(client.info(), async {
-        assert_eq!(read_frame(server, buf).await, ClientMessage::Info);
-        send(server, &HostMessage::InfoReply(info_numbered(1))).await;
-        send(server, &HostMessage::InfoReply(info_numbered(2))).await;
-    });
+    // Leave the decoded stale answer in the reply slot. Two replies read in one batch could hide a bad match.
+    send(server, &HostMessage::InfoReply(info_numbered(1))).await;
+    client
+        .drive(
+            |client| client.info.received == 1,
+            Some(Instant::now() + WAIT),
+        )
+        .await
+        .unwrap();
+    let info = client.info();
+    tokio::pin!(info);
+    tokio::select! {
+        biased;
+        early = &mut info => panic!("second request completed before its reply: {early:?}"),
+        request = read_frame(server, buf) => assert_eq!(request, ClientMessage::Info),
+    }
+    send(server, &HostMessage::InfoReply(info_numbered(2))).await;
+    let info = info.await;
     assert_eq!(info.unwrap().host_pid, 2);
 }
 
