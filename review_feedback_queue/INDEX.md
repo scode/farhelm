@@ -760,10 +760,6 @@ consequences.
 - [`narrow-sidebar-tests-measure-outer-container.md`](narrow-sidebar-tests-measure-outer-container.md) — Two narrow row
   tests retain containment bounds from the wider outer sidebar after shrinking only its content area.
 
-- [`session-navigation-interrupts-close-all.md`](session-navigation-interrupts-close-all.md) — Switching sessions while
-  Close all waits for a response leaves later tunnel listeners open without attempting their closure or reporting that
-  the batch was interrupted.
-
 - [`request-cards-cover-tunnel-controls.md`](request-cards-cover-tunnel-controls.md) — A waiting agent request can cover
   the opened tunnel list and prevent pointer access to overlapping close controls. Exact native overlap geometry remains
   unmeasured, and specification coverage is ambiguous.

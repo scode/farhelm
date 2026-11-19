@@ -47,13 +47,13 @@ use farhelm_grid_model::tunnel_port;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, Global,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
+    AnyElement, App, AppContext as _, BorrowAppContext as _, Context, Entity, FocusHandle,
+    FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
+    Role, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
 use serde::Deserialize;
@@ -149,6 +149,13 @@ pub(crate) struct Tunnels {
     settle: Option<ticker::Deadline>,
 }
 
+/// A session reopened during a close batch needs the same listing, busy state and notices. The operation's callback
+/// keeps the entity alive. These weak handles never keep a closed terminal's tunnel state after the work settles.
+#[derive(Default)]
+struct ClosingTunnels(session::PerSession<HashMap<String, WeakEntity<Tunnels>>>);
+
+impl Global for ClosingTunnels {}
+
 /// The session a tunnel was last opened for outside the terminal: set by [`opened_elsewhere`], observed by every
 /// [`Tunnels`]. One value: GPUI merges a global's notifications within one update, so two calls in one update would
 /// refresh only the second session's views. Each call comes from its own answer's reply, so none share an update.
@@ -170,6 +177,16 @@ pub(crate) fn opened_elsewhere(session: &str, cx: &mut App) {
 }
 
 impl Tunnels {
+    /// The tunnel state to reuse when selecting this session again during a close batch.
+    pub(crate) fn while_closing(key: &str, cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<ClosingTunnels>()?
+            .0
+            .read(cx)?
+            .get(key)?
+            .upgrade()
+            .filter(|tunnels| tunnels.read(cx).closing)
+    }
+
     /// The tunnels of `session`, not read yet.
     pub(crate) fn new(session: String, cx: &mut Context<Self>) -> Self {
         let elsewhere = cx.observe_global::<OpenedElsewhere>(|tunnels: &mut Self, cx| {
@@ -420,6 +437,12 @@ impl Tunnels {
         }
         self.closing = true;
         self.failures.clear();
+        let handle = cx.weak_entity();
+        cx.update_default_global::<ClosingTunnels, _>(|closing, cx| {
+            let entries = closing.0.current(cx);
+            entries.retain(|_, tunnels| tunnels.upgrade().is_some());
+            entries.insert(self.session.clone(), handle);
+        });
         cx.notify();
         self.close_next(listeners.into(), Vec::new(), cx);
     }
@@ -458,12 +481,14 @@ impl Tunnels {
         );
         self.revision += 1;
         let key = OpKey::tunnels(&self.session);
-        let tunnels = cx.weak_entity();
+        // The batch belongs to the activated session after its terminal leaves the pane. The operation store owns
+        // this handle until the reply arrives or the connection retires.
+        let tunnels = cx.entity();
         let closing = listener.clone();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
                 let outcome = settled.outcome.clone();
-                let _ = tunnels.update(cx, |tunnels, cx| {
+                tunnels.update(cx, |tunnels, cx| {
                     match outcome {
                         Outcome::Refused(refusal) => {
                             let text = format!(
@@ -895,7 +920,8 @@ pub(crate) fn pill(
             )
         }
     };
-    let anchor = Anchor::for_element(PILL_ANCHOR, window, cx);
+    // A close batch can keep the old list alive. Its anchor belongs to the session whose tunnels it shows.
+    let anchor = Anchor::for_element(format!("{PILL_ANCHOR}-{}", state.session), window, cx);
     let toggled = anchor.clone();
     let owner = tunnels.downgrade();
     let content = div()
