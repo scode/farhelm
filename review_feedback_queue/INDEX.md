@@ -2684,10 +2684,6 @@ consequences.
 - [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
   without typing can undo a host rename that just happened through an approved agent request.
 
-- [`layout-preference-save-failures-are-silent.md`](layout-preference-save-failures-are-silent.md) — The sidebar width,
-  terminal text size and host rail expansion can briefly change and then revert without telling you the helm could not
-  save them.
-
 - [`closing-settings-can-hide-ntfy-save-refusal.md`](closing-settings-can-hide-ntfy-save-refusal.md) — If you save an
   ntfy setting and close Settings before the helm refuses the write, the window can lose the refusal. Reopening shows
   the old value with no explanation.

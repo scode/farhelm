@@ -4524,21 +4524,23 @@ inside the environment the first attempt created, where a retry could not find i
   welcome card seen, because a failed save only lets it appear at a later window start or reset; the automatic
   announcement check and recording a dismissed batch, because a failed read or save only postpones those announcements
   to a later window start or reset; and a trust hint's Don't show again save after its session has left the screen,
-  because that session's adjacent error no longer has a place to appear. The manual "Mark unread"/"Mark read" toggle and
-  the notification list's clear button are not covered — a failed toggle or clear surfaces like any other operation.
-  Turning the session-confirmation opt-out off restores confirmations as soon as the helm saves it; a refused save
-  leaves them skipped and says so beside the switch, which goes back to the stored choice (the maintainer decided on
-  2026-11-14 that the desktop app follows the helm here rather than restoring confirmations before the helm has saved
-  the choice). Closing Settings before the save settles drops that error. The error stays until that switch's next save
-  starts. Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put
-  back the saved choice and show an adjacent error when their newest save fails. So do the host setup and removal
-  confirmation choices and turning the session-confirmation opt-out on, which were silent before: with no optimistic
-  copy a failed save never took effect, and silence would hide why the switch snapped back. For naming, frame colors and
-  link clicks, closing Settings drops only the alert: the shared choice still reverts, so mounted terminals and later
-  actions cannot keep using a failed save. Superseded results neither report nor revert a newer choice. A trust-hint
-  choice copied by a reopened Settings dialog or another mounted hint also stops being current when its save fails;
-  reopening while that save is pending does not keep the failed choice alive or inherit the closed dialog's alert. A
-  failed corrective read leaves trust settings unavailable rather than treating unknown trust as off.
+  because that session's adjacent error no longer has a place to appear. Sidebar width, terminal text size and
+  navigation rail expansion also save on a best-effort basis. If the latest save fails, the control falls back to the
+  saved value. The manual "Mark unread"/"Mark read" toggle and the notification list's clear button are not covered — a
+  failed toggle or clear surfaces like any other operation. Turning the session-confirmation opt-out off restores
+  confirmations as soon as the helm saves it; a refused save leaves them skipped and says so beside the switch, which
+  goes back to the stored choice (the maintainer decided on 2026-11-14 that the desktop app follows the helm here rather
+  than restoring confirmations before the helm has saved the choice). Closing Settings before the save settles drops
+  that error. The error stays until that switch's next save starts. Quick-launch naming, terminal-frame colors, terminal
+  link-click behavior and trust-hint visibility instead put back the saved choice and show an adjacent error when their
+  newest save fails. So do the host setup and removal confirmation choices and turning the session-confirmation opt-out
+  on, which were silent before: with no optimistic copy a failed save never took effect, and silence would hide why the
+  switch snapped back. For naming, frame colors and link clicks, closing Settings drops only the alert: the shared
+  choice still reverts, so mounted terminals and later actions cannot keep using a failed save. Superseded results
+  neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted
+  hint also stops being current when its save fails; reopening while that save is pending does not keep the failed
+  choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
+  than treating unknown trust as off.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
