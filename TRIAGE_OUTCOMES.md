@@ -1826,19 +1826,6 @@
   same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## trailing-agent-environment-target-history-admission-lacks-origin.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): its highest sub-claim (an approved
-  command or trust changing during provisioning) is incorrect: the launch is fixed before the card. The rest (agent-made
-  environments changing the New dialog's remembered container host and pushing out recent setups) is confirmed and
-  duplicates `trailing-environment-history-admits-agent-origin.md`, which stays queued.
-- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): discard as
-  a duplicate.
-- Completion criteria: Remove the feedback file and its index entry; leave
-  `trailing-environment-history-admits-agent-origin.md` queued.
-- Execution: planned in `plans/queue/triage-discards-nov18.md`
-
 ## trailing-ui-host-retry-selects-delete-from-live-phase.md
 
 - Outcome: `discard`.

@@ -21,10 +21,6 @@ consequences.
   — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-agent-environment-target-history-admission-lacks-origin.md`](trailing-agent-environment-target-history-admission-lacks-origin.md)
-  — Approved command authority is preserved; agent history effects are confirmed elsewhere. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-ui-host-retry-selects-delete-from-live-phase.md`](trailing-ui-host-retry-selects-delete-from-live-phase.md)
   — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.

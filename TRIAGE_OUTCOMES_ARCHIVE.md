@@ -21509,6 +21509,20 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `mxoxnpsnwkuv`, bookmark `plan/triage-discards-nov18/06-discard-osc52-classifier`,
   https://github.com/scode/farhelm/pull/4165/changes.
 
+## trailing-agent-environment-target-history-admission-lacks-origin.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): its highest sub-claim (an approved
+  command or trust changing during provisioning) is incorrect: the launch is fixed before the card. The rest (agent-made
+  environments changing the New dialog's remembered container host and pushing out recent setups) is confirmed and
+  duplicates `trailing-environment-history-admits-agent-origin.md`, which stays queued.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): discard as
+  a duplicate.
+- Completion criteria: Remove the feedback file and its index entry; leave
+  `trailing-environment-history-admits-agent-origin.md` queued.
+- Execution: change `tqpmlytnznnk`, bookmark `plan/triage-discards-nov18/07-discard-environment-history-origin`,
+  https://github.com/scode/farhelm/pull/4166/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
