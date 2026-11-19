@@ -10,6 +10,7 @@ from collections import namedtuple
 import io
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -181,10 +182,13 @@ the user's Git configuration has to supply an identity.
 Commit and tag signing are both turned off here because a machine's global configuration may turn them on, and a
 signed tag would need a message and a key agent; the timeout keeps such a surprise from hanging the suite.
 """
+        # Git hooks can export selectors for their own repository. The fixture's
+        # Git children must discover the temporary repository from its directory.
+        env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         return subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Fixture',
                                '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
                                '-c', 'tag.gpgSign=false', '-c', 'core.hooksPath=/dev/null', *args],
-                              check=True, capture_output=True, text=True, timeout=30).stdout
+                              check=True, capture_output=True, text=True, timeout=30, env=env).stdout
 
     def release(self, tag, files):
         """Tag a commit whose `crates/` tree holds exactly `files`, like a release cut from that layout."""
