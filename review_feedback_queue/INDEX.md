@@ -950,10 +950,6 @@ consequences.
 - [`failed-template-save-retains-attempted-draft.md`](failed-template-save-retains-attempted-draft.md) — A failed
   template Save leaves the attempted draft reusable even though the general GUI rule says failed saves discard it.
 
-- [`omp-readiness-comment-excludes-early-save.md`](omp-readiness-comment-excludes-early-save.md) — An OMP readiness
-  comment says saving requires the first reply, although the current integration can persist a newly created
-  conversation earlier.
-
 - [`automatic-update-mutates-unadopted-skewed-installation.md`](automatic-update-mutates-unadopted-skewed-installation.md)
   — Automatic Update can change a replacement installation at the saved SSH destination before discovering its new
   identity and refusing attachment.

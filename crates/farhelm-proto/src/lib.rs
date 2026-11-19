@@ -1626,8 +1626,8 @@ impl AgentKind {
             // Codex and Muse fire SessionStart at first prompt submission, not at
             // process start; a session never prompted never reports.
             AgentKind::Codex | AgentKind::Muse => Some(RestartReadiness::FirstPrompt),
-            // Both save their conversation file only once it holds the
-            // agent's first reply, and report a resumable file only then.
+            // The first reply is the normal save point for Pi and OMP.
+            // OMP can also save a new conversation immediately on /new.
             AgentKind::Pi | AgentKind::Omp => Some(RestartReadiness::FirstReply),
             // Grok's hooks are installed by the user, not injected.
             AgentKind::Grok => Some(RestartReadiness::FirstPromptWithHooks),
