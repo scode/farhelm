@@ -411,6 +411,27 @@ fn a_hosts_names_are_shown_and_named_escaped(cx: &mut TestAppContext) {
     );
 }
 
+/// A right-to-left alias and its destination must each keep their direction inside the rail's status tooltip.
+#[gpui::test]
+fn a_rail_tooltip_keeps_its_host_values_in_separate_isolates(cx: &mut TestAppContext) {
+    let alias = "שרת";
+    let destination = "ops@example.invalid";
+    let host = remote(3, destination).alias(alias);
+    let (_fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&[host])]);
+    assert_eq!(
+        hover_help(cx, "host-rail-host-3").as_deref(),
+        Some("שרת (ops@example.invalid): Connected")
+    );
+    let lines = texts_within(&frame(cx), "host-rail-help-3");
+    for value in [alias, destination] {
+        assert!(
+            lines
+                .iter()
+                .any(|line| crate::host_text::tests::paints_isolated(&line.text, value))
+        );
+    }
+}
+
 /// SPEC.md: "a failed first read invents no hosts". The rail then says the host list could not be loaded, and still
 /// offers All, which needs no registry. Specified: a hosts collection whose first read failed (unavailable, no hosts)
 /// and a snapshot with no hosts collection at all each draw All pressed and, after it, the "?" status named "The host
@@ -1400,7 +1421,11 @@ fn tab_scrolls_the_last_avatar_and_add_host_into_view_below_the_fold(cx: &mut Te
 /// remote, and a remote that happens to be named like the local sentinel.
 #[test]
 fn identity_names_local_and_adds_a_destination_only_when_it_differs() {
-    let name = |host: Host| identity(&host.view()).to_string();
+    let name = |host: Host| {
+        identity(&host.view(), "test-host-identity")
+            .accessible_name()
+            .to_string()
+    };
     assert_eq!(name(local()), "Local (this machine)");
     assert_eq!(name(local().alias("desk")), "desk");
     assert_eq!(

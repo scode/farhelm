@@ -294,15 +294,11 @@ impl SessionList {
 
 // ---- Host names ----------------------------------------------------------------------------------------------------
 
-/// The host's identity as the rail's avatar and the chip name it (the old `rail_identity`), escaped as the screen shows
-/// host text, for an accessible name and a tooltip: its display name ("Local (this machine)" for the local host under
-/// the registry's own name), then its destination in parentheses when the host is remote and the destination differs
-/// from the name. The avatar adds its state after it ([`status::state_words`]); the chip shows the identity alone.
-pub(super) fn identity(host: &HostView) -> SharedString {
+/// The host's display name and distinct remote destination each keep their reading direction when a tooltip adds
+/// the app's punctuation or status. The same sentence provides the accessible name.
+pub(super) fn identity(host: &HostView, id: impl Into<gpui::ElementId>) -> HostSentence {
     let local = host.is_local();
-    // Only its accessible name is used, so the sentence is never drawn and its id never reaches a frame.
-    let sentence = HostSentence::new("host-identity");
-    let sentence = sentence.host(&display_name(host));
+    let sentence = HostSentence::new(id).host(&display_name(host));
     match host
         .destination
         .as_deref()
@@ -314,7 +310,6 @@ pub(super) fn identity(host: &HostView) -> SharedString {
             .text(")"),
         None => sentence,
     }
-    .accessible_name()
 }
 
 /// How a chosen host the registry no longer lists is named everywhere it shows.
@@ -669,9 +664,8 @@ fn avatar(
     palette: &Palette,
 ) -> AnyElement {
     let id = host.id;
-    let name = SharedString::from(format!(
-        "{}: {}",
-        identity(host),
+    let help = identity(host, SharedString::from(format!("host-rail-help-{id}"))).text(format!(
+        ": {}",
         status::state_words(host, reading, look.last_read)
     ));
     let mark = host_mark(host.icon, host.color, px(AVATAR_MARK), palette);
@@ -701,8 +695,8 @@ fn avatar(
     let (secondary, keyed) = (list.clone(), list.clone());
     let button = Button::new(
         SharedString::from(format!("host-rail-host-{id}")),
-        name.clone(),
-        HoverHelp::tooltip(name),
+        help.accessible_name(),
+        HoverHelp::sentence(help),
         Role::Button,
     )
     .tier(Tier::Rail)

@@ -607,7 +607,7 @@ fn chip(
     list: &WeakEntity<SessionList>,
     palette: &Palette,
 ) -> AnyElement {
-    let (label, help, mark, name): (SharedString, SharedString, AnyElement, HostText) =
+    let (label, help, mark, name): (SharedString, HoverHelp, AnyElement, HostText) =
         match registered(collections, chosen) {
             Some(host) => {
                 let name = HostText::from_host(short_name(host));
@@ -616,7 +616,7 @@ fn chip(
                     .host(&name)
                     .text("; remove filter")
                     .accessible_name();
-                let help = identity(host);
+                let help = HoverHelp::sentence(identity(host, "host-filter-chip-help"));
                 let mark =
                     host_mark(host.icon, host.color, px(CHIP_MARK), palette).into_any_element();
                 (label, help, mark, name)
@@ -625,33 +625,28 @@ fn chip(
                 let name = unregistered(chosen);
                 (
                     format!("Filtered to host {name}; remove filter").into(),
-                    name.clone().into(),
+                    HoverHelp::tooltip(name.clone()),
                     div().flex_none().child("?").into_any_element(),
                     // The app's own words, drawn through the host-text element only to share the name's layout.
                     HostText::from_host(name),
                 )
             }
         };
-    Button::new(
-        "host-filter-chip",
-        label,
-        HoverHelp::tooltip(help),
-        Role::Button,
-    )
-    .tier(Tier::Chip)
-    .content(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(CHIP_GAP))
-            .min_w_0()
-            .child(mark)
-            .child(host_text::element(&name).min_w_0().truncate())
-            .child(div().flex_none().child("✕")),
-    )
-    .on_click(clear_from(list, Dimension::Host))
-    .into_any_element()
+    Button::new("host-filter-chip", label, help, Role::Button)
+        .tier(Tier::Chip)
+        .content(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(CHIP_GAP))
+                .min_w_0()
+                .child(mark)
+                .child(host_text::element(&name).min_w_0().truncate())
+                .child(div().flex_none().child("✕")),
+        )
+        .on_click(clear_from(list, Dimension::Host))
+        .into_any_element()
 }
 
 // ---- The empty answer ----------------------------------------------------------------------------------------------
