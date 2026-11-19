@@ -2123,10 +2123,6 @@ consequences.
   — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-agent-file-size-only-read-consistency-docstring.md`](trailing-agent-file-size-only-read-consistency-docstring.md)
-  — Sensitive-read consistency explanation and same-size limitation predate the full pinned range. Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md`](trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md)
   — Ordinary Add holds recipe source exclusion while waiting for SSH. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

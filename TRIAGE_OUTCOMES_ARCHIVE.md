@@ -23888,6 +23888,21 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `smkltntwytnktpquppoyorlrqmzmqtzn`, bookmark `plan/gui-ux-wording/03-spec-automatic-tab-reap`,
   [PR #4255](https://github.com/scode/farhelm/pull/4255/changes).
 
+## trailing-agent-file-size-only-read-consistency-docstring.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Comment on sandbox
+  settings reads overstates what it detects. Only size is compared; the later write's digest guard covers the rest.
+  Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comment (~3)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: change `lmprwlyqrsoykxwzktmprxpsmonrsklw`, bookmark `plan/gui-ux-wording/04-agent-file-size-only`,
+  [PR #4256](https://github.com/scode/farhelm/pull/4256/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.
