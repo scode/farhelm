@@ -23856,6 +23856,23 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `prysrovxvyxnzxnznqullqtronnurlwz`, bookmark `plan/gui-ux-wording/01-transition-accessor-comment`,
   [PR #4253](https://github.com/scode/farhelm/pull/4253/changes).
 
+## settings-close-tooltip-promises-immediate-discard.md
+
+- Outcome: `fix spec+code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Settings' Close
+  tooltip says edits are discarded, but recipe edits ask first. Both the tooltip and SPEC.md "closing discards unsaved
+  fields" omit the recipe leave question. Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec+code: add the exception to both (~4)). Size gate: about 100 lines
+  of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over
+  that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: change `svyuolnkllwpulqvrxyktrooymqzpvmo`, bookmark
+  `plan/gui-ux-wording/02-settings-close-tooltip-promises`,
+  [PR #4254](https://github.com/scode/farhelm/pull/4254/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.

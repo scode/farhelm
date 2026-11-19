@@ -189,8 +189,9 @@ const SUMMARY: &str = "For every host on this helm";
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
-/// The close controls' shared hover help, the old dialog's.
-const CLOSE_HELP: &str = "Close settings; unsaved fields are discarded";
+/// Both controls use the recipe editor's leave question when it guards a close.
+const CLOSE_HELP: &str =
+    "Close: asks first about unsaved recipe edits and discards other unsaved fields";
 
 /// Open Settings at Sessions with focus on its first switch, on top of everything else in `window`: the gear's entry
 /// point (SPEC.md: "The gear always opens sessions and focuses its first switch").
