@@ -16,9 +16,8 @@
 //!   `PUT /api/preferences` naming only `host_rail_open`, queued and saved under the preference row's key
 //!   ([`super::super::queued_preference`]), shown as the choice waiting or being saved and as the stored value at every
 //!   other moment; a press while another preference write is in flight waits for it. A refused write is logged and
-//!   shows nothing, and the rail goes back to what the helm stores at once. That is Compact's behavior, copied as the
-//!   precedent rather than taken from SPEC.md: "Errors and diagnostics" lists the best-effort preferences whose failed
-//!   save is silent, and the rail's expansion is not among them. The parity file records it as a deviation
+//!   shows nothing. A refusal of the latest write returns the rail to what the helm stores (SPEC.md, "Errors and
+//!   diagnostics"). The parity file records it as a deviation
 //!   (`docs/gpui/parity/sidebar-and-session-view.md`, "Deviations from the old app").
 //! - **The stored width keeps its meaning.** Expanding adds [`EXTRA`] to the width the sidebar shows, never to the
 //!   stored one; `crate::sidebar` has the rule.

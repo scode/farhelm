@@ -1757,18 +1757,6 @@
   feedback file and its index entry in the same change.
 - Execution: `pending`.
 
-## layout-preference-save-failures-are-silent.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Sidebar width, text
-  size and rail expansion revert silently after a failed save. SPEC.md's best-effort list doesn't name these three (made
-  helm preferences 2026-11-13); trigger is a helm database write failure. Bucket: other.
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix spec: add the three to the best-effort list (~3). Size gate: about 100 lines of diff (code,
-  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
-  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## closing-settings-can-hide-ntfy-save-refusal.md
 
 - Outcome: `fix spec`.
