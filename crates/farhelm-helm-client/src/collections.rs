@@ -651,7 +651,7 @@ mod tests {
         };
         let notice = Notice {
             id: 7,
-            host: 1,
+            host: Some(1),
             raised_at: 10,
             read: false,
             resolved: false,

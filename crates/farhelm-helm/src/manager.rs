@@ -1521,7 +1521,7 @@ impl ConnectionManager {
         cadence: Cadence,
     ) -> anyhow::Result<Arc<ConnectionManager>> {
         let manager = Self::unstarted(store, transport, cadence);
-        manager.sync_registry().await?;
+        manager.start_registry().await?;
         Ok(manager)
     }
 
@@ -1535,7 +1535,7 @@ impl ConnectionManager {
     ) -> anyhow::Result<Arc<ConnectionManager>> {
         let ntfy = crate::ntfy::Alerts::new(store.clone());
         let manager = Self::unstarted_with(store, transport, cadence, providers, ntfy);
-        manager.sync_registry().await?;
+        manager.start_registry().await?;
         Ok(manager)
     }
 
@@ -1550,8 +1550,16 @@ impl ConnectionManager {
     ) -> anyhow::Result<Arc<ConnectionManager>> {
         let ntfy = crate::ntfy::Alerts::with_client(store.clone(), Some(client));
         let manager = Self::unstarted_with(store, transport, cadence, providers, ntfy);
-        manager.sync_registry().await?;
+        manager.start_registry().await?;
         Ok(manager)
+    }
+
+    /// Subscribe after registering the initial actors. The notice observer
+    /// starts with a full read, including cached rows from unreachable hosts.
+    async fn start_registry(self: &Arc<Self>) -> anyhow::Result<()> {
+        self.sync_registry().await?;
+        crate::notices::watch_fleet_session_limit(self, &self.store);
+        Ok(())
     }
 
     /// The manager [`Self::start`] builds, before any actor is spawned.
@@ -2193,6 +2201,32 @@ impl ConnectionManager {
             .collect();
         out.sort_by_key(|snapshot| snapshot.id);
         out
+    }
+
+    /// Capture both sources for the unfiltered ceiling count from the same
+    /// published moment. Every status borrow stays live until we have the
+    /// whole scope, so concurrent live-only changes cannot mix old and new
+    /// counts. The caller holds the cache transaction open during this read.
+    /// Actors release status locks before any store write.
+    pub(crate) fn session_limit_scope(&self) -> Option<(Vec<HostId>, usize)> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        if map.shut_down {
+            return None;
+        }
+        let sources: Vec<_> = map
+            .actors
+            .iter()
+            .map(|(&id, handle)| (id, handle.status.borrow()))
+            .collect();
+        let mut cached = Vec::new();
+        let mut live_count = 0;
+        for (id, status) in &sources {
+            match &status.live_sessions {
+                Some(sessions) => live_count += sessions.len(),
+                None => cached.push(*id),
+            }
+        }
+        Some((cached, live_count))
     }
 
     /// One host's live state AND its live connection, from a single read.

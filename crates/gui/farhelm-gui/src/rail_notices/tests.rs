@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 
 use super::{
     BELL_ID, CLEAR_ID, CLEAR_REFUSAL_ID, CLOSE_ID, COUNT_ID, OPEN_TRASH_ID_PREFIX, PANEL_ID,
-    RETRY_ID_PREFIX, bell_help, bell_ink, bell_label, is_unread, newest_first,
+    RETRY_ID_PREFIX, SEND_FEEDBACK_ID_PREFIX, bell_help, bell_ink, bell_label, is_unread,
+    newest_first,
 };
 use crate::hosts::tests::hosts;
 use crate::local_time;
@@ -314,6 +315,55 @@ fn an_empty_panel_says_there_are_no_notifications(cx: &mut TestAppContext) {
     let (_fake, cx) = open(cx, &[]);
     open_panel(cx);
     assert!(painted(&frame(cx)).contains(&"No notifications".to_owned()));
+}
+
+/// The same panel distinguishes one host's cut from the merged cut. Its
+/// feedback action hands focus to the regular dialog and marks the shown
+/// notices read through the same close path as the bell.
+#[gpui::test]
+fn session_limit_notices_explain_the_two_lists_and_open_feedback(cx: &mut TestAppContext) {
+    let held = [
+        json!({
+            "id": 1, "host": 2, "raised_at": 10, "read": false, "resolved": false,
+            "content": { "kind": "host_session_limit" }
+        }),
+        json!({
+            "id": 2, "host": null, "raised_at": 11, "read": false, "resolved": false,
+            "content": { "kind": "fleet_session_limit" }
+        }),
+    ];
+    let (mut fake, cx) = open(cx, &held);
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    test_support::settle(cx);
+    open_panel(cx);
+    let nodes = frame(cx);
+    assert_eq!(
+        node(&nodes, "rail-notice-1-title").and_then(|node| node.label.as_deref()),
+        Some("build-box: session limit reached")
+    );
+    assert_eq!(
+        node(&nodes, "rail-notice-2-title").and_then(|node| node.label.as_deref()),
+        Some("Farhelm session limit reached")
+    );
+    let texts = painted(&nodes).join(" ");
+    assert!(texts.contains("only 500 sessions"), "{texts}");
+    assert!(texts.contains("newest 500"), "{texts}");
+    assert!(
+        texts.contains("need this many or think a bug caused it"),
+        "{texts}"
+    );
+    assert!(node(&nodes, &format!("{SEND_FEEDBACK_ID_PREFIX}1")).is_some());
+    test_support::click(cx, "rail-notice-send-feedback-2");
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(node(&nodes, PANEL_ID).is_none());
+    assert!(node(&nodes, "feedback-cancel").is_some());
+    assert_eq!(
+        marks(&mut fake, cx, 200),
+        [json!({ "action": "read", "ids": [2, 1] })],
+    );
+    test_support::click(cx, "feedback-cancel");
+    assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
 }
 
 // ---- Closing marks what the panel showed read ------------------------------------------------------------------------

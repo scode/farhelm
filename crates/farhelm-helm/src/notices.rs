@@ -10,16 +10,15 @@ use crate::{AppState, http_error, manager};
 use anyhow::Context;
 use axum::extract::State;
 use axum::response::IntoResponse;
-use farhelm_proto::CheckoutTrashListing;
+use farhelm_proto::{CheckoutTrashListing, LIST_SESSIONS_CAP};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
-/// Fresh databases and upgrades use exactly the same condition identity and
-/// cascade. AUTOINCREMENT prevents a stale panel's IDs naming later notices.
-pub(crate) const SCHEMA: &str = "
+/// The original trash-only table, used by the schema 81 upgrade.
+pub(crate) const TRASH_ONLY_SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
@@ -32,6 +31,58 @@ pub(crate) const SCHEMA: &str = "
         UNIQUE (host_id, kind, condition_key)
     ) STRICT;
 ";
+
+/// A host's notices cascade with its registration. The partial unique index
+/// gives the app-wide condition one identity, since NULLs compare as distinct
+/// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
+/// exactly the same condition identity and cascade. AUTOINCREMENT prevents a
+/// stale panel's IDs naming later notices.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE notices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (
+            (kind IN ('stuck_trash', 'host_session_limit') AND host_id IS NOT NULL)
+            OR (kind = 'fleet_session_limit' AND host_id IS NULL)
+        ),
+        condition_key TEXT NOT NULL,
+        raised_at INTEGER NOT NULL,
+        read INTEGER NOT NULL CHECK (read IN (0, 1)),
+        resolved INTEGER NOT NULL CHECK (resolved IN (0, 1)),
+        content TEXT NOT NULL,
+        UNIQUE (host_id, kind, condition_key)
+    ) STRICT;
+    CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
+";
+
+/// Preserve trash history and even IDs already cleared by a panel. Other
+/// clients may still hold marks for them. Seed host notices from cut caches
+/// so an unreachable host gets the same notice as one that just refreshed.
+pub(crate) fn upgrade_session_limits(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
+    let needs_rebuild: bool = tx.query_row(
+        "SELECT \"notnull\" FROM pragma_table_info('notices') WHERE name = 'host_id'",
+        [],
+        |row| row.get(0),
+    )?;
+    if needs_rebuild {
+        tx.execute_batch("ALTER TABLE notices RENAME TO notices_trash_only;")?;
+        tx.execute_batch(SCHEMA)?;
+        tx.execute_batch(
+            "INSERT INTO notices SELECT * FROM notices_trash_only;
+             DELETE FROM sqlite_sequence WHERE name = 'notices';
+             INSERT INTO sqlite_sequence (name, seq)
+                 SELECT 'notices', seq FROM sqlite_sequence WHERE name = 'notices_trash_only';
+             DROP TABLE notices_trash_only;",
+        )?;
+    }
+    let mut statement =
+        tx.prepare("SELECT id FROM hosts WHERE cache_truncated AND host_identity IS NOT NULL")?;
+    let hosts = statement.query_map([], |row| row.get(0))?;
+    for host in hosts {
+        reconcile_session_limit(tx, Some(host?), true)?;
+    }
+    Ok(())
+}
 
 // The notice shapes live in `farhelm-proto` so the GUI decodes the same types this module serves.
 pub(crate) use farhelm_proto::notices::{Notice, NoticeContent};
@@ -93,11 +144,13 @@ impl TrashRequests {
 
 /// Read under one SQLite snapshot; content decoding failures are ordinary store
 /// errors, never an empty panel that could acknowledge unseen conditions.
-fn read_notices(conn: &Connection) -> anyhow::Result<Vec<Notice>> {
+fn read_notices(conn: &Connection, trash_host: Option<HostId>) -> anyhow::Result<Vec<Notice>> {
     let mut statement = conn.prepare(
-        "SELECT id, host_id, raised_at, read, resolved, content FROM notices ORDER BY raised_at DESC, id DESC",
+        "SELECT id, host_id, raised_at, read, resolved, content FROM notices
+         WHERE ?1 IS NULL OR (host_id = ?1 AND kind = 'stuck_trash')
+         ORDER BY raised_at DESC, id DESC",
     )?;
-    let rows = statement.query_map([], |row| {
+    let rows = statement.query_map([trash_host], |row| {
         Ok((
             row.get(0)?,
             row.get(1)?,
@@ -121,6 +174,106 @@ fn read_notices(conn: &Connection) -> anyhow::Result<Vec<Notice>> {
     .collect()
 }
 
+/// Both ceiling notices follow the trash history rule. Reopening a retained
+/// notice keeps the read mark set by resolution. Clearing it allows a future
+/// occurrence to raise a new notice.
+pub(crate) fn reconcile_session_limit(
+    tx: &rusqlite::Transaction<'_>,
+    host: Option<HostId>,
+    reached: bool,
+) -> anyhow::Result<bool> {
+    let (kind, content) = match host {
+        Some(_) => ("host_session_limit", NoticeContent::HostSessionLimit),
+        None => ("fleet_session_limit", NoticeContent::FleetSessionLimit),
+    };
+    let previous: Option<(i64, bool)> = tx
+        .query_row(
+            "SELECT id, resolved FROM notices WHERE host_id IS ?1 AND kind = ?2 AND condition_key = ''",
+            rusqlite::params![host, kind],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match previous {
+        Some((id, resolved)) if resolved == reached => {
+            tx.execute(
+                "UPDATE notices SET resolved = ?2, read = 1 WHERE id = ?1",
+                rusqlite::params![id, !reached],
+            )?;
+        }
+        None if reached => {
+            tx.execute(
+                "INSERT INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
+                 VALUES (?1, ?2, '', ?3, 0, 0, ?4)",
+                rusqlite::params![host, kind, raised_now(), serde_json::to_string(&content)?],
+            )?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// First observation time for a new notice. Recurrences keep the existing date.
+fn raised_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs().min(i64::MAX as u64) as i64)
+}
+
+/// Watch the same invalidations that drive the session collection. Every
+/// published change to the fleet's membership has a wake here, including
+/// live-only lists and host removal. A weak manager keeps this observer
+/// from owning the connection lifetime while it waits.
+pub(crate) fn watch_fleet_session_limit(
+    manager: &Arc<manager::ConnectionManager>,
+    store: &HelmStore,
+) {
+    let mut revisions = manager.events().subscribe();
+    let manager = Arc::downgrade(manager);
+    let store = store.clone();
+    tokio::spawn(async move {
+        loop {
+            revisions.borrow_and_update();
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
+            if let Err(error) = observe_fleet_session_limit(manager, &store).await {
+                tracing::warn!(%error, "could not record the app-wide session ceiling");
+            }
+            if revisions.changed().await.is_err() {
+                return;
+            }
+        }
+    });
+}
+
+/// Count the same decodable rows as the unfiltered merged list. Hold the store
+/// transaction across the live scope and cache reads, so a durable write
+/// cannot invalidate the count before we record the condition.
+async fn observe_fleet_session_limit(
+    manager: Arc<manager::ConnectionManager>,
+    store: &HelmStore,
+) -> anyhow::Result<()> {
+    let events = Arc::clone(manager.events());
+    let changed = store
+        .conn()
+        .call("app-wide session ceiling task panicked", move |conn| {
+            let tx = conn.transaction()?;
+            let Some((cache_hosts, live_count)) = manager.session_limit_scope() else {
+                return Ok(false);
+            };
+            let cache = HelmStore::cached_slice_on_connection(&tx, &cache_hosts)?;
+            let reached = cache.rows.len() + live_count > LIST_SESSIONS_CAP;
+            let changed = reconcile_session_limit(&tx, None, reached)?;
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await?;
+    if changed {
+        events.bump();
+    }
+    Ok(())
+}
+
 /// Record one ordered capable observation atomically. Issue IDs retain their
 /// notice because a diagnostic is uncertainty, not evidence that files are gone.
 fn record_trash(
@@ -142,12 +295,13 @@ fn record_trash(
     if binding.as_ref() != Some(&(claim.entry_uuid.clone(), claim.identity.clone())) {
         return Ok(false);
     }
-    let previous = read_notices(&tx)?
+    let previous = read_notices(&tx, Some(claim.host))?
         .into_iter()
-        .filter(|notice| notice.host == claim.host)
-        .map(|notice| {
-            let NoticeContent::StuckTrash { checkout_id, .. } = &notice.content;
-            (checkout_id.clone(), notice)
+        .filter_map(|notice| {
+            let NoticeContent::StuckTrash { checkout_id, .. } = &notice.content else {
+                return None;
+            };
+            Some((checkout_id.clone(), notice))
         })
         .collect::<HashMap<_, _>>();
     let present: HashSet<&str> = listing
@@ -156,15 +310,13 @@ fn record_trash(
         .map(|entry| entry.id.as_str())
         .chain(listing.issues.iter().map(|issue| issue.id.as_str()))
         .collect();
-    let raised_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs().min(i64::MAX as u64) as i64);
+    let raised_at = raised_now();
     let mut changed = false;
     for entry in &listing.checkouts {
         let old = previous.get(&entry.id);
-        let known_bytes = old.and_then(|notice| {
-            let NoticeContent::StuckTrash { bytes, .. } = notice.content;
-            bytes
+        let known_bytes = old.and_then(|notice| match &notice.content {
+            NoticeContent::StuckTrash { bytes, .. } => *bytes,
+            NoticeContent::HostSessionLimit | NoticeContent::FleetSessionLimit => None,
         });
         let content = match &entry.stuck {
             Some(stuck) => NoticeContent::StuckTrash {
@@ -182,7 +334,9 @@ fn record_trash(
                     continue;
                 };
                 let mut content = old.content.clone();
-                let NoticeContent::StuckTrash { bytes, .. } = &mut content;
+                let NoticeContent::StuckTrash { bytes, .. } = &mut content else {
+                    continue;
+                };
                 *bytes = entry.bytes.or(*bytes);
                 content
             }
@@ -260,7 +414,7 @@ impl HelmStore {
         self.conn()
             .call("notice read task panicked", |conn| {
                 Ok(Notices {
-                    notices: read_notices(conn)?,
+                    notices: read_notices(conn, None)?,
                 })
             })
             .await
@@ -453,7 +607,10 @@ pub(crate) mod tests {
         assert!(updated.read && !updated.resolved);
         let NoticeContent::StuckTrash {
             bytes, at, reason, ..
-        } = updated.content;
+        } = updated.content
+        else {
+            panic!("expected the retained trash notice");
+        };
         assert_eq!(
             (bytes, at, reason.as_str()),
             (Some(4096), 30, "still denied")
@@ -552,6 +709,226 @@ pub(crate) mod tests {
                 .unwrap()
         };
         assert_eq!(schema(&upgraded), schema(&fresh));
+    }
+
+    /// Upgrading a cut, unreachable host raises its notice while preserving
+    /// trash history and the IDs retired before the upgrade.
+    #[farhelm_testtrace::test]
+    async fn ceiling_migration_preserves_trash_and_backfills_a_cut_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let host = rest_harness::local_id(&store).await;
+        {
+            let db = store.connection_for_test();
+            let conn = db.lock();
+            conn.execute_batch(&format!(
+                "DROP TABLE notices; {TRASH_ONLY_SCHEMA} PRAGMA user_version = 87;"
+            ))
+            .unwrap();
+            conn.execute(
+                "UPDATE hosts SET host_identity = 'old-install', cache_truncated = 1 WHERE id = ?1",
+                [host],
+            )
+            .unwrap();
+        }
+        let old_claim = manager::SessionClaim {
+            identity: Some("old-install".into()),
+            ..claim(&store).await
+        };
+        assert!(record(&store, &old_claim, &stuck("preserved")));
+        assert!(record(
+            &store,
+            &old_claim,
+            &CheckoutTrashListing {
+                reports_retired: true,
+                ..Default::default()
+            }
+        ));
+        let original = store.notices().await.unwrap().notices.remove(0);
+        assert!(original.read && original.resolved);
+        store
+            .connection_for_test()
+            .lock()
+            .execute(
+                "UPDATE sqlite_sequence SET seq = 100 WHERE name = 'notices'",
+                [],
+            )
+            .unwrap();
+        drop(store);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        let notices = store.notices().await.unwrap().notices;
+        assert!(notices.contains(&original));
+        let ceiling = notices
+            .iter()
+            .find(|notice| notice.content == NoticeContent::HostSessionLimit)
+            .expect("the existing cache was already cut");
+        assert_eq!(ceiling.host, Some(host));
+        assert!(ceiling.id > 100 && !ceiling.read && !ceiling.resolved);
+    }
+
+    /// Wait for a particular state of a persisted ceiling notice. The
+    /// observer publishes its own revision after saving it, even when the
+    /// original session-list change was published earlier.
+    async fn wait_for_limit(
+        harness: &rest_harness::Harness,
+        kind: NoticeContent,
+        resolved: bool,
+    ) -> Notice {
+        let mut revisions = harness.manager.events().subscribe();
+        tokio::time::timeout(std::time::Duration::from_secs(8), async {
+            loop {
+                if let Some(notice) = harness
+                    .store
+                    .notices()
+                    .await
+                    .unwrap()
+                    .notices
+                    .into_iter()
+                    .find(|notice| notice.content == kind && notice.resolved == resolved)
+                {
+                    return notice;
+                }
+                revisions.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("did not observe {kind:?} with resolved={resolved}"))
+    }
+
+    /// The app-wide condition includes live-only rows and can resolve while
+    /// a host remains cut. A recurring condition keeps its identity and mark.
+    #[farhelm_testtrace::test]
+    async fn host_and_fleet_session_ceiling_notices_follow_independent_conditions() {
+        let builder = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                sessions: vec![rest_harness::session("live-only", 1)],
+                ..Default::default()
+            })
+            .await;
+        let (builder, remote) = builder
+            .ssh(
+                "build.example.invalid",
+                HostScript {
+                    identity: Some("durable-install".into()),
+                    sessions: (0..LIST_SESSIONS_CAP)
+                        .map(|id| rest_harness::session(&format!("remote-{id}"), id as i64))
+                        .collect(),
+                    truncated: true,
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        harness.await_refreshed(remote).await;
+        let listing = crate::aggregate::session_list(
+            &harness.manager,
+            &harness.store,
+            &crate::store::SessionFilter::default(),
+            crate::store::ListSort::Created,
+        )
+        .await
+        .unwrap();
+        assert_eq!(listing.total, LIST_SESSIONS_CAP as u64 + 1);
+        let host = wait_for_limit(&harness, NoticeContent::HostSessionLimit, false).await;
+        let fleet = wait_for_limit(&harness, NoticeContent::FleetSessionLimit, false).await;
+        assert_eq!((host.host, fleet.host), (Some(remote), None));
+        assert!(!host.read && !fleet.read);
+        mark(&harness, "read", &[host.id, fleet.id]).await;
+        harness.refresh_to_completion(remote).await;
+        assert_eq!(
+            wait_for_limit(&harness, NoticeContent::HostSessionLimit, false).await,
+            Notice {
+                read: true,
+                ..host.clone()
+            }
+        );
+        {
+            let connection = harness.store.connection_for_test();
+            let mut conn = connection.lock();
+            let tx = conn.transaction().unwrap();
+            assert!(
+                !reconcile_session_limit(&tx, None, true).unwrap(),
+                "another observation of the same fleet cut changes nothing"
+            );
+            tx.commit().unwrap();
+        }
+
+        let status = harness
+            .manager
+            .status(local)
+            .expect("live-only host is connected");
+        harness
+            .manager
+            .forget_session(
+                &manager::SessionClaim {
+                    host: local,
+                    entry_uuid: status.entry_uuid,
+                    incarnation: status.incarnation,
+                    identity: None,
+                },
+                "live-only",
+            )
+            .await
+            .unwrap();
+        let resolved = wait_for_limit(&harness, NoticeContent::FleetSessionLimit, true).await;
+        assert_eq!(resolved.id, fleet.id);
+        assert!(resolved.read);
+        assert_eq!(
+            wait_for_limit(&harness, NoticeContent::HostSessionLimit, false)
+                .await
+                .id,
+            host.id
+        );
+
+        harness
+            .fleet
+            .edit(remote, |script| script.truncated = false);
+        harness.manager.refresh_now(remote);
+        let resolved = wait_for_limit(&harness, NoticeContent::HostSessionLimit, true).await;
+        assert_eq!(resolved.id, host.id);
+        assert!(resolved.read);
+        harness.fleet.edit(remote, |script| script.truncated = true);
+        harness.manager.refresh_now(remote);
+        let reopened = wait_for_limit(&harness, NoticeContent::HostSessionLimit, false).await;
+        assert_eq!(reopened.id, host.id);
+        assert!(reopened.read);
+
+        harness.manager.refresh_now(local);
+        let reopened = wait_for_limit(&harness, NoticeContent::FleetSessionLimit, false).await;
+        assert_eq!(reopened.id, fleet.id);
+        assert!(reopened.read);
+
+        let reply = harness
+            .router()
+            .oneshot(request(
+                "DELETE",
+                &format!("/api/hosts/{remote}"),
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::OK);
+        assert_eq!(
+            wait_for_limit(&harness, NoticeContent::FleetSessionLimit, true)
+                .await
+                .id,
+            fleet.id
+        );
+        assert!(
+            !harness
+                .store
+                .notices()
+                .await
+                .unwrap()
+                .notices
+                .iter()
+                .any(|notice| notice.id == host.id)
+        );
     }
 
     /// Exact IDs prevent a stale close from reading a newer notice, and clear

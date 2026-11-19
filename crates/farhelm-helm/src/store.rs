@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 87;
+pub(crate) const SCHEMA_VERSION: i64 = 88;
 
 mod environment_history;
 mod podman;
@@ -2777,6 +2777,9 @@ pub struct HelmStore {
 ///   per device (appearance, sidebar width, host rail, the three status
 ///   sounds, terminal text size; [`FORMER_DEVICE_SETTING_COLUMNS`]), unset on
 ///   every upgraded helm so each client default applies.
+/// - 86: shared session mute state.
+/// - 87: session groups and their membership.
+/// - 88: host and app-wide session ceiling notices, with trash history preserved.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3120,7 +3123,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 87;",
+              PRAGMA user_version = 88;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4885,7 +4888,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             |row| row.get(0),
         )?;
         if !present {
-            tx.execute_batch(crate::notices::SCHEMA)
+            tx.execute_batch(crate::notices::TRASH_ONLY_SCHEMA)
                 .context("creating shared notices")?;
         }
         tx.execute_batch("PRAGMA user_version = 81;")
@@ -4960,6 +4963,12 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 87;")
             .context("migrating helm.db to schema version 87")?;
         version = 87;
+    }
+    if version == 87 {
+        crate::notices::upgrade_session_limits(&tx).context("adding session ceiling notices")?;
+        tx.execute_batch("PRAGMA user_version = 88;")
+            .context("migrating helm.db to schema version 88")?;
+        version = 88;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -8328,6 +8337,7 @@ impl HelmStore {
                         rusqlite::params![host],
                     )
                     .context("purging the superseded identity's cached sessions")?;
+                    crate::notices::reconcile_session_limit(&tx, Some(host), false)?;
                     for table in [
                         "launch_history",
                         "folder_history",
@@ -8564,6 +8574,9 @@ impl HelmStore {
                 .context("recording whether the cached list was cut")?
                 != 0;
             let changed = changed || truncated_changed;
+            if truncated_changed {
+                crate::notices::reconcile_session_limit(&tx, Some(host), truncated)?;
+            }
             tx.commit().context("committing cache replace")?;
             Ok(changed)
         })
@@ -8716,11 +8729,14 @@ impl HelmStore {
                             )
                             .context("evicting the oldest cached session past the cap")?;
                         }
-                        tx.execute(
-                            "UPDATE hosts SET cache_truncated = 1 WHERE id = ?1",
+                        let cut_changed = tx.execute(
+                            "UPDATE hosts SET cache_truncated = 1 WHERE id = ?1 AND cache_truncated = 0",
                             rusqlite::params![host],
                         )
-                        .context("recording the seed eviction as a cut")?;
+                        .context("recording the seed eviction as a cut")? != 0;
+                        if cut_changed {
+                            crate::notices::reconcile_session_limit(&tx, Some(host), true)?;
+                        }
                     }
                     tx.commit().context("committing cache seed")?;
                     // Compared against BOTH stored halves this host already held,
@@ -9692,43 +9708,53 @@ impl HelmStore {
     /// hold of the store's connection mutex, which no writer can
     /// interleave.
     pub async fn cached_slice(&self, hosts: &[HostId]) -> anyhow::Result<CachedSlice> {
+        let hosts = hosts.to_vec();
+        self.conn
+            .call("cached slice task panicked", move |conn| {
+                Self::cached_slice_on_connection(conn, &hosts)
+            })
+            .await
+    }
+
+    /// Read the same admitted rows when a caller already owns the connection.
+    /// The ceiling observer keeps this read in its notice transaction so cache
+    /// changes cannot slip between the count and the persisted notice.
+    pub(crate) fn cached_slice_on_connection(
+        conn: &Connection,
+        hosts: &[HostId],
+    ) -> anyhow::Result<CachedSlice> {
         if hosts.is_empty() {
             return Ok(CachedSlice::default());
         }
-        let hosts = hosts.to_vec();
-        self.conn
-            .call(
-                "cached slice task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<CachedSlice> {
-                    let placeholders = (1..=hosts.len())
-                        .map(|index| format!("?{index}"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let mut stmt = conn
-                        .prepare(&format!(
-                            "SELECT host_id, session_id, created_at, info_json \
+        let placeholders = (1..=hosts.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT host_id, session_id, created_at, info_json \
                      FROM session_cache WHERE host_id IN ({placeholders})"
-                        ))
-                        .context("preparing the cached rows query")?;
-                    let rows: Vec<(HostId, String, i64, String)> = stmt
-                        .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
-                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                        })
-                        .context("querying cached rows")?
-                        .collect::<Result<_, _>>()
-                        .context("reading cached rows")?;
-                    // Same lock hold as the rows, per this method's contract.
-                    let mut flags = conn
-                        .prepare(&format!(
-                            "SELECT id FROM hosts WHERE cache_truncated AND id IN ({placeholders})"
-                        ))
-                        .context("preparing the cache flag query")?;
-                    let truncated_hosts: Vec<HostId> = flags
-                        .query_map(rusqlite::params_from_iter(hosts.iter()), |r| r.get(0))
-                        .context("querying cache flags")?
-                        .collect::<Result<_, _>>()
-                        .context("reading cache flags")?;
-                    let rows = rows
+            ))
+            .context("preparing the cached rows query")?;
+        let rows: Vec<(HostId, String, i64, String)> = stmt
+            .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .context("querying cached rows")?
+            .collect::<Result<_, _>>()
+            .context("reading cached rows")?;
+        // Same lock hold as the rows, per this method's contract.
+        let mut flags = conn
+            .prepare(&format!(
+                "SELECT id FROM hosts WHERE cache_truncated AND id IN ({placeholders})"
+            ))
+            .context("preparing the cache flag query")?;
+        let truncated_hosts: Vec<HostId> = flags
+            .query_map(rusqlite::params_from_iter(hosts.iter()), |r| r.get(0))
+            .context("querying cache flags")?
+            .collect::<Result<_, _>>()
+            .context("reading cache flags")?;
+        let rows = rows
                 .into_iter()
                 .filter_map(|(host, session_id, created_at, json)| {
                     let info = match serde_json::from_str::<SessionInfo>(&json) {
@@ -9761,13 +9787,10 @@ impl HelmStore {
                     Some(CachedRow { host, info })
                 })
                 .collect();
-                    Ok(CachedSlice {
-                        rows,
-                        truncated_hosts,
-                    })
-                },
-            )
-            .await
+        Ok(CachedSlice {
+            rows,
+            truncated_hosts,
+        })
     }
 
     /// One host's cached entry for `session_id`, if it still decodes with
@@ -10544,7 +10567,6 @@ mod tests {
 
         let migrated = HelmStore::open(&path).await.unwrap();
         assert_eq!(migrated.schema_version, SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 87);
         assert_eq!(
             migrated.preferences().await.unwrap(),
             before,
@@ -14257,7 +14279,7 @@ mod tests {
             )
             .unwrap();
         let migrated = HelmStore::open(&path).await.unwrap();
-        assert_eq!(migrated.schema_version, 87);
+        assert_eq!(migrated.schema_version, SCHEMA_VERSION);
         assert_eq!(schema_objects(&migrated.conn.lock()), expected_schema);
         let view = migrated
             .session_group_projection(std::slice::from_ref(&key))
