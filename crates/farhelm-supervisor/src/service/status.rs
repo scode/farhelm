@@ -319,14 +319,12 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
     )
 }
 
-/// One entry as a reply must describe it: the stored metadata plus the
-/// three fields that are NEVER stored as answers and are therefore
-/// recomputed on every reply — live-probed `status` (with its annotation),
-/// the session's current `tabs`, and a freshly derived `restart_offer`.
+/// One entry as a reply must describe it: stored metadata and the current
+/// status, tabs and restart offer. Terminal presence comes from the handle
+/// on this entry, independently of what the terminal says about its agent.
 ///
-/// `last_activity_at` is refreshed here too, and is deliberately not one
-/// of those three: it IS stored, and this is a plain read of the entry's
-/// live cell rather than a recomputation. It needs refreshing for a
+/// `last_activity_at` is refreshed here too. It is stored, and this is a
+/// plain read of the entry's live cell rather than a recomputation. It needs refreshing for a
 /// mechanical reason only — the entry is immutable behind its `Arc`, so
 /// the ticker advances a cell beside `info` rather than `info` itself.
 ///
@@ -343,6 +341,7 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// now-uncommittable fallback. Replies never touch launch artifacts themselves.
 pub(crate) fn entry_info(entry: &SessionEntry) -> SessionInfo {
     let mut info = entry.info.clone();
+    info.terminal_missing = entry.terminal.is_none();
     // List and rename replies read the same run cell; the immutable entry was
     // built before any footer was sampled and must not freeze that first value.
     let activity = entry.run.activity.lock().expect("activity mutex poisoned");

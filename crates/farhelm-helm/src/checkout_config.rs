@@ -2895,6 +2895,7 @@ mod tests {
     /// persisted cache JSON rather than only its ordering columns.
     fn migration_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,

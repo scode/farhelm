@@ -8095,6 +8095,12 @@ sets. A serde-additive field can still be semantically load-bearing: the non-dis
 peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is
 why such a bump is required rather than why it is unnecessary.
 
+Protocol 79 adds `SessionInfo::terminal_missing`. The supervisor sets it when it holds no agent terminal for the
+session. An unreadable terminal with a retained handle and an exited agent whose terminal still holds output both keep
+it clear. A Restart reply describes the terminal published for the new run. The helm carries the value through its
+session cache and into the app's session row. Older cached rows omit it and decode as false until refreshed. Ignoring a
+positive report would cause the app to keep trying to attach, so this field requires a protocol bump.
+
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a
 release-shaped build refuses its default payload download before any request instead of provisioning hosts with some

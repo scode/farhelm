@@ -9987,6 +9987,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
+                    terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
                     workspace_trust_prompt: false,
@@ -10175,6 +10176,7 @@ mod tests {
     fn fake_entry(id: &str, created_at: i64) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,

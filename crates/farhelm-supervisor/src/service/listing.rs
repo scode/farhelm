@@ -157,6 +157,7 @@ mod tests {
     /// wrong COUNT) would still be caught.
     fn fake_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,

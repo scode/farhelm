@@ -7926,6 +7926,7 @@ mod tests {
     /// and neither needs the other's field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,

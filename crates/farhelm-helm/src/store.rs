@@ -9996,6 +9996,7 @@ mod tests {
     /// other's full field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -12593,6 +12594,7 @@ mod tests {
                     host,
                     "identity-a",
                     &SessionInfo {
+                        terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
                         workspace_trust_prompt: false,
@@ -22339,6 +22341,55 @@ mod tests {
         assert_eq!(cached_stamps(&store).await, (1_500, 1_500_000));
     }
 
+    /// Restart replaces the list's terminal-absence fact even when its
+    /// unsampled status still borrows the cached exit. Otherwise the pane
+    /// could keep showing a recovery card after the new terminal starts.
+    #[farhelm_testtrace::test]
+    async fn mutation_cache_takes_current_terminal_availability() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "user@host", "identity-1").await;
+        let mut reply = session("s-1", 100);
+        let exited = SessionStatus::Exited { exit_code: Some(7) };
+        reply.status = exited.clone();
+        reply.terminal_missing = true;
+        store
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![reply.clone()]),
+                false,
+            )
+            .await
+            .expect("cache the reported absence");
+        let cached = async || {
+            store
+                .cached_session(host, "s-1")
+                .await
+                .expect("read cache")
+                .expect("session is cached")
+        };
+        assert!(
+            cached().await.terminal_missing,
+            "the list's fact survived storage"
+        );
+
+        reply.status = SessionStatus::Unknown;
+        reply.terminal_missing = false;
+        store
+            .remember_session(host, "identity-1", &admitted_row(host, &reply))
+            .await
+            .expect("cache the restart reply");
+        let cached = cached().await;
+        assert!(
+            !cached.terminal_missing,
+            "the reply clears the prior absence"
+        );
+        assert_eq!(
+            cached.status, exited,
+            "the reply still has no live status sample"
+        );
+    }
+
     /// The single-row writes answer the same question, so a mutation that
     /// re-records what the cache already says invalidates nothing.
     ///
@@ -22449,6 +22500,7 @@ mod tests {
                     host,
                     vec![
                         SessionInfo {
+                            terminal_missing: false,
                             screen_yolo: false,
                             claude_trust_prompt: false,
                             workspace_trust_prompt: false,
@@ -22456,6 +22508,7 @@ mod tests {
                             ..session("good-1", 500)
                         },
                         SessionInfo {
+                            terminal_missing: false,
                             screen_yolo: false,
                             claude_trust_prompt: false,
                             workspace_trust_prompt: false,
@@ -22463,6 +22516,7 @@ mod tests {
                             ..session("undecodable", 400)
                         },
                         SessionInfo {
+                            terminal_missing: false,
                             screen_yolo: false,
                             claude_trust_prompt: false,
                             workspace_trust_prompt: false,

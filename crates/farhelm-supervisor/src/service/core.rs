@@ -7184,6 +7184,7 @@ impl Supervisor {
                 row.id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
+                        terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
                         workspace_trust_prompt: false,
@@ -10203,11 +10204,10 @@ impl Supervisor {
     /// The replayed `SessionInfo` is rebuilt from the stored row with the
     /// same create-time placeholders a first attempt's reply carries
     /// (`status: Unknown`, no annotation) — a replay is the same answer, so
-    /// it must have the same shape. The restart offer is the one field
-    /// computed rather than placeheld, and from the STORED snapshot: it is
-    /// a property of the session that already exists, not of this reply,
-    /// and a replay landing after capture succeeded should say so rather
-    /// than under-report what the original create would report now.
+    /// it must have the same shape. The restart offer comes from the stored
+    /// snapshot, since a replay can land after capture succeeded. Terminal
+    /// presence describes the published session. Durable launch evidence
+    /// can admit a replay before this supervisor holds its terminal.
     async fn replay_created_session(
         &self,
         reservation: &Reservation,
@@ -10226,7 +10226,21 @@ impl Supervisor {
                     .await
                     .unwrap_or_default();
                 let snapshot = IntegrationSnapshot::of(&row.launch);
+                let terminal_missing = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(&row.id).map_or_else(
+                        || {
+                            self.restarting_rows
+                                .lock()
+                                .expect("restarting-rows mutex poisoned")
+                                .get(&row.id)
+                                .is_none_or(|held| held.terminal_missing)
+                        },
+                        |entry| entry.terminal.is_none(),
+                    )
+                };
                 let info = SessionInfo {
+                    terminal_missing,
                     screen_yolo: false,
                     claude_trust_prompt: false,
                     workspace_trust_prompt: false,
@@ -11232,6 +11246,7 @@ impl Supervisor {
             },
         );
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -11792,6 +11807,8 @@ impl Supervisor {
         // launch stays recorded for the next supervisor.
         let mut sessions = self.sessions.lock().await;
         let terminal = self.publishable(Some(terminal));
+        let mut info = info;
+        info.terminal_missing = terminal.is_none();
         sessions.insert(
             id,
             Arc::new(SessionEntry {
@@ -11862,7 +11879,6 @@ impl Supervisor {
         let session_id = info.id.clone();
         // The reply carries what the listing will: `info` was built before
         // the spawn recorded anything.
-        let mut info = info;
         info.notifications = self.published_notifications(&session_id).await;
         self.with_checkout_metadata(info).await.with_context(|| {
             format!(
@@ -12693,7 +12709,7 @@ impl Supervisor {
         // entry back (or decides not to).
         {
             let mut sessions = self.sessions.lock().await;
-            let held = self
+            let mut held = self
                 .last_listed
                 .lock()
                 .expect("last-listed mutex poisoned")
@@ -12704,6 +12720,9 @@ impl Supervisor {
                 // cap): the entry's own row, whose status is the one it was
                 // built with.
                 .unwrap_or_else(|| entry.info.clone());
+            // Hold the availability of the terminal being replaced. The last
+            // listing can predate its loss, and the entry's row is a snapshot.
+            held.terminal_missing = entry.terminal.is_none();
             self.restarting_rows
                 .lock()
                 .expect("restarting-rows mutex poisoned")
@@ -13082,7 +13101,8 @@ impl Supervisor {
                 capture.committed_ownership_version().unwrap_or(0),
             )
         };
-        let info = SessionInfo {
+        let mut info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -13116,8 +13136,8 @@ impl Supervisor {
             invocation: entry.info.invocation.clone(),
             agent_kind: entry.snapshot.kind,
             launch: entry.info.launch.clone(),
-            // Deliberately not a fabricated live status: the pane exists, but
-            // whether the agent's own `exec` inside it succeeds is a
+            // Deliberately not a fabricated live status: whether the agent's
+            // own `exec` inside the new terminal succeeds is a
             // separate question this reply cannot answer. `ListSessions`
             // computes the real status, and the UI refreshes after a
             // restart for exactly that reason.
@@ -13144,6 +13164,7 @@ impl Supervisor {
             // (`Self::publishable`); after, the confirmed launch is the next
             // supervisor's to adopt by its tag.
             let terminal = self.publishable(Some(terminal));
+            info.terminal_missing = terminal.is_none();
             let published = relaunched_entry(
                 entry,
                 info.clone(),
@@ -13185,7 +13206,6 @@ impl Supervisor {
         // nothing would otherwise copy into the cell, and the reply must
         // carry what the listing will.
         self.reload_notification_cell(&entry.info.id).await;
-        let mut info = info;
         info.notifications = self.published_notifications(&entry.info.id).await;
         // Every relaunch publication goes through here, whichever request
         // or recovery drove it; see `hints` for why marks sit at
@@ -14870,6 +14890,7 @@ impl Supervisor {
     ) {
         let snapshot = IntegrationSnapshot::of(&row.launch);
         let info = SessionInfo {
+            terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -19115,6 +19136,7 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<HostTerminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
+                terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
@@ -20206,8 +20228,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// A session in the middle of a restart is still in the session list,
-    /// described as it was last listed before the restart began.
+    /// A restart keeps the session's row visible and holds the previous
+    /// terminal's availability until a replacement is published.
     ///
     /// Why it matters: the restart takes the session off the supervisor's
     /// map while it detaches the previous terminal and relaunches, and a listing
@@ -20217,9 +20239,18 @@ pub(crate) mod tests {
     /// it and the open view went away). Specified: a listing taken while the
     /// restart is held inside that window carries the session with the row
     /// the previous listing gave it, status included, and the session is
-    /// listed again, once, after the restart finishes.
+    /// listed again, once, after the restart finishes. If the terminal has
+    /// disappeared since that last listing, the held row reports the
+    /// absence so the app can keep showing recovery without dialing.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_listing_during_a_restart_keeps_the_session_as_last_listed() {
+        assert_restart_window_listing(false).await;
+        assert_restart_window_listing(true).await;
+    }
+
+    /// Check the same restart window while replacing a retained terminal and
+    /// while recovering one removed after the cached listing was made.
+    async fn assert_restart_window_listing(terminal_lost: bool) {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
         let reached = Arc::new(std::sync::Mutex::new(Some(reached_tx)));
@@ -20248,13 +20279,34 @@ pub(crate) mod tests {
         .await
         .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
-        let before = crate::service::listing::list_all(&sup)
+        let mut before = crate::service::listing::list_all(&sup)
             .await
             .expect("list before the restart")
             .sessions
             .into_iter()
             .find(|row| row.id == created.id)
             .expect("fixture premise: the session is listed before its restart");
+        assert!(
+            !before.terminal_missing,
+            "the last listing still had a terminal"
+        );
+        if terminal_lost {
+            let host = sup
+                .agent_host_for_test(&created.id)
+                .await
+                .expect("the original terminal");
+            let ended = host
+                .shutdown()
+                .await
+                .expect("shut down the original terminal");
+            assert!(ended.ended, "the old terminal ended: {ended:?}");
+            sup.forget_agent_terminal_for_test(&created.id)
+                .await
+                .expect("forget the ended terminal");
+            // Save the expected row locally, leaving the supervisor's
+            // last-listed snapshot as it was before the terminal was lost.
+            before.terminal_missing = true;
+        }
 
         let restart = tokio::spawn({
             let sup = Arc::clone(&sup);
@@ -20288,7 +20340,7 @@ pub(crate) mod tests {
         assert_eq!(
             during,
             vec![before],
-            "a listing inside the restart window shows the session as last listed"
+            "the held row preserves last-listed metadata and actual terminal availability"
         );
 
         release_tx.send(()).expect("release the restart window");
@@ -35100,6 +35152,8 @@ exit 1
 
     /// An identical retry must replay the retained Error without creating a
     /// terminal or a new spec after cleanup has removed all physical proof.
+    /// Its reply still reports that absence because the helm caches replays
+    /// in the same way as the first successful create.
     /// A created terminal would be a host bound in the state directory's
     /// socket directory, which every caller leaves empty before the replay.
     async fn assert_sentinel_replay(
@@ -35133,6 +35187,10 @@ exit 1
         }
         .expect("the accepted create replays despite its launch error");
         assert_eq!(reply.id, row.id);
+        assert!(
+            reply.terminal_missing,
+            "the replay reports that it has no terminal"
+        );
         let durable = sup.store.session(&row.id).await.unwrap().unwrap();
         assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
         assert_eq!(durable.generation, 0);

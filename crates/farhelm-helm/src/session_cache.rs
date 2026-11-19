@@ -166,9 +166,12 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
 /// sampler's, and a create/rename/restart reply merely copies
 /// whatever the entry happened to hold when it was built — which can be
 /// OLDER than what a `ListSessions` drain already committed here, because
-/// replies and drains race and nothing orders them.
+/// replies and drains race and nothing orders them. (`terminal_missing`
+/// is not merged: it is taken from the reply as it is, so a successful
+/// Restart's reply clears it even when its status is Unknown and the
+/// previous status is kept.)
 ///
-/// So the value is carried forward monotonically: a reply may push it
+/// So the timestamps' value is carried forward monotonically: a reply may push it
 /// forward, never back. `0` is the field's "unknown" (an old sender omits
 /// it entirely — see `SessionInfo::last_activity_at` and
 /// `SessionInfo::last_work_started_at`), and it is also the
