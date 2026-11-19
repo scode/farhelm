@@ -306,29 +306,49 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 
 No release note needed.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-19 (claim c4d8b6).
+### 2026-11-19: answer to a blocked question
 
-### Allow a larger patch for Enter after closing a dialog?
+The question, as the executor put it:
 
-After Enter submits the launcher and focus returns to the terminal, a quick second Enter currently disappears. The
-triage decision was to send that Enter to whatever has focus after the close. Escape keeps its half-second protection
-after the last dialog closes, so tapping it twice while backing out cannot interrupt an agent.
+> Blocked on 2026-11-19 (claim c4d8b6).
+>
+> ### Allow a larger patch for Enter after closing a dialog?
+>
+> After Enter submits the launcher and focus returns to the terminal, a quick second Enter currently disappears. The
+> triage decision was to send that Enter to whatever has focus after the close. Escape keeps its half-second protection
+> after the last dialog closes, so tapping it twice while backing out cannot interrupt an agent.
+>
+> The candidate changes the input rule in two lines and passed 86 focused tests, including an immediate second Enter
+> after launching and both nested and final Escape dismissals. Updating the specs and replacing the old Enter
+> expectations brought the diff to 173 lines, above this outcome's limit of about 100. The final tests also need to
+> preserve the existing rule that a different key or a click ends the Escape guard, so a subsequent Escape can reach the
+> terminal.
+>
+> I recommend allowing about 200 changed lines for this outcome so the behavior, spec and regression coverage can land
+> together. With the existing size limit, defer this outcome and keep the current behavior after a dialog closes.
+>
+> Three drafts are open.
+>
+> - Count a second Enter in the same terminal as new input after a quick launch.
+>   [#4206](https://github.com/scode/farhelm/pull/4206/changes)
+> - Clarify where focus starts for permanent trash deletion and warnings about unexpected risk.
+>   [#4216](https://github.com/scode/farhelm/pull/4216/changes)
+> - Return focus to the open session when bulk Stop or Delete, Clear or Escape removes the focused toolbar for marked
+>   sessions. [#4230](https://github.com/scode/farhelm/pull/4230/changes)
 
-The candidate changes the input rule in two lines and passed 86 focused tests, including an immediate second Enter after
-launching and both nested and final Escape dismissals. Updating the specs and replacing the old Enter expectations
-brought the diff to 173 lines, above this outcome's limit of about 100. The final tests also need to preserve the
-existing rule that a different key or a click ends the Escape guard, so a subsequent Escape can reach the terminal.
+The maintainer's answer:
 
-I recommend allowing about 200 changed lines for this outcome so the behavior, spec and regression coverage can land
-together. With the existing size limit, defer this outcome and keep the current behavior after a dialog closes.
+### Answered by the landing monitor on the maintainer's behalf
 
-Three drafts are open.
+The landing monitor answered this block on the maintainer's behalf, under the maintainer's standing rule that only a
+huge question waits for them (`plans/.agents/landing.md`, "Answering blocks"). A later change of mind is a follow-up,
+not a reason to stop the plan.
 
-- Count a second Enter in the same terminal as new input after a quick launch.
-  [#4206](https://github.com/scode/farhelm/pull/4206/changes)
-- Clarify where focus starts for permanent trash deletion and warnings about unexpected risk.
-  [#4216](https://github.com/scode/farhelm/pull/4216/changes)
-- Return focus to the open session when bulk Stop or Delete, Clear or Escape removes the focused toolbar for marked
-  sessions. [#4230](https://github.com/scode/farhelm/pull/4230/changes)
+- **Allow about 200 changed lines for this outcome**, as recommended, so the input rule change, the spec updates and the
+  replaced Enter expectations land together. Most of the growth is spec text and tests, not mechanism; the rule itself
+  stays the two-line change.
+- Keep Escape's half-second protection after the last dialog closes, and keep the existing rule that a different key or
+  a click ends the Escape guard, with a test for each, as the block describes. If the outcome would need much more than
+  about 200 lines, block again rather than dropping coverage.
