@@ -1927,20 +1927,6 @@
   behavior change. Remove the feedback file and its index entry in the same change.
 - Execution: planned in `plans/queue/triage-misc-nov18.md`
 
-## trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed in code, very unlikely. A
-  supervisor test fixture stores only the process-group number of host-run fake agents and SIGKILLs that group at
-  teardown with no identity check (crates/farhelm-supervisor/src/service/core.rs tests), so after a stall longer than
-  the fake agent's 25 s sleep and a full process-number wrap, an unrelated group of the same user could be killed. Test
-  tooling only. FILTER.md's process-number filter excludes storing a number for later use. Bucket: other.
-- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
-- Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
-  group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
-  lines in the test code). Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/triage-misc-nov18.md`
-
 ## trailing-agent-environment-target-history-admission-lacks-origin.md
 
 - Outcome: `discard`.
