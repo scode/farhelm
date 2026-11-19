@@ -7,4 +7,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight f768ad] `gui-ux-desktop-fixes.md` — Header question anchors, Close all after navigation, selected-template contrast, host text in tooltips and refusals, wrong action names, approval keyboard tab stops
 - [in-flight 84005f] `gui-ux-backend-fixes.md` — Bounded shell-tab requests, Tensorlake suspension attribution, late approval answers, tunnels for retired sessions, the Mac update wait, endpoint @ paths, braced command display
 - [pending] `antigravity-support.md` — Support Google Antigravity (agy): structured launches, sidebar mark, user-installed hook conversation tracking, and docs (protocol bump)
-- [landing cad1e6] `settings-app-version.md` — Settings → App shows the running version with a Check for updates button that shows a running check
