@@ -1845,7 +1845,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## old-suspension-stamp-labels-later-external-pause.md
 
@@ -1863,7 +1863,7 @@
   with a test. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
   removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
   feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## approval-answer-acknowledged-after-expiry.md
 
@@ -1882,7 +1882,7 @@
   diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## stale-reply-test-lacks-processing-witness.md
 
@@ -1897,7 +1897,7 @@
   fix the test only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism);
   otherwise treat this as a discard and say so in the execution record. Either way, remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## process-presence-fixture-leaves-sleep-descendant.md
 
@@ -1911,7 +1911,7 @@
 - Completion criteria: fix if a group kill or childless stand-in fits (~5-10), else discard. At execution, fix the test
   only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise
   treat this as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## checkpoint-rejection-test-asserts-before-processing.md
 
@@ -1925,7 +1925,7 @@
 - Completion criteria: fix: move the assertion after the status frame (~3 lines). At execution, fix the test only if the
   fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## tab-reap-deadline-excludes-listing-request.md
 
@@ -1939,7 +1939,7 @@
 - Completion criteria: fix: wrap each check in the deadline (~5-8). At execution, fix the test only if the fix is
   obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## held-start-test-lacks-prelaunch-fencing-witness.md
 
@@ -1951,7 +1951,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (needs a new fixture observation, ~10-20)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## keeper-can-win-one-shot-interrupted-start-gate.md
 
@@ -1965,7 +1965,7 @@
 - Completion criteria: fix: copy the sibling test's held marker (~10-15). At execution, fix the test only if the fix is
   obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## rebuild-order-test-misses-persistence-boundary.md
 
@@ -1977,7 +1977,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (needs a new fake hook, ~20-40)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## stty-tool-format-mismatch.md
 
@@ -1991,7 +1991,7 @@
 - Completion criteria: fix: give the reference command the host's PATH (~2 lines). At execution, fix the test only if
   the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this
   as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## closed-stdin-epipe-witness.md
 
@@ -2003,7 +2003,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (needs a forwarder witness, ~15-25)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## notification-cleanup-row-premise.md
 
@@ -2017,7 +2017,7 @@
 - Completion criteria: fix: assert the count is 1 before the delete (~6). At execution, fix the test only if the fix is
   obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## successor-exit-processing-witness.md
 
@@ -2031,7 +2031,7 @@
 - Completion criteria: fix: wait for the dead agent first (~3). At execution, fix the test only if the fix is obvious
   and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
   say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## hook-waiter-missing-invocation-binding.md
 
@@ -2043,7 +2043,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (needs per-call nonces, ~30-60)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## tab-survival-missing-live-exchange.md
 
@@ -2058,7 +2058,7 @@
   test only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism);
   otherwise treat this as a discard and say so in the execution record. Either way, remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## claude-recreation-test-clears-old-stamp.md
 
@@ -2072,7 +2072,7 @@
 - Completion criteria: fix: add a sibling test that keeps the old stamp (~25). At execution, fix the test only if the
   fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
 ## catalog-retry-test-does-not-witness-inventory.md
 
@@ -2086,7 +2086,7 @@
 - Completion criteria: fix: assert a catalog-only effect (~5-15). At execution, fix the test only if the fix is obvious
   and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
   say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
 ## destructive-action-tests-omit-request-targets.md
 
@@ -2099,7 +2099,7 @@
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard under the rule (80-150 lines via shared
   helpers); say so if you want it kept).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## launcher-escalation-test-misses-banner-premise.md
 
@@ -2112,7 +2112,7 @@
 - Completion criteria: fix: assert the banner in the fixture (~3). At execution, fix the test only if the fix is obvious
   and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
   say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
 ## launcher-model-height-test-accepts-collapsed-list.md
 
@@ -2125,7 +2125,7 @@
 - Completion criteria: fix: add a lower bound (~5-10). At execution, fix the test only if the fix is obvious and trivial
   (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and say so in the
   execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
 ## checkout-fixture-inherits-git-repository-selector.md
 
@@ -2139,7 +2139,7 @@
 - Completion criteria: fix: child-only env scrub in both fixtures (~15-25). At execution, fix the test only if the fix
   is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
 ## signal-test-child-lacks-unwind-cleanup.md
 
@@ -2152,7 +2152,7 @@
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (all sites ~100-250); say so if you want
   the two never-ending stand-ins fixed (~20-40)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## inherited-lock-test-self-dup.md
 
@@ -2166,7 +2166,7 @@
 - Completion criteria: fix: copy the sibling's guard and assert the premise (~10-15). At execution, fix the test only if
   the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this
   as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## failed-client-close-test-lacks-writer-premise.md
 
@@ -2177,7 +2177,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (no clear witness shape)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## stderr-readiness-lacks-live-holder-premise.md
 
@@ -2190,7 +2190,7 @@
 - Completion criteria: fix: require the holder pid and assert it alive (~5-10). At execution, fix the test only if the
   fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## late-listener-blocks-start-test-cleanup.md
 
@@ -2204,7 +2204,7 @@
 - Completion criteria: fix: accept with a deadline (~10-15). At execution, fix the test only if the fix is obvious and
   trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and say so
   in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## staged-start-test-lacks-reader-drain-witness.md
 
@@ -2216,7 +2216,7 @@
   Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (needs a new fixture mechanism, ~30-60)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## readiness-test-does-not-establish-first-stage-exit.md
 
@@ -2229,7 +2229,7 @@
 - Completion criteria: fix: also assert the parent isn't a live child (~5-10). At execution, fix the test only if the
   fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## peak-memory-test-lacks-baseline-headroom.md
 
@@ -2242,7 +2242,7 @@
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard the remainder (record #3209 as fixing the
   rest)).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## malformed-snapshot-fixtures-mask-intended-validators.md
 
@@ -2255,7 +2255,7 @@
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard under the rule (~30-50 lines); say so if
   you want it kept).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## recording-loader-rejects-valid-json-field-spacing.md
 
@@ -2269,7 +2269,7 @@
 - Completion criteria: fix: skip whitespace before the colon (~5). At execution, fix the test only if the fix is obvious
   and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
   say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## trailing-removed-live-alternate-screen-reattach-oracle.md
 
@@ -2282,7 +2282,7 @@
   otherwise discard.
 - Completion criteria: Remove the feedback file and its index entry (discard (a new test is ~40-60); say so if you want
   it added).
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-converted-old-session-warning-retention-assertion-vacuous-all.md
 
@@ -2295,7 +2295,7 @@
 - Completion criteria: fix: assert exactly one resolved warning (~3-5). At execution, fix the test only if the fix is
   obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
 
 ## transition-accessor-comment.md
 
@@ -2308,7 +2308,7 @@
   the text is corrected to describe the code (fix comment (1 line)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## settings-close-tooltip-promises-immediate-discard.md
 
@@ -2323,7 +2323,7 @@
   of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over
   that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-spec-automatic-tab-reap-omits-failed-close-retry.md
 
@@ -2337,7 +2337,7 @@
   the text is corrected to describe the code (fix spec (~2-4)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-agent-file-size-only-read-consistency-docstring.md
 
@@ -2351,7 +2351,7 @@
   the text is corrected to describe the code (fix comment (~3)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-late-activity-test-doc-retains-removed-screen-read-await.md
 
@@ -2364,7 +2364,7 @@
   the text is corrected to describe the code (fix comment (~3)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md
 
@@ -2378,7 +2378,7 @@
   the text is corrected to describe the code (fix comments (~4)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-status-documentation-probe-versus-processed-exit-evidence.md
 
@@ -2392,7 +2392,7 @@
   the text is corrected to describe the code (fix comments (~6)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## bash-source-admission-retains-literal-splitter.md
 
@@ -2407,7 +2407,7 @@
   ~80-150). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
   or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
   and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## peer-text-normalization-contract-overstates-retained-scope.md
 
@@ -2421,7 +2421,7 @@
   the text is corrected to describe the code (fix spec (~2)). Size gate: about 100 lines of diff (code, tests and docs,
   not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
   the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## keyboard-overview-omits-in-sequence-number-action.md
 
@@ -2436,7 +2436,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## digit-leading-template-limit-overstated.md
 
@@ -2451,7 +2451,7 @@
   lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment);
   over that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the
   same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## checkout-refusal-conflicts-with-failed-save-rule.md
 
@@ -2466,7 +2466,7 @@
   item)). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
   or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
   and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## failed-template-save-retains-attempted-draft.md
 
@@ -2481,7 +2481,7 @@
   diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## omp-permission-docs-retain-yolo-default.md
 
@@ -2494,7 +2494,7 @@
   the text is corrected to describe the code (fix spec (~2)). Size gate: about 100 lines of diff (code, tests and docs,
   not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
   the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## omp-readiness-comment-excludes-early-save.md
 
@@ -2507,7 +2507,7 @@
   the text is corrected to describe the code (fix comment (~2)). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## gui-migration-comments-need-current-contracts.md
 
@@ -2522,7 +2522,7 @@
   wholesale sweep). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
   removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
   feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## desktop-state-rewrite-blocks-startup.md
 
@@ -2534,7 +2534,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## attention-list-refresh-failure-scope-unresolved.md
 
@@ -2545,7 +2545,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## failed-setup-refresh-overwrites-held-lifecycle-status.md
 
@@ -2556,7 +2556,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## notification-read-failure-leaves-stale-cell.md
 
@@ -2567,7 +2567,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## attention-save-error-can-exhaust-list-height.md
 
@@ -2577,7 +2577,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## short-progress-card-can-hide-overflow-notice.md
 
@@ -2588,7 +2588,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## open-source-notices-window-failure-is-silent.md
 
@@ -2598,7 +2598,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## desktop-startup-reopen-can-wait-on-reused-pid.md
 
@@ -2608,7 +2608,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## open-types-acknowledgement-only-in-dialog.md
 
@@ -2619,7 +2619,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md
 
@@ -2630,7 +2630,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md
 
@@ -2640,7 +2640,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md
 
@@ -2650,7 +2650,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md
 
@@ -2661,7 +2661,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md
 
@@ -2671,7 +2671,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md
 
@@ -2681,7 +2681,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md
 
@@ -2692,7 +2692,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md
 
@@ -2702,7 +2702,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md
 
@@ -2713,7 +2713,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## trailing-launch-excerpt-whole-row-intermediate-allocation.md
 
@@ -2724,7 +2724,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## gone-retry-forgets-pinned-foreground-child.md
 
@@ -2736,7 +2736,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## normal-quit-misses-empty-download-directory.md
 
@@ -2746,7 +2746,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## numeric-version-guard-hides-artifact-filenames.md
 
@@ -2756,7 +2756,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## tab-helper-can-fail-after-open-succeeds.md
 
@@ -2767,7 +2767,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## spare-ancestry-fallback-skips-destination-recheck.md
 
@@ -2778,7 +2778,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## network-state-wal-failure-topology-unresolved.md
 
@@ -2788,7 +2788,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## muse-unmarked-same-process-child-attribution.md
 
@@ -2798,7 +2798,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## refused-add-rewrites-new-destination-owner.md
 
@@ -2809,7 +2809,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## desktop-owner-record-lacks-boot-domain.md
 
@@ -2820,7 +2820,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## changed-project-key-cleanup-absence-unresolved.md
 
@@ -2831,7 +2831,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## first-state-directory-ancestor-durability-unresolved.md
 
@@ -2841,7 +2841,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## ambiguous-codex-seed-renewal.md
 
@@ -2852,7 +2852,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## launcher-live-draft-submission-source-gap.md
 
@@ -2863,7 +2863,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## header-copy-warning-survives-different-copy.md
 
@@ -2873,7 +2873,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## secondary-button-erases-intercepted-primary-ownership.md
 
@@ -2884,7 +2884,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## truncated-empty-filter-result-omits-clear-actions.md
 
@@ -2895,7 +2895,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## transfer-result-height-can-hide-destination.md
 
@@ -2905,7 +2905,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## backup-warning-can-imply-inconsistent-live-copy.md
 
@@ -2915,7 +2915,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## long-launch-status-crops-painted-edge.md
 
@@ -2925,7 +2925,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## subline-progress-preview-hides-diagnosis.md
 
@@ -2935,7 +2935,7 @@
 - Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
   race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-discards.md`
 
 ## layout-preference-save-failures-are-silent.md
 
@@ -2947,7 +2947,7 @@
 - Completion criteria: fix spec: add the three to the best-effort list (~3). Size gate: about 100 lines of diff (code,
   tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
   blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## closing-settings-can-hide-ntfy-save-refusal.md
 
@@ -2960,7 +2960,7 @@
   lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment);
   over that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the
   same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
@@ -2973,7 +2973,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the
   changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and
   its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## recovered-agent-retains-stale-launch-hold-handle.md
 
@@ -2985,7 +2985,7 @@
 - Completion criteria: fix code (~15-30). Size gate: about 100 lines of diff (code, tests and docs, not counting
   TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
   to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## agent-endpoint-refuses-valid-at-sign-path.md
 
@@ -2997,7 +2997,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## approval-scrollports-lack-keyboard-entry.md
 
@@ -3010,7 +3010,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## header-questions-follow-anchor-across-sessions.md
 
@@ -3024,7 +3024,7 @@
   about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
   fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
   entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## session-navigation-interrupts-close-all.md
 
@@ -3037,7 +3037,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## bulk-completion-focuses-sort.md
 
@@ -3050,7 +3050,7 @@
   100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
   fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
   entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
 
 ## selected-template-state-contrast.md
 
@@ -3061,7 +3061,7 @@
 - Completion criteria: fix code: palette tweak or selected marker (~2-30). Size gate: about 100 lines of diff (code,
   tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
   blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## selected-template-shortcut-contrast.md
 
@@ -3073,7 +3073,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## sentence-case-sweep-leaves-authored-lowercase-text.md
 
@@ -3084,7 +3084,7 @@
 - Completion criteria: fix code: capitalize (~10 incl. tests). Size gate: about 100 lines of diff (code, tests and docs,
   not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
   the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## rail-tooltip-merges-direction-boundaries.md
 
@@ -3096,7 +3096,7 @@
 - Completion criteria: fix code: build them as host sentences (~30-50). Size gate: about 100 lines of diff (code, tests
   and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks
   and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## brace-literal-command-display-is-bash-inexact.md
 
@@ -3107,7 +3107,7 @@
 - Completion criteria: fix code: quote words with { } ! ^ (~5-15). Size gate: about 100 lines of diff (code, tests and
   docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
   brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
 
 ## template-collision-refusal-mixes-unisolated-name.md
 
@@ -3118,7 +3118,7 @@
 - Completion criteria: fix code: build the refusal as a host sentence (~5-15). Size gate: about 100 lines of diff (code,
   tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
   blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## gui-labels-and-refusals-name-different-actions.md
 
@@ -3131,7 +3131,7 @@
   (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
   execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
   change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-desktop-fixes.md`
 
 ## linux-sound-resolves-player-on-path.md
 
@@ -3148,7 +3148,7 @@
   agent settings file the user grew near Farhelm's read limit is theirs to manage. No code change. Remove this feedback
   file and the other two QF items (muse-current-hook-override-semantics-unresolved.md,
   agent-settings-write-exceeds-next-read-limit.md), with their index entries, in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## muse-current-hook-override-semantics-unresolved.md
 
@@ -3160,7 +3160,7 @@
   local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
   PATH, a custom command's own agent flags, unusually large agent settings files).
 - Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## agent-settings-write-exceeds-next-read-limit.md
 
@@ -3172,7 +3172,7 @@
   local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
   PATH, a custom command's own agent flags, unusually large agent settings files).
 - Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-wording.md`
 
 ## irreversible-confirmation-focus-contract.md
 
@@ -3189,7 +3189,7 @@
   trash deletion among them) start on their confirming answer because the user is already in a flow whose intent is
   plain, and the Cancel-first rule is for prompts that warn of an unexpected risk (YOLO on a host that does not allow
   it, for example). No code change (about 2-3 lines). Remove the feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
 
 ## sequence-following-enter-does-not-count-as-moving-on.md
 
@@ -3219,7 +3219,7 @@
   about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
   fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
   entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
 
 ## enter-falls-through-after-dismiss-or-approval.md
 
@@ -3241,4 +3241,4 @@
   follow. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
   or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
   and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-ux-enter-and-focus.md`
