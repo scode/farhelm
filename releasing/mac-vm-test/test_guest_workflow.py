@@ -345,9 +345,11 @@ starting unless the operator separately recorded that exact live-send scope.
     def test_real_source_contract_supplies_text_origin(self):
         """The actual Git reader must compose with guest staging, not only a shaped mock."""
         checkout = self.root / 'checkout'
-        subprocess.run(['git', 'init', '-q', str(checkout)], check=True, capture_output=True)
+        # Both setup writes belong to the temporary checkout, even inside a Git hook.
+        env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        subprocess.run(['git', 'init', '-q', str(checkout)], check=True, capture_output=True, env=env)
         subprocess.run(['git', '-C', str(checkout), 'remote', 'add', 'origin',
-                        'https://github.com/fixture/project.git'], check=True, capture_output=True)
+                        'https://github.com/fixture/project.git'], check=True, capture_output=True, env=env)
         self.assertEqual(source_url(Source(checkout)), 'https://github.com/fixture/project.git')
 
 

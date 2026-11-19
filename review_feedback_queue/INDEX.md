@@ -925,11 +925,6 @@ consequences.
   Podman routing can choose a remote engine despite Farhelm's host-local container description; the intended
   configuration boundary is unresolved.
 
-- [`checkout-fixture-inherits-git-repository-selector.md`](checkout-fixture-inherits-git-repository-selector.md) — An
-  inherited GIT_DIR can redirect a managed-checkout test's initialization into another fixture repository. Additional
-  reviewed scope: Running the new unit-test fixture with an inherited absolute Git repository selector can initialize
-  and mutate a repository outside its temporary fixture.
-
 - [`update-reminder-before-initial-provisioning-read.md`](update-reminder-before-initial-provisioning-read.md) — An
   Update reminder can advertise availability before the first provisioning-state read has established whether that
   action is eligible.
