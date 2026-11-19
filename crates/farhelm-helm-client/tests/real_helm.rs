@@ -48,6 +48,7 @@ impl Helm {
         let args = farhelm_helm::HelmArgs {
             port: 0,
             state_dir: state.path().join("state"),
+            ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
             backstop_refresh_secs: None,

@@ -63,6 +63,18 @@ impl TransportConnection {
 /// fn`: an `async fn` in a trait is not dyn-compatible, and dyn dispatch
 /// is the entire point here.
 pub trait HostTransport: Send + Sync + 'static {
+    /// Prepare the shared connection before the noninteractive dial. Only real, ordinary SSH hosts need this step.
+    /// The actor keeps the retry decision and publishes the sign-in stage only while this attempt still owns the row.
+    fn sign_in<'a>(
+        &'a self,
+        _host: &'a HostRow,
+        _deadline: Duration,
+        _startup: bool,
+        _on_question: &'a mut (dyn FnMut(bool) + Send),
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
     /// Open a connection for `host`. The row is passed whole (not just its
     /// destination) because an ssh row's `remote_farhelm` and
     /// `remote_state_dir` are part of how it is reached, and a test
@@ -104,6 +116,7 @@ pub struct SystemTransport {
     /// Injecting the executable keeps process-ordering tests independent of
     /// the running test process's PATH and the operator's SSH configuration.
     ssh_program: PathBuf,
+    sign_in: Option<crate::ssh_sign_in::SignIn>,
     /// Production refreshes registry routes per attempt. Row-injected fixtures
     /// can omit the store while using the same command and lifetime machinery.
     store: Option<HelmStore>,
@@ -122,6 +135,7 @@ impl SystemTransport {
             places: crate::environment::podman_probe::PodmanPlaces::new(&state_dir),
             state_dir,
             ssh_program: PathBuf::from("ssh"),
+            sign_in: None,
             store: None,
         }
     }
@@ -132,10 +146,12 @@ impl SystemTransport {
         state_dir: impl Into<PathBuf>,
         store: HelmStore,
         places: Arc<crate::environment::podman_probe::PodmanPlaces>,
+        sign_in: Option<crate::ssh_sign_in::SignIn>,
     ) -> Self {
         Self {
             store: Some(store),
             places,
+            sign_in,
             ..Self::new(state_dir)
         }
     }
@@ -177,6 +193,41 @@ impl SystemTransport {
 pub struct LocalSupervisorNotRunning;
 
 impl HostTransport for SystemTransport {
+    fn sign_in<'a>(
+        &'a self,
+        host: &'a HostRow,
+        deadline: Duration,
+        startup: bool,
+        on_question: &'a mut (dyn FnMut(bool) + Send),
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(sign_in) = &self.sign_in else {
+                return Ok(());
+            };
+            if !host
+                .kind
+                .ssh_access()
+                .is_some_and(crate::ssh::SshAccessKind::asks_user)
+            {
+                return Ok(());
+            }
+            let destination = host
+                .destination
+                .as_deref()
+                .context("an SSH host has no destination")?;
+            sign_in
+                .establish(
+                    &self.ssh_program,
+                    destination,
+                    host.id,
+                    startup,
+                    deadline,
+                    on_question,
+                )
+                .await
+        })
+    }
+
     fn connect<'a>(
         &'a self,
         host: &'a HostRow,
@@ -512,7 +563,7 @@ struct SshState {
 
 impl SshObservation {
     /// Observations hold no child, pipes, task handles, or cancellation anchor.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Arc::new(SshObserved {
             state: Mutex::new(SshState::default()),
             connected: watch::channel(false).0,
@@ -547,7 +598,7 @@ impl SshObservation {
     /// Consume a fixed-size read chunk without allocating uncapped lines.
     /// Marker recognition uses the full line's truncation bit and newline,
     /// so a long line with a marker prefix cannot impersonate progress.
-    fn observe_chunk(&self, bytes: &[u8]) -> Vec<SshStderrLine> {
+    pub(crate) fn observe_chunk(&self, bytes: &[u8]) -> Vec<SshStderrLine> {
         let mut state = self.0.state.lock().expect("ssh observation mutex");
         let mut diagnostic_lines = Vec::new();
         let mut first_marker = false;

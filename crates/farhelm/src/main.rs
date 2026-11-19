@@ -37,12 +37,13 @@
 //! [`agent_instructions`].
 
 use agent_client::{SessionEnv, SpawnArgs, SpawnLaunch, agent_request, spawn_session};
+use anyhow::Context as _;
 use clap::builder::TypedValueParser as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use farhelm_proto::AgentReply;
 use render::{host_cell, quoted, render_agent_reply, safe_cell, truncation_notice};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod agent_client;
 mod agent_instructions;
@@ -1302,6 +1303,8 @@ impl HookVendor {
 
 #[derive(Subcommand)]
 enum InternalCmd {
+    /// Relay one local OpenSSH question through the private socket of its owning helm.
+    Askpass { question: std::ffi::OsString },
     /// Proxy stdio to the local supervisor's unix socket. This is the
     /// remote end of the helm's ssh transport: `ssh host farhelm
     /// internal stdio` yields a byte pipe to the supervisor.
@@ -1719,7 +1722,29 @@ fn build_info_text(version: &str, release_build: bool) -> String {
 }
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut arguments = std::env::args_os();
+    let program = arguments.next();
+    let invoked_as = program
+        .as_deref()
+        .and_then(|program| Path::new(program).file_name());
+    if invoked_as.is_some_and(|name| name == farhelm_helm::ASKPASS_JUMP_PROGRAM_NAME) {
+        return farhelm_helm::run_askpass_jump(arguments).context("starting SSH for a jump host");
+    }
+    let cli = if invoked_as.is_some_and(|name| name == farhelm_helm::ASKPASS_PROGRAM_NAME) {
+        // OpenSSH supplies a single argument, which may begin with a dash or contain multiple lines.
+        let question = arguments.next().context("missing SSH question")?;
+        anyhow::ensure!(
+            arguments.next().is_none(),
+            "unexpected SSH helper arguments"
+        );
+        Cli {
+            command: Cmd::Internal {
+                command: InternalCmd::Askpass { question },
+            },
+        }
+    } else {
+        Cli::parse()
+    };
     hold_own_version(&cli.command)?;
     match cli.command {
         Cmd::Uninstall(options) => uninstall::run(options),
@@ -1857,6 +1882,9 @@ fn main() -> anyhow::Result<()> {
             run_supervisor(&dir, startup, exit_on_stdin_close)
         }
         Cmd::Internal { command } => match command {
+            InternalCmd::Askpass { question } => {
+                farhelm_helm::run_askpass(&question).context("relaying an SSH sign-in question")
+            }
             // Fresh synchronous processes: the guard starts its own OS watches
             // before user rc files; neither command needs an async runtime.
             InternalCmd::BuildSpare { spec } => farhelm_supervisor::build_spare(&spec),

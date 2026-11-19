@@ -248,6 +248,7 @@ pub(crate) fn runs_newer_version(state: &HostStateView) -> bool {
         } => peer_protocol > our_protocol,
         HostStateView::Connecting { .. }
         | HostStateView::Unreachable { .. }
+        | HostStateView::SignInNeeded
         | HostStateView::IdentityMismatch { .. }
         | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }
@@ -327,6 +328,7 @@ pub(crate) fn adoptable(state: &HostStateView) -> Option<&str> {
         HostStateView::IdentityMismatch { reported, .. } => Some(reported),
         HostStateView::Connecting { .. }
         | HostStateView::Unreachable { .. }
+        | HostStateView::SignInNeeded
         | HostStateView::Connected { .. }
         | HostStateView::VersionSkew { .. }
         | HostStateView::OwnedElsewhere { .. }

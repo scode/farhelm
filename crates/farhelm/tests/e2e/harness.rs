@@ -861,6 +861,7 @@ pub(crate) fn helm_args(state_dir: &std::path::Path) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         port: 0,
         state_dir: state_dir.to_path_buf(),
+        ssh_askpass_program: None,
         ensure_hosts: None,
         payload_dir: None,
         backstop_refresh_secs: None,

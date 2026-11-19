@@ -383,6 +383,7 @@ fn stage_failure_context(stage: ConnectionStage) -> &'static str {
         ConnectionStage::ConnectingToHost => {
             "connecting or logging in to the host, or Farhelm there is too old to report its progress"
         }
+        ConnectionStage::WaitingForSignIn => "waiting for your SSH sign-in answer",
         ConnectionStage::ConnectingToSupervisor => "connecting to the local supervisor",
         ConnectionStage::WaitingForHello => {
             "the supervisor accepted the connection but did not finish answering the hello"
@@ -411,6 +412,8 @@ fn stage_failure_context(stage: ConnectionStage) -> &'static str {
 /// [`HostActor::run`] is the one place that performs them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HostState {
+    /// SSH asked a question and the attempt ended. Only a retry, a registry change or helm startup dials again.
+    SignInNeeded,
     /// Inside the active-retry window: attempts are being made right now,
     /// on the [`Cadence::connect_backoff`] ladder.
     ///
@@ -663,6 +666,7 @@ impl HostState {
     pub fn phase(&self) -> &'static str {
         match self {
             HostState::Connecting { .. } => "connecting",
+            HostState::SignInNeeded => "sign-in-needed",
             HostState::Unreachable { .. } => "unreachable-reprobing",
             HostState::Connected { .. } => "connected",
             HostState::VersionSkew { .. } => "version-skew",
@@ -1625,7 +1629,7 @@ impl ConnectionManager {
                     .into_iter()
                     .map(|host| (host, SealedHost::Pending)),
             );
-        self.sync_registry().await?;
+        self.sync_registry_with_startup(true).await?;
         crate::notices::watch_fleet_session_limit(self, &self.store);
         Ok(())
     }
@@ -1847,6 +1851,12 @@ impl ConnectionManager {
     /// holds a client clone. This withdraws access; it does not stop the
     /// remote supervisor or its sessions.
     pub async fn sync_registry(&self) -> anyhow::Result<()> {
+        self.sync_registry_with_startup(false).await
+    }
+
+    /// Only initial registry population confers startup focus eligibility. Hosts added or revived later may have
+    /// their own explicit UI action, even when they have never connected before.
+    async fn sync_registry_with_startup(&self, startup: bool) -> anyhow::Result<()> {
         let _reconcile = self.reconcile.lock().await;
         let rows = self.store.list_hosts().await?;
         let mut map = self.actors.lock().expect("actor map mutex poisoned");
@@ -1920,7 +1930,7 @@ impl ConnectionManager {
                             destination = display_destination(&row),
                             "the host's connection actor is gone; respawning it"
                         );
-                        let mut replacement = self.spawn_actor(row);
+                        let mut replacement = self.spawn_actor(row, false);
                         Self::carry_connection_hold(handle, &replacement);
                         if let Some(start) = replacement.start.take() {
                             started.push(start);
@@ -2021,7 +2031,7 @@ impl ConnectionManager {
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    let mut fresh = self.spawn_actor(row);
+                    let mut fresh = self.spawn_actor(row, startup);
                     if let Some(start) = fresh.start.take() {
                         started.push(start);
                     }
@@ -2071,7 +2081,7 @@ impl ConnectionManager {
     /// Start one dormant actor and hand back the manager's handle on it.
     /// The caller installs it and transfers any existing connection hold
     /// before releasing its start gate.
-    fn spawn_actor(&self, row: HostRow) -> ActorHandle {
+    fn spawn_actor(&self, row: HostRow, startup: bool) -> ActorHandle {
         let status = Arc::new(watch::Sender::new(ActorStatus {
             state: HostState::Connecting {
                 attempt: 0,
@@ -2154,7 +2164,7 @@ impl ConnectionManager {
                 if gate_rx.await.is_err() {
                     return ActorCompletion::NeverStarted;
                 }
-                actor.run(row, nudge_rx, refresh_rx).await;
+                actor.run(row, nudge_rx, refresh_rx, startup).await;
                 ActorCompletion::Ran
             }
         };
@@ -3315,7 +3325,7 @@ impl ConnectionManager {
             // answer a caller would have got a moment earlier.
             return Ok(false);
         };
-        let mut replacement = self.spawn_actor(row);
+        let mut replacement = self.spawn_actor(row, false);
         let mut map = self.actors.lock().expect("actor map mutex poisoned");
         if map.shut_down {
             // Checked in the hold the insertion happens in, for the reason
@@ -3759,7 +3769,7 @@ fn environment_gate(
 
 /// Wall-clock now in unix milliseconds, for timestamps the UI shows. A clock
 /// before the epoch reads as 0 rather than failing.
-fn unix_millis() -> i64 {
+pub(crate) fn unix_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis() as i64)
@@ -3769,6 +3779,8 @@ fn unix_millis() -> i64 {
 /// named so [`HostActor::run`]'s loop reads as the state machine it is
 /// rather than as nested error handling.
 enum AttemptOutcome {
+    /// A question was shown. Retrying immediately would ask the same user again without their consent.
+    SignInNeeded,
     /// Hello succeeded and the identity question was settled.
     Connected {
         client: Arc<SupervisorClient>,
@@ -4004,6 +4016,7 @@ impl HostActor {
         mut row: HostRow,
         mut nudge: watch::Receiver<Nudge>,
         mut refresh: watch::Receiver<u64>,
+        mut startup: bool,
     ) {
         let mut active = true;
         let mut stopped = StoppedEpisode::default();
@@ -4064,6 +4077,7 @@ impl HostActor {
                     active && known_owner_refusal.is_none(),
                     incarnation,
                     &mut nudge,
+                    std::mem::take(&mut startup),
                 )
                 .await;
             let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
@@ -4075,6 +4089,7 @@ impl HostActor {
                 && matches!(
                     &outcome,
                     AttemptOutcome::Failed { .. }
+                        | AttemptOutcome::SignInNeeded
                         | AttemptOutcome::Stopped
                         | AttemptOutcome::Suspended { .. }
                 )
@@ -4186,6 +4201,11 @@ impl HostActor {
                         },
                         attempt,
                     );
+                    next_nudge(&mut nudge).await;
+                    active = true;
+                }
+                AttemptOutcome::SignInNeeded => {
+                    self.set_refusal(HostState::SignInNeeded, attempt);
                     next_nudge(&mut nudge).await;
                     active = true;
                 }
@@ -4348,6 +4368,7 @@ impl HostActor {
         active: bool,
         incarnation: u64,
         nudge: &mut watch::Receiver<Nudge>,
+        startup: bool,
     ) -> (AttemptOutcome, u64) {
         let mut last: Option<AttemptOutcome> = None;
         // The number of the most recent dial. Every path out of the loop
@@ -4405,7 +4426,7 @@ impl HostActor {
                 nudge = next_nudge(nudge) => AttemptOutcome::Interrupted {
                     fresh_window: nudge.fresh_window,
                 },
-                outcome = self.deadlined_attempt(row, active, incarnation) => outcome,
+                outcome = self.deadlined_attempt(row, active, incarnation, startup && attempt == 0) => outcome,
             };
             match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
@@ -4440,6 +4461,7 @@ impl HostActor {
         row: &HostRow,
         active: bool,
         incarnation: u64,
+        startup: bool,
     ) -> AttemptOutcome {
         let prior_marker_seen = {
             let mut capability = self.ssh_capability.lock().expect("SSH capability mutex");
@@ -4452,6 +4474,34 @@ impl HostActor {
             ssh: None,
             prior_marker_seen,
         };
+        // Sign-in has its own bounded dial and a longer deadline while the user answers. The established
+        // connection then gets the normal deadline for opening the supervisor stream and completing its hello.
+        let mut waiting = |open| self.publish_sign_in_stage(incarnation, open);
+        if let Err(error) = self
+            .transport
+            .sign_in(row, self.cadence.attempt_timeout, startup, &mut waiting)
+            .await
+        {
+            if error.is::<crate::ssh_sign_in::SignInNeeded>() {
+                return AttemptOutcome::SignInNeeded;
+            }
+            if let Some(preflight) = error.downcast_ref::<crate::ssh_sign_in::BeforeQuestion>() {
+                let detail = ssh_failure_detail(
+                    row,
+                    ConnectionStage::ConnectingToHost,
+                    prior_marker_seen,
+                    &preflight.snapshot,
+                    true,
+                    None,
+                );
+                return if preflight.timed_out {
+                    self.connection_timeout(row, detail)
+                } else {
+                    failure(row, anyhow::anyhow!("{detail}"))
+                };
+            }
+            return failure(row, error);
+        }
         match tokio::time::timeout(
             self.cadence.attempt_timeout,
             self.attempt(row, &mut progress),
@@ -4474,15 +4524,50 @@ impl HostActor {
                     ),
                     None => stage_failure_context(progress.stage).to_string(),
                 };
-                failure(
-                    row,
-                    anyhow::anyhow!(
-                        "the connection attempt did not complete within {:?}: {context}",
-                        self.cadence.attempt_timeout,
-                    ),
-                )
+                self.connection_timeout(row, context)
             }
         }
+    }
+
+    /// A pre-question deadline and a batch dial deadline are the same retryable connection failure to the user.
+    fn connection_timeout(&self, row: &HostRow, detail: String) -> AttemptOutcome {
+        failure(
+            row,
+            anyhow::anyhow!(
+                "the connection attempt did not complete within {:?}: {detail}",
+                self.cadence.attempt_timeout,
+            ),
+        )
+    }
+
+    /// A question can make an unreachable host visibly wait for sign-in. A previous ownership refusal still blocks
+    /// setup until a new supervisor hello provides ownership evidence. Its prompt only appears in the question list.
+    fn publish_sign_in_stage(&self, incarnation: u64, open: bool) {
+        let (attempt, last_error) = match &self.status.borrow().state {
+            HostState::Connecting {
+                attempt,
+                last_error,
+                ..
+            } => (*attempt, last_error.clone()),
+            HostState::OwnedElsewhere { .. } => return,
+            _ => (0, None),
+        };
+        self.publish_refresh(
+            HostState::Connecting {
+                attempt,
+                stage: if open {
+                    ConnectionStage::WaitingForSignIn
+                } else {
+                    ConnectionStage::ConnectingToHost
+                },
+                last_error,
+            },
+            None,
+            LiveSessions::Retain,
+            None,
+            PublishGuard::WhileIncarnation(incarnation),
+            0,
+        );
     }
 
     /// Publish a genuine stage change only while this attempt still owns the row.
@@ -6640,6 +6725,112 @@ mod tests {
             assert!(!SshCapability::for_dial(&mut slot, &changed).seen);
             assert!(!SshCapability::for_dial(&mut slot, &original).seen);
         }
+    }
+
+    /// A silent preflight on the startup dial is an ordinary connection timeout. The actor keeps its retry
+    /// ladder, but the next attempt must lose the startup focus eligibility of the first one.
+    #[farhelm_testtrace::test]
+    async fn silent_ssh_preflight_keeps_the_retry_ladder_and_limits_startup_origin() {
+        struct SilentPreflight {
+            host: HostId,
+            dials: tokio::sync::mpsc::UnboundedSender<bool>,
+        }
+
+        impl HostTransport for SilentPreflight {
+            fn sign_in<'a>(
+                &'a self,
+                row: &'a HostRow,
+                _timeout: Duration,
+                startup: bool,
+                _question: &'a mut (dyn FnMut(bool) + Send),
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+                Box::pin(async move {
+                    if row.id != self.host {
+                        return Ok(());
+                    }
+                    self.dials.send(startup).unwrap();
+                    if !startup {
+                        return std::future::pending().await;
+                    }
+                    Err(crate::ssh_sign_in::BeforeQuestion {
+                        snapshot: SshObservation::new().snapshot(),
+                        timed_out: true,
+                    }
+                    .into())
+                })
+            }
+
+            fn connect<'a>(
+                &'a self,
+                row: &'a HostRow,
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>
+            {
+                assert_ne!(
+                    row.id, self.host,
+                    "timed-out SSH must not open a batch dial"
+                );
+                Box::pin(std::future::ready(Err(anyhow::anyhow!(
+                    "local fixture offline"
+                ))))
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let host = store
+            .add_ssh_host("quiet.example", None, None)
+            .await
+            .unwrap();
+        let (dials, mut observed) = tokio::sync::mpsc::unbounded_channel();
+        let cadence = Cadence {
+            connect_backoff: vec![Duration::from_secs(1)],
+            ..Default::default()
+        };
+        tokio::time::pause();
+        let manager =
+            ConnectionManager::start(store, Arc::new(SilentPreflight { host, dials }), cadence)
+                .await
+                .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            assert_eq!(
+                observed.recv().await,
+                Some(true),
+                "the registry's startup dial"
+            );
+            let Some(HostState::Connecting {
+                last_error: Some(error),
+                ..
+            }) = manager
+                .wait_for_state(host, |state| {
+                    matches!(
+                        state,
+                        HostState::Connecting {
+                            attempt: 1,
+                            last_error: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .await
+            else {
+                panic!("the host should retry with the prior dial's error");
+            };
+            assert!(
+                error.contains("the connection attempt did not complete within"),
+                "{error}"
+            );
+            assert!(
+                error.contains("connecting or logging in to the host"),
+                "{error}"
+            );
+            assert_eq!(
+                observed.recv().await,
+                Some(false),
+                "the retry is not a startup dial"
+            );
+        })
+        .await
+        .expect("the ordinary retry ladder should continue after the deadline");
     }
 
     /// Observe real SSH diagnostics without becoming another process owner.
@@ -12805,7 +12996,7 @@ mod tests {
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
         let revision = manager.events().revision();
-        let mut discarded = manager.spawn_actor(row.clone());
+        let mut discarded = manager.spawn_actor(row.clone(), false);
         drop(discarded.start.take());
 
         tokio::time::timeout(Duration::from_secs(10), &mut discarded.task)
@@ -12822,7 +13013,7 @@ mod tests {
         // test yields. Keep the actor gated until supervision has finished
         // cancelling, so an actor publication cannot race guard cleanup.
         // Only a captured guard can prevent it becoming unmanaged afterward.
-        let mut cancelled = manager.spawn_actor(row);
+        let mut cancelled = manager.spawn_actor(row, false);
         let mut status = cancelled.status.subscribe();
         assert!(!cancelled.task.is_finished());
         cancelled.task.abort();

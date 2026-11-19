@@ -37,7 +37,9 @@
 use farhelm_helm_client::Collections;
 use farhelm_proto::SessionStatus;
 use farhelm_proto::tensorlake::LifecycleDirection;
-use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView, SessionRow};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, ConnectionStage, HostStateView, HostView, SessionRow,
+};
 use gpui::{
     Div, IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _, px,
     svg,
@@ -489,6 +491,11 @@ pub(crate) fn cause(lookup: HostLookup<'_>) -> &'static str {
         HostLookup::Known(host) => host,
     };
     match &host.state {
+        HostStateView::Connecting {
+            stage: ConnectionStage::WaitingForSignIn,
+            ..
+        } => "Waiting for sign-in",
+        HostStateView::SignInNeeded => "Sign-in needed",
         HostStateView::Connecting { .. } | HostStateView::Unreachable { .. } => {
             "Waiting for supervisor"
         }

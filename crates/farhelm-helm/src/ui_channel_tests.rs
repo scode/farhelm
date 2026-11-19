@@ -1164,6 +1164,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
             Collection::Hosts,
             Collection::Preferences,
             Collection::Approvals,
+            Collection::SshQuestions,
             Collection::Templates,
             Collection::Notices,
             Collection::Announcements,
@@ -1200,16 +1201,32 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let local = rest_harness::local_id(&harness.store).await;
     assert_eq!(collections[1].meta.order, [local.to_string()]);
     assert_eq!(collections[2].meta.order, [PREFERENCES_KEY]);
-    for empty in [3, 4, 5, 7, 8, 9] {
+    for empty in [
+        Collection::Approvals,
+        Collection::SshQuestions,
+        Collection::Templates,
+        Collection::Notices,
+        Collection::HostProgress,
+        Collection::Recipes,
+        Collection::RecipePlaces,
+    ] {
+        let collection = collections
+            .iter()
+            .find(|state| state.collection == empty)
+            .unwrap();
         assert_eq!(
-            collections[empty].meta.availability,
+            collection.meta.availability,
             Availability::Available,
             "{:?}",
-            collections[empty].collection
+            empty
         );
-        assert!(collections[empty].entries.is_empty());
+        assert!(collection.entries.is_empty());
     }
-    assert_eq!(collections[6].meta.order, [ANNOUNCEMENTS_KEY]);
+    let announcements = collections
+        .iter()
+        .find(|state| state.collection == Collection::Announcements)
+        .unwrap();
+    assert_eq!(announcements.meta.order, [ANNOUNCEMENTS_KEY]);
 }
 
 const UI_CHANNEL: &str = farhelm_proto::ui_channel::UI_CHANNEL_PATH;
@@ -1280,8 +1297,10 @@ async fn dismissing_an_announcement_outside_the_channel_moves_it_to_history_on_t
     let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
         panic!("the first message is the snapshot");
     };
-    let queue: AnnouncementQueue =
-        serde_json::from_value(collections[6].entries[0].value.clone()).expect("a queue");
+    let queue = entry_of::<AnnouncementQueue>(
+        snapshot_entries(&collections, Collection::Announcements),
+        ANNOUNCEMENTS_KEY,
+    );
     assert!(
         queue.pending.iter().any(|entry| entry.id == "news-1"),
         "premise: the announcement is pending"
@@ -1424,10 +1443,11 @@ async fn marking_a_notice_read_outside_the_channel_reaches_an_idle_connected_ui(
     let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
         panic!("the first message is the snapshot");
     };
+    let entry = &snapshot_entries(&collections, Collection::Notices)[0];
     let notice: farhelm_proto::notices::Notice =
-        serde_json::from_value(collections[5].entries[0].value.clone()).expect("a notice");
+        serde_json::from_value(entry.value.clone()).expect("a notice");
     assert!(!notice.read, "premise: the notice is unread");
-    assert_eq!(collections[5].entries[0].key, notice.id.to_string());
+    assert_eq!(entry.key, notice.id.to_string());
     let status = http(
         &harness,
         "POST",
@@ -1477,7 +1497,9 @@ async fn a_provisioning_step_transition_reaches_the_connected_ui() {
     let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
         panic!("the first message is the snapshot");
     };
-    assert_eq!(collections[7].meta.order, [host.to_string()], "premise");
+    let entries = snapshot_entries(&collections, Collection::HostProgress);
+    let before = entry_of::<ProvisioningView>(entries, &host.to_string());
+    assert_eq!(before.steps[0].status, StepStatus::Pending, "premise");
     harness
         .state
         .provisioning
@@ -1855,6 +1877,97 @@ async fn an_ordinary_preference_patch_reaches_the_connected_ui_before_its_reply(
         panic!("the reply follows the change");
     };
     assert_eq!((reply.id, reply.status), (1, 204));
+}
+
+/// The answer crosses the same routed UI command path used in the app and reaches its waiting attempt exactly once.
+/// A malformed answer and a late duplicate also cross that path. No UI message or tracing field can echo the answer.
+#[farhelm_testtrace::test]
+async fn ssh_answers_reach_only_the_waiting_attempt() {
+    use crate::askpass::Answer;
+    use farhelm_proto::ui_channel::{SshConnectionPurpose, SshQuestion};
+
+    let mut harness = rest_harness::idle_helm().await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the UI must be connected before the question appears");
+    };
+    assert!(snapshot_entries(&collections, Collection::SshQuestions).is_empty());
+
+    let questions = Arc::clone(&harness.state.ssh_questions);
+    questions.publish_to(Arc::clone(harness.state.manager.events()));
+    let question = SshQuestion {
+        id: "test-ssh-question".into(),
+        host: 42,
+        purpose: SshConnectionPurpose::Sessions,
+        startup: false,
+        prompt: "Verification code:".into(),
+        notice: false,
+        expires_at: crate::manager::unix_millis() + 120_000,
+    };
+    let mut pending = questions.open(
+        question.clone(),
+        tokio::time::Instant::now() + Duration::from_secs(120),
+    );
+    assert_eq!(
+        entry_of::<SshQuestion>(
+            &changes_of(&mut ws, Collection::SshQuestions).await.upsert,
+            &question.id
+        ),
+        question
+    );
+
+    const ANSWER: &str = "ssh-test-answer-only-7fc21";
+    let path = format!("/api/ssh-questions/{}", question.id);
+    let attempt = |id, answer| {
+        command(
+            id,
+            "POST",
+            &path,
+            Some(serde_json::json!({"action": "send", "answer": answer})),
+        )
+    };
+    send_message(&mut ws, &attempt(1, serde_json::json!([ANSWER]))).await;
+    let ServerMessage::Reply(refused) = recv_message(&mut ws).await else {
+        panic!("a malformed answer should be refused without changing the list");
+    };
+    assert_eq!((refused.id, refused.status, refused.body), (1, 422, None));
+
+    send_message(&mut ws, &attempt(2, serde_json::json!(ANSWER))).await;
+    let removed = changes_of(&mut ws, Collection::SshQuestions).await;
+    assert_eq!(removed.remove, [question.id]);
+    assert!(removed.upsert.is_empty());
+    let ServerMessage::Reply(accepted) = recv_message(&mut ws).await else {
+        panic!("a delivered answer has an empty receipt");
+    };
+    assert_eq!(
+        (accepted.id, accepted.status, accepted.body),
+        (2, 204, None)
+    );
+    let delivered = tokio::time::timeout(NOTICE, &mut pending.reply)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(delivered, Answer::Send(ref answer) if answer == ANSWER));
+
+    send_message(&mut ws, &attempt(3, serde_json::json!(ANSWER))).await;
+    let ServerMessage::Reply(stale) = recv_message(&mut ws).await else {
+        panic!("a stale answer should be refused");
+    };
+    assert_eq!((stale.id, stale.status, stale.body), (3, 404, None));
+    assert!(
+        crate::test_capture::current()
+            .matching_events(|event| {
+                event
+                    .fields
+                    .values()
+                    .chain(event.span_fields.values())
+                    .any(|text| text.contains(ANSWER))
+            })
+            .unwrap()
+            .is_empty(),
+        "an SSH answer appeared in the UI channel's traces"
+    );
 }
 
 /// Changes made outside the GUI reach it too. An agent's approved host

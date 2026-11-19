@@ -264,6 +264,8 @@ pub enum Collection {
     Preferences,
     /// Agent requests waiting for the user's answer.
     Approvals,
+    /// Open SSH sign-in questions. Answers never enter the pushed collections.
+    SshQuestions,
     /// Launch templates, as `GET /api/templates` serves them, keyed by name.
     Templates,
     /// Shared notices about hosts, as `GET /api/notices` serves them, keyed
@@ -1021,6 +1023,9 @@ pub enum HostStateView {
     /// connected and nothing is written while this holds.
     #[serde(rename = "identity-mismatch")]
     IdentityMismatch { recorded: String, reported: String },
+    /// SSH asked a question and sign-in ended. Retry starts a new sign-in.
+    #[serde(rename = "sign-in-needed")]
+    SignInNeeded,
     /// Frozen at an ownership refusal. The identity scopes a Take over
     /// answer to this supervisor even if the host is reached by an alias.
     #[serde(rename = "owned-elsewhere")]
@@ -1108,6 +1113,7 @@ impl HostStateView {
             HostStateView::Connected { .. } => "connected",
             HostStateView::VersionSkew { .. } => "version-skew",
             HostStateView::IdentityMismatch { .. } => "identity-mismatch",
+            HostStateView::SignInNeeded => "sign-in-needed",
             HostStateView::OwnedElsewhere { .. } => "owned-elsewhere",
             HostStateView::IdentityUnverified { .. } => "identity-unverified",
             HostStateView::Duplicate { .. } => "duplicate",
@@ -1151,12 +1157,40 @@ pub enum ConnectionStage {
     WaitingToConnect,
     /// SSH has started, but no evidence yet establishes a remote supervisor connection.
     ConnectingToHost,
+    /// An SSH sign-in question is open. Only the Questions collection carries its text.
+    WaitingForSignIn,
     /// The local supervisor socket has not accepted the connection yet.
     ConnectingToSupervisor,
     /// A supervisor socket accepted the connection; its hello is still outstanding.
     WaitingForHello,
     /// Hello succeeded; identity recording and browser-link setup share this final stage.
     SettingUp,
+}
+
+/// The desktop uses distinct wording for the two shared connections.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SshConnectionPurpose {
+    Sessions,
+    Setup,
+}
+
+/// One outstanding question from SSH. A fresh id on each request prevents an old answer reaching a later question.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SshQuestion {
+    pub id: String,
+    pub host: i64,
+    pub purpose: SshConnectionPurpose,
+    /// This question comes from the first dial of a host registered when the helm started.
+    /// The desktop also requires an untouched window before it can focus the answer field.
+    #[serde(default)]
+    pub startup: bool,
+    /// Host-supplied text, with original line breaks. The view escapes it before presenting it.
+    pub prompt: String,
+    /// A security-key touch notice has no answer. The helper exits when SSH no longer needs the notice.
+    pub notice: bool,
+    /// Display time in Unix milliseconds. The helm owns the actual monotonic expiry.
+    pub expires_at: i64,
 }
 
 #[cfg(test)]

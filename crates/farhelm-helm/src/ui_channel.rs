@@ -271,6 +271,12 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             selected: None,
         },
         CollectionSpec {
+            collection: Collection::SshQuestions,
+            path: |_| "/api/ssh-questions".to_string(),
+            split: |body| split_keyed_array(body, "questions", "id"),
+            selected: None,
+        },
+        CollectionSpec {
             collection: Collection::Templates,
             path: |_| "/api/templates".to_string(),
             split: |body| split_keyed_array(body, "templates", "name"),

@@ -241,6 +241,7 @@ pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<Stri
     // Exhaustive, so a new phase decides here whether it needs a row.
     let phase = match &host.state {
         HostStateView::Unreachable { .. }
+        | HostStateView::SignInNeeded
         | HostStateView::IdentityMismatch { .. }
         | HostStateView::OwnedElsewhere { .. }
         | HostStateView::IdentityUnverified { .. }

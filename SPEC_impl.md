@@ -310,7 +310,9 @@ lookup over that closed set for every route. A supervisor's text only ever reach
 route that starts marking a refusal with one of these headers needs no change to the channel; a new helm-only header
 needs a new `HelmMarker` variant. A route that genuinely cannot work this way is recorded as a decision with the reason.
 The router's existing contracts hold: the cancellable group in `api_router` is dropped when its caller goes away, as
-today, and work behind `own_state_change` finishes after a reset (see "Who owns an accepted action").
+today, and work behind `own_state_change` finishes after a reset (see "Who owns an accepted action"). An SSH reply reads
+its bounded body in the cancellable group. Validation and handoff to the waiting attempt happen in one poll. That
+attempt owns forwarding the answer or stopping its process after the handoff.
 
 The router has one client. After the browser UI is gone, only the GUI calls the HTTP API, plus terminal streams and file
 transfers. The command line and agents reach the helm through the supervisor relay and the shared `do_*` handler
@@ -364,28 +366,28 @@ under "The store, and how views redraw").
 Owner: the UI channel.
 
 Pushed collections are the helm-local data the fleet feed already invalidates: sessions, hosts, templates, preferences,
-notices, approvals, announcements, host progress, recipes and recipe places. The PR that adds a collection lists it.
-Each is read through its GET route: sessions keyed by their served id, templates by name, notices by id, approvals by
-id, hosts by registry id; preferences and the announcement queue travel as one entry each; host progress is
-`GET /api/provisioning`, every run this helm process retains, keyed by host id (a host with no run is absent, not idle);
-recipes are `GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe
-and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` beside the channel's. The pushed
-preferences supersede the old client's reread of shared preferences before an automatic pick: the GUI picks from the
-preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick. The
-snapshot sent when a channel opens never waits on a remote host. Every other read (directory browse, repository lists,
-the trash list, launch history) is an ordinary command, a GET or, for directory browse and repository lists, a POST,
-whose reply body is the result. File stat is not: it is an HTTP request of the helm client's transfers,
-`POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its own. A hover
-check sent on the channel would keep running after the pointer left the link, and count against the channel's watchdog
-meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by dropping it. Data the
-old GUI polled stays a query that the GUI issues again; it does not become a replicated collection. There are two
-exceptions, both for work whose progress Settings follows while it runs: the Podman check's readiness, which rides each
-local and ssh host's entry so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe
-catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move. A pushed read must start
-nothing, because it runs after every bump, so none schedules a Podman check: the GUI asks for each check with a command
-of its own. Neither recipe collection follows the clock: a prepared artifact that passes its freshness window reads
-stale at the next re-read, not when it passes. Host progress also lists the failed environment launches kept after their
-host was removed (see "The UI channel").
+notices, approvals, announcements, host progress, recipes, recipe places and SSH questions. Each is read through its GET
+route: sessions keyed by their served id, templates by name, notices by id, approvals by id, hosts by registry id;
+preferences and the announcement queue travel as one entry each; host progress is `GET /api/provisioning`, every run
+this helm process retains, keyed by host id (a host with no run is absent, not idle); recipes are
+`GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe and place
+(`RecipePlaceView::key`). SSH questions come from `GET /api/ssh-questions`, keyed by question id. Their entry types live
+in `farhelm-proto` beside the channel's. The pushed preferences supersede the old client's reread of shared preferences
+before an automatic pick: the GUI picks from the preferences as last pushed, since the helm pushes them together with
+the session changes that prompt a pick. The snapshot sent when a channel opens never waits on a remote host. Every other
+read (directory browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for
+directory browse and repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request
+of the helm client's transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot
+be cancelled on its own. A hover check sent on the channel would keep running after the pointer left the link, and count
+against the channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is
+cancelled by dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a
+replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
+check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
+creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
+they move. A pushed read must start nothing, because it runs after every bump, so none schedules a Podman check: the GUI
+asks for each check with a command of its own. Neither recipe collection follows the clock: a prepared artifact that
+passes its freshness window reads stale at the next re-read, not when it passes. Host progress also lists the failed
+environment launches kept after their host was removed (see "The UI channel").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -2698,6 +2700,19 @@ On ordinary SSH hosts, both shared connections override `ServerAliveInterval` to
 to 3. The master probes the host over the encrypted connection so it can exit after about a minute of silence, even
 while its local control socket still responds to checks. A master opened before this change keeps the options it was
 started with until it exits. Tensorlake keeps its own 30-second interval.
+
+The sessions actor checks for a live shared socket before dialing. With no master on an ordinary SSH host, it starts an
+interactive client in its own process group, with `ControlMaster=auto`, `SSH_ASKPASS_REQUIRE=force` and one password
+attempt. A short remote command leaves the authenticated master behind. Other clients keep `BatchMode=yes`. A lock on
+OpenSSH's expanded control path serializes sign-ins for aliases sharing that master. Container routes leave sign-in to
+the host owning the connection. A missing shareable socket keeps the existing unshared behavior.
+
+The helper reaches a 0600 socket in a private per-attempt directory. The helm publishes pending question text and
+creates a fresh reply id for each prompt. Replies carry the answer once, in memory, back to the helper's stdout. The
+interactive command's output after the first question is discarded because the remote exchange can echo back an answer.
+The actor publishes the waiting stage while a question is open. Cancellation, expiry or failure after a question ends
+the attempt and freezes it until Retry or startup. The process group is killed before closing the helper's connection on
+cancel, since OpenSSH can treat a failed helper as an empty answer. A security-key notice ends when its helper exits.
 
 ### Grid streams
 
@@ -5258,7 +5273,8 @@ installation it is on, so it follows an open session the sidebar's filter hides
   one of the connection states below, with additional provider states for environment hosts. The refusal states exist
   because folding them into "unreachable" would throw away the only information that makes the situation fixable:
   **connecting** (active retries in progress), **unreachable-reprobing** (the active window is spent, background probes
-  continue forever, no give-up), **connected**, **version-skew** (the hello was answered and refused; carries both
+  continue forever, no give-up), **sign-in needed** (SSH asked a question and did not connect; an explicit retry or a
+  new helm starts another attempt), **connected**, **version-skew** (the hello was answered and refused; carries both
   protocol versions, the peer's build, and the remediation text, since SPEC.md demands actionable rather than merely
   diagnostic errors), **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts
   or fixes the destination), **identity-unverified** (the peer cannot confirm the recorded identity, so nothing is
@@ -5303,21 +5319,24 @@ installation it is on, so it follows an open session the sidebar's filter hides
   attempt, and a fresh active window is granted only where something changed — startup, a connection that was up and was
   lost, or the resolution of a freeze. A re-probe also leaves the host's existing state alone while it dials, so an
   entry that has been unreachable overnight reads as unreachable instead of flickering into "connecting" every 45
-  seconds. Version-skewed entries ride the same 45-second cadence, so an upgraded host resurfaces by itself.
-  Identity-mismatch and duplicate are deliberately the states with no timer at all, because no amount of waiting answers
-  a question only a user can.
-- Two DEADLINES bound what a peer can do to an actor by saying nothing, both injectable alongside the cadences. One
-  connection attempt shares a single 20-second budget across opening the transport, exchanging hellos, recording the
-  host's identity and applying the browser-link setting. Expiry names the last observed stage and is an ordinary failed
-  attempt, so the ladder and re-probe cadence carry on unchanged. The actor retains stage evidence outside the cancelled
-  attempt future: local socket connection, waiting for hello and final setup are separate boundaries; spawning SSH alone
-  establishes only that it is connecting to the host. A remote connected marker establishes waiting for hello; without
-  one, timeout wording follows the marker-capability evidence described in the transport section. Active attempts
-  publish stage changes through the existing changed-only host snapshot, guarded against retargeting; backoff is
-  explicitly waiting to connect, and background re-probes never publish Connecting. One cache refresh is bounded at 30
-  seconds, and expiry drops the connection so the actor re-enters its normal loss handling. Without these deadlines a
-  transport that accepts and then goes silent parks the whole state machine indefinitely while every layer below looks
-  healthy — no error, no EOF, and a host that reads as connecting or connected forever.
+  seconds. An SSH question shows that the host is waiting for sign-in. A host with an existing ownership refusal keeps
+  showing that refusal even while the question is open. Version-skewed entries ride the same 45-second cadence, so an
+  upgraded host resurfaces by itself. Identity-mismatch, duplicate, ownership refusal and sign-in needed wait without a
+  timer, because no amount of waiting answers a question only a user can.
+- The connection and cache refresh deadlines are injectable alongside the cadences. A connection gets a 20-second budget
+  across opening the transport, exchanging hellos, recording the host's identity and applying the browser-link setting.
+  An interactive SSH preflight has its own 20-second connection deadline. Each question replaces that deadline with two
+  minutes for the user's answer. Expiry before any question is an ordinary connection failure. After a question, expiry
+  ends the SSH attempt and stops automatic retries. Ordinary connection expiry names the last observed stage, so the
+  ladder and re-probe cadence carry on unchanged. The actor retains stage evidence outside the cancelled attempt future:
+  local socket connection, waiting for hello and final setup are separate boundaries; spawning SSH alone establishes
+  only that it is connecting to the host. A remote connected marker establishes waiting for hello; without one, timeout
+  wording follows the marker-capability evidence described in the transport section. Active attempts publish stage
+  changes through the existing changed-only host snapshot, guarded against retargeting; backoff is explicitly waiting to
+  connect, and background re-probes keep their existing state unless SSH asks a question. One cache refresh is bounded
+  at 30 seconds, and expiry drops the connection so the actor re-enters its normal loss handling. Without these
+  deadlines a transport that accepts and then goes silent parks the whole state machine indefinitely while every layer
+  below looks healthy — no error, no EOF, and a host that reads as connecting or connected forever.
 - Editing a registry row's connection-defining fields RECONNECTS the host rather than waiting for its current connection
   to end on its own: the connection is torn down, a non-connected state is published together with the new row (so a
   hosts list can never pair an edited destination with the old connection's state), and the actor gets a fresh active

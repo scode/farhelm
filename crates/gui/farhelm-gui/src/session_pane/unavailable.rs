@@ -262,7 +262,7 @@ pub(crate) fn notice(
                 }),
                 Some(phase::host_evidence(evidence_line(), host, &twin, zone)),
             ),
-            HostStateView::Connecting { .. }
+            HostStateView::SignInNeeded | HostStateView::Connecting { .. }
             | HostStateView::Unreachable { .. }
             | HostStateView::VersionSkew { .. }
             | HostStateView::IdentityMismatch { .. }

@@ -33,7 +33,7 @@ use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::recipes::{RecipePlaceView, RecipeView};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionMeta, CollectionState, HostView, KeyedEntry,
-    Preferences, SessionRow,
+    Preferences, SessionRow, SshQuestion,
 };
 use serde::de::DeserializeOwned;
 
@@ -48,6 +48,7 @@ pub enum PushedEntry {
     Host(HostView),
     Preferences(Preferences),
     Approval(PendingApproval),
+    SshQuestion(SshQuestion),
     Template(LaunchTemplate),
     Notice(Notice),
     Announcements(AnnouncementQueue),
@@ -100,6 +101,17 @@ impl Pushed for PendingApproval {
     fn from_entry(entry: &PushedEntry) -> Option<&Self> {
         match entry {
             PushedEntry::Approval(approval) => Some(approval),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for SshQuestion {
+    const COLLECTION: Collection = Collection::SshQuestions;
+
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::SshQuestion(question) => Some(question),
             _ => None,
         }
     }
@@ -227,6 +239,7 @@ fn decode_entries(
             Collection::Hosts => |value| typed(value, PushedEntry::Host),
             Collection::Preferences => |value| typed(value, PushedEntry::Preferences),
             Collection::Approvals => |value| typed(value, PushedEntry::Approval),
+            Collection::SshQuestions => |value| typed(value, PushedEntry::SshQuestion),
             Collection::Templates => |value| typed(value, PushedEntry::Template),
             Collection::Notices => |value| typed(value, PushedEntry::Notice),
             Collection::Announcements => |value| typed(value, PushedEntry::Announcements),
