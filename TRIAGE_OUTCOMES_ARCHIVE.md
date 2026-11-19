@@ -22849,6 +22849,22 @@ prior terminal output" (rebased revision)
 - Execution: complete in jj change `vsorymynsnqxumyqmqrqlrktnoowzkvm`, bookmark
   `plan/gui-ux-backend-test-gaps/05-keeper-can-win-one`, [PR #4218](https://github.com/scode/farhelm/pull/4218/changes).
 
+## stty-tool-format-mismatch.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Terminal-settings
+  test compares two different stty programs. Fails on a Mac with GNU coreutils first on PATH. Confirmed from source.
+  Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: give the reference command the host's PATH (~2 lines). At execution, fix the test only if
+  the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this
+  as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: complete in jj change `xnrxzwnnplryrqpyplnvwzzsskmvyynk`, bookmark
+  `plan/gui-ux-backend-test-gaps/06-stty-tool-format-mismatch`,
+  [PR #4220](https://github.com/scode/farhelm/pull/4220/changes).
+
 ## held-start-test-lacks-prelaunch-fencing-witness.md
 
 - Outcome: `discard`.
