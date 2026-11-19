@@ -128,6 +128,11 @@ const CONNECTION_OVERRIDES: [&str; 6] = [
     "PermitLocalCommand=no",
 ];
 
+// A local master can still answer socket checks after a Wi-Fi change or sleep. Have the master check the remote
+// end so the next connection attempt can reconnect about a minute after a silent drop.
+const SHARED_ALIVE_INTERVAL: &str = "ServerAliveInterval=15";
+const SHARED_ALIVE_COUNT: &str = "ServerAliveCountMax=3";
+
 /// `CONNECTION_OVERRIDES` as `-o` argument pairs, followed by `options` as
 /// further pairs, ready to precede the option terminator.
 fn options_with_overrides(options: &[&str]) -> Vec<String> {
@@ -210,8 +215,7 @@ impl SshAccessKind {
 /// to add the right options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SshAccess {
-    /// Nothing beyond the overrides every connection gets; the argv is
-    /// byte-for-byte what it was before Tensorlake hosts existed.
+    /// The user's keys and host-key policy, with Farhelm's keepalive settings on its shared connections.
     UserConfig,
     /// Farhelm's key and known-hosts file for Tensorlake's gateway: the same
     /// access, and the same option set, the snapshot builder uses
@@ -238,10 +242,14 @@ impl SshAccess {
         })
     }
 
-    /// This access's own `-o` values, placed after the connection options
-    /// and before the option terminator. Empty for [`SshAccess::UserConfig`].
-    fn options(&self) -> anyhow::Result<Vec<String>> {
+    /// The access policy goes before the option terminator. Tensorlake's own keepalive interval also applies to its
+    /// unshared connections, while ordinary SSH only overrides keepalives for shared connections Farhelm can reuse.
+    fn options(&self, shared: bool) -> anyhow::Result<Vec<String>> {
         match self {
+            SshAccess::UserConfig if shared => Ok(vec![
+                SHARED_ALIVE_INTERVAL.to_string(),
+                SHARED_ALIVE_COUNT.to_string(),
+            ]),
             SshAccess::UserConfig => Ok(Vec::new()),
             SshAccess::Tensorlake(access) => access.options().map_err(anyhow::Error::msg),
         }
@@ -280,11 +288,12 @@ pub(crate) fn ssh_base_args(
     connection: SharedConnection,
     access: &SshAccess,
 ) -> anyhow::Result<Vec<String>> {
+    let control_socket = control_socket(control_dir, connection);
     let access_options = access
-        .options()?
+        .options(control_socket.is_some())?
         .into_iter()
         .flat_map(|option| ["-o".to_string(), option]);
-    let Some(control_path) = control_socket(control_dir, connection) else {
+    let Some(control_path) = control_socket else {
         // Too long to bind or unsafe to represent: sharing is an optimization, so ssh
         // runs without it rather than failing every connection. Both
         // options are needed: `ControlMaster=no` only stops ssh creating a
@@ -542,6 +551,8 @@ fn manual_master_command_from(
         "ControlMaster=yes",
         &control_path,
         "ControlPersist=yes",
+        SHARED_ALIVE_INTERVAL,
+        SHARED_ALIVE_COUNT,
     ]));
     args.extend(["--".to_string(), dest.to_string()]);
     let command = args
@@ -915,7 +926,8 @@ mod tests {
     /// control directory, the supervisor connection's ControlPath ends in
     /// `/%C` and provisioning's in `/p%C`, and a state directory holding
     /// ssh_config syntax is escaped identically for both, leaving only the
-    /// trailing token active.
+    /// trailing token active. Both masters probe a silent connection so a
+    /// network drop cannot leave a stale socket answering local checks.
     #[farhelm_testtrace::test]
     fn the_supervisor_connection_and_provisioning_use_different_sockets() {
         let dir = std::path::Path::new("/home/u/%d/\"quoted\"/state");
@@ -942,6 +954,11 @@ mod tests {
                 .contains(&"ControlPath=\"/home/u/%%d/\\\"quoted\\\"/state/p%C\"".to_string()),
             "{provisioning:?}"
         );
+        for args in [supervisor, provisioning] {
+            let options = option_values(&args);
+            assert!(options.contains(&"ServerAliveInterval=15"), "{args:?}");
+            assert!(options.contains(&"ServerAliveCountMax=3"), "{args:?}");
+        }
     }
 
     /// Why this matters: the socket name is the only thing allowed to differ
@@ -1311,13 +1328,12 @@ mod tests {
     /// Why: a Tensorlake host uses Farhelm's key and known-hosts file (D3, P6);
     /// a missing option would let the agent promote the user's configured
     /// keys ahead of Farhelm's or trust the gateway
-    /// through the user's `~/.ssh`. Every ordinary ssh host must keep its
-    /// argv byte for byte.
+    /// through the user's `~/.ssh`. The gateway also needs its own
+    /// keepalive behavior because an ssh command can run without sharing.
     ///
-    /// Spec: the Tensorlake argv is the user-config argv with exactly the
-    /// shared Tensorlake access options (no builder log level) inserted before the option terminator, in both
-    /// shared and unshared shapes, with both paths config-quoted (spaces
-    /// survive); the user-config argv has none of them.
+    /// Spec: the Tensorlake access options replace any ordinary shared
+    /// keepalives and precede the option terminator. Both paths stay quoted
+    /// in shared and unshared commands.
     #[farhelm_testtrace::test]
     fn tensorlake_access_adds_its_options_before_the_terminator() {
         let state = std::path::Path::new("/state dir/normal");
@@ -1337,7 +1353,7 @@ mod tests {
             known_hosts,
             std::path::Path::new("/state dir/normal/tensorlake/known_hosts")
         );
-        let expected = [
+        let identity_options = [
             r#"IdentityFile="/state dir/normal/tensorlake/ssh-key/id_ed25519""#,
             "IdentitiesOnly=yes",
             "IdentityAgent=none",
@@ -1348,9 +1364,10 @@ mod tests {
             "HostKeyAlias=sandbox.tensorlake.ai",
             "StrictHostKeyChecking=accept-new",
             "UpdateHostKeys=no",
-            "ServerAliveInterval=30",
-            "ServerAliveCountMax=3",
         ];
+        let expected = identity_options
+            .into_iter()
+            .chain(["ServerAliveInterval=30", "ServerAliveCountMax=3"]);
         let deep = std::path::PathBuf::from(format!("/{}", "d".repeat(199)));
         for dir in [std::path::Path::new("/state"), deep.as_path()] {
             for connection in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
@@ -1366,8 +1383,15 @@ mod tests {
                         .unwrap();
                 let terminator = plain.len() - 2;
                 assert_eq!(plain[terminator], "--");
-                let mut inserted = plain[..terminator].to_vec();
-                for option in expected {
+                let mut inserted = plain[..terminator]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .filter(|pair| !pair[1].starts_with("ServerAlive"))
+                    .flatten()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for option in expected.clone() {
                     inserted.extend(["-o".to_string(), option.to_string()]);
                 }
                 inserted.extend(plain[terminator..].iter().cloned());
@@ -1375,8 +1399,8 @@ mod tests {
                 assert!(
                     !option_values(&plain)
                         .iter()
-                        .any(|value| expected.contains(value)),
-                    "the user-config argv carries no Tensorlake option"
+                        .any(|value| identity_options.contains(value)),
+                    "the user-config argv carries no Tensorlake identity option"
                 );
             }
         }
