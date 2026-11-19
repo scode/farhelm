@@ -936,7 +936,7 @@ review: the layer manager cannot see inside it, and its tests show a press passi
 
 Owner: the prompt, the one way to ask the user a question.
 
-A confirmation freezes what it shows when it opens: targets, consequences and preconditions. Its answer buttons come
+When a confirmation opens, it freezes what it shows: targets, consequences and preconditions. Its answer buttons come
 pre-wired to that frozen state, so feature code never wires an answer by hand. Commands name their targets by stable id,
 never by list position, and the helm refuses a target that is gone. The existing per-route refusals of a target that
 changed since its prompt stay (a delete or restart that goes beyond what its confirmation said is refused, commit
@@ -954,13 +954,15 @@ so a handler for a newly drawn frame may have to refuse the press. Live state ma
 target. The question and request use the snapshot that admitted the press.
 
 SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw run as delivered, so a Confirm queued
-behind a Cancel may still submit. What the prompt guarantees is that whatever runs acts on the state the confirmation
-froze when it opened, never on state the user was not shown.
+behind a Cancel may still submit. An answer acts on the value presented with the confirmation it answers.
+
+The warning beside a launcher's YOLO question follows the source session. An answer is accepted after that warning is
+shown and carries its permission through a wait for a host setting or checkout preview.
 
 A question has Cancel and its confirming answer at the ends, and may carry extra answers between them, in the order the
 feature adds them, for the questions SPEC.md asks with more than two (the template editor's "Keep editing, Discard, or
 Save", the host confirmations' permanent answer, the YOLO confirmation's guarded and permanent answers). Each extra
-answer follows the same rules: it acts on the frozen value, the first answer pressed wins among all of them, and focus
+answer follows the same rules: it acts on the shown value, the first answer pressed wins among all of them, and focus
 never starts on one. Cancel may be relabelled ("Keep editing") or given its own hover help without changing what it
 does.
 

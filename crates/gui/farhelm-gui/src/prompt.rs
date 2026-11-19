@@ -4,8 +4,8 @@
 //! not shown: a confirmation drawn from one row, answered after the list had moved, acting on another. A [`Question`]
 //! is built from the state at the moment it opens and is frozen there: its title, its lines (targets, consequences,
 //! preconditions) and the value its confirming answer acts on ([`Question::frozen`]) never change while it is open,
-//! except through a reword (below), and the answer buttons come pre-wired to that frozen value, so feature code never
-//! wires an answer itself. Commands name their targets by stable id inside the frozen value, and the helm refuses a
+//! except through a reword or a live warning drawn by an inline owner. The answer buttons act on that frozen value,
+//! so feature code never wires an answer itself. Commands name targets by stable id, and the helm refuses a
 //! target that is gone; the existing per-route refusals of a target that changed since its prompt stay as they are. No
 //! generic precondition protocol is added here.
 //!
@@ -1348,6 +1348,21 @@ impl<T: 'static> Clone for Inline<T> {
 }
 
 impl<T: Clone + 'static> Inline<T> {
+    /// Keep an answer's value in step with a live warning drawn by the owner in this same frame. The existing
+    /// presentation check admits the new value. An accepted answer holds its own copy, and Cancel can still run.
+    /// Fields used by the prompt's own text or body stay fixed.
+    pub(crate) fn refresh_value(&self, value: T, cx: &mut App)
+    where
+        T: PartialEq,
+    {
+        self.prompt.update(cx, |prompt, _| {
+            if !prompt.answered && !prompt.in_flight && prompt.question.frozen != value {
+                prompt.question.frozen = value;
+                prompt.wording += 1;
+            }
+        });
+    }
+
     /// Whether it is still open: no answer has run (Cancel included), and no fallible answer has succeeded. An owner
     /// reads it to stop drawing the question's place once it closes, to prune finished questions, and to refuse what
     /// SPEC.md refuses while a question is open (an open lifecycle confirmation "refuses another lifecycle action").

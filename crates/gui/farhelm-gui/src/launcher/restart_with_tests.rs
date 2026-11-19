@@ -277,18 +277,30 @@ fn restart_with_stops_a_working_agent_with_consent(cx: &mut TestAppContext) {
 }
 
 /// An idle agent is stopped without asking, by the supervisor's own rule, so the action reads plain "Restart" and the
-/// press gives no stop consent (the old `restart_needs_confirmation`). Specified: with a listed idle, the action reads
-/// "Restart", no warning shows, and the restart's `stop_if_running` is false.
+/// press gives no stop consent. Enter on the first edit still launches immediately using the shown warning, even
+/// when Restart was unavailable until that edit. With a listed idle, the restart's `stop_if_running` is false.
 #[gpui::test]
 fn restart_with_an_idle_agent_asks_no_consent(cx: &mut TestAppContext) {
+    use test_support::focused_id;
+
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(restart_with(cx, "a"));
     a_idles(&mut helm, cx);
-    edit_effort(cx);
     let action = name_of(cx, "launcher-launch").unwrap_or_default();
     assert!(action.starts_with("Restart "), "{action}");
     assert_eq!(name_of(cx, "launcher-source-warning"), None);
-    let body = pressed(&mut helm, cx).body.expect("a body");
+    assert!(restarts(&mut helm, cx).is_empty());
+    test_support::click(cx, "launcher-effort-High");
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("launcher-effort-Default"));
+    assert_eq!(name_of(cx, "launcher-changed-effort"), None);
+    test_support::keys(cx, "enter");
+    let [request] = &restarts(&mut helm, cx)[..] else {
+        panic!("one restart")
+    };
+    let body = request.body.as_ref().expect("a body");
+    assert!(body["with"].is_object());
+    assert!(body["with"]["effort"].is_null());
     assert_eq!(body["stop_if_running"], json!(false));
 }
 

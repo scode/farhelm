@@ -1726,13 +1726,14 @@ fn a_stale_inline_checkout_save_refreshes_the_preview_and_keeps_the_refusal(
 /// a host that asks first, and answered "Start guarded session instead": the moment the guarded launch waits for its
 /// new preview. Returns that preview's command, unanswered, once it is checked that no create went out with it.
 fn guarded_waiting(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
-    guarded_waiting_named(cx, None)
+    guarded_waiting_named(cx, None, "/api/sessions")
 }
 
-/// [`guarded_waiting`], with the session named by a launch template's base name `base`, if given.
+/// Wait at the guarded answer's fresh preview, for a New or Replace request, optionally with a template base name.
 fn guarded_waiting_named<'a>(
     cx: &'a mut TestAppContext,
     base: Option<&str>,
+    route: &str,
 ) -> (FakeHelm, &'a mut VisualTestContext, FakeCommand) {
     let mut draft = LaunchDraft::new(
         Some(1),
@@ -1741,6 +1742,9 @@ fn guarded_waiting_named<'a>(
     );
     let _ = draft.choose_harness(farhelm_proto::LaunchHarness::Codex, None, None);
     draft.choose_permissions(Some(farhelm_proto::LaunchPermission::Yolo));
+    if route == REPLACE_A {
+        draft.mode = Mode::ReplaceWith { source: "a".into() };
+    }
     draft.choose_repository(repo("acme", "bar"));
     if let Some(base) = base {
         draft.edit_name(base.into());
@@ -1756,7 +1760,7 @@ fn guarded_waiting_named<'a>(
         preview_reply("/work/bar-1", "bar-1", 3),
     );
     test_support::click(cx, "launcher-launch");
-    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let creates = to(&sent(&mut helm, cx), route);
     let [create] = &creates[..] else {
         panic!("one create, not {}", creates.len());
     };
@@ -1767,6 +1771,10 @@ fn guarded_waiting_named<'a>(
         Some(json!("YOLO launches on host1 need --yolo")),
     );
     settle(cx);
+    if route == REPLACE_A {
+        show_source(&mut helm, cx, json!({"state": "exited", "exit_code": 0}));
+        assert_eq!(name_of(cx, "launcher-source-warning"), None);
+    }
     assert_eq!(
         name_of(cx, "prompt-alternative-0").as_deref(),
         Some("Start guarded session instead"),
@@ -1774,10 +1782,7 @@ fn guarded_waiting_named<'a>(
     );
     test_support::click(cx, "prompt-alternative-0");
     let after = sent(&mut helm, cx);
-    assert!(
-        to(&after, "/api/sessions").is_empty(),
-        "no create before the preview"
-    );
+    assert!(to(&after, route).is_empty(), "no launch before the preview");
     let [preview] = &to(&after, PREVIEW)[..] else {
         panic!("the new preview");
     };
@@ -1785,28 +1790,45 @@ fn guarded_waiting_named<'a>(
     (helm, cx, preview)
 }
 
+const REPLACE_A: &str = "/api/sessions/a/replace";
+
+/// Push the source independently of checkout preview settlement, as the helm does when its agent exits or restarts.
+fn show_source(helm: &mut FakeHelm, cx: &mut VisualTestContext, status: Value) {
+    use crate::session_list::tests::{change, listing_meta, session};
+    helm.push(change(
+        listing_meta(&["a"], 1, false),
+        &[session("a").status(status)],
+        &[],
+    ));
+    settle(cx);
+}
+
 /// SPEC.md: the YOLO question's guarded answer starts "the same launch guarded instead"; switching to Guarded is an
 /// agent-choice change, which "invalidate[s] an undispatched preview". The old launcher waited for the new preview and
 /// then submitted once (its `GuardedSubmitStamp`); refusing instead would turn the answer into a dead end. Specified:
-/// once the new preview answers ready, one create goes out, Guarded and with that preview, without consent.
+/// once the new preview answers ready, one Replace goes out with that preview, guarded and without YOLO consent.
+/// The restarted source must still be protected by the ended-and-tabless warning shown when the user answered.
 #[gpui::test]
 fn the_guarded_answer_waits_for_the_new_preview_then_launches_once(cx: &mut TestAppContext) {
-    let (mut helm, cx, preview) = guarded_waiting(cx);
+    let (mut helm, cx, preview) = guarded_waiting_named(cx, None, REPLACE_A);
+    show_source(&mut helm, cx, json!({"state": "running"}));
+    assert!(name_of(cx, "launcher-source-warning").is_some());
     helm.reply(
         preview.id,
         200,
         Some(preview_reply("/work/bar-1", "bar-1", 3)),
     );
     settle(cx);
-    let creates = to(&sent(&mut helm, cx), "/api/sessions");
+    let creates = to(&sent(&mut helm, cx), REPLACE_A);
     let [create] = &creates[..] else {
         panic!("one create once ready, not {}", creates.len());
     };
     let body = create.body.as_ref().unwrap();
-    assert_eq!(body["launch"]["permissions"], json!("guarded"));
+    assert_eq!(body["only_if_nothing_alive"], json!(true));
+    assert_eq!(body["with"]["launch"]["permissions"], json!("guarded"));
     assert_eq!(body["confirm_yolo"], json!(false));
     assert_eq!(
-        body["github_checkout"]["preview"]["cwd"],
+        body["with"]["github_checkout"]["preview"]["cwd"],
         json!("/work/bar-1")
     );
 }
@@ -1817,7 +1839,7 @@ fn the_guarded_answer_waits_for_the_new_preview_then_launches_once(cx: &mut Test
 /// whose new preview is answered taken and the next candidate's ready, sends no create.
 #[gpui::test]
 fn a_guarded_wait_does_not_follow_a_taken_base_name(cx: &mut TestAppContext) {
-    let (mut helm, cx, preview) = guarded_waiting_named(cx, Some("review"));
+    let (mut helm, cx, preview) = guarded_waiting_named(cx, Some("review"), "/api/sessions");
     assert_eq!(
         preview.body.as_ref().unwrap()["title"],
         json!("review"),

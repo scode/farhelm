@@ -1736,28 +1736,6 @@
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `pending`.
 
-## session-actions-use-unseen-liveness.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The desktop app builds a
-  lifecycle action's precondition from the session as the store holds it at the click, not as the clicked frame drew it
-  (session_list/menu.rs documents "The row as the store holds it now: what any question is drawn from and any
-  precondition is taken from"; the skipped Delete sends at once; the launcher reads its warning state at the press).
-  GPUI dispatches a click to the previous frame's handlers, so a push landing in that frame can make a nothing-alive
-  Delete carry an agent-alive precondition. SPEC.md "Lifecycle operations" (confirmed 2026-10-01): "When the session
-  setting skips a prompt, the click authorizes only the state the screen showed, under the same guards. The request
-  carries the matching precondition"; the launcher "carries the precondition matching what the launcher showed at the
-  click". Bucket stays highest: the route kills a restarted agent without consent.
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
-- Completion criteria: Delete, Stop, Restart, Replace and the Restart with / Replace with launcher send the precondition
-  matching the state the clicked frame drew, so the supervisor refuses when more is alive than was shown. Uses the
-  shared standard and mechanism the user required on 2026-11-18 (Q3; see header-actions-follow-unseen-session.md), not
-  an ad hoc per-site fix; the mechanism itself counts against that item, not this gate. Size gate: about 100 lines of
-  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/drawn-frame-actions.md`
-
 ## trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md
 
 - Outcome: `fix code`.

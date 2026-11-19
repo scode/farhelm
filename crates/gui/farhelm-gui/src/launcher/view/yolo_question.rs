@@ -34,7 +34,7 @@ use std::rc::Rc;
 
 use gpui::{AppContext as _, Context, WeakEntity, Window};
 
-use super::Launcher;
+use super::{Launcher, SourceConsent};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
@@ -47,7 +47,7 @@ use crate::session;
 
 /// What the question is about, frozen when the refusal arrives: the host the launch targeted and why it counts as
 /// YOLO. The question describes that launch even if the store's view of the host changes while it is up.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct YoloAsk {
     /// The host to stop asking on, for the permanent answer.
     host: i64,
@@ -56,6 +56,8 @@ pub struct YoloAsk {
     reason: YoloReason,
     /// Whether the guarded alternative is offered.
     guarded: bool,
+    /// The source warning beside this question. A lifecycle launcher sets it when drawing both together.
+    source: Option<SourceConsent>,
 }
 
 impl YoloAsk {
@@ -79,6 +81,7 @@ impl YoloAsk {
             host_name,
             reason,
             guarded: false,
+            source: None,
         }
     }
 }
@@ -88,6 +91,17 @@ impl YoloAsk {
 pub(in crate::launcher) struct YoloState {
     ask: YoloAsk,
     inline: Option<Inline<YoloAsk>>,
+}
+
+impl YoloState {
+    /// Refresh the question's consent when its source warning changes on screen.
+    pub(super) fn show_source(&self, source: SourceConsent, cx: &mut gpui::App) {
+        if let Some(inline) = &self.inline {
+            let mut ask = self.ask.clone();
+            ask.source = Some(source);
+            inline.refresh_value(ask, cx);
+        }
+    }
 }
 
 /// One answer button.
@@ -135,6 +149,7 @@ impl Launcher {
                 reason,
                 guarded: reason.offers_guarded(selection.as_ref())
                     && self.draft.guarded_still_changes(),
+                source: None,
             },
             inline: None,
         });
@@ -157,14 +172,14 @@ impl Launcher {
         }
         let guarded = state.ask.guarded.then(|| {
             let launcher = cx.weak_entity();
-            Box::new(move |window: &mut Window, cx: &mut gpui::App| {
+            Box::new(move |source, window: &mut Window, cx: &mut gpui::App| {
                 let mark = Mark::take(cx);
                 let _ = launcher.update(cx, |launcher, cx| {
                     launcher
                         .draft
                         .choose_permissions(Some(LaunchPermission::Guarded));
                     // A managed checkout's preview is stale after the switch; this waits for the new one.
-                    let _ = launcher.submit_or_wait_for_preview(mark, window, cx);
+                    let _ = launcher.submit_or_wait_for_preview(source, mark, window, cx);
                 });
             }) as GuardedAction
         });
@@ -186,13 +201,13 @@ impl Launcher {
 }
 
 /// Send a launch again with consent, for the user's answer at the given mark.
-type LaunchAgain = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
+type LaunchAgain = Rc<dyn Fn(SourceConsent, Mark, &mut Window, &mut gpui::App)>;
 
 /// A plain Replace's retry with consent, the caller's own.
 pub(in crate::launcher) type Retry = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
 
 /// The guarded alternative's action: switch the launch to Guarded and start it without consent.
-type GuardedAction = Box<dyn FnOnce(&mut Window, &mut gpui::App)>;
+type GuardedAction = Box<dyn FnOnce(SourceConsent, &mut Window, &mut gpui::App)>;
 
 /// What owns a YOLO question and its launch: the launcher, for its own refused launches, or the sidebar's plain
 /// Replace, through `launcher::entry::ask_yolo_for_replace`. The question's words and answers are the same for both;
@@ -212,7 +227,7 @@ pub(in crate::launcher) struct Owner {
 /// consent; its question stays current (there is no draft to edit), and nothing of the launcher redraws.
 pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
     Owner {
-        launch: Rc::new(move |mark, window, cx| retry(mark, window, cx)),
+        launch: Rc::new(move |_, mark, window, cx| retry(mark, window, cx)),
         current: Rc::new(|_| true),
         redraw: Rc::new(|_| {}),
     }
@@ -223,9 +238,9 @@ pub(in crate::launcher) fn replace_owner(retry: Retry) -> Owner {
 fn launcher_owner(launcher: WeakEntity<Launcher>) -> Owner {
     let (launching, checking, redrawing) = (launcher.clone(), launcher.clone(), launcher);
     Owner {
-        launch: Rc::new(move |mark, window, cx| {
+        launch: Rc::new(move |source, mark, window, cx| {
             let _ = launching.update(cx, |launcher, cx| {
-                launcher.submit(true, false, mark, window, cx)
+                launcher.submit(true, false, source, mark, window, cx)
             });
         }),
         current: Rc::new(move |cx| {
@@ -253,9 +268,9 @@ pub(in crate::launcher) fn ask_question(
     prompt::ask_inline(
         question(ask, guarded, owner),
         mark,
-        move |_: YoloAsk, window, cx| {
+        move |ask: YoloAsk, window, cx| {
             let mark = Mark::take(cx);
-            launch(mark, window, cx);
+            launch(ask.source.unwrap_or_default(), mark, window, cx);
         },
         window,
         cx,
@@ -301,7 +316,7 @@ fn question(ask: &YoloAsk, guarded: Option<GuardedAction>, owner: Owner) -> Ques
                 "Start this session in guarded mode instead, where the agent's own safety checks stay on",
                 Tier::Primary,
             ),
-            move |_, window, cx| guarded(window, cx),
+            move |ask, window, cx| guarded(ask.source.unwrap_or_default(), window, cx),
         );
     }
     question
@@ -339,6 +354,7 @@ fn stop_asking_then_launch(
     };
     // The answer is the user's press the launch's moved-on check counts from, not the write's reply.
     let mark = Mark::take(cx);
+    let source = ask.source.unwrap_or_default();
     let handle = window.window_handle();
     let host_name = ask.host_name.clone();
     // The attempt settles from the write's reply; a write the store refuses to start settles it at once instead.
@@ -368,9 +384,9 @@ fn stop_asking_then_launch(
                         let current = (on_reply.current)(cx);
                         attempt.succeeded(cx);
                         if current {
-                            let launch = on_reply.launch.clone();
-                            let _ =
-                                cx.update_window(handle, |_, window, cx| launch(mark, window, cx));
+                            let _ = cx.update_window(handle, |_, window, cx| {
+                                (on_reply.launch)(source, mark, window, cx)
+                            });
                         }
                     }
                 }
