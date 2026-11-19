@@ -36,6 +36,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Audit all the hover positioning in the app.** An example is the hover on the Help menu, which covers the menu: the
+  tooltip for "Announcements" opens above that item and hides the "Keyboard shortcuts" entry above it. Fix these hover
+  positioning issues across the entire app in one fell swoop, settle some standards, and identify all the hovers that
+  exist.
+
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
   resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
   (interim, decided 2026-11-17). Tensorlake suspends an idle sandbox after 30 minutes, including once the app quits, so
