@@ -6,5 +6,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 883c26] `docs-shot-desktop-fixes.md` — Settings → Hosts auto-update wording, template summary ellipsis, session row place id for the docs shot
 - [pending] `settings-search.md` — Search field in Settings: section list narrows to matches, pane lists matches, jump to the setting (after `docs-shot-desktop-fixes.md`)
 - [complete] `stop-agent-podman-containers.md` — Stop agent- and tab-started Podman containers through Podman before the scope kill, with notices on failure
-- [complete] `persist-environment-seal.md` — Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
+- [landing 5eb561] `persist-environment-seal.md` — Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
 - [pending] `ssh-askpass-2fa.md` — SSH sign-in prompts: relay what ssh asks (2FA codes, passwords, host keys) to an attention row and popover, inline in Add host; Sign-in needed after cancel or expiry; keepalives; remove SSH needs 2FA?
