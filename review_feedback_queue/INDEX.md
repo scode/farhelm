@@ -912,9 +912,6 @@ consequences.
   An explicitly chosen local alias equal to this machine is rewritten on full-name surfaces even though its short label
   preserves it.
 
-- [`digit-leading-template-limit-overstated.md`](digit-leading-template-limit-overstated.md) — The stated inability to
-  type digit-leading template names is false on shifted-digit keyboard layouts.
-
 - [`initial-shortcut-replay-lacks-busy-release-wake.md`](initial-shortcut-replay-lacks-busy-release-wake.md) — An
   initial replay that observes busy state has no explicit wake when that state clears; an ordinary overlapping input
   producer remains missing.
