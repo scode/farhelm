@@ -160,12 +160,20 @@ pub(crate) fn message_line(
     content: impl IntoElement,
     cx: &App,
 ) -> gpui::AnyElement {
-    let palette = theme::palette(cx);
-    div()
+    message_frame(cx)
         .id(id)
         .debug_selector(move || id.into())
         .role(crate::components::Role::Status)
         .aria_label(label)
+        .child(content)
+        .into_any_element()
+}
+
+/// Shared by the visible status and the layout placeholder for a status drawn by the layer manager. The placeholder
+/// omits the status role and label so assistive technology sees only the live line.
+pub(super) fn message_frame(cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    div()
         .px(px(6.))
         .py(px(4.))
         .max_h(px(54.))
@@ -173,8 +181,6 @@ pub(crate) fn message_line(
         .bg(theme::color(palette.bg_2))
         .text_color(theme::color(palette.fg_1))
         .text_size(metrics::TEXT_SM)
-        .child(content)
-        .into_any_element()
 }
 
 /// The panel's view: one disclosure, as the grid model judged it when the hover started (SPEC.md: the warning is

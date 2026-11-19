@@ -218,23 +218,35 @@ pub(super) fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mu
 /// owner's opener plays its whole stream at once (attach, a replay at the fitted size, its end, the stall), and the
 /// settle loop draws until the picture stops changing.
 pub(super) fn terminal_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    attached_setup(state, cx, |keep| {
-        vec![
-            stalled_stream(Some(2), keep.clone()),
-            stalled_stream(None, keep),
-        ]
-    });
+    attached_setup(
+        state,
+        cx,
+        Vec::new(),
+        |keep| {
+            vec![
+                stalled_stream(Some(2), keep.clone()),
+                stalled_stream(None, keep),
+            ]
+        },
+        |_| {},
+    );
 }
 
 /// What a scene keeps alive for as long as it draws (`SceneState`'s `keep`): fake helms and streams, subscriptions.
 type Kept = Rc<RefCell<Vec<Box<dyn std::any::Any>>>>;
 
 /// Connect a fake helm and, once its snapshot arrives, make one attached terminal for each opener `openers` makes,
-/// handing them whatever they must keep alive. The setup the attached-terminal scenes share.
-fn attached_setup(state: &SceneState, cx: &mut App, openers: fn(Kept) -> Vec<OpenStream>) {
+/// handing them whatever they must keep alive. Fixtures can stage an outcome on each owner before its first frame.
+fn attached_setup(
+    state: &SceneState,
+    cx: &mut App,
+    snapshot: Vec<farhelm_proto::ui_channel::CollectionState>,
+    openers: fn(Kept) -> Vec<OpenStream>,
+    stage: fn(&mut AttachedTerminal),
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(Vec::new());
+    helm.connect(snapshot);
     // The subscription is kept in `keep` too, so the closure holds it only weakly: a strong handle would be a cycle that
     // outlives the app and fails its leak check.
     let (attached, keep) = (state.attached.clone(), Rc::downgrade(&state.keep));
@@ -255,7 +267,11 @@ fn attached_setup(state: &SceneState, cx: &mut App, openers: fn(Kept) -> Vec<Ope
                 lease: AttachmentLease::new(),
             };
             let metrics = CellMetrics::measure(TextSize::DEFAULT, cx).unwrap();
-            let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, open, cx));
+            let owner = cx.new(|cx| {
+                let mut owner = AttachedTerminal::new(&session, target, metrics, open, cx);
+                stage(&mut owner);
+                owner
+            });
             attached.borrow_mut().push(owner);
         }
     });
@@ -324,6 +340,37 @@ pub(super) fn attached_terminals(state: &SceneState, _: &mut Window, _: &mut App
                 .iter()
                 .map(|owner| div().w(px(420.)).h(px(150.)).child(owner.clone())),
         )
+        .into_any_element()
+}
+
+/// Put a real approval card in front of an attached terminal with the outcome of a covered link click. The
+/// interaction tests drive the click itself. This scene pins the status line's position over the card.
+pub(super) fn terminal_covered_link_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::approvals::region_tests::{stop, waiting};
+    crate::approvals::region::install(window, cx);
+    attached_setup(
+        state,
+        cx,
+        vec![waiting(&[stop("golden-covered-link", "build-box")])],
+        |keep| vec![replayed_stream(None, keep, |_| {})],
+        AttachedTerminal::stage_covered_refusal,
+    );
+}
+
+/// Match the approval region's placement relative to the terminal pane, as the session view does.
+pub(super) fn terminal_covered_link(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let pane = crate::layers::Anchor::for_element("golden-covered-link-pane", window, cx);
+    crate::approvals::region::set_pane(pane.clone(), cx);
+    div()
+        .relative()
+        .w(px(760.))
+        .h(px(420.))
+        .child(pane.track())
+        .children(state.attached.borrow().iter().cloned())
         .into_any_element()
 }
 
