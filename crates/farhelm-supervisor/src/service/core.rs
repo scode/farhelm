@@ -7724,8 +7724,15 @@ impl Supervisor {
     /// [`Self::wait_for_pending_holds`], dropping entries that have since
     /// shown "held" so the list only ever holds launches still starting.
     ///
-    /// `terminal` is the host the launch's program runs in.
-    fn track_pending_hold(&self, spec_path: &Path, terminal: HostTerminal) {
+    /// The original terminal covers launches that register before publication.
+    /// Once published, this session and generation locate its recovered runtime.
+    fn track_pending_hold(
+        &self,
+        session_id: &str,
+        generation: i64,
+        spec_path: &Path,
+        terminal: HostTerminal,
+    ) {
         if self.versioned_program.is_none() {
             return;
         }
@@ -7735,6 +7742,8 @@ impl Supervisor {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         pending.retain(|hold| crate::session_hold::read_mark(&hold.held).is_none());
         pending.push(PendingHold {
+            session_id: session_id.to_owned(),
+            generation,
             held: crate::session_hold::held_mark_path(spec_path),
             terminal,
         });
@@ -7767,7 +7776,12 @@ impl Supervisor {
             let mut still = Vec::new();
             for hold in waiting {
                 let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if left.is_zero() || !Self::hold_settled(&hold) {
+                if left.is_zero()
+                    || !matches!(
+                        tokio::time::timeout(left, self.hold_settled(&hold)).await,
+                        Ok(true)
+                    )
+                {
                     still.push(hold);
                 }
             }
@@ -7815,13 +7829,24 @@ impl Supervisor {
     /// Whether one tracked launch needs no more waiting for; see
     /// [`Self::wait_for_pending_holds`].
     ///
-    /// The terminal answers from its runtime
-    /// ([`crate::hosts::HostTerminal::probe`]), whose live answer is the
-    /// host's child, which starts the launch's command chain, so the mark is
-    /// compared with it. A host that cannot be read is not settled, so the
-    /// wait runs on until its budget.
-    fn hold_settled(hold: &PendingHold) -> bool {
-        match hold.terminal.probe() {
+    /// Recovery can retire the original handle while its child still runs.
+    /// Read the published runtime for this launch's socket and generation.
+    /// Keep the original handle until publication, including when shutdown
+    /// publishes a placeholder while leaving its host alive.
+    /// A live child settles only with its own mark. An unreadable host waits.
+    async fn hold_settled(&self, hold: &PendingHold) -> bool {
+        let sessions = self.sessions.lock().await;
+        let terminal = sessions
+            .get(&hold.session_id)
+            .filter(|entry| entry.generation == hold.generation)
+            .and_then(|entry| entry.terminal.as_ref())
+            .filter(|terminal| {
+                !terminal.is_placeholder() && terminal.socket() == hold.terminal.socket()
+            })
+            .unwrap_or(&hold.terminal)
+            .clone();
+        drop(sessions);
+        match terminal.probe() {
             Ok(TerminalProbe::Running(pid)) => {
                 crate::session_hold::read_mark(&hold.held) == Some(pid)
             }
@@ -16156,9 +16181,11 @@ impl Drop for StartingLaunch {
     }
 }
 
-/// One launch [`Supervisor::wait_for_pending_holds`] may wait for: where
-/// its "held" mark appears, and the terminal its program runs in.
+/// One launch [`Supervisor::wait_for_pending_holds`] may wait for, keyed by
+/// session and generation so recovering its terminal leaves the wait intact.
 struct PendingHold {
+    session_id: String,
+    generation: i64,
     held: PathBuf,
     terminal: HostTerminal,
 }
@@ -26042,7 +26069,7 @@ exit 1
                     format!("{child}\n"),
                 )
                 .expect("the host child's mark");
-                sup.track_pending_hold(&spec, host);
+                sup.track_pending_hold("s", 0, &spec, host);
                 drop(starting);
             })
         };

@@ -1295,10 +1295,6 @@ consequences.
 - [`stable-recut-removes-retained-announcement-anchor.md`](stable-recut-removes-retained-announcement-anchor.md) — A
   different-version stable re-cut can remove the website anchor still targeted by carried announcements.
 
-- [`recovered-agent-retains-stale-launch-hold-handle.md`](recovered-agent-retains-stale-launch-hold-handle.md) — After
-  agent recovery, Mac supervisor replacement can wait unnecessarily and falsely warn about version protection because it
-  checks the ended runtime.
-
 - [`recovery-gap-notice-lifetime-contract-conflict.md`](recovery-gap-notice-lifetime-contract-conflict.md) —
   Same-supervisor recovery exposes contradictory product and implementation promises for the missing-output notice's
   lifetime.

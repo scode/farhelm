@@ -500,19 +500,19 @@ async fn the_hold_wait_waits_for_a_host_agents_child() {
     std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
     let short = Duration::from_millis(300);
 
-    sup.track_pending_hold(&spec, host.clone());
+    sup.track_pending_hold("s", 0, &spec, host.clone());
     assert!(
         !sup.wait_for_pending_holds(short).await,
         "no mark yet: the wait runs out"
     );
     std::fs::write(&held, format!("{}\n", child + 1)).expect("a stale mark");
-    sup.track_pending_hold(&spec, host.clone());
+    sup.track_pending_hold("s", 0, &spec, host.clone());
     assert!(
         !sup.wait_for_pending_holds(short).await,
         "a mark naming another process does not count"
     );
     std::fs::write(&held, format!("{child}\n")).expect("the child's mark");
-    sup.track_pending_hold(&spec, host.clone());
+    sup.track_pending_hold("s", 0, &spec, host.clone());
     assert!(
         sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
         "the child's own mark settles it"
@@ -521,7 +521,7 @@ async fn the_hold_wait_waits_for_a_host_agents_child() {
     std::fs::remove_file(&held).expect("clear the mark");
     test_host.exit(0);
     wait_for(&host, "the exit", |host| host.child_root().is_none()).await;
-    sup.track_pending_hold(&spec, host.clone());
+    sup.track_pending_hold("s", 0, &spec, host.clone());
     assert!(
         sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
         "an exited child needs no wait"
@@ -2351,6 +2351,38 @@ async fn readoption_make_unstable(host: &HostTerminal, test_host: &TestHost) {
         !host.is_placeholder(),
         "premise: this runtime ran before it failed"
     );
+}
+
+/// A recovered terminal has the same child and version mark even after its
+/// original handle stops answering. A supervisor replacement can settle the
+/// launch from the recovered runtime without waiting out its shutdown budget.
+#[farhelm_testtrace::test]
+async fn the_hold_wait_uses_the_recovered_agent_terminal() {
+    let state = StateDir::new();
+    let program = state
+        .path()
+        .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
+    let sup = Supervisor::new_with_exe(state.path(), program)
+        .await
+        .unwrap();
+    let (old, test_host) = readoption_runtime(&sup, &state).await;
+    let child = test_host.child_pid();
+    let spec = crate::launch::spec_path_for_launch(state.path(), "s1", 0);
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    sup.track_pending_hold("s1", 0, &spec, old.clone());
+    std::fs::write(
+        crate::session_hold::held_mark_path(&spec),
+        format!("{child}\n"),
+    )
+    .unwrap();
+
+    readoption_make_unstable(&old, &test_host).await;
+    assert!(old.probe().is_err(), "the old handle cannot prove the mark");
+    assert!(sup.readopt_one("s1", 0, &old).await);
+    let recovered = s1_terminal(&sup).await.expect("recovered runtime");
+    assert!(matches!(recovered.probe(), Ok(TerminalProbe::Running(pid)) if pid == child));
+    assert!(sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await);
+    end_discoverable(test_host);
 }
 
 /// A recovered runtime replaces the failed handle without resetting retry
