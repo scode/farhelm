@@ -515,6 +515,90 @@ fn a_pin_dropped_on_an_unpinned_member_appends_in_its_group(cx: &mut TestAppCont
     );
 }
 
+/// A marked pin carries marked sessions of either pin state. Over a destination pin, that set takes whole-group
+/// membership moves and keeps its marks. Each reply sends the next write, which keeps large selections below the
+/// channel's queue limit. An already-grouped member is skipped and each accepted move gets a held slot.
+#[gpui::test]
+fn a_marked_drag_moves_a_mixed_set_without_reordering_pins(cx: &mut TestAppContext) {
+    use super::groups_tests::{group, grouped_snapshot};
+    let global = session("global").pinned(1);
+    let loose = session("loose");
+    let state = grouped_snapshot(
+        &[
+            global.clone(),
+            session("pin").pinned(2).grouped(10),
+            session("member").grouped(10),
+            loose.clone(),
+        ],
+        vec![group(10, "Work", 2, false)],
+    );
+    let (mut fake, cx) = open_main(cx, state);
+    for (id, mark) in [
+        ("session-row-global", "session-marked-global"),
+        ("session-row-loose", "session-marked-loose"),
+        ("session-row-member", "session-marked-member"),
+    ] {
+        let at = test_support::center(cx, id);
+        cx.simulate_click(at, Modifiers::control());
+        test_support::settle(cx);
+        assert!(drawn(cx, mark), "{id} was marked before the drag");
+    }
+    away(cx);
+    sent(&mut fake);
+    assert_eq!(row_order(&frame(cx)), ["global", "pin", "member", "loose"]);
+    press_grip(cx, "global");
+    assert!(!drawn(cx, "session-drag-accompanying-2"));
+    let target = item(cx, "pin").center();
+    drag_to(cx, target);
+    assert!(drawn(cx, "session-drag-accompanying-2"));
+    assert!(drawn(cx, "session-membership-drop-pin"));
+    assert!(!drawn(cx, "session-pin-drop-pin:before"));
+    assert!(!drawn(cx, "session-pin-drop-pin:after"));
+    release(cx, target);
+    assert!(!drawn(cx, "session-drag-accompanying-2"));
+    let [pinned] = &fake.commands()[..] else {
+        panic!("one write can be in flight for the marked drop");
+    };
+    assert_eq!(pinned.path, "/api/sessions/global/group");
+    assert_eq!(
+        pinned.body,
+        Some(json!({"target": {"group": 10}, "pin_source": "ungrouped"}))
+    );
+    let mut meta = listing_meta(&["global", "pin", "member", "loose"], 4, false);
+    meta.session_groups = vec![group(10, "Work", 3, false)];
+    fake.push(change(meta.clone(), &[global.pinned(3).grouped(10)], &[]));
+    test_support::settle(cx);
+    assert!(
+        fake.commands().is_empty(),
+        "a push is not the first write's completion"
+    );
+    assert_eq!(row_order(&frame(cx)), ["global", "pin", "member", "loose"]);
+    fake.reply(pinned.id, 200, None);
+    test_support::settle(cx);
+    assert_eq!(row_order(&frame(cx)), ["pin", "global", "member", "loose"]);
+    let [free] = &fake.commands()[..] else {
+        panic!("the first reply sends the next membership write");
+    };
+    assert_eq!(free.path, "/api/sessions/loose/group");
+    assert_eq!(free.body, Some(json!({"target": {"group": 10}})));
+    meta.session_groups = vec![group(10, "Work", 4, false)];
+    fake.push(change(meta, &[loose.grouped(10)], &[]));
+    fake.reply(free.id, 200, None);
+    test_support::settle(cx);
+    assert_eq!(row_order(&frame(cx)), ["pin", "global", "loose", "member"]);
+    assert!(
+        fake.commands().is_empty(),
+        "the marked member already in the group needed no write"
+    );
+    for mark in [
+        "session-marked-global",
+        "session-marked-loose",
+        "session-marked-member",
+    ] {
+        assert!(drawn(cx, mark), "{mark} survives the drop");
+    }
+}
+
 /// The group header grip uses the pin gesture's line and relative request
 /// while accepting other headers as neighbors.
 #[gpui::test]
@@ -858,18 +942,18 @@ fn escape_ends_a_drag_after_tab_moved_focus_off_the_grip(cx: &mut TestAppContext
 }
 
 /// The old listener stopped the Escape that ended a drag, so nothing else acted on that key; the list's own Escape
-/// clears the marks, and the root's closes the topmost layer. Specified: with u marked by a Shift-click, c's grip
-/// dragged to a's top and Escape pressed, the drag ends and u is still marked; a second Escape, with no drag on, clears
-/// the mark as usual.
+/// clears the marks, and the root's closes the topmost layer. Ctrl-click marks only u, so c's grip starts a
+/// single-pin drag. Drag c to a's top and press Escape. The drag ends and u stays marked until a second Escape.
 #[gpui::test]
 fn the_escape_that_ends_a_drag_goes_no_further(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, three_pins());
     away(cx);
     sent(&mut fake);
     let at = test_support::center(cx, "session-row-u");
-    cx.simulate_click(at, Modifiers::shift());
+    cx.simulate_click(at, Modifiers::control());
     test_support::settle(cx);
     assert!(drawn(cx, "session-marked-u"), "the premise: u is marked");
+    assert!(!drawn(cx, "session-marked-c"), "the source starts unmarked");
     away(cx);
     press_grip(cx, "c");
     let target = near_top(cx, "a");

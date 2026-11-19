@@ -2516,6 +2516,12 @@ neighbor has left the expected area. Escape, interrupted pointer capture or rele
 The row and header menus retain the keyboard actions for these moves. A newly pinned row waiting for the order hold to
 end has neither a grip nor Move actions until it joins a movable area.
 
+Dragging a marked row carries the other marked sessions shown in the list. The lifted row shows **+N** for the number of
+other sessions. A drag carrying several sessions can land only on a group or on the ungrouped part of the list,
+including the strip when there are no ungrouped rows. Pinned sessions remain pinned and append to the destination's
+pins, including global pins when leaving a group. The drop skips sessions already in the destination and reports busy
+sessions in their rows, as the marked-rows menu does. The drop keeps the marks.
+
 Among unpinned sessions, the option labelled most recent activity sorts connected running and waiting sessions first,
 then every other session — idle, unclassified, ended, and anything on an unreachable host. Within each of these two sort
 buckets the order is the most recent observed START of a work burst: a session promotes when it moves from known idle or
