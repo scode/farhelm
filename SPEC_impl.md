@@ -1980,20 +1980,21 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   ended keeps its record, which its session's Delete finds it by, and whatever could not be confirmed cleaned up is in
   the refusal. The tab strip and every tab lookup list a session's tabs by their tags' creation times; a tab whose shell
   exited, or whose host ended under it, is hidden at once. Closing a tab: the session's cell holds only hosts whose tag
-  names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused; the reap's
-  "only if dead" is the runtime's processed exit record, checked again under the session's lifecycle claim; the scope is
-  the tag's; the sweep roots at the child only while it runs; then the attached viewer is told the tab closed (before
-  the host ends, since a grid stream would otherwise report its terminal ended first), the host is ended as above (for a
-  runtime that judged its host gone from its socket alone, the process it adopted is confirmed gone first, by the
-  verified signal), a marker-only sweep catches what outlived the hangup, and the record goes once the end is confirmed.
-  A close that cannot confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces
-  nothing, the reap closes it again until one does: a second after the failure, then doubling to at most a minute
-  between tries, so an end that keeps failing holds the session's lifecycle claim and a reap slot only that often. A
-  host tab that cannot be read refuses to close; its session's Delete ends it. The automatic reap is driven by the
-  host's exit event: the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes
-  the ticker's reap pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover
-  displaces the previous client's attachments to every terminal of the session, and a grid attach to a tab goes through
-  the grid stream as an agent's does.
+  names one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused. Under the
+  session's lifecycle claim, the reap checks a failed close's retry deadline, or otherwise checks for a processed exit
+  or a host known gone. The scope is the tag's; the sweep roots at the child only while it runs; then the attached
+  viewer is told the tab closed (before the host ends, since a grid stream would otherwise report its terminal ended
+  first), the host is ended as above (for a runtime that judged its host gone from its socket alone, the process it
+  adopted is confirmed gone first, by the verified signal), a marker-only sweep catches what outlived the hangup, and
+  the record goes once the end is confirmed. A close that cannot confirm the end keeps the tab and its record and marks
+  it, and since its stopped runtime announces nothing, the reap closes it again until one does: a second after the
+  failure, then doubling to at most a minute between tries, so an end that keeps failing holds the session's lifecycle
+  claim and a reap slot only that often. A host tab that cannot be read refuses to close unless an earlier close could
+  not confirm its host ended. Deleting the session ends the tab. The automatic reap is driven by the host's exit event:
+  the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes the ticker's reap
+  pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover displaces the
+  previous client's attachments to every terminal of the session, and a grid attach to a tab goes through the grid
+  stream as an agent's does.
 - **Restarting a host agent** (`service/core/host_restart.rs`): a host runs one child for its whole life, so a Restart
   of an agent in a host (or of a host row whose session holds no terminal) never reuses the host. Under the session's
   lifecycle claim, once the consent a working agent needs has been checked (so a refusal touches nothing) and before
@@ -4566,8 +4567,9 @@ usual notices collection delivers additions and resolutions to the rail.
   helm would send unrestricted Stop without asking about tabs. Treating the change as additive would let that old client
   close tabs it never received permission to close.
 
-  Automatic tab cleanup goes ahead only while the tab's runtime says its shell exited, checked under its lifecycle claim
-  before signalling: an old exit observation does not authorize ending a shell that is live now. The tab's host is then
+  The supervisor checks automatic tab cleanup under the lifecycle claim before signalling. A close that could not
+  confirm the host ended is retried when due. For other tabs, the runtime must report that the shell exited or that its
+  host is gone. An old exit observation alone does not authorize ending a shell that is live now. The tab's host is then
   ended through its runtime or by the verified signal, which checks the host's own identity, so a host that went away
   cannot redirect cleanup to another. Explicit tab closes and failed-open cleanup name their reason. Each process-sweep
   signal logs the target and a capped list of successful syscall recipients. Scope signals log a capped best-effort

@@ -1757,20 +1757,6 @@
   feedback file and its index entry in the same change.
 - Execution: `pending`.
 
-## trailing-spec-automatic-tab-reap-omits-failed-close-retry.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Spec sentence on
-  automatic tab cleanup forgets the failed-close retry. SPEC_impl contradicts itself; the code follows the more specific
-  rule. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix spec (~2-4)). Size gate: about 100 lines of diff (code, tests and
-  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
-  brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## trailing-agent-file-size-only-read-consistency-docstring.md
 
 - Outcome: `fix code`.
