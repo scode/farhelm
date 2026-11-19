@@ -21,3 +21,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`demo-video-capture`](reports/demo-video-capture.report.md) landed 2026-11-19 in #4178, #4184, #4185: The README demo video's capture runs on the desktop app again (mechanism only)
 - [`replace-with-checkout-hint`](reports/replace-with-checkout-hint.report.md) landed 2026-11-19 in #4177, #4179: Replace with on a managed checkout says the replacement keeps its checkout, and warns before a fresh clone
 - [`shift-drag-marking`](reports/shift-drag-marking.report.md) landed 2026-11-19 in #4199: Shift+drag across the session list marks the rows it sweeps
+- [`model-family-shorthand`](reports/model-family-shorthand.report.md) landed 2026-11-19 in #4198: Typing a model family word in the launcher picks that family's latest model
