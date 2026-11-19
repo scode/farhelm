@@ -4540,7 +4540,8 @@ inside the environment the first attempt created, where a retry could not find i
   neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted
   hint also stops being current when its save fails; reopening while that save is pending does not keep the failed
   choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
-  than treating unknown trust as off.
+  than treating unknown trust as off. Closing Settings before the helm refuses an ntfy save drops that refusal. The
+  first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar
