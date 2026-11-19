@@ -28,6 +28,55 @@ use tracing::{debug, info, warn};
 #[cfg(target_os = "linux")]
 mod podman;
 
+/// Podman failures are advisory even when the ordinary process reap
+/// succeeds. Keep the same report on a reap error so a lifecycle caller
+/// can warn the user about both failures.
+#[derive(Debug)]
+pub(crate) struct Reaped {
+    podman_failures: Vec<String>,
+}
+
+impl Reaped {
+    /// Read the advisory outcome without changing the caller's existing
+    /// treatment of process-cleanup errors.
+    pub(crate) fn from_result(result: &anyhow::Result<Self>) -> Option<&Self> {
+        match result {
+            Ok(report) => Some(report),
+            Err(error) => error.downcast_ref::<Self>(),
+        }
+    }
+
+    /// Use the original storage settings and full IDs because a session
+    /// can use several private Podman stores with colliding names.
+    pub(crate) fn podman_notice(&self) -> Option<String> {
+        if self.podman_failures.is_empty() {
+            return None;
+        }
+        const SHOWN: usize = 4;
+        let mut containers =
+            self.podman_failures[..self.podman_failures.len().min(SHOWN)].join(", ");
+        if self.podman_failures.len() > SHOWN {
+            containers.push_str(&format!(" and {} more", self.podman_failures.len() - SHOWN));
+        }
+        Some(format!(
+            "Farhelm could not confirm that Podman stopped {containers}, so they may still be \
+             running. Check them with podman ps -a on the session's host, adding the storage options \
+             the agent used if it chose its own, and remove any you no longer need with podman rm -f \
+             and the container's ID."
+        ))
+    }
+}
+
+impl std::fmt::Display for Reaped {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            output,
+            "Podman cleanup was incomplete for {} container(s)",
+            self.podman_failures.len()
+        )
+    }
+}
+
 /// Upper bound on the wait between `SIGTERM` and the SIGSTOP-quiesce step
 /// in [`kill_process_tree`], and between `SIGTERM` and `SIGKILL` in
 /// [`kill_scope`]. An upper bound, not a duration: both waits poll their
@@ -1405,7 +1454,7 @@ pub(crate) async fn reap_process_tree(
     session_id: &str,
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Reaped> {
     reap_process_tree_with_podman_deadline(
         scopes,
         units,
@@ -1428,7 +1477,7 @@ pub(crate) async fn reap_process_tree_with_podman_deadline(
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
     podman_deadline: Option<tokio::time::Instant>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Reaped> {
     reap_process_tree_with_sweep(
         scopes,
         units,
@@ -1452,7 +1501,7 @@ async fn reap_process_tree_with_sweep<F, Fut>(
     scope_kill_failure: ScopeKillFailure,
     _podman_deadline: Option<tokio::time::Instant>,
     sweep: F,
-) -> anyhow::Result<()>
+) -> anyhow::Result<Reaped>
 where
     F: FnOnce(Vec<(u32, u64)>) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<()>>,
@@ -1531,7 +1580,11 @@ where
     // Podman's own stop gives conmon time to update its records before the
     // same scope is signalled. A failed stop leaves the usual reaper in charge.
     #[cfg(target_os = "linux")]
-    podman::stop_before_signals(scopes, &units, session_id, _podman_deadline).await;
+    let podman_failures =
+        podman::stop_before_signals(scopes, &units, session_id, _podman_deadline).await;
+    #[cfg(not(target_os = "linux"))]
+    let podman_failures = Vec::new();
+    let report = Reaped { podman_failures };
 
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
@@ -1553,11 +1606,11 @@ where
         let roots = validated.iter().copied().collect();
         let (survivors, errors) = poll_until_gone(&roots, Duration::ZERO).await;
         if survivors.is_empty() && errors.is_empty() {
-            return Ok(());
+            return Ok(report);
         }
     }
 
-    match (sweep(validated).await, scope_error) {
+    let swept = match (sweep(validated).await, scope_error) {
         (Ok(()), Some(e)) => match scope_kill_failure {
             ScopeKillFailure::Warn => {
                 // The sweep proved the tree is gone, so this stop is complete
@@ -1581,6 +1634,16 @@ where
             "a cgroup scope also could not be fully torn down ({e})"
         ))),
         (Err(sweep), None) => Err(sweep),
+    };
+    match swept {
+        Ok(()) => Ok(report),
+        Err(error)
+            if matches!(scope_kill_failure, ScopeKillFailure::Refuse)
+                && !report.podman_failures.is_empty() =>
+        {
+            Err(error.context(report))
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -2052,7 +2115,7 @@ pub(crate) async fn stop_live_agent(
     // Restart shares this agent reap and must keep tabs running. Stop's
     // handler closes tabs separately under its lifecycle claim, through
     // their own close paths, so their live roots remain available to sweep.
-    reap_process_tree(
+    let reaped = reap_process_tree(
         &sup.seams.scopes,
         ScopeUnits::recorded(entry.scope.clone()),
         roots,
@@ -2063,8 +2126,15 @@ pub(crate) async fn stop_live_agent(
         // not relaunch beside them (SPEC.md "Lifecycle operations").
         ScopeKillFailure::Refuse,
     )
-    .await
-    .map_err(StopFailure::Sweep)?;
+    .await;
+    let report = match reaped {
+        Ok(report) => report,
+        Err(error) => {
+            sup.notify_podman_cleanup(entry, error.downcast_ref::<Reaped>())
+                .await;
+            return Err(StopFailure::Sweep(error));
+        }
+    };
     // The host's exit record may not have arrived right after the sweep,
     // which reads as no code; the store's monotonic enrichment lets a later
     // tick fill it in.
@@ -2074,16 +2144,19 @@ pub(crate) async fn stop_live_agent(
     // committed the same choice, which the store preserves monotonically.
     let stopped_before_start =
         stopped_before_start(&sup.state_dir, session_id, entry.generation).await;
-    sup.record(
-        session_id,
-        entry,
-        Transition::StopCompleted {
-            stopped_before_start,
-            exit_code,
-        },
-    )
-    .await
-    .map_err(StopFailure::UnrecordedOutcome)
+    let outcome = sup
+        .record(
+            session_id,
+            entry,
+            Transition::StopCompleted {
+                stopped_before_start,
+                exit_code,
+            },
+        )
+        .await
+        .map_err(StopFailure::UnrecordedOutcome);
+    sup.notify_podman_cleanup(entry, Some(&report)).await;
+    outcome
 }
 
 #[cfg(test)]

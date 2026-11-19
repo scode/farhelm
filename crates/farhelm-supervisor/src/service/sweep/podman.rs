@@ -261,14 +261,14 @@ pub(super) async fn stop_before_signals(
     units: &[&String],
     session_id: &str,
     caller_deadline: Option<Instant>,
-) {
+) -> Vec<String> {
     let now = Instant::now();
     let deadline = caller_deadline.map_or(now + BUDGET, |limit| limit.min(now + BUDGET));
     if units.is_empty() || deadline <= now {
-        return;
+        return Vec::new();
     }
     let Some(podman) = scopes.podman_program().map(Arc::new) else {
-        return;
+        return Vec::new();
     };
     let mut dispatched = HashSet::new();
     let mut stops = JoinSet::new();
@@ -310,16 +310,26 @@ pub(super) async fn stop_before_signals(
             });
         }
     }
+    let mut failures = Vec::new();
     while let Some(result) = stops.join_next().await {
         match result {
-            Ok((container, false)) => warn!(
-                session = %session_id, container = %container.name, id = %container.id,
-                "Podman could not confirm the container stopped; continuing process cleanup"
-            ),
+            Ok((container, false)) => {
+                warn!(
+                    session = %session_id, container = %container.name, id = %container.id,
+                    "Podman could not confirm the container stopped; continuing process cleanup"
+                );
+                if container.name == container.id {
+                    failures.push(container.id);
+                } else {
+                    failures.push(format!("{} ({})", container.name, container.id));
+                }
+            }
             Err(error) => warn!(session = %session_id, %error, "Podman stop task did not complete"),
             Ok((_, true)) => {}
         }
     }
+    failures.sort_unstable();
+    failures
 }
 
 #[cfg(test)]

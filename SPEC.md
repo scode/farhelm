@@ -2188,7 +2188,8 @@ has no usable systemd user manager does not excuse skipping a scope that such a 
 Farhelm tried to reap but could not examine counts as unconfirmed, never as gone. The accepted limits of hosts without a
 usable user manager described above are not unconfirmed cleanup: processes Farhelm has no way to identify do not make an
 operation fail. When Podman cannot confirm a container stopped, Farhelm falls back to process cleanup and judges whether
-that cleanup completed by the same rules.
+that cleanup completed by the same rules. Stop, Restart and tab close tell you about the Podman failure in the session's
+notifications. Delete includes the warning in its reply unless Delete destroys the environment.
 
 Confirmed 2026-10-10: these cleanup and resume rules cover single ordinary failures. They do not extend to a supervisor
 crash that lands at one exact moment of an operation, or to two independent rare faults coinciding (a crash and a failed
@@ -2955,45 +2956,49 @@ the topic private. The desktop app's helm stops when its window closes, so alert
 be in the background.
 
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
-will then be unable to resume it, it says so on that session as a notification rather than only in a log. In this
-version every notification but the old-terminal ones (below) is a session-tracking problem: a launch whose conversation
-hook should have reported which conversation the agent is in and has not, a minute after the first Enter the user sent
-it (an Enter inside a paste, or Shift+Enter, inserts a newline and does not count, and an Enter while the latest screen
-reading shows a recognized dialog does not count either; an outdated dialog reading can defer the clock to the next
-Enter; with no reading yet, the ordinary Enter rule applies), for an agent that reports by its first prompt (Pi and OMP
-report only after their first reply, which can take as long as the first turn, so their silence proves nothing and is
-not reported); a launch Farhelm could not add its conversation hook to, unless the user turned hooks off for that agent
-themselves; a Codex or Grok conversation record that Restart finds missing, which withdraws the resume offer; and an OMP
-launch whose conversation reporter does not match the running Farhelm, the one refused conversation report that
-notifies; and a Claude, Codex, Muse or Antigravity launch whose first conversation report came from a nested process of
-that agent, corrected when a recorded ancestor reports. That correction says which conversation a Restart before now
-would have resumed and that Farhelm now follows the conversation of the agent process that started it, without claiming
-no further ancestor can correct it. Every other refused report (from a subagent, from an agent process the session's
-agent started itself, overtaken by a relaunch or delete, or turned away by a passing error) is the system working and
-never notifies. A launch that still carries a conversation Farhelm captured earlier is never told Restart cannot resume
-it, because Restart can. The manual Grok and Antigravity hooks do not start the silent-hook timer. After a supervisor
-restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches stored
-before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do about
-it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning names
-the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says Restart
-cannot resume until that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`;
-otherwise it invites feedback from the help (?) menu. There is at most one notification of each such problem per launch
-of the session's agent. The warning that the agent never reported its conversation and the warning that Restart stopped
-offering to resume are marked resolved when Restart can resume that launch's conversation again, including after a
-supervisor restart. The other session-tracking kinds and notifications from earlier launches stay as they are. If a
-resolved problem returns in the same launch, its existing notification reopens at the top as new and unread, even if the
-user had cleared it; repeated checks while it remains unresolved do not repeat it.
+will then be unable to resume it, it says so on that session as a notification rather than only in a log. The
+session-tracking notifications cover a launch whose conversation hook should have reported which conversation the agent
+is in and has not, a minute after the first Enter the user sent it (an Enter inside a paste, or Shift+Enter, inserts a
+newline and does not count, and an Enter while the latest screen reading shows a recognized dialog does not count
+either; an outdated dialog reading can defer the clock to the next Enter; with no reading yet, the ordinary Enter rule
+applies), for an agent that reports by its first prompt (Pi and OMP report only after their first reply, which can take
+as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm could not add its
+conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok conversation record
+that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation reporter does not
+match the running Farhelm, the one refused conversation report that notifies; and a Claude, Codex, Muse or Antigravity
+launch whose first conversation report came from a nested process of that agent, corrected when a recorded ancestor
+reports. That correction says which conversation a Restart before now would have resumed and that Farhelm now follows
+the conversation of the agent process that started it, without claiming no further ancestor can correct it. Every other
+refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
+delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
+conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. The manual Grok and
+Antigravity hooks do not start the silent-hook timer. After a supervisor restart, a launch that received the hook starts
+its silent-hook clock at the next qualifying Enter; launches stored before this behavior was introduced stay unchecked.
+Each notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
+never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
+conversation, using the same timing as Restart's explanation. It says Restart cannot resume until that report arrives,
+and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it invites feedback from the
+help (?) menu. There is at most one notification of each such problem per launch of the session's agent. The warning
+that the agent never reported its conversation and the warning that Restart stopped offering to resume are marked
+resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The other
+session-tracking kinds and notifications from earlier launches stay as they are. If a resolved problem returns in the
+same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it; repeated
+checks while it remains unresolved do not repeat it.
 
-The other notifications are about old terminals (see Terminal experience). Earlier releases gave a session in which
-something still ran in an old terminal the old-terminal warning: it asked for the session to be restarted, replaced,
-stopped or deleted as soon as possible, because an upcoming release would forcibly terminate its old terminals. That has
-happened (see Terminal experience), so no warning is recorded any more, and every supervisor start marks any unresolved
-one resolved. Each session whose agent was still launching, running or being stopped in an old terminal when a
-supervisor's start ended it gets one notice instead, at that start, saying that its old terminal was ended by the
-update, so its agent is no longer running and its last screen is gone, and that Restart starts the agent again in a new
-terminal (resuming its conversation), or Replace when Restart is unavailable; it ends with a link to the docs page on
-new terminals. Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later
-supervisor starts, until it is cleared. A session whose agent had already ended, or that lost only old tabs, gets none.
+Earlier releases gave a session in which something still ran in an old terminal the old-terminal warning: it asked for
+the session to be restarted, replaced, stopped or deleted as soon as possible, because an upcoming release would
+forcibly terminate its old terminals. That has happened (see Terminal experience), so no warning is recorded any more,
+and every supervisor start marks any unresolved one resolved. Each session whose agent was still launching, running or
+being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start, saying that
+its old terminal was ended by the update, so its agent is no longer running and its last screen is gone, and that
+Restart starts the agent again in a new terminal (resuming its conversation), or Replace when Restart is unavailable; it
+ends with a link to the docs page on new terminals. Nothing resolves the notice: it stays unresolved, and unread until
+the user reads it, across later supervisor starts, until it is cleared. A session whose agent had already ended, or that
+lost only old tabs, gets none.
+
+When Podman cleanup fails during Stop, Restart or a tab close (see Lifecycle operations), the session's warning names
+the affected containers. A later cleanup that reports different containers on the same launch updates the warning and
+makes it unread again. Resuming the agent's conversation leaves the warning in place.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
