@@ -21777,3 +21777,912 @@ prior terminal output" (rebased revision)
   [PR #4170](https://github.com/scode/farhelm/pull/4170/changes).
 
 >>>>>>>>>>>>>>>>>>> conflict 1 of 1 ends
+
+## fake-filesystem-cancellation-outlives-test-transaction.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The reported trigger
+  was browser tests deleting a recipe during its snapshot build; the browser suite was deleted in 6ef88c9a4 (#3401), and
+  the filesystem-backed Tensorlake fake (crates/farhelm-helm/src/tensorlake/e2e.rs, cfg(test) only) has no remaining
+  user that cancels a state-changing call and keeps using the fake.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## status-sound-test-misses-reseed-transition.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser test was
+  deleted with e2e/ (6ef88c9a4, #3401); the desktop port a_view_change_records_the_new_views_statuses_silently
+  (crates/gui/farhelm-gui/src/sounds/owner/tests.rs) supplies the audible edge the finding asked for.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## folder-refusal-fixture-enters-version-skew.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on a
+  Playwright HTTP mock without the build stamp; the browser suite is gone (6ef88c9a4, #3401) and the desktop client
+  never reads the build-stamp header per reply.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## composer-assertions-precede-session-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on the
+  shared Playwright test stack (deleted in 6ef88c9a4, #3401); desktop tests use a per-test FakeHelm and create no real
+  sessions.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## name-regression-registers-cleanup-after-assertions.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shared Playwright
+  stack leak; the browser suite is gone (6ef88c9a4, #3401) and desktop tests have no shared stack.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## template-cleanup-skipped-after-preference-reset-fails.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shared Playwright
+  stack contamination; the browser suite is gone (6ef88c9a4, #3401) and desktop template tests use per-test FakeHelm
+  state.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## malformed-add-acceptance-test-misses-retries.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser test is
+  gone (6ef88c9a4, #3401); the desktop app does not decode the provision 202 body (hosts/setup.rs), and its tests assert
+  exactly one request was sent.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## tooltip-focus-test-lacks-installation-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on
+  Dioxus/WASM script-loading order; Dioxus and tooltip.js were removed (6ef88c9a4, 1eb4e3751).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## outage-recovery-test-can-credit-ordinary-probe.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser test is
+  gone (6ef88c9a4, #3401); the desktop recovery nudge has a direct witness counting ReconnectNow requests
+  (session_pane/unavailable_tests.rs).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## switcher-second-create-failure-leaks-first-session.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shared Playwright
+  stack leak in deleted e2e/ specs (6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## fake-spawn-cleanup-can-leave-launch-policy-enabled.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: spawn.spec.ts and
+  the shared Playwright stack are gone (6ef88c9a4, #3401); Rust e2e tests build a harness per test.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## spawn-test-publishes-child-after-observations.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: spawn.spec.ts and
+  the shared Playwright stack are gone (6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## zoom-cleanup-failure-skips-second-session.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shared-stack leak in
+  deleted terminal-tabs and terminal-migration specs (6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## back-to-back-shortcut-test-misses-first-batch.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The race needed a
+  held preferences GET per press in the browser fixture (deleted, 6ef88c9a4); desktop templates come from pushed state
+  and the ordering port asserts each press's own effect.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## named-refusal-test-misses-selector-editability.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser test is
+  gone (6ef88c9a4, #3401) and no desktop port carries the gap.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## bulk-pacing-test-samples-before-quiet-regrouping.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on real
+  fake agents settling and reordering rows in the browser suite (deleted, 6ef88c9a4); desktop bulk tests set every
+  status through the fake helm.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## filter-escape-test-accepts-earlier-query.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser test is
+  gone (6ef88c9a4, #3401); the desktop port drains earlier queries and then requires exactly one new query.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## bulk-test-preference-latch-bypasses-finally.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on
+  Playwright timeout semantics and the shared stack (deleted, 6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## settings-close-test-forwards-cancelled-save.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on
+  Playwright route.fetch sending its own request (deleted, 6ef88c9a4); with FakeHelm tests see the app's actual
+  commands.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## switch-geometry-discards-visible-frames.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Lives in the
+  browser's frame-sampling setup (grid-terminal.js, rAF traces), deleted with e2e/ (6ef88c9a4); the desktop port asserts
+  the attach size and zero resizes.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## switch-geometry-capped-readiness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Lives in the
+  browser's capped rAF trace, deleted with e2e/ (6ef88c9a4); the desktop port keeps no capped history.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## switch-geometry-row-readiness-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Lives in the
+  browser's frame-sampling readiness, deleted with e2e/ (6ef88c9a4).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## progress-hover-test-can-scroll-away-entry.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on
+  Playwright scroll-into-view and DOM ancestor scrolling (deleted, 6ef88c9a4).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## nonblocking-reply-tests-lack-settlement-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The gap was
+  HTTP-done plus animation frames not proving the WASM continuation ran (deleted, 6ef88c9a4); desktop ports reply and
+  run_until_parked.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## cleanup-status-masks-body-assertion.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Turns on Playwright
+  testInfo.status timing and helpers/cleanup.ts (deleted, 6ef88c9a4).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## negated-isolation-probes-cannot-fail-test.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The probes belonged
+  to the retired bind-mounted containerized-session e2e test, rewritten in 04d85f0c9 (#3330); no current test runs them.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## account-assertion-chain-can-reach-false-readiness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The account check
+  chain belonged to the retired bind-mounted containerized-session e2e test, removed in 04d85f0c9 (#3330).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## creator-revocation-test-lacks-wait-boundary-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The test and the
+  container creator path were removed with the retired bind-mounted container model (04d85f0c9, #3330); the replacement
+  test asserts its waiter premise.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## manual-unroute-leaves-listing-callback-running.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Playwright route
+  mechanics in e2e/tests/terminal.spec.ts, deleted in 6ef88c9a4 (#3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## delayed-appearance-event-overrides-local-choice.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Rested on browser
+  localStorage storage events between pages (appearance.js, deleted); appearance is now a helm preference saved over the
+  ordered UI channel.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## unknown-policy-write-overtaking-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The producer was the
+  Dioxus Settings checkbox sending parallel HTTP requests (deleted); the desktop app sends over the UI channel, which
+  the helm runs one at a time.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## queued-preference-survives-signin-expiry.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depends on browser
+  sign-in shared between tabs and the Dioxus preference writer (deleted in 6ef88c9a4).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## old-keep-editing-clears-new-leave-continuation.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The cause was the
+  Dioxus recipe editor's shared pending_close (deleted); the desktop editor carries the departure in each question's
+  answer.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## settings-save-replies-arrive-out-of-order.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The cause was
+  parallel Dioxus HTTP replies (deleted); desktop saves go over the ordered UI channel and replies arrive in send order.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## account-save-visible-draft-mismatch-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The open question
+  was Dioxus/WebView event transport (deleted); the desktop form reads its own draft at the click on one thread.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## unmeasured-notices-can-be-marked-read.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Needed Dioxus's
+  hidden Unmeasured placement stage (deleted); the desktop panel is placed in the frame it is laid out and marks only
+  ids the last drawn frame showed.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## notice-retry-error-hides-clear-failure.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The cause was the
+  Dioxus single-error or_else (deleted); the desktop panel shows Clear's refusal on its own line and the Trash refusal
+  on the notice.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## attention-retry-omits-failed-save-identity.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The open premise was
+  Dioxus event dispatch (deleted); in the desktop app the error line and its Try again disappear once a newer choice
+  exists.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## trailing-browser-native-arrival-latch-bypasses-owned-finally.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The Playwright wake
+  specs and route-gate.ts were deleted with e2e/ (6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## trailing-cleanup-status-masks-body-assertion.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage:
+  retired-container-sessions.spec.ts and helpers/cleanup.ts were deleted with e2e/ (6ef88c9a4, #3401).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The xterm file-link
+  test and add-on were deleted (f560058; crates/farhelm-ui in 1eb4e3751).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## trailing-live-redraw-pending-ready-refused-hover-browser-matrix-removed.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The browser specs
+  and the xterm renderer are gone (6ef88c9a4); the desktop app covers the behavior in terminal/files/tests.rs.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## trailing-events-test-cross-realm-array-example-reference.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage:
+  crates/farhelm-ui/js-tests was deleted in 1eb4e3751 (#3407).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## checkout-root-reopen-lacks-identity-comparison.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The
+  checkout-confinement code belonged to the retired bind-mounted container model (removed in 04d85f0c9, #3330) and the
+  deleted terminal-files.js; downloads now open paths relative to the session folder.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## remote-version-display-retains-format-characters.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: About the Dioxus
+  page placing raw text in the DOM; the GPUI Recipes list wraps each version in HostText escaping (ce91a0876, #3712).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## reopened-rail-menu-loses-keyboard-handles.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Caused by Dioxus
+  onmounted handle registration; the desktop app closes the open menu and opens a fresh one.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## native-confirmation-reopen-paint-order-source-gap.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on
+  Dioxus/WebView measurement over IPC and opacity; GPUI places popovers during each frame's layout.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## early-empty-status-filter-stays-loading.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the
+  Dioxus fleet_empty signal; the desktop pane says Loading only while no listing has arrived.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## physical-tab-crosses-catalog-readiness-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the
+  Dioxus/Wry JS relay and synchronous XHR ordering; desktop Tab is handled on the main thread in event order.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## shortcut-overview-pending-read-presentation-ambiguity.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The opening read is
+  gone; the desktop overview reads pushed preferences on every draw.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## expanded-sidebar-minimum-width-conflicts-with-controls.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the old
+  CSS width arithmetic; the desktop sidebar stops growing in narrow windows and the window minimum is 720 px.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## late-rail-restoration-retains-menu-coordinates.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on Dioxus
+  loading sidebar-width.js without waiting; expansion is now a pushed preference and anchored popovers follow their
+  element every frame.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## templates-close-targets-disabled-bulk-button.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the
+  Dioxus .marked-menu-toggle selector; Templates now returns focus to its own button or the previous focus.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## modified-keyboard-row-activation-marks-instead-of-opens.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the
+  browser's simulated click carrying Shift; GPUI keyboard clicks carry no modifiers and the row maps them to Open.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## disabled-lifecycle-items-receive-roving-focus.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on native
+  HTML disabled; desktop menu items stay focusable when disabled.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## shift-range-uses-refreshed-row-order-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on Dioxus
+  edit acknowledgment versus event dispatch; the desktop app builds the range from the last drawn frame's order.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## empty-filter-actions-escape-keeps-session-marks.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on the
+  Dioxus handler structure; in the desktop app Escape anywhere in the list's column clears marks.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## switcher-late-activity-baseline.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on Dioxus
+  awaiting DOM removal before the launch; the desktop switcher closes and launches synchronously in the pick's handler.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## heading-tests-dismiss-menus.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The tests were in
+  the deleted Playwright suite (6ef88c9a4); GPUI popovers follow their anchor.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## native-header-dispatch-readiness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on a Dioxus
+  use_effect installing the dispatcher; desktop header actions call the row's functions directly.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## selected-session-inverse-ink-on-light-controls.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Caused by a CSS rule
+  passing the selected row's white ink to child surfaces; the desktop app draws menu errors red, uses the darker accent
+  on hover, and shows no focus ring on disabled items.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## short-launcher-notice-reachability.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The CSS caps and
+  hidden overflow were removed; the desktop launcher's shared dialog frame caps notices at 24% with their own scroll and
+  scrolls the whole dialog when needed.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## launcher-target-hover-merges-direction-runs.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The old tooltip
+  renderer is gone; the desktop launcher builds this hover as a host sentence with host and folder each isolated.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## light-native-select-keeps-dark-fill.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Depended on WebKit's
+  native Adwaita select; the desktop select is its own component drawn in the app's colors.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## feedback-discord-header-hides-send.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The old CSS clipped
+  the feedback dialog; the desktop dialog uses the shared frame that scrolls the whole card, with a short-window test.
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## empty-filter-padding-overridden-by-status-rule.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A CSS cascade
+  problem; the desktop app sets the intended padding directly (session_list/filters.rs).
+- Decision: removed without a question under the maintainer's 2026-11-17 instruction to delete findings the GPUI
+  migration made moot (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed on 2026-11-18 during the 2026-11-18 GUI UX triage, without further triage (maintainer's
+  instruction).
+
+## catalog-unencoded-file-url.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: 647f0227b (#3360)
+  deleted oldTerminalSet and the dynamic file:// import from scripts/tensorlake/sandbox-tests.ts; e2e/ no longer exists.
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## style-fixture-overwrites-strikeout-sample.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: 978b01836 (#2948)
+  added the style-removals-and-reset-tie frozen fixture that keeps STRIKEOUT and pins the SGR 29 removal; the old
+  fixture cannot be regenerated by rule.
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The warning was
+  corrected in 350a4b33b (#3329) and carried into the desktop app; the pruning of the user's base image was fixed by
+  da8366b7f (#4085, --no-prune).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## development-peer-version-age-wording-is-reversed.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The sentence was
+  deleted with the old webview app in 1eb4e3751 (#3407); SPEC_impl "Version and skew" now makes the development helm the
+  special case, matching the code.
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## unscoped-tab-log-says-scoped.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The tmux-era code
+  was removed in 647f0227b (#3360); the terminal-host tab path logs whether a scope prefix was actually used.
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## quick-launch-billing-focus.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The desktop
+  launcher's sandbox question always starts on Cancel (launcher/view/sandbox_question.rs), added in 44ce66c71 (#4000).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## welcome-help-location-is-stale.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The desktop Welcome
+  card points to the ? menu at the bottom left (welcome.rs), ported in 164246b30 (#3670).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## omp-npx-guide-omits-tracking-qualification.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The OMP guide now
+  states the npx limits (7c6a64654, #3207).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## feedback-guide-overpromises-window-close-survival.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The sentence was
+  removed from send-feedback.md (8aafdc67a, #3958).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## settings-guide-misstates-device-local-preferences.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The device-local
+  sentence is gone and appearance and sounds are both helm preferences (5c34f0034, #3961).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## launcher-diagnosis-overstates-unscoped-name-rule.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The TODO paragraph
+  with the wrong rule was removed (355a59d88, #3198).
+- Decision: already fixed; recorded without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## attention-dismissal-membership-scope-unresolved.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Confirmed behavior,
+  and specified: SPEC_impl.md says "Dismissal hides the optional Update rows only, until a host outside the set that had
+  an update at the dismissal gains one", and SPEC.md agrees ("until a host outside the dismissed update set gains an
+  update"). The problem-masked host had an update at the dismissal, so it is in the set; trigger, consequence and scope
+  match.
+- Decision: covered by the specification as quoted in the Assessment; removed without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## trailing-bounded-sigterm-sigcont-pid-reuse.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: SPEC_impl.md
+  "Process-number reuse inside a short window is accepted, for now" accepts losing such a race within a short bounded
+  window and stops review findings about such windows; SIGTERM and SIGCONT are sent back to back (hosts/process.rs) with
+  no wait, stored number or asynchronous work between them.
+- Decision: covered by the specification as quoted in the Assessment; removed without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## cleanup-list-error-hides-accepted-progress.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: FILTER.md "Rare,
+  self-correcting glitches and imprecise diagnostics": the trigger is a narrow timing window (no cleanup is granted
+  while a listing read is out, so it is likely unreachable), and the whole consequence is a briefly wrong Trash display
+  that the fresh read sent after deletion corrects; no loss, wrong target, persistent state, false success or security
+  effect.
+- Decision: matches the review filter named in the Assessment; removed without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## desktop-reopen-masks-bundle-read-error.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: FILTER.md "Rare,
+  self-correcting glitches and imprecise diagnostics": the trigger is the app's own version vanishing during startup
+  plus a local read error, and the whole consequence is a misleading "uninstalled" message; no loss, wrong target,
+  persistent state, false success or security effect.
+- Decision: matches the review filter named in the Assessment; removed without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## agent-screen-refusal-missing-path.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: FILTER.md "Rare,
+  self-correcting glitches and imprecise diagnostics": the trigger is an input the shipped caller never sends (a
+  non-UTF-8 capture folder; the tool's script uses ASCII folders it creates), and the whole consequence is an error
+  message that omits the path; the folder is refused before anything starts.
+- Decision: matches the review filter named in the Assessment; removed without asking (2026-11-18 GUI UX triage).
+- Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
+- Execution: complete; removed during the 2026-11-18 GUI UX triage.

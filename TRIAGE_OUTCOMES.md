@@ -1921,3 +1921,1420 @@
 - Completion criteria: Remove the feedback file and its index entry (the two other-bucket duplicates were not part of
   this decision).
 - Execution: planned in `plans/queue/triage-discards-nov18.md`
+
+## stalled-tab-request-resets-healthy-helm-channel.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. The
+  helm's `open_tab` and `close_tab` routes (crates/farhelm-helm/src/sessions.rs) wait on the supervisor with no bound,
+  and the supervisor request documents "There is no timeout" (crates/farhelm-helm/src/client.rs). The desktop app's
+  channel watchdog fires after 30 s with a command in flight (crates/farhelm-helm-client/src/channel.rs), and the reset
+  closes every layer, a half-typed launcher draft included (crates/gui/farhelm-gui/src/session.rs). SPEC_impl.md says
+  "every host-waiting route the GUI sends is bounded" and "N is set above the helm's own bound on host waits". The
+  hung-systemd filter does not apply: the whole window and every host are affected. Unverified: which real host
+  conditions stall these requests that long. Bucket: high (one slow host resets the whole window; a lost draft can be
+  retyped).
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
+- Completion criteria: the tab open and close routes answer within the helm's host-reply bound through the existing
+  `within_host_reply_bound_saying` helper, with a timeout reply saying the operation carries on, and a paused-clock test
+  that a stalled supervisor answer no longer trips the desktop channel's watchdog. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## old-suspension-stamp-labels-later-external-pause.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. Only
+  Farhelm's own Resume clears the stored suspension time (crates/farhelm-helm/src/tensorlake/lifecycle.rs), a later
+  suspension reuses it (crates/farhelm-helm/src/manager.rs), and the app labels it "Suspended from Farhelm" with the old
+  time (crates/gui/farhelm-gui/src/environment_ui.rs). So after a Farhelm Suspend, a resume outside Farhelm and a later
+  Tensorlake idle suspension, details wrongly say Farhelm suspended it, at the old time. SPEC.md "Topology" (Tensorlake
+  hosts): "Its details say since when, and whether Tensorlake suspended it on its own." Bucket: other (diagnostic
+  wording).
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
+- Completion criteria: the stored Farhelm suspension time is cleared once the host is seen running again, without racing
+  a Farhelm Suspend (which holds the connection), so a later suspension is attributed to Tensorlake with its own time;
+  with a test. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
+  removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
+  feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## approval-answer-acknowledged-after-expiry.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. The
+  approval waiter can choose Expired while its answer channel is still alive, and the answer handler's ordinary path
+  ignores whether the answer was used and replies 204 (`let _ = entry.answer.send(verdict)` in
+  crates/farhelm-helm/src/approvals.rs); only Host Add waits for a receipt. The app shows its late-answer notice only on
+  410, so the card disappears silently while the agent got "expired", and an Always allow setting may still have been
+  saved. SPEC_impl.md: the answer route "returns 410 once the request no longer waits", and "the answer gets 410 and the
+  setting stays on, and the GUI's notice says the answer did not take effect". The rare-glitch filter does not apply
+  (success reported for an operation that did not take effect). Bucket: other.
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
+- Completion criteria: ordinary approval answers use the receipt Host Add already uses, so an answer that lost the race
+  with expiry gets 410 and the GUI shows its existing notice; with a paused-clock test. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## stale-reply-test-lacks-processing-witness.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Late-reply test
+  can't tell matched reply from newest reply. Terminal-host Info: the test sends both replies back to back, so a broken
+  "newest reply wins" client also passes. Confirmed; production is correct. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: send reply 1, assert the second call still waits, then reply 2 (~10-15 lines). At execution,
+  fix the test only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism);
+  otherwise treat this as a discard and say so in the execution record. Either way, remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## process-presence-fixture-leaves-sleep-descendant.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Passing test leaves
+  a sleep running up to 30 s. Kills only the stand-in shell; its sleep child lingers ≤30 s. Confirmed, harmless. Bucket:
+  other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix if a group kill or childless stand-in fits (~5-10), else discard. At execution, fix the test
+  only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise
+  treat this as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## checkpoint-rejection-test-asserts-before-processing.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Rejected-checkpoint
+  check runs before the rejection is read. The "no checkpoint" assertion can run before the supervisor processes the
+  rejection. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: move the assertion after the status frame (~3 lines). At execution, fix the test only if the
+  fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## tab-reap-deadline-excludes-listing-request.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Polling helper's 15
+  s limit doesn't cover a stuck check. A hung listing waits for nextest's 5 min kill instead of failing at 15 s.
+  Confirmed, never observed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: wrap each check in the deadline (~5-8). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## held-start-test-lacks-prelaunch-fencing-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Restart test doesn't
+  check the held start ends before the new launch. Would pass if Restart launched first. Confirmed; production orders it
+  right. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (needs a new fixture observation, ~10-20)).
+- Execution: `pending`.
+
+## keeper-can-win-one-shot-interrupted-start-gate.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Second session can
+  take the gate meant for the first. A race can make two reclaim tests fail or time out (false failure, not false pass).
+  Never observed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: copy the sibling test's held marker (~10-15). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## rebuild-order-test-misses-persistence-boundary.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Rebuild test doesn't
+  check the new snapshot is saved before the old is deleted. Compares API call order only. Confirmed; production order
+  is as specified. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (needs a new fake hook, ~20-40)).
+- Execution: `pending`.
+
+## stty-tool-format-mismatch.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Terminal-settings
+  test compares two different stty programs. Fails on a Mac with GNU coreutils first on PATH. Confirmed from source.
+  Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: give the reference command the host's PATH (~2 lines). At execution, fix the test only if
+  the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this
+  as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## closed-stdin-epipe-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: The fake-ssh test
+  never proves the failed write happened. A test of a test fixture; a buffering refactor would leave it untested.
+  Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (needs a forwarder witness, ~15-25)).
+- Execution: `pending`.
+
+## notification-cleanup-row-premise.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Upgrade test checks
+  notification cleanup without first showing it exists. An already-empty table would pass. Confirmed; broader coverage
+  exists elsewhere. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert the count is 1 before the delete (~6). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## successor-exit-processing-witness.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Exit-code test may
+  read before the new supervisor caught up. A slow journal replay makes a correct restart fail the test. Never observed.
+  Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: wait for the dead agent first (~3). At execution, fix the test only if the fix is obvious
+  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
+  say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## hook-waiter-missing-invocation-binding.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A repeated hook
+  callback can be credited with an earlier one's clean finish. Markers aren't tied to one call; no redraw happens in the
+  fixture as written. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (needs per-call nonces, ~30-60)).
+- Execution: `pending`.
+
+## tab-survival-missing-live-exchange.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Tab-survival test
+  never asks the shell to do anything after restart. A shell that died in the handoff could still pass. Confirmed gap.
+  Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: run a command in the shell after reattach (~8-10, existing helper). At execution, fix the
+  test only if the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism);
+  otherwise treat this as a discard and say so in the execution record. Either way, remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## claude-recreation-test-clears-old-stamp.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage:
+  Recreated-Claude-login test clears the stamp it should check. Would pass without the incarnation comparison.
+  Confirmed; production has it. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: add a sibling test that keeps the old stamp (~25). At execution, fix the test only if the
+  fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## catalog-retry-test-does-not-witness-inventory.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Restart-with catalog
+  Retry test doesn't prove the retried catalog was used. The desktop port inherited the browser test's gap: Retry clears
+  the error on click and the sent body is the same either way. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert a catalog-only effect (~5-15). At execution, fix the test only if the fix is obvious
+  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
+  say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## destructive-action-tests-omit-request-targets.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Destructive-action
+  tests don't check which session/host the request targets. ~20 desktop tests would pass if Delete/Stop/Replace went to
+  a different target. Confirmed at spot-checked sites. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard under the rule (80-150 lines via shared
+  helpers); say so if you want it kept).
+- Execution: `pending`.
+
+## launcher-escalation-test-misses-banner-premise.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Agent switch clears
+  the banner" test never checks the banner appeared. Passes if the banner never showed. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert the banner in the fixture (~3). At execution, fix the test only if the fix is obvious
+  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
+  say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## launcher-model-height-test-accepts-collapsed-list.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Model-list height
+  test passes for a zero-height list. Checks only an upper bound. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: add a lower bound (~5-10). At execution, fix the test only if the fix is obvious and trivial
+  (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and say so in the
+  execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## checkout-fixture-inherits-git-repository-selector.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Test Git fixtures
+  can write into another repo under an inherited GIT_DIR. Two Python release-test fixtures don't scrub GIT_* for their
+  git children (the Rust part is gone). Archive precedents #1798/#2158 fixed the same class. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: child-only env scrub in both fixtures (~15-25). At execution, fix the test only if the fix
+  is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## signal-test-child-lacks-unwind-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Test processes
+  outlive a failed test because cleanup is armed late. Several fixtures start stand-ins before their kill-and-reap
+  guard; two never end on their own. Only on already-failing runs. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (all sites ~100-250); say so if you want
+  the two never-ending stand-ins fixed (~20-40)).
+- Execution: `pending`.
+
+## inherited-lock-test-self-dup.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Version-lock test
+  may never hand the lock over. If the lock file already has fd 8, dup2(8,8) leaves it close-on-exec and the test proves
+  nothing. Conditional; sibling test handles it. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: copy the sibling's guard and assert the premise (~10-15). At execution, fix the test only if
+  the fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this
+  as a discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-client-close-test-lacks-writer-premise.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Endless sender"
+  test can run before the sender starts. Would still pass if the final read lost its limit. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (no clear witness shape)).
+- Execution: `pending`.
+
+## stderr-readiness-lacks-live-holder-premise.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Don't wait for
+  stderr" test never checks something holds stderr. The holder sleep is never shown alive. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: require the holder pid and assert it alive (~5-10). At execution, fix the test only if the
+  fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## late-listener-blocks-start-test-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A slow stand-in
+  listener can hang a test until the runner kills it. accept() without a deadline; 300 s kill instead of prompt failure.
+  Not observed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: accept with a deadline (~10-15). At execution, fix the test only if the fix is obvious and
+  trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and say so
+  in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## staged-start-test-lacks-reader-drain-witness.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Nothing reaches a
+  terminal before its owner is recorded" test can miss early bytes. No witness that the reader drained. Confirmed;
+  production correct. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (needs a new fixture mechanism, ~30-60)).
+- Execution: `pending`.
+
+## readiness-test-does-not-establish-first-stage-exit.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Start returns after
+  its first stage exits" test can't tell. A live first stage also passes. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: also assert the parent isn't a live child (~5-10). At execution, fix the test only if the
+  fix is obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## peak-memory-test-lacks-baseline-headroom.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Snapshot memory test
+  could hide a spike under an earlier peak. The main case got a premise in #3209; the fixups case deliberately has none,
+  and a false pass is unshown. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard the remainder (record #3209 as fixing the
+  rest)).
+- Execution: `pending`.
+
+## malformed-snapshot-fixtures-mask-intended-validators.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Corrupt-snapshot
+  fixtures are refused by a size check before the check they name. Five fixtures are truncated, so the named validators
+  could regress unnoticed. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard under the rule (~30-50 lines); say so if
+  you want it kept).
+- Execution: `pending`.
+
+## recording-loader-rejects-valid-json-field-spacing.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Private-recording
+  loader rejects JSON with a space before the colon. Maintainer-only ignored test; legal JSON panics. Confirmed. Bucket:
+  other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: skip whitespace before the colon (~5). At execution, fix the test only if the fix is obvious
+  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
+  say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-removed-live-alternate-screen-reattach-oracle.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: No test checks
+  reconnecting to a live full-screen program shows its screen. The tmux-era test was deleted without a terminal-host
+  replacement. Confirmed coverage gap. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: Remove the feedback file and its index entry (discard (a new test is ~40-60); say so if you want
+  it added).
+- Execution: `pending`.
+
+## trailing-converted-old-session-warning-retention-assertion-vacuous-all.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Old-terminal test
+  passes even if the old warning vanished. `.all` on a possibly empty list. Confirmed. Bucket: other.
+- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
+  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
+  otherwise discard.
+- Completion criteria: fix: assert exactly one resolved warning (~3-5). At execution, fix the test only if the fix is
+  obvious and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a
+  discard and say so in the execution record. Either way, remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## transition-accessor-comment.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Store test comment
+  names a method that no longer exists. Transition::pane is now Transition::address. Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comment (1 line)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## settings-close-tooltip-promises-immediate-discard.md
+
+- Outcome: `fix spec+code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Settings' Close
+  tooltip says edits are discarded, but recipe edits ask first. Both the tooltip and SPEC.md "closing discards unsaved
+  fields" omit the recipe leave question. Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec+code: add the exception to both (~4)). Size gate: about 100 lines
+  of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over
+  that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## trailing-spec-automatic-tab-reap-omits-failed-close-retry.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Spec sentence on
+  automatic tab cleanup forgets the failed-close retry. SPEC_impl contradicts itself; the code follows the more specific
+  rule. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec (~2-4)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## trailing-agent-file-size-only-read-consistency-docstring.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Comment on sandbox
+  settings reads overstates what it detects. Only size is compared; the later write's digest guard covers the rest.
+  Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comment (~3)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## trailing-late-activity-test-doc-retains-removed-screen-read-await.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Test explanation
+  names a removed screen-read wait. The read is now synchronous; the test is still valid. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comment (~3)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Listing comments say
+  an unreadable launch file fails the list. Contradicts SPEC_impl ("does not fail lists") and the code. Confirmed.
+  Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comments (~4)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## trailing-status-documentation-probe-versus-processed-exit-evidence.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Status comments say
+  a terminal can look dead before its exit is processed. The code reads evidence that stays live until the exit record
+  is processed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comments (~6)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## bash-source-admission-retains-literal-splitter.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Some valid Bash
+  commands are refused despite SPEC's "reaches Bash unchanged". The shell-word check and exact placeholder slots are
+  deliberate in SPEC_impl; SPEC.md promises more. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec: name the limits in SPEC.md (~3-5); widening the code is
+  ~80-150). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
+  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
+  and its index entry in the same change.
+- Execution: `pending`.
+
+## peer-text-normalization-contract-overstates-retained-scope.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "All host text is
+  normalized the same way" is too broad. Same section keeps raw bytes for diagnostics and identities. Spec text only.
+  Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec (~2)). Size gate: about 100 lines of diff (code, tests and docs,
+  not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
+  the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## keyboard-overview-omits-in-sequence-number-action.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shortcuts overview
+  doesn't say what a number chord does inside a sequence. Inside a sequence it queues the unfinished word first; no row
+  says so. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix: add an in-sequence row (~5)). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## digit-leading-template-limit-overstated.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Spec and docs say
+  digit-leading template names can't be typed. On Shift-digit layouts (French) they can. Confirmed in code. Bucket:
+  other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec + docs page: qualify to a bare digit (~4)). Size gate: about 100
+  lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment);
+  over that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the
+  same change.
+- Execution: `pending`.
+
+## checkout-refusal-conflicts-with-failed-save-rule.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: General "failed save
+  is discarded" rule ignores the checkout-folder exception. Code keeps the refused draft as SPEC.md:1700 says; the
+  general rule doesn't name its exceptions. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec: general rule names its exceptions (~2-5, shared with the next
+  item)). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
+  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
+  and its index entry in the same change.
+- Execution: `pending`.
+
+## failed-template-save-retains-attempted-draft.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Template editor
+  keeps a failed draft, against the general rule. SPEC.md now says the editor keeps it (#3597); same unacknowledged
+  conflict as above. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec, together with the item above). Size gate: about 100 lines of
+  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## omp-permission-docs-retain-yolo-default.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: SPEC_impl still says
+  OMP defaults to YOLO. SPEC.md and code say Guarded is the default. Confirmed. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec (~2)). Size gate: about 100 lines of diff (code, tests and docs,
+  not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
+  the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## omp-readiness-comment-excludes-early-save.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Comment says OMP
+  saves only after the first reply. SPEC says OMP saves a new conversation eagerly. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix comment (~2)). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## gui-migration-comments-need-current-contracts.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Desktop code
+  comments still describe the migration as unfinished. Several contradict shipped behavior; 358 lines mention
+  coordinator/orchestrator overall. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix only the comments that are now false (~15 sites, ~60 lines), not a
+  wholesale sweep). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
+  removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
+  feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## desktop-state-rewrite-blocks-startup.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A bad desktop
+  settings file stops the app at a startup alert. Only an outside edit or corruption produces a bad file; read/write
+  failures fall under SPEC.md "Healthy local filesystems". The refusal is deliberate. Bucket: re-bucketed from high to
+  other (no established route to a high consequence).
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## attention-list-refresh-failure-scope-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A host whose session
+  list stops refreshing gets no attention row. SPEC's attention list is an enumerated list; Hosts details does show the
+  failure. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## failed-setup-refresh-overwrites-held-lifecycle-status.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: After a failed
+  registry sync, a refresh shows Connecting over a running Suspend. Needs the helm's own database read to fail; the
+  display corrects at completion. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## notification-read-failure-leaves-stale-cell.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A failed
+  notification reload leaves the bell wrong until the next event. Needs a local SQLite read failure; next lifecycle
+  event or restart fixes it. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## attention-save-error-can-exhaust-list-height.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A save error plus a
+  wrapped header leaves no room for attention rows. Unreachable at the app's 720×560 minimum window. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## short-progress-card-can-hide-overflow-notice.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A very short
+  progress card clips "Full details in Hosts". Card limit is ≥550 px at the minimum window; effectively unreachable.
+  Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## open-source-notices-window-failure-is-silent.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Open-Source Notices
+  does nothing if its window can't open. No realistic macOS trigger for a failed window creation. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## desktop-startup-reopen-can-wait-on-reused-pid.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Reopen helper waits
+  forever if the old process number is reused. Needs macOS to reuse a pid within ~0.1 s. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## open-types-acknowledgement-only-in-dialog.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "The helm stores any
+  file-type list without the acknowledgement". Incorrect: "acknowledged save" means a save the helm stores first, not a
+  user acknowledgement step. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Second copy of the
+  relay-ordering comment finding. Duplicate of the queued
+  trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Stand-in cleanup
+  does not hide destructive actions. Refuted by its own reviewer; the fixture counts destroys. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Host-phase test also
+  misses Deleting. Duplicate of the queued trailing-host-phase-vocabulary-test-omits-stopped.md. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Nothing was
+  decided" wording does not promise nothing changed. Refuted; the stronger comment was in deleted code and is tracked
+  separately. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Dropped client can't
+  strand a half-registered environment launch. Refuted by its own reviewer; the work is helm-owned. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Preparation progress
+  steps are not misattributed. Refuted by its own reviewer. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Failed-cleanup path
+  loses the "SSH session limit" explanation. A less specific warning when two failures coincide; the failure is still
+  reported. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Recipe deletion
+  keeps its hold when the client disconnects. Refuted; the pruning it set aside is fixed (#4085). Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: 500-byte
+  launch-error excerpt briefly holds more text. A small fraction of an allocation the same path already makes; no
+  latency shown. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trailing-launch-excerpt-whole-row-intermediate-allocation.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Launch-error excerpt
+  memory + earlier-run quoting. Quoting part is covered by plan triage-misc-nov18; memory part duplicates the item
+  above. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## gone-retry-forgets-pinned-foreground-child.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A reconnect that
+  finds the host gone forgets the foreground program. The remaining route is inside SPEC's accepted limit (unscoped
+  host, a program that hides its environment). Bucket: re-bucketed from high to other (no established route to a high
+  consequence).
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## normal-quit-misses-empty-download-directory.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Quit can leave an
+  empty hidden download staging folder. Microsecond race; no file lost. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## numeric-version-guard-hides-artifact-filenames.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Filenames starting
+  with a version number get no file actions. 1.2rc1-notes.txt is treated as a version; ./ works. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## tab-helper-can-fail-after-open-succeeds.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A slow tab can
+  report opened, then vanish without the folder error. The plan unusable-folder-refusals removes the main case; the
+  remainder needs the folder to change mid-start. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## spare-ancestry-fallback-skips-destination-recheck.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Refused prepared
+  checkout clones into a swapped-in folder. Needs the user to swap the allocated folder during the fetch; nothing
+  existing is lost. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## network-state-wal-failure-topology-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Database journal
+  mode on a network-mounted state folder. No supported layout producing the failure was found. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## muse-unmarked-same-process-child-attribution.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A Muse sub-agent
+  report might be taken as the session's conversation. No Muse version is known to send such a report. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## refused-add-rewrites-new-destination-owner.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Refused host setup
+  can rewrite another busy host's install paths. Needs two retargets inside a millisecond window with no remote work.
+  Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## desktop-owner-record-lacks-boot-domain.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Linux desktop
+  supervisor record can match a different process after reboot. No realistic match shown; the stop is an orderly
+  SIGTERM. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## changed-project-key-cleanup-absence-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: After switching to a
+  key for another Tensorlake project, cleanup may forget resources. Depends on unverified provider 404-vs-403 behavior.
+  Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## first-state-directory-ancestor-durability-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: First-run state
+  folder's parents aren't explicitly flushed. No supported filesystem shown to lose it. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## ambiguous-codex-seed-renewal.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Re-sending a saved
+  Codex login after an uncertain upload can overwrite a renewed one. The replay is accepted in SPEC_impl; the
+  broken-login consequence is unverified. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## launcher-live-draft-submission-source-gap.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Launcher reads
+  current choices at submit (unresolved). All cited code is the deleted Dioxus launcher; no GPUI sequence found. The
+  drawn-frame plan sets the rule. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## header-copy-warning-survives-different-copy.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Copy warning
+  describes the earlier field for up to 1.5 s. Clipboard bytes are correct; self-corrects. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## secondary-button-erases-intercepted-primary-ownership.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A second mouse
+  button during a link click stops the link from opening. Chorded gesture; a second click recovers; nothing leaks to the
+  program. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## truncated-empty-filter-result-omits-clear-actions.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Empty result from a
+  capped listing has no Show all links. Deliberate in code; only above the per-host cap; the rail still works. Bucket:
+  other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## transfer-result-height-can-hide-destination.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A long download
+  result line can be cut off. Capped at three lines; full text in the accessible name. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## backup-warning-can-imply-inconsistent-live-copy.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Backup sentence in
+  v0.33.0 release notes reads like a recipe. Published notes are frozen; the sentence isn't false. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## long-launch-status-crops-painted-edge.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Launch progress
+  pill's edge runs off screen. Old CSS cause is gone; desktop layout likely fine (unmeasured). Cosmetic. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## subline-progress-preview-hides-diagnosis.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Host diagnostic
+  preview can round to zero lines. Ported rounding; a real window producing it is unverified. Bucket: other.
+- Decision: the user picked "Discard all" (2026-11-18 GUI UX triage page, QC): unestablished route, bounded internal
+  race, below the minimum window, unmeasured perf, refuted by its own reviewer, or a duplicate of a queued item.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## layout-preference-save-failures-are-silent.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Sidebar width, text
+  size and rail expansion revert silently after a failed save. SPEC.md's best-effort list doesn't name these three (made
+  helm preferences 2026-11-13); trigger is a helm database write failure. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix spec: add the three to the best-effort list (~3). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
+  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## closing-settings-can-hide-ntfy-save-refusal.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Closing Settings
+  before an ntfy save is refused loses the refusal. SPEC already drops errors on close for some switches, not for ntfy.
+  Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix spec: accept dropping the refusal on close, as for the switches (~2). Size gate: about 100
+  lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment);
+  over that, execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the
+  same change.
+- Execution: `pending`.
+
+## trailing-retired-session-tcp-relay-cache-only-admission.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A port tunnel can
+  open for a retired container session if its cached record is unreadable. The supervisor's tunnel start doesn't check
+  retirement (uploads do); the helm comment claiming it does is false. No shipped trigger. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: supervisor refuses tunnels for retired sessions + fix the comment (~10-15 + test). Size
+  gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the
+  changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and
+  its index entry in the same change.
+- Execution: `pending`.
+
+## recovered-agent-retains-stale-launch-hold-handle.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: After a terminal
+  reconnect, Mac supervisor replacement waits 3 s and warns wrongly. The shutdown check reads the ended terminal's
+  handle. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code (~15-30). Size gate: about 100 lines of diff (code, tests and docs, not counting
+  TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings the item back
+  to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## agent-endpoint-refuses-valid-at-sign-path.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Endpoint URL with @
+  in its path is refused as credentials. https://api.example.com/@team/v1 can't be saved. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: refuse @ only in the host part (~20 with tests). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## approval-scrollports-lack-keyboard-entry.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Keyboard users can't
+  scroll clipped approval facts. SPEC.md: every scrollable region gets a keyboard tab stop. Confirmed in desktop code.
+  Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: tab stop on overflowing one-line facts (~40-80). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## header-questions-follow-anchor-across-sessions.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A header question
+  can show under the next session's button. Only route found: the open session is filtered out and deleted elsewhere;
+  answering is then refused by the helm. Bucket: re-bucketed from high to other (no established route to a high
+  consequence).
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: session key in the anchors, as the carets do (~45 with test); bucket other. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
+  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
+  entry in the same change.
+- Execution: `pending`.
+
+## session-navigation-interrupts-close-all.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Switching sessions
+  during tunnel Close all leaves the rest open. SPEC: Close all attempts every listener shown. Confirmed in desktop
+  code. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: keep the run alive until it ends (~10-20 + test). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## bulk-completion-focuses-sort.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A finished bulk
+  action sends focus to the sort title, not the terminal. SPEC says focus goes to the terminal when a control goes away;
+  code chose consistency with Clear/Escape. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: send focus home on completion, and Clear/Escape alike (~3-10 + test). Size gate: about
+  100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
+  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
+  entry in the same change.
+- Execution: `pending`.
+
+## selected-template-state-contrast.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Selected template
+  barely stands out in Dark. 2.76:1 against the dialog, no other marker. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: palette tweak or selected marker (~2-30). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
+  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## selected-template-shortcut-contrast.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Shortcut hint is
+  unreadable on the selected template. Muted ink on accent fill, 1.14:1 in Light. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: use the inverse ink like the summary line (~3-10). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## sentence-case-sweep-leaves-authored-lowercase-text.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Launcher held-field
+  refusal starts lowercase. "agent type cannot change here: ..." in Restart/Replace with. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: capitalize (~10 incl. tests). Size gate: about 100 lines of diff (code, tests and docs,
+  not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and brings
+  the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## rail-tooltip-merges-direction-boundaries.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Host tooltips join
+  host text with app words as plain text. SPEC_impl "Host-supplied text": host text is never concatenated with app words
+  outside a host sentence. Confirmed in three call sites. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: build them as host sentences (~30-50). Size gate: about 100 lines of diff (code, tests
+  and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks
+  and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## brace-literal-command-display-is-bash-inexact.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Displayed command
+  shows x{a,b} unquoted. Bash would expand it; what runs is one literal argument. Display only. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: quote words with { } ! ^ (~5-15). Size gate: about 100 lines of diff (code, tests and
+  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
+  brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## template-collision-refusal-mixes-unisolated-name.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: "Name already taken"
+  embeds the name as plain debug-quoted text. Template names are shown as host text elsewhere. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: build the refusal as a host sentence (~5-15). Size gate: about 100 lines of diff (code,
+  tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution
+  blocks and brings the item back to the user. Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## gui-labels-and-refusals-name-different-actions.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Dialogs and messages
+  name the same action differently, a few wrongly. E.g. "Seen:" and "Sandbox:" prefixes, the model Retry tooltip, the
+  tab-limit placeholder. Confirmed at spot-checked sites. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: only the wrong-action/wrong-cause messages (~30-60). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: `pending`.
+
+## linux-sound-resolves-player-on-path.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Linux notification
+  sounds run the first pw-play on PATH. No route lets host content influence it; the user's PATH is theirs. Bucket:
+  other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: one SPEC.md paragraph (about 5 lines, in the trust section) states that the user's own local
+  configuration is trusted and theirs to keep sane: helper programs the desktop app runs are found on the user's PATH,
+  flags a custom command passes to its agent are the user's (Farhelm's added hook flags may clash with them), and an
+  agent settings file the user grew near Farhelm's read limit is theirs to manage. No code change. Remove this feedback
+  file and the other two QF items (muse-current-hook-override-semantics-unresolved.md,
+  agent-settings-write-exceeds-next-read-limit.md), with their index entries, in the same change.
+- Execution: `pending`.
+
+## muse-current-hook-override-semantics-unresolved.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: A Muse custom
+  command that sets its own hooks may clash with Farhelm's. Farhelm adds its hook flags without reading the rest; the
+  docs already say such flags are yours to avoid. Bucket: other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
+- Execution: `pending`.
+
+## agent-settings-write-exceeds-next-read-limit.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Saving agent
+  settings can push a near-1 MiB file over the next read's limit. Only for agent settings files near 1 MiB; realistic
+  files are far smaller. Bucket: other.
+- Decision: the user picked "Yes, one SPEC paragraph" (2026-11-18 GUI UX triage page, QF). Principle: the user's own
+  local configuration is theirs to keep sane; Farhelm does not defend against it (helper programs found on the user's
+  PATH, a custom command's own agent flags, unusually large agent settings files).
+- Completion criteria: carried by `linux-sound-resolves-player-on-path.md`.
+- Execution: `pending`.
+
+## irreversible-confirmation-focus-contract.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Two focus rules
+  compete for permanent trash deletion. SPEC.md says trash deletion starts on its confirming answer, then that risky
+  irreversible actions start on Cancel. The app follows each rule in different places. Bucket: other.
+- Decision: the user picked "Confirm-first stays for the named list" (2026-11-18 GUI UX triage page, QG), in their
+  words: "the trash cdeletion case is when the user is already in a flow where the intent is completely obvious and
+  clear so a confirm makes sense. you're not being prompted for a "whatch out, this might be an unexpected risk" (like
+  you are when you try to launch yolo on a box w/o yolo allowed for example)." Principle: Confirm-first applies where
+  the user is already in a flow whose intent is plain; Cancel-first is for prompts warning of an unexpected risk.
+- Completion criteria: SPEC.md's focus rules say which wins: confirmations named in the Confirm-first list (permanent
+  trash deletion among them) start on their confirming answer because the user is already in a flow whose intent is
+  plain, and the Cancel-first rule is for prompts that warn of an unexpected risk (YOLO on a host that does not allow
+  it, for example). No code change (about 2-3 lines). Remove the feedback file and its index entry in the same change.
+- Execution: `pending`.
+
+## sequence-following-enter-does-not-count-as-moving-on.md
+
+- Outcome: `fix spec+code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed in source.
+  After a Cmd+X quick-launch sequence is launched with Enter, the terminal keeps focus while the launch is pending. The
+  moved-on check (crates/gui/farhelm-gui/src/focus.rs `note_press`) treats a press as a repeat whenever it is the same
+  keystroke on the same focused control as the previous press, with no time limit, so if the first key the user presses
+  afterwards is Enter in that terminal (reaching the shell or agent), it does not count as moving on and the finished
+  launch still switches to its session and opens the naming dialog. SPEC.md "Opening and closing" exempts only "an
+  accidental double-click or repeated Enter on the launcher's own submit"; the code applies it to any control. Bucket:
+  high (ordinary but narrow trigger: Enter must be the first key; the app takes the keyboard to a dialog; nothing is
+  lost).
+- Decision: the user picked "Drop the exemption everywhere" (2026-11-18 GUI UX triage page, QE-2, round 5), after asking
+  in their words: "except for esc spamming I don't agree about swalling when the user is the one initiating the irst
+  press to make the dialog/whatever go away. if we apply that consistently, then this seems to also go away - for both
+  the launcher window AND the sequence case". Principle: when the user's own press dismisses, answers or submits
+  something, their next presses are ordinary input; they reach whatever has focus and count as moving on. Only
+  Escape-spamming out of menus and dialogs gets the half-second swallow. Auto-repeat of a held key and a lone modifier
+  are not new presses and still do not count as moving on.
+- Completion criteria: SPEC.md "Opening and closing" drops the exemption for "an accidental double-click or repeated
+  Enter on the launcher's own submit" (keeping auto-repeat and a lone modifier), and states the principle above with
+  `enter-falls-through-after-dismiss-or-approval.md`'s fence change (one paragraph may carry both). The moved-on count
+  in the desktop app counts every fresh press and click after the launch's answer, from the launcher window and from a
+  quick-launch sequence; the time-unbounded same-key check goes. Tests: a delayed launch where a second Enter on Launch,
+  and an Enter in the terminal after a sequence, each leave the user where they are with the "Started" pill. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog
+  fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file and its index
+  entry in the same change.
+- Execution: `pending`.
+
+## enter-falls-through-after-dismiss-or-approval.md
+
+- Outcome: `fix spec+code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed in source.
+  After Enter dismisses an empty quick-launch sequence or answers an approval card, focus is (or returns to) the
+  terminal, and the user's own held Enter or a second tap reaches the shell or agent. The pill and cards are outside the
+  after-close fence, which SPEC.md's focus rules give to dialogs and menus: "After an Enter or Escape closes the last
+  open dialog or menu, the same key held or pressed again within half a second goes nowhere". In both routes the surface
+  goes away because the user answered it. Bucket: high as filed.
+- Decision: the user said the case itself is fine ("(1) is fine", rounds 2-3: the user actually answered, nothing else
+  removed the surface) and picked "Keep this case as is, and narrow the fence to Escape" (2026-11-18 GUI UX triage page,
+  QE-1, round 5), applying the principle recorded with `sequence-following-enter-does-not-count-as-moving-on.md`:
+  outside Escape-spamming, presses after the user's own answer are ordinary input.
+- Completion criteria: no change for the sequence pill or approval cards. SPEC.md's after-close fence keeps the
+  half-second swallow for Escape only: after an Escape closes the last open dialog or menu, Escape held or pressed again
+  within half a second goes nowhere; an Enter after an Enter closed a dialog or menu reaches what has focus like any
+  press. The desktop app's focus code (crates/gui/farhelm-gui/src/focus.rs closing-press repeat handling) and its tests
+  follow. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
+  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
+  and its index entry in the same change.
+- Execution: `pending`.
