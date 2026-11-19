@@ -2459,10 +2459,6 @@ consequences.
   — Keep the target host alive through conformance observation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-status-documentation-probe-versus-processed-exit-evidence.md`](trailing-status-documentation-probe-versus-processed-exit-evidence.md)
-  — Status documentation conflates process liveness with processed exit evidence. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-retired-tmux-periodic-warning-contract.md`](trailing-retired-tmux-periodic-warning-contract.md) —
   Old-terminal warning tests are obsolete under the migration contract. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
