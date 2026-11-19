@@ -81,3 +81,81 @@ releasing the Escape guard had to start with Escape to test the active guard. Th
 standard launcher returns to terminal focus before the follow-up Enter. The bulk review found an after-frame case where
 a vanished control could keep focus. The fix checks that the same control still holds focus before recovering. The
 marked-list tests exercise the normal recovery paths. All four drafts cleared the review gate after these fixes.
+
+### Landing
+
+#### What landed with it
+
+It landed in a round of two plans, gui-ux-enter-and-focus and settings-app-version. Since its base, main gained the
+previous round's plans, among them drawn-frame-actions (session actions and the launcher act only on what the user was
+shown) and one-helm-per-supervisor, and a repair of the triage archive, which an earlier landing had garbled. The Enter
+change fits drawn-frame-actions' rule: without the half-second window in which a second Enter was swallowed, a quick
+second Enter reaches whatever has focus, and if that is a control that acts only on what was shown, the control itself
+still refuses a press before its frame is shown. The reviewer found no other interaction.
+
+At your request this landing was reviewed with extra skepticism, by me and by an independent reviewer, looking for
+over-building, weak code or documentation, and anything a user sees that makes no sense. The rule change itself is
+small, as the block's answer expected, and the regression tests check that the terminal had focus before the second
+Enter and would fail on the old code. The Enter PR came to 229 changed lines against the allowance of about 200 given
+when it blocked; I accepted it, since most of it replaces old Enter expectations in tests.
+
+#### Fixes made while landing
+
+- **A held Enter typed into the terminal.** The plan exempted Enter from the rule that a held key's auto-repeat never
+  crosses into the control focus returns to. So the auto-repeat of the Enter that answered a question or pressed Launch
+  reached the terminal, and if the agent's prompt held a draft, that repeat submitted it. The outcome asked only for a
+  quick second press of Enter to get through, and auto-repeat is not a new press. A held Enter's repeat is now swallowed
+  again; a fresh Enter still goes straight through. The test and SPEC_impl.md say so.
+- **A comment was left false.** A comment on closing a session header's caret menu with Tab said that any other way of
+  closing it would swallow a second Tab pressed within half a second. Since this plan, only Escape has that guard. The
+  comment now says so, and why closing with Tab is still used.
+
+#### Things you should know that the report does not say
+
+- **A new recovery step is untested.** When a control that has keyboard focus disappears from the screen without the
+  framework noticing, focus now moves on to where the app sends it after a closed bar or dialog. The case was found by
+  reading the UI framework's code rather than reproduced, it came from the executor's own review, and no test fails
+  without it. Its comment also contradicts the paragraph above it ("never takes focus from a control that holds it").
+  Possible follow-up: a test, or removing it.
+- **Choosing Pin, Mute or Mark read from the menu for marked sessions still moves focus to the sort-order heading above
+  the session list,** while Clear, Escape, and bulk Stop or Delete now move it back to the open session. Users now get
+  two landing spots. This was outside the plan's outcome.
+
+#### Checks
+
+The two plans change the desktop app's GUI crate, the specs, two docs pages and the triage archive. The landing ran the
+lints, the GUI crate's whole suite, the app's end-to-end smoke, the reference screenshots (goldens) and the website
+build. Builds ran locally; the GUI suite and the smoke ran on boat sandboxes (cloud VMs), from binaries built locally.
+
+On the plans as delivered, stacked on main as it stood when the round started:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, and
+  `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings` once without and once with `--features agent`:
+  passed.
+- `cargo nextest run -p farhelm-gui`, from a locally built archive, split in three across boats: 1097, 1036 and 1030
+  passed, 3163 in all, with no runtime skips (`2b47e057-bb12-44ed-9b4e-0eb107bd7f93`,
+  `33b0a8db-29ec-4348-81d9-7fe3eb4f3c59`, `da09c3c6-1297-47b9-839b-2960e7aaf280`).
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on a boat: 49 of its 50 steps passed and the clipboard
+  paste step was skipped, as always on Linux (`0d719710-e8fc-4f7d-a99e-4a98147bf820`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`f2fafc15-3eab-4786-8d26-dee83ba73b58`).
+- The docs website build (`bun install --frozen-lockfile && bun run build` in `website/`): passed.
+
+On the fixed tree (a held Enter's repeat, the Settings help line and its test, comments and SPEC wording), rebased onto
+main with the archive repair:
+
+- `cargo fmt --all -- --check`, `dprint check` and `cargo clippy --locked -p farhelm-gui --all-targets -- -D warnings`:
+  passed.
+- The focus, Settings, session pane, marked-rows, bulk action, launcher launch and quick launch tests, locally: 607
+  passed (`5edad3a8-c790-4866-86f9-51d2b58187ca`).
+- `python3 scripts/check-gui-goldens.py`, locally: passed (`0b4c779b-c1c6-4b49-af6e-c450b6a5bc5e`).
+
+The boat suites, the smoke and the website build were reused for the fixed tree: after them only the changes above,
+which the focused runs cover, and the archive repair, which only restores text. The sleep check and the clippy run with
+`--features agent` were reused too: the changed tests only changed assertions and added no delays, and no feature-gated
+code changed.
+
+Skipped:
+
+- The rest of the Rust workspace: the plans stay in the GUI crate.
+- The Mac-only checks: no Mac-specific code changed.
