@@ -47,12 +47,12 @@ use farhelm_helm_client::PushedEntry;
 use farhelm_helm_client::{FileStat, PushedChanges, PushedState};
 use farhelm_proto::CheckoutTrashListing;
 use farhelm_proto::session_requests::LaunchHistoryReply;
-use farhelm_proto::ui_channel::HostView;
+use farhelm_proto::ui_channel::{HostView, SessionRow};
 #[cfg(any(feature = "agent", test))]
 use farhelm_proto::{
     ArchivedCheckout, DownloadFileInfo, DownloadFileStatus, LaunchSelection,
     session_requests::{FolderHistoryEntry, LaunchHistoryEntry},
-    ui_channel::{Collection, SessionRow},
+    ui_channel::Collection,
 };
 use gpui::{App, Global, Pixels, Size, px, size};
 
@@ -218,15 +218,17 @@ pub fn start_dialogs_off(cx: &App) -> bool {
 // than "pinned" in the names here, because pinning a session to the top of the list is a product feature.
 //
 // Why the store: it is the one copy of pushed state every view reads (the row, the session pane's details bar, the
-// summary card, the quick switcher, the launcher's default folder), so one rewrite there reaches all of them, as the
-// old rewrite of both the listing and the detail reply did. Nothing else of what the helm pushes is rewritten, the
-// order included (the host values below are answers to reads, not pushed state): the list's order is the helm's (`CollectionMeta::order`). The summary card's "Started" stays the real creation time, so it reads
-// later than the staged last activity.
+// summary card, the launcher's default folder), so one rewrite there reaches all of them. The quick switcher reads its
+// own list from the helm and applies the same values to that reply before displaying or matching its rows. Nothing
+// else of what the helm pushes is rewritten, the order included (the host values below are answers to reads, not pushed
+// state): both lists keep the helm's order (`CollectionMeta::order` for the pushed one). The summary card's "Started"
+// stays the real creation time, so it reads later than the staged last activity.
 //
 // Never in a release build. Everything that reads or applies the values is behind `any(feature = "agent", test)`, the
 // `agent` feature cannot compile into an optimized build (the guard at the top of this file), and every other build
-// gets [`staged_snapshot`] and [`staged_changes`] as pass-throughs. `crates/farhelm-desktop/tests/release_build.rs`
-// checks an ordinary build of the app for [`SESSION_PINS_ENV`]'s value, which it reads from this file.
+// gets [`staged_snapshot`], [`staged_changes`] and [`stage_session_rows`] as pass-throughs.
+// `crates/farhelm-desktop/tests/release_build.rs` checks an ordinary build of the app for [`SESSION_PINS_ENV`]'s value,
+// which it reads from this file.
 
 /// The variable naming the pins file, `{"sessions": [{"title": ..., "age": ..., "cwd": ...}], "hosts": [...]}`: for
 /// each session the scenario titles, its age in seconds and the folder its row shows, and for each scenario host, by
@@ -237,11 +239,11 @@ pub const SESSION_PINS_ENV: &str = "FARHELM_DESKTOP_AGENT_SESSION_PINS";
 /// A staged run's session values, by title, with the anchor their ages count back from. Installed as a global by an
 /// agent build launched with [`SESSION_PINS_ENV`]; absent everywhere else.
 ///
-/// Sessions are matched on every push by their current title, because that is all the harness knows when it writes the
-/// file, before any session exists (the old capture matched by title too). So a renamed session loses its values and
-/// shows its real scratch folder, a machine path; a Clone, which keeps its source's title, gets them; and Clone and
-/// Replace with start from the staged folder, as New session does from the open session's, a folder that does not
-/// exist on this machine. A session the file does not name is left exactly as pushed.
+/// Pushes and switcher replies match sessions by their current title, which is all the harness knows when it writes
+/// the file. A renamed session loses its values and shows its real scratch folder, a machine path. A Clone keeps its
+/// source's title and gets its staged values. Clone and Replace with start from the staged folder, as New session
+/// does from the open session's, a folder that may not exist on this machine. Rows the file does not name are kept as
+/// received.
 ///
 /// The anchor is when the app read the file, and it stays put: a staged row's age grows from then on like any age, so
 /// it reads older by however long the run took between launching the app and taking its picture (seconds for the
@@ -308,17 +310,35 @@ impl StagedValues {
         Some((self.anchor - i64::from(staged.age), &staged.cwd))
     }
 
+    /// Give a named session the same staged age and folder whether the window got it through a push or a read.
+    fn apply_row(&self, row: &mut SessionRow) {
+        if let Some((stamp, cwd)) = self.stamp(&row.info.title) {
+            row.info.last_activity_at = stamp;
+            cwd.clone_into(&mut row.info.cwd);
+        }
+    }
+
     /// Rewrite the sessions among `entries` that the file names; every other entry stays as pushed.
     fn apply(&self, entries: &mut [(String, PushedEntry)]) {
         for (_, entry) in entries {
-            if let PushedEntry::Session(row) = entry
-                && let Some((stamp, cwd)) = self.stamp(&row.info.title)
-            {
-                row.info.last_activity_at = stamp;
-                cwd.clone_into(&mut row.info.cwd);
+            if let PushedEntry::Session(row) = entry {
+                self.apply_row(row);
             }
         }
     }
+}
+
+/// Apply staged values to the window's own copy of a listing read directly from the helm. The helm keeps the real
+/// folders it uses to run sessions. Ordinary builds and agent runs without a scenario leave every row as received.
+pub(crate) fn stage_session_rows(rows: &mut [SessionRow], cx: &App) {
+    #[cfg(any(feature = "agent", test))]
+    if let Some(staged) = cx.try_global::<StagedValues>() {
+        for row in rows {
+            staged.apply_row(row);
+        }
+    }
+    #[cfg(not(any(feature = "agent", test)))]
+    let _ = (rows, cx);
 }
 
 /// `snapshot` as the store installs it: with the staged sessions rewritten in an agent build that has

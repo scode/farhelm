@@ -37,6 +37,7 @@ use super::{
     matching_positions, ranked,
 };
 use crate::actions::{QUICK_SWITCHER_CHORD, TEMPLATE_LIST_CHORD};
+use crate::agent_startup::StagedValues;
 use crate::focus::{self, TabReach};
 use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
 use crate::launcher::view_tests::fixture_hosts;
@@ -723,6 +724,51 @@ fn a_reply_is_listed_in_ranking_order_and_a_cut_reply_says_so(cx: &mut TestAppCo
             .iter()
             .any(|line| line == CAP_NOTICE)
     );
+}
+
+/// A capture must hide the scratch folders in the switcher's own helm reply. Each named row draws and matches its
+/// staged folder, a row absent from the scenario draws its original folder, and the listing keeps the helm's order
+/// even when the staged ages differ from that order.
+#[gpui::test]
+fn a_staged_reply_draws_and_matches_the_scenarios_folders(cx: &mut TestAppContext) {
+    let file = r#"{"sessions": [
+        {"title": "First", "age": 240, "cwd": "/demo/quartz"},
+        {"title": "Second", "age": 120, "cwd": "/demo/opal"}
+    ], "hosts": []}"#;
+    let rows = [
+        session("a").title("First").cwd("/scratch/one"),
+        session("b").title("Second").cwd("/scratch/two"),
+        session("c").title("Third").cwd("/work/three"),
+    ];
+    let real = rows.clone().map(|fixture| row(fixture, "buildbox"));
+    assert!(
+        ranked(&real, "quartz").is_empty(),
+        "the real rows do not match"
+    );
+    let mut main = open_main(cx, fleet());
+    main.cx.update(|_, cx| {
+        cx.set_global(StagedValues::parse(file, 1_800_000_000).unwrap());
+    });
+    let read = main.open_switcher();
+    main.answer(read, &rows, false);
+
+    let nodes = frame(main.cx);
+    assert_eq!(drawn_rows(&nodes), ["a", "b", "c"]);
+    for (key, folder) in [
+        ("a", "/demo/quartz"),
+        ("b", "/demo/opal"),
+        ("c", "/work/three"),
+    ] {
+        let texts = texts_within(&nodes, &format!("quick-switcher-row-{key}"));
+        assert!(
+            texts.iter().any(|line| line.text == folder),
+            "{key} draws {folder}"
+        );
+        assert!(texts.iter().all(|line| !line.text.contains("/scratch/")));
+    }
+    assert!(field_focused(main.cx));
+    type_query(main.cx, "quartz");
+    assert_eq!(drawn_rows(&frame(main.cx)), ["a"]);
 }
 
 /// A reply belongs to the opening that asked for it: one that landed in a switcher opened since would replace the
