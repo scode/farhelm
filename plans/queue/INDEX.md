@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
 - [complete] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
 - [complete] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
-- [in-flight af9ead] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
+- [complete] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
 - [complete] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
 - [complete] `update-survival-wording.md` — General survival statements stay general: SPEC.md records the principle and the old-terminal update note
 - [complete] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
