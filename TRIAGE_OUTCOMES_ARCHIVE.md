@@ -21447,6 +21447,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `vyovwpryspll`, bookmark `plan/triage-discards-nov18/01-discard-selection-concealed`,
   https://github.com/scode/farhelm/pull/4157/changes.
 
+## masked-fields-expose-secrets-to-text-services.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The UI kit hands a
+  masked field's real text to the OS input machinery on request and macOS Secure Event Input is never turned on; on
+  Wayland the vendored backend never shares the text with the input method, so that half is weaker than claimed. No
+  input method was shown to store or send what it reads; Copy and Cut are already blocked for masked fields. A fix needs
+  patches to the UI kit and both platform layers. Bucket: other.
+- Decision: the user picked "Logs and screen, not the OS input stack" (2026-11-18 highest-bucket triage page, Q5).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `vwwovoqkxvmy`, bookmark `plan/triage-discards-nov18/02-discard-masked-text-services`,
+  https://github.com/scode/farhelm/pull/4158/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.

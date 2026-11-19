@@ -58,10 +58,6 @@ consequences.
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
   when the pointer moves.
 
-- [`masked-fields-expose-secrets-to-text-services.md`](masked-fields-expose-secrets-to-text-services.md) — Farhelm
-  covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
-  edit it.
-
 - [`template-number-key-save-overwrites-committed-binding.md`](template-number-key-save-overwrites-committed-binding.md)
   — A number-key change in Templates can undo an agent's already saved binding on a different key if the helm is still
   sending the window an older set of bindings.
