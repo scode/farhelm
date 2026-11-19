@@ -365,6 +365,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to a model at all. Asked for by the maintainer on 2026-11-18 while planning `model-families`, which records the latest
   model of each family that this needs. Plan: `plans/queue/model-family-shorthand.md`.
 
+- **Three small desktop-app fixes the docs screenshots showed.** Found restoring the docs pages' annotated screenshots
+  (2026-11-18). (1) Settings → Hosts still says **Update remote hosts automatically** works "even with no window open"
+  (hover help and help line, `crates/gui/farhelm-gui/src/settings/choices.rs`); SPEC.md says it works while Farhelm is
+  open, since the helm runs inside the app. The Settings Hosts goldens draw the help line, so they change too, and the
+  Manage hosts `app-settings` docs shot shows the old words until recaptured. (2) The Templates list clips each
+  template's summary mid-word ("Destinatic", "Agent launch · C") with no ellipsis; the browser app showed "Destina…".
+  (3) A session row's host-and-directory line has no element id, so the Read the session list `row` shot's callout
+  points at the row's bottom edge instead of the line; `session-row-<key>-place` on the row's meta line
+  (`session_list/row.rs`) would let it point there.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
