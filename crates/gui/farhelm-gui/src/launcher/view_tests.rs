@@ -173,13 +173,6 @@ pub(crate) enum Field {
     Model,
 }
 
-/// The platform's Select All chord, for a test that replaces a field's whole text.
-pub(super) const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// Whether `field` holds focus.
 pub(crate) fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
     read(cx, |launcher, window, cx| {
@@ -2791,7 +2784,7 @@ fn the_prefix_in_a_launcher_field_begins_a_sequence_only_with_nothing_selected(
     keys(cx, "escape");
     assert!(!sequence_armed(cx), "the premise: Escape ended it");
 
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     assert!(
         read(cx, |launcher, _, cx| !launcher.folder.selection_empty(cx)),
         "the premise: Select All selected the folder"

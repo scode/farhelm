@@ -99,7 +99,7 @@
 //! The Mac app's Edit menu has one action per item, whatever holds focus ([`EditCommand`]). Its Copy, Paste and Select
 //! All are the terminal's actions, so that they reach a focused terminal, and [`TextInput`] turns those three back into
 //! Kit's own for its field on their way up from it. A field therefore answers the menu as it answers Cmd+C, Cmd+V and
-//! Cmd+A, and no key binding changes on either platform.
+//! Cmd+A on the Mac.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -110,7 +110,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
     Subscription, Window, div, prelude::FluentBuilder as _,
 };
-use gpui::{KeybindingKeystroke, Keystroke};
+use gpui::{KeyBinding, KeybindingKeystroke, Keystroke};
 
 use crate::actions::{self, THIS_PLATFORM};
 use gpui_component::input::{
@@ -529,6 +529,24 @@ impl EditCommand {
 }
 
 impl TextInput {
+    /// Give single-line fields and text areas the same Control-key editing on macOS and Linux. Register after
+    /// Kit's defaults so Ctrl+A moves to the start of a line on Linux too. Binding to Kit's input context keeps
+    /// the keys with the shell or agent when the terminal has focus. Vertical moves also reach `on_vertical`.
+    pub(crate) fn control_key_bindings() -> [KeyBinding; 9] {
+        let field = Some(actions::TEXT_INPUT_CONTEXT);
+        [
+            KeyBinding::new("ctrl-f", input::MoveRight, field),
+            KeyBinding::new("ctrl-b", input::MoveLeft, field),
+            KeyBinding::new("ctrl-n", input::MoveDown, field),
+            KeyBinding::new("ctrl-p", input::MoveUp, field),
+            KeyBinding::new("ctrl-a", input::MoveHome, field),
+            KeyBinding::new("ctrl-e", input::MoveEnd, field),
+            KeyBinding::new("ctrl-d", input::Delete, field),
+            KeyBinding::new("ctrl-h", input::Backspace, field),
+            KeyBinding::new("ctrl-k", input::DeleteToEndOfLine, field),
+        ]
+    }
+
     /// An input showing `state`. `label` is its accessible name; `help` its hover help.
     pub fn new(
         id: impl Into<SharedString>,

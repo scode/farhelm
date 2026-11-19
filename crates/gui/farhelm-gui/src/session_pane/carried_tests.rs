@@ -29,13 +29,6 @@ use crate::session_list::tests::{
 };
 use crate::test_support::{self, any_open, frame, keys, settle};
 
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
 /// The window over `a` (open, the last visited) and `b`, with every command of the startup answered.
@@ -157,7 +150,7 @@ fn a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename(
 
     keys(cx, RENAME_SESSION_CHORD);
     assert!(any_open(cx), "the shortcut opened Rename for a");
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, "r e n a m e d enter");
     let commands = fake.commands();
     let [rename] = &commands[..] else {

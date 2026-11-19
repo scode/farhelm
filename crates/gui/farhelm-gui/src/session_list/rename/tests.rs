@@ -31,12 +31,7 @@ use crate::test_support::{self, any_open, frame, keys, settle, terminal_focused}
 /// The Rename shortcut on this platform (SPEC.md, "Desktop window chrome").
 const RENAME: &str = RENAME_SESSION_CHORD;
 
-/// Kit's select-all and paste in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
+/// Kit's Paste shortcut in a text field on this platform.
 const PASTE: &str = if cfg!(target_os = "macos") {
     "cmd-v"
 } else {
@@ -482,7 +477,7 @@ fn an_untouched_save_sends_the_raw_title_and_success_closes_the_editor(cx: &mut 
 fn a_typed_title_is_sent_verbatim_and_an_empty_one_too(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_main(cx, fleet("old"));
     keys(cx, RENAME);
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, "r e n a m e d enter");
     let (id, title) = one_rename(&mut helm);
     assert_eq!(title, json!("renamed"));
@@ -490,7 +485,7 @@ fn a_typed_title_is_sent_verbatim_and_an_empty_one_too(cx: &mut TestAppContext) 
     settle(cx);
 
     keys(cx, RENAME);
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, "backspace enter");
     let (_, title) = one_rename(&mut helm);
     assert_eq!(
@@ -513,7 +508,7 @@ fn a_click_on_the_field_focuses_it(cx: &mut TestAppContext) {
     assert!(!field_focused(cx), "the premise: focus left the field");
     test_support::click(cx, "rename-field");
     assert!(field_focused(cx), "the click focused the field");
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, "z");
     assert_eq!(field(cx), "z");
 }
@@ -583,7 +578,7 @@ fn a_refusal_keeps_the_draft_and_shows_the_helms_words_escaped(cx: &mut TestAppC
     let (mut helm, cx) = open_main(cx, fleet("old"));
     cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("fix\nbug".into())));
     keys(cx, RENAME);
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, PASTE);
     keys(cx, "enter");
     let (id, title) = one_rename(&mut helm);

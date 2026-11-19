@@ -197,7 +197,7 @@ fn a_press_on_launch_uses_the_typed_folder_with_its_list_open(cx: &mut TestAppCo
         draft.choose_command_yolo(false);
     });
     focus_folder(cx);
-    keys(cx, super::view_tests::SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     cx.simulate_input("/src");
     settle(cx);
     keys(cx, "down");

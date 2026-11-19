@@ -3573,6 +3573,11 @@ ordinary confirmation and busy rules. With no session open it does nothing. The 
 Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app. The Linux chord
 leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
 
+On macOS and Linux, text fields use Ctrl+F and Ctrl+B to move forward and back by a character, Ctrl+N and Ctrl+P to move
+down and up, Ctrl+A and Ctrl+E to move to the start and end of the line, Ctrl+D and Ctrl+H to delete forward and back,
+and Ctrl+K to delete to the end of the line. Where arrow keys move through suggestions, Ctrl+N and Ctrl+P do the same.
+Linux text fields therefore have no Select All shortcut. A focused terminal sends these keys to its program.
+
 The Mac app menu has an Open-Source Notices item, which opens a plain window of scrolling read-only text holding the
 notices of the open-source code and fonts the app includes; choosing it again brings that window forward, and closing it
 leaves the app running. The maintainer decided on 2026-11-13 that the notices live in that window.

@@ -235,13 +235,6 @@ impl Fixture<'_> {
     }
 }
 
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// Every line of text the window painted, as words on screen (a sentence's isolates left out), joined with single
 /// spaces.
 fn painted(cx: &mut VisualTestContext) -> String {
@@ -494,10 +487,10 @@ fn add_waits_out_the_answer_pause(cx: &mut TestAppContext) {
 fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppContext) {
     let mut f = fixture(cx, Vec::new());
     f.open().expect("opened");
-    keys(f.cx, SELECT_ALL);
+    crate::test_support::select_all_text(f.cx);
     type_text(f.cx, "ops@new.example2");
     keys(f.cx, "tab");
-    keys(f.cx, SELECT_ALL);
+    crate::test_support::select_all_text(f.cx);
     type_text(f.cx, "newbox2");
     assert_eq!(
         (destination(f.cx), alias(f.cx)),

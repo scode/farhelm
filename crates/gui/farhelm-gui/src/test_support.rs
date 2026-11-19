@@ -240,6 +240,19 @@ pub fn keys(cx: &mut VisualTestContext, keystrokes: &str) {
     check(cx);
 }
 
+/// Select the whole value of the focused text field to prepare it for replacement. Dispatch the same action as
+/// the Edit menu so test setup can replace multi-line text on either platform.
+///
+/// Do not replace this with a keystroke: Linux text fields have no Select All key (Ctrl+A moves to the line's start,
+/// SPEC.md, "Desktop window chrome"), so a test pressing it there would quietly type at the start instead of replacing.
+pub(crate) fn select_all_text(cx: &mut VisualTestContext) {
+    show_next_frame(cx);
+    cx.update(|window, cx| {
+        window.dispatch_action(crate::components::EditCommand::SelectAll.action(), cx)
+    });
+    settle(cx);
+}
+
 /// Let `duration` pass on the executor's clock (a pointer resting for the hover delay, a deadline expiring), run
 /// whatever that wakes until the app is idle, and check.
 pub fn advance(cx: &mut VisualTestContext, duration: Duration) {

@@ -265,7 +265,7 @@ fn navigation_reveals_the_highlight_and_a_miss_clears_it(cx: &mut TestAppContext
         "the whole highlighted row is shown"
     );
 
-    keys(cx, super::view_tests::SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     type_in(cx, "host:no-such-composer-result");
     assert_eq!(
         name_of(cx, "launcher-search-message").as_deref(),
@@ -278,7 +278,7 @@ fn navigation_reveals_the_highlight_and_a_miss_clears_it(cx: &mut TestAppContext
             .is_some_and(|id| id.starts_with("launcher-search-option-"))
     }));
     assert!(search_focused(cx));
-    keys(cx, super::view_tests::SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     type_in(cx, "scroll-model");
     assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(true));
     assert_eq!(
