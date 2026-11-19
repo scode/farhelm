@@ -33,10 +33,6 @@ consequences.
   Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md`](trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md)
-  — Host-backed fixture cleanup can SIGKILL a recycled, unrelated process group. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md)
   — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.

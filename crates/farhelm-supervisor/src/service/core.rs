@@ -22468,44 +22468,65 @@ pub(crate) mod tests {
     /// covers the reporter across the whole pre-publication window,
     /// including timeout, panic, and cancellation paths that never
     /// learn its pid.
-    struct OwnedRuntime {
-        /// The direct child, for a runtime this test process spawned;
-        /// `None` for one that runs as a terminal host's child
-        /// ([`OmpAdmission::start_in_host`]), which its host reaps.
-        child: Option<std::process::Child>,
-        /// The group id: the leader's pid, which leads its group either
-        /// way (`process_group(0)` here; a host's child leads a session of
-        /// its own).
-        group: u32,
+    enum OwnedRuntime {
+        /// The direct child leads its own group and pins its id until reaped.
+        Direct(std::process::Child),
+        /// The host reaps its own child. Keep the start identity pinned by
+        /// adoption so a later group with the same number is never assumed
+        /// to belong to this fixture.
+        Hosted(crate::hosts::ProcessRoot),
     }
 
     impl OwnedRuntime {
-        /// Signal the whole owned group, then kill and reap the direct
-        /// child. The group goes first, while the unreaped leader still
-        /// reserves the id; the direct kill is then a no-op against an
-        /// already-signaled leader, and the wait reaps it. Grandchild
-        /// reporters are signaled, never waited — this process cannot
-        /// wait on them — under their bounded `sleep 25`.
+        /// Each runtime leads its own group. Its leader's PID is the group
+        /// number, while the leader still has the identity we registered.
+        fn group(&self) -> u32 {
+            match self {
+                Self::Direct(child) => child.id(),
+                Self::Hosted(root) => root.pid,
+            }
+        }
+
+        /// Reap direct children and signal groups with a confirmed leader.
+        /// Without a confirmed hosted leader, cleanup relies on terminal
+        /// hangup and the shell reporters' bounded sleeps.
         fn teardown(self) {
-            kill_process_group(self.group);
-            if let Some(mut child) = self.child {
-                let _ = child.kill();
-                let _ = child.wait();
+            match self {
+                Self::Direct(mut child) => {
+                    // A timeout diagnostic can have reaped this child.
+                    // A live result pins the number through the group kill.
+                    if matches!(child.try_wait(), Ok(None)) {
+                        kill_process_group(child.id());
+                        let _ = child.kill();
+                    }
+                    let _ = child.wait();
+                }
+                Self::Hosted(root) => {
+                    if crate::procs::ProcessIdentity::read(root.pid)
+                        .is_some_and(|leader| leader.start == root.start)
+                    {
+                        kill_process_group(root.pid);
+                    }
+                }
             }
         }
 
         /// [`reporter_timeout_diagnostic`] for this runtime, from its child
         /// when this process owns one, else from the process table.
         fn timeout_diagnostic(&mut self) -> String {
-            match self.child.as_mut() {
-                Some(child) => reporter_timeout_diagnostic(child),
-                None => {
-                    let pid = self.group;
+            match self {
+                Self::Direct(child) => reporter_timeout_diagnostic(child),
+                Self::Hosted(root) => {
+                    let pid = root.pid;
                     match crate::procs::read_process(pid) {
-                        Ok(Some((_, _, crate::procs::ProcessState::Running))) => format!(
-                            "the entry script never published its reporter; \
+                        Ok(Some((_, start, crate::procs::ProcessState::Running)))
+                            if start == root.start =>
+                        {
+                            format!(
+                                "the entry script never published its reporter; \
                              the owned runtime (pid {pid}) is still alive"
-                        ),
+                            )
+                        }
                         Ok(_) => format!(
                             "the entry script never published its reporter; \
                              the owned runtime (pid {pid}) had already exited"
@@ -22747,15 +22768,11 @@ await new Promise(() => {});
             )
             .await
             .expect("adopt the runtime's host");
-            let pid = host
+            let root = host
                 .live_root()
                 .expect("read the host's child")
-                .expect("the host's child runs")
-                .pid;
-            self.runtimes.push(OwnedRuntime {
-                child: None,
-                group: pid,
-            });
+                .expect("the host's child runs");
+            self.runtimes.push(OwnedRuntime::Hosted(root));
             let row = sup
                 .store
                 .session(id)
@@ -22770,7 +22787,7 @@ await new Promise(() => {});
                 .lock()
                 .await
                 .insert(id.to_string(), Arc::new(entry));
-            pid
+            root.pid
         }
 
         /// Spawn the entry-shaped runtime as session `id`'s agent, in a host
@@ -22828,7 +22845,7 @@ await new Promise(() => {});
             std::fs::create_dir(&nested).expect("nested runtime directory");
             std::fs::copy(root.join("internal"), nested.join("internal"))
                 .expect("nested reporter script");
-            let pane_pid = self.runtimes.first().expect("agent runtime").group;
+            let pane_pid = self.runtimes.first().expect("agent runtime").group();
             std::fs::write(root.join("start-nested"), b"").expect("request nested runtime");
             let reporter_pid = Self::await_reporter(
                 &nested.join("reporter.pid"),
@@ -22949,10 +22966,7 @@ await new Promise(() => {});
             let runtime_pid = child.id();
             // Owned from the first instruction after the spawn.
             // `process_group(0)` makes the leader's pid the group id.
-            self.runtimes.push(OwnedRuntime {
-                child: Some(child),
-                group: runtime_pid,
-            });
+            self.runtimes.push(OwnedRuntime::Direct(child));
             (runtime_pid, root.join("reporter.pid"))
         }
 
@@ -22986,9 +23000,9 @@ await new Promise(() => {});
         /// supervisor: the durable capture must outlive the processes
         /// that reported it. Idempotent — owned runtimes are drained, so
         /// a later teardown finds nothing left to kill. Each teardown
-        /// signals the runtime's whole process group — covering
-        /// reporters the fixture never learned the pid of — then kills
-        /// and reaps the direct child.
+        /// signals the runtime's whole process group when its leader is
+        /// still owned, covering reporters whose pids the fixture never
+        /// learned. It also kills and reaps the direct child.
         fn kill_owner(&mut self) {
             for runtime in std::mem::take(&mut self.runtimes) {
                 runtime.teardown();
@@ -23183,16 +23197,10 @@ await new Promise(() => {});
     }
 
     impl Drop for OmpAdmission {
-        /// Reap every owned runtime, including failure paths: each
-        /// direct child is killed and waited on, and its whole process
-        /// group is signaled first — so reporters spawned before their
-        /// pid was ever published, and runtimes whose readiness wait
-        /// timed out or was cancelled, are still covered. Panic and
-        /// cancellation paths land here too, since every runtime is
-        /// registered before any fallible wait. Grandchildren are
-        /// signaled, never waited (this process cannot wait on them),
-        /// under their bounded `sleep 25`, which caps any linger if a
-        /// signal lands late.
+        /// Own cleanup even if the readiness wait panics or is cancelled.
+        /// Registration precedes the wait, so teardown can reach reporters
+        /// whose pids never got published as long as the group leader
+        /// is still confirmed.
         fn drop(&mut self) {
             self.kill_owner();
         }
@@ -23880,7 +23888,7 @@ await new Promise(() => {});
         // Premise: the parent stays owned AND live while the sibling's
         // rejection is measured — a dead parent would refuse the child
         // reports for the wrong reason (no chain to walk past).
-        let parent_pid = fixture.runtimes.first().expect("parent runtime").group;
+        let parent_pid = fixture.runtimes.first().expect("parent runtime").group();
         let (_, _, liveness) = crate::procs::read_process(parent_pid)
             .expect("read the parent runtime")
             .expect("the parent runtime is alive");

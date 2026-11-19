@@ -21674,8 +21674,33 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: containers whose first launch is still in progress are left out of the list (about 15-30 lines,
   with a test). Remove the feedback file and its index entry in the same change.
-- Execution: change `zxronrqsxmoqznsyytmwzwmlmomkutpm`, bookmark
-  `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
+- Execution: change `zxronrqsxmoqznsyytmwzwmlmomkutpm`, bookmark <<<<<<<<<<< conflict 1 of 1 %%%%%%%%%%% diff from:
+  zxronrqs 7badc480 "fix: hide launching containers from the leftovers list" (rebased revision) \\\\\\\\\\\ to: zxronrqs
+  21c14c56 "fix: hide launching containers from the leftovers list" (rebase destination)
+- `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
   [PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
 
->>>>>>> conflict 1 of 1 ends
+* `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
+* [PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
+*
+
++>>>>>>> conflict 1 of 1 ends +++++++++++ kpmsllur ab74e065 "test: verify process ownership in agent admission teardown"
+(rebased revision) `plan/triage-misc-nov18/02-leftovers-skip-launching-containers`,
+[PR #4159](https://github.com/scode/farhelm/pull/4159/changes).
+
+## trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed in code, very unlikely. A
+  supervisor test fixture stores only the process-group number of host-run fake agents and SIGKILLs that group at
+  teardown with no identity check (crates/farhelm-supervisor/src/service/core.rs tests), so after a stall longer than
+  the fake agent's 25 s sleep and a full process-number wrap, an unrelated group of the same user could be killed. Test
+  tooling only. FILTER.md's process-number filter excludes storing a number for later use. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
+  group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
+  lines in the test code). Remove the feedback file and its index entry in the same change.
+- Execution: change `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
+  [PR #4163](https://github.com/scode/farhelm/pull/4163/changes).
+
+>>>>>>>>>>> conflict 1 of 1 ends
