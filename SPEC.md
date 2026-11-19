@@ -12,6 +12,11 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
 
 ## Documentation scope
 
+Farhelm's general statements about how the product behaves (sessions survive updates and supervisor restarts, say)
+describe its ordinary operation. A narrow exception specified where it applies does not make them wrong and is not a
+reason to qualify them everywhere. The maintainer's principle is: "These are general principles and statements about how
+the product operates, not a lawyer's contract."
+
 The README introduction, the docs Overview and their artwork are a short hook that may describe the main, first-class
 path. Qualifications for other agents and hosts belong in the guides; a claim that holds on that main path is not a
 defect in the introduction. The maintainer's principle is: "The overview is meant to be short and a hook. We cannot be
@@ -3121,7 +3126,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   left for the session's Delete, which stops everything of the session. A session whose agent or tabs already run in
   terminal hosts keeps them. A failure to end the server or to stop what ran there is logged and never stops the
   supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start
-  a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal.
+  a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal. The
+  statements that sessions survive updates and supervisor restarts (Restart to update, Durability and resume, and the
+  installer's closing line) deliberately carry no exception for the update that ends old terminals, and the installer
+  prints its closing line during that update too.
 - One viewer per session, enforced by the supervisor: an attach from another view (another lease) detaches every
   terminal the previous view held in that session, and a view's own reattach of a terminal replaces its earlier
   attachment of it. The window holding the seat is the session's only viewer (One GUI at a time), so this is how its own

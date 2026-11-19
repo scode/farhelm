@@ -21454,3 +21454,54 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   whether the behavior is acceptable in code.
 - Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
 - Execution: complete; removed during the 2026-11-18 highest-bucket triage.
+
+## trailing-update-survival-reassurance-omits-old-terminal-retirement.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The installer's closing line
+  after every update ("Quit and reopen Farhelm to finish updating. Your sessions keep running.", scripts/install.sh),
+  SPEC.md's Restart to update and Durability ("must not interrupt its sessions … only a host reboot takes sessions
+  down"), SPEC_impl.md's Restart to update and the update and remote-Update docs all promise survival with no exception
+  for the one update whose first supervisor start ends old tmux terminals (SPEC.md "Terminal experience", "Old
+  terminals"). #3375 (78e9d68) deliberately put the unqualified wording back, "accepting that the installer prints it
+  during that one update too", but that decision lived only in its commit message, so SPEC.md contradicts itself.
+  plans/queue/retire-old-terminal-announcement.md does not touch these texts. Bucket: highest by the letter of the rules
+  (a statement that could lead a reader into losing work); the loss itself is accepted.
+- Decision: the user picked "Keep the wording; write the exception down" (2026-11-18 highest-bucket triage page, Q1), in
+  their words: "omg yes some agent removed this wording. sigh. This is a general product feature. Some nit pick about a
+  particular upgrade flow and a user not having done the restarts etc doesn't overturn this. These are general
+  principles and statements about how the product operates, not a lawyer's contract". Principle: Farhelm's general
+  statements about how the product behaves (sessions survive updates and supervisor restarts) describe its ordinary
+  operation; a narrow, separately specified exception in one upgrade flow does not make them wrong and is not a reason
+  to qualify them everywhere.
+- Completion criteria: SPEC.md states the principle (general product statements describe ordinary operation and are not
+  qualified for every separately specified exception), and the "Old terminals" bullet or Durability notes that the
+  survival statements are deliberately left unqualified for the update that ends old terminals. The survival wording in
+  the installer, SPEC.md, SPEC_impl.md and the docs stays as it is. Remove this feedback file and the two below, with
+  their index entries, in the same change.
+- Execution: change `sptwzuunqquysplunkytyluluxuvqzvw`, bookmark
+  `plan/update-survival-wording/01-general-statements-principle`,
+  [PR #4145](https://github.com/scode/farhelm/pull/4145/changes).
+
+## trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md
+
+- Outcome: `fix spec`.
+- Assessment: the same defect as `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`, reached
+  through SPEC_impl.md's Restart to update text; confirmed the same way.
+- Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
+- Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
+- Execution: change `sptwzuunqquysplunkytyluluxuvqzvw`, bookmark
+  `plan/update-survival-wording/01-general-statements-principle`,
+  [PR #4145](https://github.com/scode/farhelm/pull/4145/changes).
+
+## trailing-old-terminal-migration-unconditional-session-survival-assurance.md
+
+- Outcome: `fix spec`.
+- Assessment: the same defect as `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`, reached
+  through the installer's closing line; confirmed the same way (whether the run counts as an update depends only on the
+  install result, and the message has no old-terminal condition).
+- Decision: settled by the same pick (2026-11-18 highest-bucket triage page, Q1) and the same principle; see that entry.
+- Completion criteria: carried by `trailing-update-survival-reassurance-omits-old-terminal-retirement.md`.
+- Execution: change `sptwzuunqquysplunkytyluluxuvqzvw`, bookmark
+  `plan/update-survival-wording/01-general-statements-principle`,
+  [PR #4145](https://github.com/scode/farhelm/pull/4145/changes).

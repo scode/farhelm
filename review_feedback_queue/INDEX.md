@@ -17,14 +17,6 @@ consequences.
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`trailing-update-survival-reassurance-omits-old-terminal-retirement.md`](trailing-update-survival-reassurance-omits-old-terminal-retirement.md)
-  — Blanket update-survival assurance includes the update that ends old terminals (proposed drop). Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md`](trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md)
-  — Update-survival promise omits the explicitly accepted old-terminal migration. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md`](trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md)
   — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -36,10 +28,6 @@ consequences.
 - [`trailing-ui-host-retry-selects-delete-from-live-phase.md`](trailing-ui-host-retry-selects-delete-from-live-phase.md)
   — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-migration-unconditional-session-survival-assurance.md`](trailing-old-terminal-migration-unconditional-session-survival-assurance.md)
-  — Installer survival assurance can lead users to leave work in terminals this update ends. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-removed-lone-legacy-tab-lifecycle-oracles.md`](trailing-removed-lone-legacy-tab-lifecycle-oracles.md) —
   Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
