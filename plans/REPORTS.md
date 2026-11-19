@@ -17,3 +17,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`concealed-link-target`](reports/concealed-link-target.report.md) landed 2026-11-19 in #4154: Hidden terminal text cannot change where a printed link goes
 - [`triage-misc-nov18`](reports/triage-misc-nov18.report.md) landed 2026-11-19 in #4156, #4159, #4163, #4169, #4170: natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
 - [`triage-discards-nov18`](reports/triage-discards-nov18.report.md) landed 2026-11-19 in #4157, #4158, #4161, #4162, #4164, #4165, #4166, #4167, #4168: nine discards from the 2026-11-18 highest-bucket triage
+- [`covered-link-refusal`](reports/covered-link-refusal.report.md) landed 2026-11-19 in #4175, #4180, #4186: A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
