@@ -3228,7 +3228,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule below, not a
   lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something
   Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm
-  may stall because of it.
+  may stall because of it. On Wayland, keys typed while Farhelm is still fetching pasted text from the system clipboard
+  may reach the terminal before that text.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the

@@ -21699,8 +21699,38 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
 - Completion criteria: the fixture records the group leader's identity (process number plus start time) and signals the
   group only while that leader still matches, relying on the leftover sleep ending on its own otherwise (about 15-30
-  lines in the test code). Remove the feedback file and its index entry in the same change.
+  lines in the test code). Remove the feedback file and its index entry in the same change. <<<<<<<<<<<<<<< conflict 1
+  of 1 %%%%%%%%%%%%%%% diff from: kpmsllur ab74e065 "test: verify process ownership in agent admission teardown"
+  (rebased revision) \\\\\\\\\\\\\\\ to: kpmsllur 73da1a63 "test: verify process ownership in agent admission teardown"
+  (rebase destination) -- Execution: change `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark
+- `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
+  [PR #4163](https://github.com/scode/farhelm/pull/4163/changes). +- Execution: change
+  `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
+
+* [PR #4163](https://github.com/scode/farhelm/pull/4163/changes).
+*
+
++>>>>>>>>>>> conflict 1 of 1 ends +++++++++++++++ ulurrwpu 293046a8 "docs: note that typed input can precede a Wayland
+paste" (rebased revision)
+
 - Execution: change `kpmsllurlxnlyroylrkprwoszmstxorx`, bookmark `plan/triage-misc-nov18/03-omp-fixture-group-identity`,
   [PR #4163](https://github.com/scode/farhelm/pull/4163/changes).
 
->>>>>>>>>>> conflict 1 of 1 ends
+## wayland-enter-overtakes-pending-text-paste.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed for the mechanism. On Wayland
+  a paste waits for the asynchronous clipboard read (and only behind earlier pastes), while typed keys are sent at once
+  (terminal/attached.rs), so Enter can run a half-typed command before the pasted rest arrives, which then lands at the
+  next prompt. macOS reads the clipboard synchronously. Needs a slow clipboard source or a key-injection macro. SPEC.md
+  declines to add complexity for slow clipboards. Bucket: high (highest only if a different command running than the one
+  composed counts as lost work in itself).
+- Decision: settled by the same pick as `header-actions-follow-unseen-session.md` (2026-11-18 highest-bucket triage
+  page, Q3): spec note for paste order.
+- Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
+  still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
+  entry in the same change.
+- Execution: change `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark `plan/triage-misc-nov18/04-wayland-paste-order-spec`,
+  [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
+
+>>>>>>>>>>>>>>> conflict 1 of 1 ends
