@@ -20,6 +20,7 @@
 //! launches before sending, and the supervisor fills them.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 use crate::{AgentKind, LaunchHarness, LaunchSelection};
 
@@ -525,15 +526,24 @@ impl SessionLaunch {
 
 /// One stored argv as a shell command line: the first `prefix_words` words are a wrapper prefix already in its own
 /// shell spelling (quotes and escapes kept), joined as written; the rest are literal argv, quoted, with Farhelm's
-/// internal [`FARHELM_ARGS_PLACEHOLDER`] left out. Malformed peer data can record a prefix longer than the vector; the
-/// split stays bounded rather than trusting it.
+/// internal [`FARHELM_ARGS_PLACEHOLDER`] left out. The literal suffix quotes braces, `!` and `^` because the plain
+/// shell-word formatter leaves those bare; a reserved placeholder ([`is_reserved_placeholder`]) is a marker Farhelm
+/// substitutes rather than a literal word, so it stays bare as the user wrote it. Malformed peer data can record a
+/// prefix longer than the vector; the split stays bounded rather than trusting it.
 fn display_argv(argv: &[String], prefix_words: usize) -> String {
     let (prefix, suffix) = argv.split_at(prefix_words.min(argv.len()));
-    let suffix = shell_words::join(
-        suffix
-            .iter()
-            .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER),
-    );
+    let suffix = suffix
+        .iter()
+        .filter(|element| element.as_str() != FARHELM_ARGS_PLACEHOLDER)
+        .map(|element| {
+            if element.contains(['{', '}', '!', '^']) && !is_reserved_placeholder(element) {
+                Cow::Owned(crate::text::shell_quote(element))
+            } else {
+                shell_words::quote(element)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     [prefix.join(" "), suffix]
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -969,11 +979,12 @@ mod tests {
     /// out, a command launch shows the user's text, a legacy template joins its words, and a launch without a resume
     /// command has none.
     ///
-    /// Why: approval cards show this text as what a later plain Restart runs without another YOLO check; quoting the
-    /// prefix again, or showing the placeholder, would show a different command from the one Bash runs.
+    /// Why: approval cards show what a later plain Restart runs without another YOLO check. The prefix carries the
+    /// user's Bash spelling, and quoting a composed brace expression keeps it one literal argument, while Farhelm's
+    /// own placeholders stay bare markers (a quoted one reads as a literal word the user typed).
     #[test]
     fn resume_commands_display_like_start_commands() {
-        let prefix = vec!["with-endpoint".to_string(), "\"$PROFILE\"".to_string()];
+        let prefix = vec!["with-endpoint".to_string(), "\"${PROFILE}\"".to_string()];
         let agent = SessionLaunch::Agent {
             selection: LaunchSelection {
                 wrapper_prefix: Some(prefix.clone()),
@@ -981,7 +992,12 @@ mod tests {
             },
             start: [
                 prefix.clone(),
-                vec!["muse".into(), FARHELM_ARGS_PLACEHOLDER.into()],
+                vec![
+                    "muse".into(),
+                    "flag{".into(),
+                    CODEX_TRUSTED_CWD_PLACEHOLDER.into(),
+                    FARHELM_ARGS_PLACEHOLDER.into(),
+                ],
             ]
             .concat(),
             resume: Some(
@@ -991,16 +1007,26 @@ mod tests {
                         "muse".into(),
                         "--resume".into(),
                         "two words".into(),
+                        "x{a,b}".into(),
+                        "right}".into(),
+                        "bang!".into(),
+                        "caret^".into(),
+                        CONVERSATION_PLACEHOLDER.into(),
                         FARHELM_ARGS_PLACEHOLDER.into(),
                     ],
                 ]
                 .concat(),
             ),
         };
-        assert_eq!(agent.display_command(), "with-endpoint \"$PROFILE\" muse");
+        assert_eq!(
+            agent.display_command(),
+            "with-endpoint \"${PROFILE}\" muse 'flag{' {codex:trusted-cwd}"
+        );
         assert_eq!(
             agent.display_resume().as_deref(),
-            Some("with-endpoint \"$PROFILE\" muse --resume 'two words'")
+            Some(
+                "with-endpoint \"${PROFILE}\" muse --resume 'two words' 'x{a,b}' 'right}' 'bang!' 'caret^' {conversation}"
+            )
         );
         let command = command(
             "agent {farhelm_args}",
