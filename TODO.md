@@ -26,6 +26,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit taking the Tensorlake pause attribution fix out of gui-ux-backend-fixes.** Decided on the maintainer's
+  behalf by the landing monitor on 2026-11-19, when gui-ux-backend-fixes blocked twice on that one outcome (a later
+  Tensorlake pause can show the earlier "Suspended from Farhelm" label and time in Hosts): the plan delivers its six
+  other backend fixes without it, and the outcome stays unexecuted in the triage ledger to be scheduled as a plan of its
+  own. A first answer had allowed one draft of about 200 lines; the second attempt reached 265 lines and still had a
+  race (a Suspend clicked while Farhelm records that the sandbox ran can reuse the first pause's time). The alternative
+  was holding the six fixes for one larger pause draft.
 - **Revisit allowing gui-ux-enter-and-focus about 200 lines for Enter after a dialog closes.** Decided on the
   maintainer's behalf by the landing monitor on 2026-11-19, when gui-ux-enter-and-focus blocked: the outcome that sends
   a quick second Enter after the launcher closes to whatever has focus, instead of dropping it, may use about 200
