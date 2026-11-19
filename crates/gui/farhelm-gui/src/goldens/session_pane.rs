@@ -205,10 +205,34 @@ pub(super) fn session_interrupted_cards(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    session_recovery_cards(false, state, window, cx)
+}
+
+/// The same layout shows why a missing terminal needs recovery, with and without a resumable conversation.
+pub(super) fn session_missing_terminal_cards(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    session_recovery_cards(true, state, window, cx)
+}
+
+/// Both scenes use the same window-sized boxes so the two explanations can be compared in the same layout.
+fn session_recovery_cards(
+    terminal_missing: bool,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let row = |offer: &str| -> farhelm_proto::ui_channel::SessionRow {
-        let mut entry = session("a")
-            .status(serde_json::json!({"state": "interrupted"}))
-            .entry();
+        let fixture = if terminal_missing {
+            session("a")
+                .status(serde_json::json!({"state": "exited", "exit_code": 0}))
+                .terminal_missing()
+        } else {
+            session("a").status(serde_json::json!({"state": "interrupted"}))
+        };
+        let mut entry = fixture.entry();
         entry.value["restart_offer"] = serde_json::json!(offer);
         entry.value["agent_kind"] = serde_json::json!("claude");
         serde_json::from_value(entry.value).unwrap_or_else(|error| panic!("a session row: {error}"))

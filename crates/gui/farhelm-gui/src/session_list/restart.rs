@@ -286,16 +286,18 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
         tracing::warn!("a session key that cannot be a path segment was not restarted");
         return;
     };
-    // A refusal is the operation store's to keep, and a success moves no focus and opens nothing: the terminal follows
-    // the restarted agent through its own stream. A success marks the session restarted for its interrupted card, since
-    // the helm may still list it as Interrupted until its host's next listing (`session_pane/card.rs`). Every success
-    // is marked, interrupted or not: the mark of a session listed as anything but Interrupted is dropped at once, so
-    // it is harmless, and this completion has no row to tell the two apart.
-    let restarted = key.to_owned();
+    // A successful reply that published a terminal lets the recovery card give way before the listing catches up.
+    // If the supervisor could not publish the new terminal, its reply keeps the card in place.
+    let session = key.to_owned();
     let started = operations.update(cx, |operations, cx| {
         operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
-            if matches!(settled.outcome, Outcome::Done(_)) {
-                crate::session_pane::card::restarted(&restarted, cx);
+            if let Outcome::Done(body) = &settled.outcome {
+                let terminal_missing = body
+                    .as_ref()
+                    .and_then(|body| body.get("terminal_missing"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or_default();
+                crate::session_pane::card::restart_finished(&session, terminal_missing, cx);
             }
         })
     });

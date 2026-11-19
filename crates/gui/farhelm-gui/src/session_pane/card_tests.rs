@@ -1,5 +1,5 @@
-//! Tests of the interrupted card (`card.rs`): when the pane shows it in place of the open session's terminals and mounts
-//! none, how it gives way to a new terminal once the session recovers, its one-click Restart and inline Replace, a
+//! Tests of the recovery card (`card.rs`): when the pane shows it in place of the open session's terminals and mounts
+//! none, how it gives way to a new terminal once the session recovers, its Restart and inline Replace, a
 //! legacy session's Replace with, the lines it takes over from the header, and the card as where focus rests.
 //!
 //! Everything runs in the real main view over the helm client's fake, whose connection hands out fake terminal streams
@@ -40,6 +40,14 @@ const CARD: &str = "session-interrupted-card";
 /// `key` as an interrupted session: a host reboot ended its agent. The fixture's offer is Resume.
 fn interrupted(key: &'static str) -> Fixture {
     session(key).status(json!({"state": "interrupted"}))
+}
+
+/// An exited row whose agent terminal is absent, with a separate shell tab still listed by the server.
+fn missing_terminal(key: &'static str) -> Fixture {
+    session(key)
+        .status(json!({"state": "exited", "exit_code": 0}))
+        .terminal_missing()
+        .tabs(1)
 }
 
 /// The lifecycle requests the window sent since the last call, as (id, path, body), left unanswered; every other
@@ -301,7 +309,162 @@ fn a_session_opened_unreachable_takes_no_interrupted_card(cx: &mut TestAppContex
     assert!(drawn(main.cx, super::unavailable::CARD_ID));
 }
 
+/// A missing agent terminal prevents the pane from dialing or exposing shell tabs. A fresh listing can still
+/// publish a terminal with the same Exited status, which gives the pane a screen it can attach to.
+#[gpui::test]
+fn missing_terminal_opens_on_recovery_until_the_host_reports_one(cx: &mut TestAppContext) {
+    let mut main = open_main(
+        cx,
+        snapshot(&[(missing_terminal("a"), 0), (session("b"), 0)], false),
+    );
+    assert!(drawn(main.cx, CARD));
+    assert!(
+        label_of(main.cx, CARD)
+            .unwrap()
+            .starts_with("This session's terminal is gone")
+    );
+    assert_eq!(focused_id(main.cx).as_deref(), Some(CARD));
+    assert!(drawn(main.cx, "session-card-restart"));
+    assert!(drawn(main.cx, "session-card-replace"));
+    assert!(
+        !drawn(main.cx, STRIP_ID),
+        "the still-listed shell tab is hidden"
+    );
+    assert!(
+        streams(&main).is_empty(),
+        "there was no attach for either terminal"
+    );
+
+    push_a(
+        &mut main,
+        session("a").status(json!({"state": "exited", "exit_code": 0})),
+    );
+    assert_eq!(streams(&main), [FakePhase::Attaching]);
+    assert!(!drawn(main.cx, CARD));
+
+    push_a(&mut main, missing_terminal("a"));
+    assert_eq!(streams(&main), [FakePhase::Closed]);
+    assert!(drawn(main.cx, CARD));
+    push_a(&mut main, interrupted("a").terminal_missing().tabs(1));
+    assert!(
+        label_of(main.cx, CARD)
+            .unwrap()
+            .starts_with("A host reboot or a Farhelm update ended this session's agent")
+    );
+    assert_eq!(streams(&main), [FakePhase::Closed]);
+}
+
+/// Availability from the host still determines whether its recovery controls can be used.
+#[gpui::test]
+fn a_missing_terminal_on_an_unreachable_host_uses_the_unavailable_card(cx: &mut TestAppContext) {
+    let main = open_main(
+        cx,
+        snapshot(
+            &[(missing_terminal("a").stale(), 0), (session("b"), 0)],
+            false,
+        ),
+    );
+    assert!(drawn(main.cx, super::unavailable::CARD_ID));
+    assert!(!drawn(main.cx, CARD));
+    assert!(streams(&main).is_empty());
+}
+
 // ---- Restart -------------------------------------------------------------------------------------------------------
+
+/// The helm can keep the last Running status after a relaunch leaves no terminal, but with no terminal no agent runs,
+/// so a question saying "Still running — restarting stops the agent" would be false, and the supervisor asks no consent
+/// of a session with no terminal. Specified: on a missing-terminal card whose row still reads Running, the card's
+/// Restart draws no question and sends exactly one plain Restart, without consent to stop an agent.
+#[gpui::test]
+fn the_cards_restart_asks_nothing_when_a_missing_terminal_still_reads_running(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, snapshot(&[(session("a").terminal_missing(), 0)], false));
+    assert!(drawn(main.cx, CARD));
+    assert_eq!(listed_status(main.cx, "a"), Some(SessionStatus::Running));
+    lifecycle(&mut main.helm);
+
+    test_support::click(main.cx, "session-card-restart");
+    assert!(!drawn(main.cx, "prompt-confirm"));
+    assert_eq!(sent(&mut main.helm), [restart("a")]);
+}
+
+/// Restart can succeed just before a supervisor shutdown fences off the replacement terminal. The reply's
+/// explicit absence keeps the recovery surface visible until there is a terminal to attach to.
+#[gpui::test]
+fn a_restart_reply_still_missing_its_terminal_keeps_the_card(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, snapshot(&[(missing_terminal("a"), 0)], false));
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-restart");
+    let [(id, _, _)] = lifecycle(&mut main.helm)[..] else {
+        panic!("one Restart was sent");
+    };
+    main.helm
+        .reply(id, 200, Some(json!({"terminal_missing": true})));
+    test_support::settle(main.cx);
+    assert!(drawn(main.cx, CARD));
+    assert!(streams(&main).is_empty());
+}
+
+/// A second Restart can run from the header before the listing catches up to the first. If its reply reports
+/// absence, the earlier success no longer justifies mounting a terminal.
+#[gpui::test]
+fn a_newer_restart_reply_reporting_absence_restores_the_card(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, snapshot(&[(missing_terminal("a").tabs(0), 0)], false));
+    assert!(drawn(main.cx, CARD));
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-restart");
+    let [(first, _, _)] = lifecycle(&mut main.helm)[..] else {
+        panic!("one Restart was sent from the card");
+    };
+    main.helm.reply(first, 200, Some(json!({})));
+    test_support::settle(main.cx);
+    assert!(!drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [FakePhase::Attaching]);
+
+    test_support::click(main.cx, "session-header-restart");
+    let [(second, _, _)] = lifecycle(&mut main.helm)[..] else {
+        panic!("one Restart was sent from the header");
+    };
+    main.helm
+        .reply(second, 200, Some(json!({"terminal_missing": true})));
+    test_support::settle(main.cx);
+    assert!(drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [FakePhase::Closed]);
+}
+
+/// Keep the success mark through a repeated listing of the old absence, even if the row says Exited. The first
+/// listing with a terminal retires it, so a subsequent loss shows the recovery card again.
+#[gpui::test]
+fn a_restart_mark_lasts_until_terminal_presence_changes(cx: &mut TestAppContext) {
+    let no_terminal = || missing_terminal("a").tabs(0);
+    let mut main = open_main(
+        cx,
+        snapshot(&[(no_terminal(), 0), (session("b"), 0)], false),
+    );
+    assert!(drawn(main.cx, CARD));
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-restart");
+    let [(id, _, _)] = lifecycle(&mut main.helm)[..] else {
+        panic!("one Restart was sent");
+    };
+    main.helm.reply(id, 200, Some(json!({})));
+    test_support::settle(main.cx);
+    assert!(!drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [FakePhase::Attaching]);
+
+    push_a(&mut main, no_terminal().activity(200));
+    assert!(!drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [FakePhase::Attaching]);
+    push_a(
+        &mut main,
+        session("a").status(json!({"state": "exited", "exit_code": 0})),
+    );
+    assert_eq!(streams(&main), [FakePhase::Attaching]);
+    push_a(&mut main, no_terminal());
+    assert!(drawn(main.cx, CARD));
+    assert_eq!(streams(&main), [FakePhase::Closed]);
+}
 
 /// SPEC.md: "Nothing respawns unattended", and the card's Restart is the user's intentional restart; nothing runs, so
 /// it asks nothing (`terminal-restart.spec.ts`, "restart from the interrupted surface sends the resume request exactly

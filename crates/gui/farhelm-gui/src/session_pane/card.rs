@@ -1,5 +1,5 @@
-//! The interrupted card: what the session pane shows in place of the open session's terminals once a host reboot or a
-//! Farhelm update ended its agent, with the way forward.
+//! The recovery card stands in for the open session's terminals when its agent was interrupted or its terminal
+//! is missing. Both cases use the same lifecycle controls, with an explanation specific to the row.
 //!
 //! SPEC.md, "Durability and resume": "Opening an interrupted session shows a centered neutral card in the empty terminal
 //! area explaining that a host reboot or a Farhelm update ended the agent and that it needs an intentional restart. The
@@ -8,30 +8,25 @@
 //! resume offers only Replace and says why." Ported from the old app's `.interrupted-card` (`session_view.rs` and
 //! `app.css` at the reference commit). Here's the TLDR of the rules:
 //!
-//! - **When.** While the store holds the open session as Interrupted on a host the helm reaches ([`shows`]), unless a
-//!   Restart has relaunched it since (below). A session on a host the helm cannot reach is the unreachable-host card's,
-//!   whatever its last status: a host that cannot be asked anything cannot be restarted either, and a reboot is known
-//!   only once the host answers again. The pane mounts no terminal and no tab strip while the card shows (the reboot
-//!   took the terminal, so an attach would only meet its absence), drops the ones it had when a session it shows is
-//!   interrupted, and mounts fresh ones only once the session is on a reachable host and no longer reads interrupted
-//!   ([`reachable`]; `session_pane.rs`), so a card whose host drops away mounts nothing in between. The top row and the
-//!   details bar stay, so the session's metadata is what an interrupted session shows, never an empty pane (SPEC.md,
-//!   "Session view").
+//! - **When.** The card takes a reachable session whose row says Interrupted or whose supervisor reports no agent
+//!   terminal ([`shows`]), unless a Restart has just brought it back (below). An unreachable host has its own card,
+//!   and retired sessions have their own rules. While recovery shows, the pane drops its terminal set, including
+//!   the tab strip. The top row and details bar stay, so the session's metadata remains visible.
 //! - **Restarted, until the list says so.** The helm's reply to a Restart comes before its list stops saying
 //!   Interrupted: the supervisor's reply carries an Unknown status, which the helm's session cache never lets overwrite
 //!   a definite one, and the real status arrives with the host's next listing, after the reply. So a Restart that
-//!   succeeds marks its session restarted ([`restarted`]), and the card treats a marked session as recovered: it goes
+//!   publishes a terminal marks its session restarted ([`restart_finished`]), and the card treats it as recovered: it goes
 //!   on the reply and the pane mounts the new terminal. The card's Restart goes with it, so a second click there cannot
 //!   send a second Restart into the gap; the header's Restart stays available meanwhile, as the old header's did. The
-//!   mark goes once the store lists the session as anything but Interrupted, or its host as unreachable: a second
-//!   reboot inside that window would leave every later push saying Interrupted, and the mark would otherwise keep the
-//!   pane attaching to a terminal that reboot took. The old card's `relaunched` (`session_view.rs` at the reference
-//!   commit), with the same two ends.
+//!   mark goes once the store no longer calls for a recovery card. In particular, an exited row whose terminal is
+//!   still listed as missing retains the mark until terminal presence is refreshed. An unreachable host clears it,
+//!   so a later report of absence can show the recovery card again.
 //! - **The text** says what happened and what the card offers ([`text`]), from the same clauses as Restart's hover help
 //!   (`session_list::restart`), so the two cannot drift apart.
-//! - **Restart** is one click: nothing runs, so nothing is asked (`restart::begin` asks only while the agent reads
-//!   working), and it is drawn only when the conversation can be resumed. **Replace** asks its inline question in the
-//!   card, unless Skip session confirmations is on, through `replace::begin` and `confirm` as the row and the header do.
+//! - **Restart** is one click: the card shows only when no agent process is left, so there is nothing to stop and
+//!   nothing is asked, even when the last status the helm kept still reads working (a terminal that went missing
+//!   leaves the last definite status in place). It is drawn only when the conversation can be resumed. **Replace**
+//!   asks its inline question in the card, unless Skip session confirmations is on, through `replace::begin` and `confirm` as the row and the header do.
 //!   A legacy launch (a session from before launch kinds) cannot be replaced as it is, so its card offers the
 //!   launcher's Replace with in Replace's place, as the old card did; once the launcher opens, the sidebar shows
 //!   Sessions in place of the Hosts panel, a New handoff like the header's Replace with… (`super::header`). Restart
@@ -90,17 +85,35 @@ pub(super) const GAP: f32 = 12.;
 
 // ---- When the card shows, and what it says ---------------------------------------------------------------------------
 
-/// Whether `row` takes the interrupted card: its status is Interrupted, the helm reaches its host (see the module docs,
-/// "When"), and it is not a retired containerized session, which supports Delete only and so takes the retired card
-/// whatever its status (`super::retired`): this card's Restart and Replace would be refused.
-fn interrupted(row: &SessionRow) -> bool {
-    !row.stale && row.info.status == SessionStatus::Interrupted && !session_list::retired::is(row)
+/// The two explanations the recovery card can show. The follower tracks the reason to refresh the explanation
+/// even when the pane keeps the same card and focus handle.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reason {
+    Interrupted,
+    MissingTerminal,
 }
 
-/// Whether the open session filed under `key`, whose row the store holds as `row`, shows the interrupted card now: its
-/// row takes the card and no Restart has relaunched it since ([`restarted`]).
+/// A recovery card needs a reachable, operable session. Interruption carries a more specific explanation than
+/// the missing-terminal fact, which can accompany any status.
+fn reason(row: &SessionRow) -> Option<Reason> {
+    if row.stale || session_list::retired::is(row) {
+        return None;
+    }
+    if row.info.status == SessionStatus::Interrupted {
+        Some(Reason::Interrupted)
+    } else {
+        row.info.terminal_missing.then_some(Reason::MissingTerminal)
+    }
+}
+
+/// The row's recovery reason unless a successful Restart already supplied a new terminal.
+fn shown_reason(key: &str, row: &SessionRow, cx: &App) -> Option<Reason> {
+    reason(row).filter(|_| !is_restarted(key, cx))
+}
+
+/// Whether the open session filed under `key` shows its recovery card.
 pub(crate) fn shows_row(key: &str, row: &SessionRow, cx: &App) -> bool {
-    interrupted(row) && !is_restarted(key, cx)
+    shown_reason(key, row, cx).is_some()
 }
 
 /// [`shows_row`] for the row the current UI session's store holds under `key`. `false` while the store holds none (a
@@ -139,8 +152,8 @@ fn row(key: &str, cx: &App) -> Option<SessionRow> {
 
 // ---- Restarted sessions ----------------------------------------------------------------------------------------------
 
-/// The sessions a Restart relaunched while the store may still list them as Interrupted, under the UI session they were
-/// marked in (see the module docs, "Restarted, until the list says so"). A global, because the Restart's completion
+/// The sessions a Restart relaunched while the store may still give a reason to show the recovery card. The marks
+/// belong to their UI session (see "Restarted, until the list says so"). A global, because the Restart's completion
 /// marks it from the operation store, with no view at hand, and the follower and the pane read it. The marked keys are
 /// read through [`PerSession::read`], since [`is_restarted`] answers while drawing, with only `&App`; they are written
 /// through `current` inside a global update, which takes the global off the app for the closure, so `current` can
@@ -150,15 +163,20 @@ struct Restarted(PerSession<HashSet<String>>);
 
 impl Global for Restarted {}
 
-/// A Restart of the session filed under `key` succeeded: its card treats it as recovered until the list catches up.
-/// Called from every Restart's completion (`session_list::restart`), the header's included, since a Restart from there
-/// meets the same gap. Every successful Restart marks its session, interrupted or not, on purpose: the completion knows
-/// nothing of the row, and a mark on a session the store lists as anything but Interrupted is dropped at once
-/// ([`forget_settled`] runs as the mark notifies), so it changes nothing.
-pub(crate) fn restarted(key: &str, cx: &mut App) {
-    cx.update_default_global::<Restarted, _>(|marks, cx| {
-        marks.0.current(cx).insert(key.to_owned());
-    });
+/// A Restart reply can bridge a stale listing as soon as it reports a terminal. A later reply reporting absence
+/// revokes that evidence, including when Restart came from the header during the gap.
+pub(crate) fn restart_finished(key: &str, terminal_missing: bool, cx: &mut App) {
+    if terminal_missing {
+        if is_restarted(key, cx) {
+            cx.update_global::<Restarted, _>(|marks, cx| {
+                marks.0.current(cx).remove(key);
+            });
+        }
+    } else {
+        cx.update_default_global::<Restarted, _>(|marks, cx| {
+            marks.0.current(cx).insert(key.to_owned());
+        });
+    }
 }
 
 /// Whether the session filed under `key` is marked restarted under the current UI session.
@@ -168,11 +186,10 @@ fn is_restarted(key: &str, cx: &App) -> bool {
         .is_some_and(|keys| keys.contains(key))
 }
 
-/// Drop the marks the store has caught up with: a session it lists as anything but Interrupted, on a host the helm
-/// cannot reach, or not at all. A mark matters only while the open session's card would show, and the open session
-/// always has a row unless it is gone; a row that left the listing (a filter, the cap, another session opened) could
-/// otherwise keep its mark until a later reboot made it Interrupted again, and then hide that card. Changes the global
-/// (which notifies its observers) only when a mark goes, since the follower that calls this observes the global.
+/// Drop marks as soon as the row has no recovery reason or leaves the listing. A mark matters only while the card
+/// would show. The open session always has a row unless it is gone. A row that left the listing (a filter, the cap,
+/// another session opened) could otherwise keep its mark until a later terminal loss and then hide that card. Changes
+/// the global (which notifies its observers) only when a mark goes, since the follower that calls this observes the global.
 ///
 /// Marks of an earlier UI session are left alone: no read finds them ([`is_restarted`] reads through
 /// [`PerSession::read`]), and the next mark starts them over. Dropping them here would notify the follower of a change
@@ -186,10 +203,7 @@ fn forget_settled(cx: &mut App) {
     };
     let gone: Vec<String> = keys
         .iter()
-        .filter(|key| {
-            row(key, cx)
-                .is_none_or(|row| row.stale || row.info.status != SessionStatus::Interrupted)
-        })
+        .filter(|key| row(key, cx).is_none_or(|row| reason(&row).is_none()))
         .cloned()
         .collect();
     if gone.is_empty() {
@@ -220,7 +234,7 @@ struct Asked(PerSession<Option<(String, Inline<replace::Frozen>)>>);
 impl Global for Asked {}
 
 /// Keep `question`, which the card of the session filed under `key` just asked, in place of any earlier one.
-pub(super) fn keep_question(key: &str, question: Inline<replace::Frozen>, cx: &mut App) {
+fn keep_question(key: &str, question: Inline<replace::Frozen>, cx: &mut App) {
     cx.update_default_global::<Asked, _>(|asked, cx| {
         *asked.0.current(cx) = Some((key.to_owned(), question));
     });
@@ -244,7 +258,7 @@ pub(super) fn question(key: &str, cx: &App) -> Option<Inline<replace::Frozen>> {
     (asked_for == key).then(|| question.clone())
 }
 
-/// Whether the interrupted card of the session filed under `key` asks its Replace question now: one is kept for it
+/// Whether the recovery card of the session filed under `key` asks its Replace question now: one is kept for it
 /// under the current UI session and has had no answer. While it does, the session's lifecycle commands are refused
 /// everywhere (`session_list::menu::refused`).
 pub(crate) fn asks(key: &str, cx: &App) -> bool {
@@ -257,14 +271,22 @@ fn offers_replace_with(row: &SessionRow) -> bool {
     matches!(row.info.launch, SessionLaunch::Legacy { .. })
 }
 
-/// The card's sentence for `row`: the old `interrupted_surface_text`. It names the reboot or update and the intentional
-/// handoff before what the choices do, so the empty terminal area explains both the missing terminal and the safe next
-/// step without implying that anything recovers by itself; a session that cannot resume names only the way it can
-/// start over. An interrupted session's agent has ended, so every clause is the ended one, as Restart's hover help says
-/// it for the same session.
+/// Name the reason the pane has no terminal and what each recovery action does. An interrupted session keeps the
+/// explanation about a reboot or update. The missing-terminal report does not identify a cause.
 pub(crate) fn text(row: &SessionRow) -> String {
-    const ENDED: &str = "A host reboot or a Farhelm update ended this session's agent";
     let (offer, kind) = (row.info.restart_offer, row.info.agent_kind);
+    let lead = match row.info.status {
+        SessionStatus::Interrupted if offer.can_restart() => {
+            "A host reboot or a Farhelm update ended this session's agent; it needs an intentional restart"
+        }
+        SessionStatus::Interrupted => {
+            "A host reboot or a Farhelm update ended this session's agent"
+        }
+        _ => {
+            "This session's terminal is gone: it ended outside Farhelm (for example when its container was stopped), \
+             never started, or could not be found on its host"
+        }
+    };
     let clause = restart::offer_clause(offer, kind, true);
     let note = restart::feedback_note(offer, true);
     // A legacy session's card offers Replace with, never plain Replace, so its text must not promise that "Replace
@@ -272,33 +294,33 @@ pub(crate) fn text(row: &SessionRow) -> String {
     if offers_replace_with(row) {
         return if offer.can_restart() {
             format!(
-                "{ENDED}; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace with \
+                "{lead}. Farhelm will wait for you to choose Restart or Replace with \
                  — {clause}."
             )
         } else if offer == RestartOffer::NotCaptured {
             let start_over = "Replace with opens the launcher with its command to start it over";
             let clause = restart::not_captured_clause(kind, true, start_over);
-            format!("{ENDED}. Farhelm will wait for you to choose Replace with — {clause}.{note}")
+            format!("{lead}. Farhelm will wait for you to choose Replace with — {clause}.{note}")
         } else {
             format!(
-                "{ENDED}. Farhelm will wait for you to choose Replace with — this session was created before launch \
+                "{lead}. Farhelm will wait for you to choose Replace with — this session was created before launch \
                  kinds, so it cannot resume, and Replace with opens the launcher with its command to start it over."
             )
         };
     }
     if offer.can_restart() {
         format!(
-            "{ENDED}; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — \
+            "{lead}. Farhelm will wait for you to choose Restart or Replace — \
              {clause}."
         )
     } else {
-        format!("{ENDED}. Farhelm will wait for you to choose Replace — {clause}.{note}")
+        format!("{lead}. Farhelm will wait for you to choose Replace — {clause}.{note}")
     }
 }
 
 // ---- Following the store ---------------------------------------------------------------------------------------------
 
-/// What tells the pane that the open session went into or out of its interrupted card, or its host into or out of reach
+/// What tells the pane that the open session's recovery card or its reason changed, or its host came into or out of reach
 /// (and so into or out of the unavailable card, `unavailable.rs`), or that its row turned out to be a retired
 /// containerized session's (`retired.rs`), so it can drop, mount or make inert its terminals then, and that the fleet
 /// became empty or stopped being empty, so it can make New home or stop: the store pushes the change (or a Restart
@@ -308,7 +330,7 @@ pub(crate) fn text(row: &SessionRow) -> String {
 /// It is built on [`session::observe_current`], which cannot serve the pane by itself: its callback gets no window,
 /// which every focus move the pane makes needs, and it calls on every pushed change, where the pane wants only these
 /// transitions. So the pane observes this entity with its window, as it observes the terminal set that follows the
-/// session's tabs, and this entity notifies only when the open session, whether it shows the interrupted card, the
+/// session's tabs, and this entity notifies only when the open session, its shown recovery reason, the
 /// state of its row's host (reached, not reached, or no row at all), whether it is retired, or whether the fleet is
 /// empty changes. The two unreached states are told apart because a stale row shows the unavailable card and a missing
 /// one does not, so a row that goes from one to the other changes what the pane does with its terminals although
@@ -316,9 +338,9 @@ pub(crate) fn text(row: &SessionRow) -> String {
 /// change with nothing open and the selection staying as it was: a failed or cut listing, which opens nothing, coming
 /// back complete and empty.
 pub(super) struct Follow {
-    /// The open session, whether it shows the interrupted card, whether its row is stale (`None` with no row), and
+    /// The open session, its card's reason if it shows, whether its row is stale (`None` with no row), and
     /// whether it is a retired containerized session, which never gets terminals (`super::retired`).
-    last: Option<(String, bool, Option<bool>, bool)>,
+    last: Option<(String, Option<Reason>, Option<bool>, bool)>,
     /// Whether the store showed an empty fleet at the last check ([`empty_fleet`]).
     empty: bool,
     _following: ObservingCurrent,
@@ -336,14 +358,14 @@ impl Follow {
         }
     }
 
-    /// Drop the settled marks, then notify if the open session, whether it shows the card, its row's host state, or
-    /// whether the fleet is empty changed since the last check.
+    /// Drop the settled marks, then notify when the open session, its shown recovery reason, its host state,
+    /// retirement or the fleet's emptiness changes.
     fn check(&mut self, cx: &mut Context<Self>) {
         forget_settled(cx);
         let now = local_state::selected(cx).map(|key| {
             // One read of the row for both answers, so they describe the same push.
             let row = row(&key, cx);
-            let card = row.as_ref().is_some_and(|row| shows_row(&key, row, cx));
+            let card = row.as_ref().and_then(|row| shown_reason(&key, row, cx));
             let retired = row.as_ref().is_some_and(session_list::retired::is);
             let stale = row.map(|row| row.stale);
             (key, card, stale, retired)
@@ -360,7 +382,7 @@ impl Follow {
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
 /// What the card draws for the open session filed under `key`: its row as the store holds it, the focus handle the
-/// card tracks (home while it shows), the Replace question it asked if one is kept, why the launcher cannot open now
+/// card tracks (home while it shows), the question it asked if one is kept, why the launcher cannot open now
 /// if it cannot, and the spinner's step.
 pub(crate) struct Drawn<'a> {
     pub(crate) key: &'a str,
@@ -555,7 +577,12 @@ pub(crate) fn draw(
 
 // ---- Acting ----------------------------------------------------------------------------------------------------------
 
-/// The shown interrupted row supplies Restart's guard while the current row still offers Restart on this card.
+/// The card's Restart, sent at once with no consent to stop a running agent: the card shows only when no agent process
+/// is left (SPEC_impl.md: "Restart is an unconfirmed normal action because no process remains"), even when the status
+/// the helm kept still reads Running because the terminal went missing without a definite new status. Asking "Still
+/// running — restarting stops the agent" there would be false. If an agent is alive after all (a terminal published
+/// since the row was drawn), the supervisor refuses a Restart that carries no consent, so this errs toward stopping
+/// nothing. The shown row supplies the guard while the current row still offers Restart on this card.
 fn restart_from_card(snapshot: Option<&ShownAction<menu::Actionable>>, cx: &mut App) {
     use session_list::environment::{self, Environment};
 
@@ -567,7 +594,7 @@ fn restart_from_card(snapshot: Option<&ShownAction<menu::Actionable>>, cx: &mut 
                 && !environment::of_key(&target.key, cx).is_some_and(Environment::frozen)
         })
     {
-        let _ = restart::begin(&target.key, &target.row, target.skips_questions, cx);
+        restart::send(&target.key, false, cx);
     }
 }
 
@@ -694,18 +721,20 @@ mod tests {
         assert!(!other.contains("Replace starts it over"));
     }
 
-    /// Stale beats interrupted: a host the helm cannot reach cannot be restarted, so its session is the unreachable
-    /// card's whatever its last status said, and only a reachable interrupted session takes this card. Specified: an
-    /// interrupted row takes it, the same row stale does not, and an exited row does not (an exited agent keeps its
-    /// terminal and scrollback).
+    /// The card distinguishes an exited agent with a retained screen from a missing terminal. Interruption gets its
+    /// own explanation even if both conditions hold, and an unreachable host owns the surface in either case.
     #[test]
-    fn only_a_reachable_interrupted_session_takes_the_card() {
+    fn a_reachable_session_takes_the_card_when_interrupted_or_missing_its_terminal() {
         let mut row = row("resume", "claude", None);
-        assert!(interrupted(&row));
+        assert!(matches!(reason(&row), Some(Reason::Interrupted)));
+        row.info.terminal_missing = true;
+        assert!(matches!(reason(&row), Some(Reason::Interrupted)));
         row.stale = true;
-        assert!(!interrupted(&row));
+        assert!(reason(&row).is_none());
         row.stale = false;
         row.info.status = SessionStatus::Exited { exit_code: Some(0) };
-        assert!(!interrupted(&row));
+        assert!(matches!(reason(&row), Some(Reason::MissingTerminal)));
+        row.info.terminal_missing = false;
+        assert!(reason(&row).is_none());
     }
 }

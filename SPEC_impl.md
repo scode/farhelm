@@ -471,10 +471,11 @@ it, must move its store subscription to each new session's store and drop the ol
 retired store nor misses the store that replaced it. Views do that through the owner's helper
 (`session::observe_current`): the session list follows the store through it and keeps the rest of its per-session state
 in `PerSession`. The session pane follows the connection, keyed on the session through `PerSession`, and follows the
-store only for the open session's transitions into and out of its interrupted card and its host's reachability, which
-decide whether it mounts terminals and whether they are inert under the unavailable card. The one survivor the UI keeps
-itself is the selected session, by id, if the new snapshot still has it; it lives in a small foundation of its own
-outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in
+store for the open session's recovery card (Interrupted or `terminal_missing`) and its host's reachability. These decide
+whether the pane mounts terminals, including the separate shell tabs, and whether they are inert under the unavailable
+card. An acknowledged Restart that published a terminal can dismiss the recovery card before the listing catches up. The
+one survivor the UI keeps itself is the selected session, by id, if the new snapshot still has it; it lives in a small
+foundation of its own outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in
 `docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one. A second,
 deliberate survivor is the attachment lines a terminal leaves when it goes
 (`crates/gui/farhelm-gui/src/terminal/attachments.rs`, `Carried`): the failures still on its strip, and a line for each

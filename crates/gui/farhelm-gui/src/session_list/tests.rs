@@ -71,6 +71,8 @@ pub(crate) struct Fixture {
     /// Whether the supervisor sees the harness-neutral workspace-trust question (Codex's, Muse's) on the agent's screen
     /// now (`workspace_trust_prompt`).
     workspace_trust_prompt: bool,
+    /// Whether the supervisor reports no agent terminal, independently of the status and listed shell tabs.
+    terminal_missing: bool,
     /// The session's notifications in the helm's wire form and its read mark, when the test names them; else none, and
     /// a read mark of 0.
     notifications: Option<(Value, u64)>,
@@ -111,6 +113,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         screen_yolo: false,
         claude_trust_prompt: false,
         workspace_trust_prompt: false,
+        terminal_missing: false,
         notifications: None,
         tabs: 0,
         invocation: None,
@@ -124,6 +127,12 @@ pub(crate) fn session(key: &'static str) -> Fixture {
 }
 
 impl Fixture {
+    /// Report a missing agent terminal. Keep the rest of the listing intact so hiding the tabs is the pane's choice.
+    pub(crate) fn terminal_missing(mut self) -> Self {
+        self.terminal_missing = true;
+        self
+    }
+
     pub(crate) fn grouped(mut self, group: i64) -> Self {
         self.group = Some(group);
         self
@@ -262,6 +271,9 @@ impl Fixture {
         value["screen_yolo"] = json!(self.screen_yolo);
         value["claude_trust_prompt"] = json!(self.claude_trust_prompt);
         value["workspace_trust_prompt"] = json!(self.workspace_trust_prompt);
+        if self.terminal_missing {
+            value["terminal_missing"] = json!(true);
+        }
         let (notifications, read_through) =
             self.notifications.clone().unwrap_or_else(|| (json!([]), 0));
         value["notifications"] = notifications;

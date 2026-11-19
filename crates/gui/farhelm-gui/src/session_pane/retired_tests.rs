@@ -54,7 +54,13 @@ fn has_id(main: &mut MainWindow, id: &str) -> bool {
 /// row and the details bar and holds focus.
 #[gpui::test]
 fn a_retired_session_opens_on_its_card_with_no_terminal(cx: &mut TestAppContext) {
-    let mut main = open_main(cx, snapshot(&[(retired("a"), 0), (session("b"), 0)], false));
+    let mut main = open_main(
+        cx,
+        snapshot(
+            &[(retired("a").terminal_missing(), 0), (session("b"), 0)],
+            false,
+        ),
+    );
     answer_all(&mut main.helm);
     assert_eq!(streams(&main), 0, "no stream");
     assert!(!drawn(main.cx, "terminal-grid"), "no terminal");

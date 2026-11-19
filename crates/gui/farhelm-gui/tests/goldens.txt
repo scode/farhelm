@@ -166,6 +166,8 @@ linux/session-list-pinned--dark.png 5dd8a6e5fe03d36f0868c9a5d0471c5a5b7b3056
 linux/session-list-pinned--light.png fc4477585be4b84df40f7e8642535f19087d5271
 linux/session-list-selected-stale--dark.png c566ff748397fb0cc85f9d1b61f479ef64a93a7e
 linux/session-list-selected-stale--light.png f1866078e04b6a93addd67bbdd4d06533516433b
+linux/session-missing-terminal-card--dark.png a607a921d8aae1ee2903bc1d6dcc541c01853b49
+linux/session-missing-terminal-card--light.png 294fe8052afb479c2c59c5298af41f580a9ec393
 linux/session-order-menu--dark.png e316f4f605989b1fdd8ab2f9e11c5b957f738811
 linux/session-order-menu--light.png 1e9124e404d643b69763daaab98e85e107211501
 linux/session-row-hover-beside--dark.png a22fb30357388ed8703ece3d737bececfd7eaacb

@@ -207,7 +207,7 @@ pub struct SessionPane {
     /// moves on with the rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked
     /// out at the top of each frame like `spinner`.
     clock: Option<ticker::Clock>,
-    /// Tells the pane when the open session goes into or out of its interrupted card or its host into or out of reach,
+    /// Tells the pane when the open session's recovery card changes or its host comes into or out of reach,
     /// and when the fleet becomes empty or stops being so ([`card::Follow`]).
     _card: Entity<card::Follow>,
     /// The session list's New button's focus handle ([`crate::session_list::SessionList::new_focus`]), home while no
@@ -353,7 +353,7 @@ impl SessionPane {
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
         // The pane follows the connection, not the store: what it mounts depends on the UI session and the selection,
-        // and on the store only for whether the open session shows its interrupted card, whether its row's host is
+        // and on the store only for the open session's recovery card and reason, whether its row's host is
         // reached (a stale row shows the unavailable card), whether the session is retired (the retired card, and never
         // a terminal) and whether the fleet is empty (New as home), which the card's follower reports when any of them
         // changes. So it does not use `session::observe_current` itself, which would add a sync on every pushed
@@ -364,7 +364,11 @@ impl SessionPane {
             }));
         }
         let follow = cx.new(card::Follow::new);
-        observing.push(cx.observe_in(&follow, window, |pane, _, window, cx| pane.sync(window, cx)));
+        observing.push(cx.observe_in(&follow, window, |pane, _, window, cx| {
+            pane.sync(window, cx);
+            // A card can stay open while the reason for the missing terminal changes.
+            cx.notify();
+        }));
         let trust_band = cx.new(trust_band::TrustBand::new);
         observing.push(cx.observe(&trust_band, |_, _, cx| cx.notify()));
         // After the window's first frame exists rather than during its construction, as the focus coordinator's own
@@ -418,7 +422,7 @@ impl SessionPane {
                 || (mounted.set.is_none() && !card && !retired && reachable))
         {
             // The open session went into its card (its terminals go, streams and all) or came out of it (new ones,
-            // under a new lease, since the reboot took the old terminal). Out of it means on a host the helm reaches:
+            // under a new lease for the replacement terminal). Out of it means on a host the helm reaches:
             // a card whose host drops away mounts nothing, since the terminal is gone there too. The card's question
             // goes either way. A retired session's row arriving after its terminals were made drops them the same way,
             // and nothing ever mounts new ones for it.
@@ -665,7 +669,7 @@ impl Render for SessionPane {
                 window,
                 cx,
             )),
-            // Never both: the interrupted card leaves a retired session alone (`card.rs`).
+            // A retired session keeps its own card even if its terminal is missing.
             Some(row) if retired::shows_row(row) => Some(retired::draw(&card_focus, window, cx)),
             _ => terminals.map(IntoElement::into_any_element),
         };
