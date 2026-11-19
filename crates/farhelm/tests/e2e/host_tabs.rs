@@ -185,21 +185,27 @@ async fn wait_for_grid_text(stream: &mut TermStream, text: &str) {
 
 /// Wait until `condition` answers true, failing with `what` and the last
 /// answer's `detail` after [`WAIT_SECS`]: the one poll for state no event
-/// announces (the process table, files, a listing).
+/// announces (the process table, files, a listing). The deadline also bounds an in-flight listing.
 pub(crate) async fn wait_for_condition<F, Fut>(what: &str, mut condition: F)
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(WAIT_SECS);
-    loop {
-        let Err(detail) = condition().await else {
-            return;
-        };
-        assert!(tokio::time::Instant::now() < deadline, "{what}: {detail}");
+    let mut detail = "no observation completed".to_owned();
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout_at(deadline, condition()).await {
+            Ok(Ok(())) if tokio::time::Instant::now() < deadline => return,
+            Ok(Err(next)) => detail = next,
+            Ok(Ok(())) | Err(_) => {
+                panic!("{what}: observation exceeded the deadline (last failure: {detail})")
+            }
+        }
+        let next_poll = tokio::time::Instant::now() + Duration::from_millis(50);
         // sleep-ok: polling interval for process-table, filesystem and listing state no event announces.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep_until(next_poll.min(deadline)).await;
     }
+    panic!("{what}: {detail}");
 }
 
 /// The host processes serving sockets in `state`'s socket directory, by
