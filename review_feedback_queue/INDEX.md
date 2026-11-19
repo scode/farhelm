@@ -1661,10 +1661,6 @@ consequences.
 - [`transition-accessor-comment.md`](transition-accessor-comment.md) — A maintainer following the test's explanation
   encounters an accessor name that no longer exists. No product behavior or lifecycle guarantee is shown to be wrong.
 
-- [`successor-exit-processing-witness.md`](successor-exit-processing-witness.md) — The retained-exit-code regression
-  test relies on recovery replay finishing in the background before it checks the code. A slow replay can make a correct
-  restart fail this test; the failing schedule is unverified after investigation.
-
 - [`grid-row-is-not-program-line.md`](grid-row-is-not-program-line.md) — The new terminal transcript can make a
   partially rendered program line appear complete to a test. Agent checks can then reject correct behavior; one
   direct-signal caller could instead use a process-number prefix and terminate unrelated work. The exact short-line

@@ -132,6 +132,9 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 /// The exits deliberately happen without any intervening `list_sessions`:
 /// a list is how this supervisor witnesses an exit, so listing first would
 /// test the recording path rather than the reload path this test is about.
+/// The original runtime therefore observes the exit without recording it,
+/// and the replacement must process its own retained exit before the test
+/// checks the listing.
 #[farhelm_testtrace::test]
 async fn same_boot_classification_is_per_session_and_never_interrupted() {
     let h = harness().await;
@@ -167,6 +170,8 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
     // keeps its exited child's code, `3`, and the supervisor must report
     // exactly that. A supervisor that fabricated a code, or dropped the one
     // the terminal still had, fails this.
+    // Adoption can return before replay delivers the replacement runtime's retained exit.
+    wait_for_dead_agent(&h.sup, h.state.path(), &exiting.id).await;
     let retained = agent_exit_code(&h, &exiting.id).await;
     assert_eq!(
         retained,
