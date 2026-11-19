@@ -143,7 +143,7 @@ impl HelpEdges {
                     .filter_map(|surface| surface.get());
                 place_menu(panel, target.bounds, size, area, lower, higher)
             }
-            HelpPlacement::Beside(_) => {
+            HelpPlacement::Beside(_) | HelpPlacement::Rail(_) => {
                 let edge = self
                     .inline
                     .iter()
@@ -156,9 +156,19 @@ impl HelpEdges {
                         };
                         area(a).total_cmp(&area(b))
                     });
-                Some(edge.map_or_else(ordinary, |edge| {
+                let placed = edge.map_or_else(ordinary, |edge| {
                     place(edge.right(), target.bounds, size, area)
-                }))
+                });
+                // A rail button keeps accepting pointer hover while its menu is open beside it. Give the open
+                // panel the space it already occupies, including when the tooltip falls back above the button.
+                let card = Bounds::new(placed.origin, size);
+                let clear = !matches!(placement, HelpPlacement::Rail(_))
+                    || !self
+                        .panels
+                        .iter()
+                        .filter_map(|surface| surface.get())
+                        .any(|panel| panel.intersects(&card));
+                clear.then_some(placed)
             }
             HelpPlacement::Ordinary => Some(ordinary()),
         }
@@ -344,7 +354,7 @@ impl PlacedBeside {
     ) -> Self {
         let fill = theme::color(palette.bg_2);
         let border = theme::color(palette.border);
-        let ring = if let HelpPlacement::Beside(cues) = placement {
+        let ring = if let HelpPlacement::Beside(cues) | HelpPlacement::Rail(cues) = placement {
             let color = theme::color(if cues.on_fill {
                 palette.on_fill
             } else {

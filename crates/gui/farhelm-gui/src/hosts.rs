@@ -1095,7 +1095,7 @@ fn identity_mark(host: &HostView, locality: Locality, palette: &Palette) -> AnyE
             StatusMark::new(
                 SharedString::from(format!("host-mark-{}", host.id)),
                 word,
-                HoverHelp::tooltip(help),
+                HoverHelp::tooltip(help).beside(),
                 Role::Image,
                 word,
             )
@@ -1128,7 +1128,7 @@ fn phase_status(
             StatusMark::new(
                 SharedString::from(format!("host-status-{}", host.id)),
                 words,
-                HoverHelp::tooltip(phase::hover(&host.state)),
+                HoverHelp::tooltip(phase::hover(&host.state)).beside(),
                 Role::Status,
                 words,
             )

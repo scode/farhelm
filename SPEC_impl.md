@@ -901,20 +901,25 @@ topmost containing popover. The sidebar and other in-tree containers register th
 For a control in the page, the smallest containing in-tree edge wins, even if a popover partly covers the control. A
 control outside any eligible surface uses ordinary placement.
 
+The host rail registers a full-height edge spanning its separately drawn scrolling entries and footer. Its right edge
+follows its measured expanded or collapsed width. Session groups, host attention rows, Hosts panel rows and the list's
+Show all actions use the full sidebar edge. If rail help would cover an open panel, the panel keeps its space and the
+tooltip is hidden for that frame.
+
 The card sits 6 pixels outside the surface, centered on its control and clamped 4 pixels inside the content area
 vertically. Its measured width determines whether it fits beside the surface while keeping the 4-pixel window margin.
-For session rows and host progress cards, only the right side is eligible. Menus, select choices and the notification
-and tunnels panels try the right and then the left. A beside candidate must clear the other open panels. If both sides
-fail, use ordinary placement against the control, centered above with 6 pixels of clearance, else below with 28, else on
-the roomier side clamped within the content area. If that fallback covers an open higher panel, the menu help is hidden
-for that frame.
+For sidebar and rail controls, only the right side is eligible. Menus, select choices and the notification and tunnels
+panels try the right and then the left. A beside candidate must clear the other open panels. If both sides fail, use
+ordinary placement against the control, centered above with 6 pixels of clearance, else below with 28, else on the
+roomier side clamped within the content area. If that fallback covers an open higher panel, the menu help is hidden for
+that frame.
 
 Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
-with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Session rows
-and host progress cards also draw a 1-pixel ring just inside the control, with its corner radius and clip, in the accent
-or the on-fill color of a selected row. Menu help uses the active item's own highlight. The control's bounds are taken
-inside its border, where the ring goes. The old app measured from the border box and closed help on scroll. Here help
-follows its control while the pointer stays on it.
+with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar and
+rail help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the
+on-fill color of a selected row. Menu help uses the active item's own highlight. The control's bounds are taken inside
+its border, where the ring goes. The old app measured from the border box and closed help on scroll. Here help follows
+its control while the pointer stays on it.
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,

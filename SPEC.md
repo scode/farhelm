@@ -2694,6 +2694,10 @@ the notification and tunnels lists show help just outside the panel, to the righ
 A notch points back to the active control. The same placement follows keyboard focus. If neither side fits, help takes
 its ordinary place above or below the control. An open submenu takes priority over its trigger's help.
 
+Session group headers, attention rows, host rows and the session list's Show all links use the sidebar's right edge.
+Help for the host rail's avatars and footer controls uses the rail's own right edge as it expands and collapses. A notch
+and a thin ring identify the target in both cases. An open panel keeps its space beside the rail.
+
 Agent marks use distinct identity colors where their owners' terms allow: a published owner hue where one exists,
 otherwise a Farhelm choice, with shades suited to each theme. Codex, Goose and the ordinary Terminal mark stay grey.
 These colors say which agent it is, never its activity or permission mode.

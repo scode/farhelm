@@ -494,7 +494,7 @@ pub(crate) fn status_mark(
     StatusMark::new(
         SharedString::from(format!("host-status-{id}")),
         sentence.accessible_name(),
-        help,
+        help.beside(),
         Role::Status,
         "",
     )
@@ -860,7 +860,7 @@ pub(crate) fn collapse(id: i64, on_fold: impl Fn(&mut Window, &mut App) + 'stati
     Button::new(
         format!("host-run-fold-{id}"),
         "Collapse",
-        HoverHelp::tooltip("Collapse this run's steps"),
+        HoverHelp::tooltip("Collapse this run's steps").ring_radius(metrics::RADIUS_SM - px(1.)),
         Role::Button,
     )
     .tier(Tier::Neutral)

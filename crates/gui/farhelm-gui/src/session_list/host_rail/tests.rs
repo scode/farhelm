@@ -383,6 +383,69 @@ fn an_avatars_hover_help_is_its_name(cx: &mut TestAppContext) {
     );
 }
 
+/// The rail's help belongs to the rail rather than the full sidebar. Expanding the rail moves the edge for both
+/// the hosts and the separately drawn footer.
+#[gpui::test]
+fn avatar_and_footer_help_follow_the_rails_current_right_edge(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    cx.simulate_resize(size(px(1200.), px(740.)));
+    test_support::settle(cx);
+    let mut previous = px(0.);
+    for expanded in [false, true] {
+        let rail = test_support::bounds(cx, "host-rail");
+        let sidebar = frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("sidebar"))
+            .expect("the sidebar encloses the rail and session list")
+            .bounds;
+        assert!(rail.right() > previous && rail.right() + px(6.) < sidebar.right());
+        assert_eq!(rail.size.width, super::expansion::width(expanded));
+        previous = rail.right();
+        for (control, words) in [
+            ("host-rail-all", "All hosts: show sessions from every host"),
+            ("app-settings-toggle", super::SETTINGS_HELP),
+        ] {
+            assert_eq!(hover_help(cx, control).as_deref(), Some(words));
+            let shown = cx
+                .update(|window, cx| layers::shown_tooltip(window, cx))
+                .unwrap();
+            assert_eq!(shown.side(), layers::TooltipSide::Beside);
+            assert!(shown.ring().is_some());
+            let card = test_support::bounds(cx, "tooltip-card");
+            assert!((card.left() - rail.right() - px(6.)).abs() <= px(1.));
+        }
+        if !expanded {
+            test_support::click(cx, super::TOGGLE_ID);
+        }
+    }
+}
+
+/// A rail opener can still be hovered while its menu is open. The menu keeps its space beside the button.
+#[gpui::test]
+fn help_button_tooltip_gives_the_open_help_menu_room(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    cx.simulate_resize(size(px(1200.), px(740.)));
+    test_support::settle(cx);
+    test_support::click(cx, "app-help-toggle");
+    let menu = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("help-menu"))
+        .expect("the click opened the Help menu")
+        .bounds;
+    let opener = test_support::center(cx, "app-help-toggle");
+    assert!(menu.left() > opener.x && (menu.top()..=menu.bottom()).contains(&opener.y));
+    cx.simulate_mouse_move(point(px(1180.), px(350.)), None, Modifiers::none());
+    test_support::settle(cx);
+    assert!(
+        hover_help(cx, "app-help-toggle").is_some_and(|words| words.starts_with("Help:")),
+        "the open menu still lets the button receive a new hover"
+    );
+    assert!(
+        cx.debug_bounds("tooltip-card").is_none(),
+        "the card gives way to the menu"
+    );
+}
+
 /// A host's name and destination are the host's own text, and a host named to pose as another (a direction override, a
 /// zero-width character) must show what it is in the rail too. Specified: for each spoofing string, an aliased host
 /// carrying it in its alias is named with the escaped form, and nothing the frame painted holds a presentation-unsafe

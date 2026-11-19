@@ -703,7 +703,7 @@ fn row_element(
         (Kind::Working, Some(_)) => {
             HoverHelp::card_with(px(CARD_WIDTH), move |_, cx| card(id, cx), sentence).beside()
         }
-        _ => HoverHelp::sentence(sentence),
+        _ => HoverHelp::sentence(sentence).beside(),
     };
     let open = {
         let list = list.clone();
@@ -736,7 +736,8 @@ fn row_element(
                 Button::new(
                     format!("host-attention-details-{id}"),
                     "Details",
-                    HoverHelp::tooltip("Details: open host management at this host"),
+                    HoverHelp::tooltip("Details: open host management at this host")
+                        .ring_radius(theme::metrics::RADIUS_SM - px(1.)),
                     Role::Button,
                 )
                 .tier(Tier::Neutral)
@@ -762,7 +763,7 @@ fn row_element(
                 Button::new(
                     format!("host-attention-update-{id}"),
                     "Update",
-                    help,
+                    help.ring_radius(theme::metrics::RADIUS_SM - px(1.)),
                     Role::Button,
                 )
                 .tier(Tier::Neutral)

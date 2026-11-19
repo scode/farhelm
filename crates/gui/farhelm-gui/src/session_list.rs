@@ -1008,9 +1008,18 @@ impl Render for SessionList {
         // borrowed as well.
         let menu = self.prepare_rail(window, cx);
         let expanded = self.rail_expanded(cx);
+        // The entries and the footer draw in separate branches to keep Tab order. One edge spans both at the
+        // rail's current width, so expanding the rail moves its help without changing the session column's edge.
+        let rail_edge = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w(host_rail::expansion::width(expanded))
+            .h_full()
+            .child(crate::layers::beside_edge("rail-help-edge", window, cx));
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
-        let body_row = body_row.child(host_rail::rail(
+        let body_row = body_row.child(rail_edge).child(host_rail::rail(
             collections,
             &weak,
             &self.all_focus,

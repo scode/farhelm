@@ -131,8 +131,8 @@ use crate::theme;
 /// any string, so that is held by review rather than by the type, as for a dialog's title. Rich help that is not
 /// words, the session row's summary card, is a view of the caller's on a card of fixed width ([`HoverHelp::card`]).
 ///
-/// Ordinary help sits above its control, or below when space runs out. Session rows and host progress cards use
-/// [`HoverHelp::beside`]. Menu items and notification actions use [`HoverHelp::beside_menu`].
+/// Ordinary help sits above its control, or below when space runs out. Sidebar rows and the host rail use
+/// [`HoverHelp::beside`]. Menu items, notifications and tunnel actions use [`HoverHelp::beside_menu`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoverHelp {
     help: Help,
@@ -217,11 +217,17 @@ impl HoverHelp {
         HoverHelp::of(Help::card_with(width, build, text))
     }
 
-    /// Use the enclosing help edge for session rows and host progress cards. The card sits 6 pixels to its right
+    /// Use the enclosing help edge for sidebar and rail controls. The card sits 6 pixels to its right
     /// with a notch and a ring inside the control's bounds. Ordinary placement takes over if the edge or the room
     /// beside it is missing. The ring takes the accent and square corners by default.
     pub fn beside(mut self) -> Self {
         self.beside_cues();
+        self
+    }
+
+    /// Rail help uses the same ring cues as sidebar help, and gives an open popover room for its choices.
+    pub(crate) fn beside_rail(mut self) -> Self {
+        self.placement = HelpPlacement::Rail(*self.beside_cues());
         self
     }
 
