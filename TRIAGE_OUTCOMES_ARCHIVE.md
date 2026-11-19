@@ -21729,8 +21729,38 @@ paste" (rebased revision)
   page, Q3): spec note for paste order.
 - Completion criteria: SPEC.md, next to its slow-clipboard rule, states that on Wayland input typed while a paste is
   still being fetched may reach the terminal before the paste. No code change. Remove the feedback file and its index
-  entry in the same change.
+  entry in the same change. <<<<<<<<<<<<<<<<<<< conflict 1 of 1 %%%%%%%%%%%%%%%%%%% diff from: ulurrwpu 293046a8 "docs:
+  note that typed input can precede a Wayland paste" (rebased revision) \\\\\\\\\\\\\\\\\\\ to: ulurrwpu 68592b43 "docs:
+  note that typed input can precede a Wayland paste" (rebase destination) -- Execution: change
+  `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark
+- `plan/triage-misc-nov18/04-wayland-paste-order-spec`, [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
+  +- Execution: change `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark
+  `plan/triage-misc-nov18/04-wayland-paste-order-spec`,
+
+* [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
+*
+
++>>>>>>>>>>>>>>> conflict 1 of 1 ends +++++++++++++++++++ klusyqyo 23c3ed8e "docs: explain why restart errors can quote
+prior terminal output" (rebased revision)
+
 - Execution: change `ulurrwputntkuvrmprxrnsqnxvwurwlo`, bookmark `plan/triage-misc-nov18/04-wayland-paste-order-spec`,
   [PR #4169](https://github.com/scode/farhelm/pull/4169/changes).
 
->>>>>>>>>>>>>>> conflict 1 of 1 ends
+## trailing-restart-seed-history-promoted-into-launch-excerpt.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. Restart seeds the
+  previous run's history above a blank screen at the old size (core/host_restart.rs); the vendored emulator pulls
+  history into view when the terminal grows (vendor/alacritty_terminal grid/resize.rs); the never-started launch's error
+  quote reads the visible screen (service/launch_artifacts.rs), so after growing it can quote the session's own previous
+  run. The cross-session disclosure is refuted. SPEC_impl.md ("a Restart's new host starts with a blank screen, so no
+  quote reaches back into the previous run") and the launch_artifacts.rs doc comment are inaccurate once the terminal
+  grows. Not reproduced. Bucket: other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7): fix spec.
+- Completion criteria: SPEC_impl.md and the launch_artifacts.rs doc comment say that after a Restart the quote may
+  include lines of the same session's previous run when the terminal grew before the failure (about 10 lines). No
+  behavior change. Remove the feedback file and its index entry in the same change.
+- Execution: change `klusyqyotxyzzszrlpkytrsttzyrszko`, bookmark `plan/triage-misc-nov18/05-restart-quote-spec`,
+  [PR #4170](https://github.com/scode/farhelm/pull/4170/changes).
+
+>>>>>>>>>>>>>>>>>>> conflict 1 of 1 ends

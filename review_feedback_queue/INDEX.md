@@ -33,10 +33,6 @@ consequences.
   Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md)
-  — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-removed-tmux-stale-target-fallback.md`](trailing-removed-tmux-stale-target-fallback.md) — Removing
   stale-window kill tests does not introduce sibling-target cleanup. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

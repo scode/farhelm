@@ -2372,9 +2372,10 @@ Never-started errors may retain the last five nonblank lines of the failed termi
 bytes after presentation-unsafe characters are escaped. The excerpt follows Farhelm's diagnosis in the existing durable
 error detail, with `|` between lines so the existing peer-text escaping in the badge and tooltip does not turn framing
 newlines into visible control-character escapes. The separators count toward the byte bound. It is not a replay snapshot
-or a conversation history store. A host runs one child for its whole life, so everything on its screen is this launch's
-output; the screen is quoted only once the host's exit record has been processed, which follows the child's drained
-output, and a Restart's new host starts with a blank screen, so no quote reaches back into the previous run. Only the
+or a conversation history store. Each host runs one child, so the excerpt quotes the visible screen of this launch's
+host, only after the host's exit record has been processed, which follows the child's drained output. Restart seeds the
+new host with the terminal history it recovered from the same session, above a blank screen. If the terminal grows
+before the failure, it can bring lines from earlier runs into view, where they can appear in the quote. Only the
 background observer and an already-dead Stop classification request this quote, after proving the unconsumed
 spec/no-sentinel shape; the Stop waits briefly for the exit record first and otherwise quotes nothing. Session lists
 never quote. A live Stop never quotes, and reboot and shim-reached classifications are unchanged.
