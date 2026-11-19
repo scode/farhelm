@@ -371,7 +371,8 @@ impl Fixture {
     /// The fake value lives only in the catalog until delivery writes the
     /// ordinary settings file. No fixture preinstalls the expected token.
     async fn claude_credential(&self, value: &str) {
-        self.store
+        let saved = self
+            .store
             .create_credential(CreateCredential {
                 name: "claude-work".into(),
                 kind: CredentialKind::ClaudeLogin,
@@ -379,6 +380,7 @@ impl Fixture {
             })
             .await
             .unwrap();
+        assert_eq!(saved.revision, 1);
     }
 }
 
@@ -503,6 +505,38 @@ async fn recreated_claude_login_is_delivered_after_none() {
     assert_eq!(f.delivery.warning(f.row.id), None);
     assert!(f.claude().await.contains("fictional-recreated-claude"));
     assert!(!f.claude().await.contains("fictional-first-claude"));
+}
+
+/// Reusing a login's name and revision must deliver its new value even when
+/// the last successful delivery still identifies the deleted login.
+#[farhelm_testtrace::test]
+async fn recreated_claude_login_replaces_the_previous_subscription_stamp() {
+    let f = Fixture::new(false).await;
+    f.claude_credential("fictional-first-claude").await;
+    f.select_claude(Some("claude-work"), false).await;
+    let lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    let previous = f.delivery.read_record(&f.row).await.unwrap().claude;
+    assert!(matches!(
+        &previous,
+        Some(EndpointStamp::Subscription { name, revision: 1, .. }) if name == "claude-work"
+    ));
+    drop(lease);
+
+    // Release the catalog reference without delivering the intermediate mode.
+    f.select_claude(None, false).await;
+    f.store
+        .delete_credential("claude-work".into())
+        .await
+        .unwrap();
+    f.claude_credential("fictional-recreated-claude").await;
+    f.select_claude(Some("claude-work"), false).await;
+    let carried = f.delivery.read_record(&f.row).await.unwrap().claude;
+    assert_eq!(carried, previous);
+
+    let _lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert!(f.claude().await.contains("fictional-recreated-claude"));
 }
 
 /// Codex owns refreshed auth bytes after the initial seed. Durable revision
