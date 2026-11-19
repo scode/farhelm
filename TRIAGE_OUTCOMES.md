@@ -1826,16 +1826,6 @@
   same change.
 - Execution: planned in `plans/queue/drawn-frame-actions.md`
 
-## trailing-removed-tmux-stale-target-fallback.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): incorrect. Terminal cleanup asks the
-  selected host to shut down and otherwise ends only the identity-checked process it adopted, or a host whose tag names
-  the session (core/host_launch.rs, hosts/terminal.rs); no tmux target lookup remains. Bucket: other.
-- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-discards-nov18.md`
-
 ## trailing-removed-lone-legacy-tab-lifecycle-oracles.md
 
 - Outcome: `discard`.

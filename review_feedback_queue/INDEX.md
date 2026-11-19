@@ -33,10 +33,6 @@ consequences.
   Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-removed-tmux-stale-target-fallback.md`](trailing-removed-tmux-stale-target-fallback.md) — Removing
-  stale-window kill tests does not introduce sibling-target cleanup. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md`](trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md)
   — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
