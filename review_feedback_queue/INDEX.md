@@ -780,10 +780,6 @@ consequences.
 - [`old-executor-close-resets-new-holder-bookmarks.md`](old-executor-close-resets-new-holder-bookmarks.md) — An old
   executor's prescribed full-close cleanup can reset plan bookmarks already being used by the new holder.
 
-- [`muse-current-hook-override-semantics-unresolved.md`](muse-current-hook-override-semantics-unresolved.md) — Current
-  Muse hook overrides may conflict with Farhelm's generated mapping; the actual vendor merge/duplicate behavior remains
-  unverified.
-
 - [`legacy-muse-hook-preservation-source-gap.md`](legacy-muse-hook-preservation-source-gap.md) — A broad legacy
   hook-preservation claim remains uncertain for an unrecognized override spelling and destructive vendor replacement
   behavior.
@@ -1359,9 +1355,6 @@ consequences.
 
 - [`mixed-setup-plans-escape-cache-bound.md`](mixed-setup-plans-escape-cache-bound.md) — A mixture of setup-plan kinds
   can accumulate retained plan entries beyond the intended cache bound.
-
-- [`agent-settings-write-exceeds-next-read-limit.md`](agent-settings-write-exceeds-next-read-limit.md) — Saving agent
-  settings can produce a file larger than Farhelm's own next-read limit, making later settings operations refuse it.
 
 - [`old-suspension-stamp-labels-later-external-pause.md`](old-suspension-stamp-labels-later-external-pause.md) — A
   suspension remembered from an earlier operation can be reused to describe a later independent pause, misattributing
@@ -2703,9 +2696,6 @@ consequences.
 - [`desktop-updater-read-failure-enables-auto-install.md`](desktop-updater-read-failure-enables-auto-install.md) —
   Farhelm can install an update in the background after you turned automatic updates off, if it later cannot read the
   setting.
-
-- [`linux-sound-resolves-player-on-path.md`](linux-sound-resolves-player-on-path.md) — Farhelm plays notification sounds
-  with the first `pw-play` on its executable search path. A misconfigured path can select a different program.
 
 - [`tensorlake-add-host-caches-skip-confirmation.md`](tensorlake-add-host-caches-skip-confirmation.md) — If the
   confirmation setting changes while Add Host stays open, the form can skip the question before starting a billed
