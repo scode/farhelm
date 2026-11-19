@@ -374,7 +374,10 @@ fn the_note_follows_the_recipe_place(cx: &mut TestAppContext) {
 
 /// A note about a host that is gone would say "Checking build status…" with nothing left to check; the old
 /// `PlacementPicker` drew none without a listed place. Specified: with New container on host1, once the registry stops
-/// listing host1 the Container host select stays, keeping host1 as the chosen place, and no note is drawn.
+/// listing host1 the Container host select stays, keeping host1 as the chosen place, and no build note is drawn.
+/// Launch says why it cannot start. Pressing the retained New container segment keeps that refusal visible, because
+/// the shared picker sends no edit for a press on a chosen segment with nowhere to enter, so nothing reaches the
+/// launcher's edit handler, which clears the refusal.
 #[gpui::test]
 fn no_note_once_the_container_host_is_gone(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx);
@@ -401,6 +404,11 @@ fn no_note_once_the_container_host_is_gone(cx: &mut TestAppContext) {
         "the premise: the Container host select is still drawn"
     );
     assert_eq!(name_of(cx, "launcher-place-note"), None);
+
+    test_support::click(cx, "launcher-launch");
+    let refusal = name_of(cx, "launcher-refusal").expect("the missing host prevents launch");
+    test_support::click(cx, "launcher-runs-on-New container");
+    assert_eq!(name_of(cx, "launcher-refusal"), Some(refusal));
 }
 
 /// Why the last row taken from the composer search changed nothing, as the line above the box says it.

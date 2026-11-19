@@ -150,8 +150,8 @@ pub(crate) enum PlacementMode<'a> {
 
 /// Edits the owning draft applies synchronously so a launch on Enter can read the just-chosen value.
 pub(crate) enum PlacementEdit {
-    /// An existing host has no target. A new segment can also lack a target when its last usable place disappears.
-    RunsOn(RunsOn, Option<LaunchTarget>),
+    /// Enter a new environment at its offered target, or return to an existing host with `None`.
+    RunsOn(Option<LaunchTarget>),
     Recipe(String),
     ContainerHost(i64),
 }
@@ -160,9 +160,8 @@ pub(crate) enum PlacementEdit {
 /// belong to the caller. The input catalog and hosts are ordered as displayed, with the launch and authoring rules
 /// supplied by the mode. An option already chosen remains visible even if the backing entry disappears.
 ///
-/// `edit` can receive `RunsOn(RunsOn::New(_), None)`: a press on a chosen segment whose last usable place has gone.
-/// Each caller decides what that means (the launcher's draft ignores it; the template editor must drop it, or it would
-/// read as Existing host). `wrap`'s first argument is the row's test selector, which a caller may ignore.
+/// A chosen New segment can outlive its last usable place. Its press leaves the draft alone, so a missing target
+/// in the edit always means the user chose Existing host. `wrap`'s first argument is the row's test selector.
 pub(crate) fn build_placement_rows(
     mode: PlacementMode<'_>,
     target: Option<&LaunchTarget>,
@@ -248,7 +247,10 @@ pub(crate) fn build_placement_rows(
                     .iter()
                     .find(|(offered, _)| offered == segment)
                     .and_then(|(_, target)| target.clone());
-                edit(PlacementEdit::RunsOn(*segment, target), window, cx);
+                if target.is_none() && *segment != RunsOn::ExistingHost {
+                    return;
+                }
+                edit(PlacementEdit::RunsOn(target), window, cx);
             });
         if let Some(on_enter) = on_enter.cloned() {
             group = group.on_enter(move |window, cx| on_enter(window, cx));
@@ -393,8 +395,10 @@ impl Launcher {
             move |edit, window, cx| {
                 let _ = on_edit.update(cx, |launcher, cx| {
                     match edit {
-                        PlacementEdit::RunsOn(segment, target) => {
-                            launcher.draft.choose_runs_on(segment, target);
+                        PlacementEdit::RunsOn(target) => {
+                            launcher
+                                .draft
+                                .choose_runs_on(RunsOn::of(target.as_ref()), target);
                             // The edit sets the folder to the environment's home, and leaving keeps it there, so the
                             // folder field must follow the draft, or Existing host would show the folder typed
                             // before while the footer and the launch use `~`.
