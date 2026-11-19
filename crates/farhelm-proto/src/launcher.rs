@@ -35,12 +35,51 @@ pub struct LaunchCatalogModel {
     /// written before model families, stays valid; the desktop app only ever reads its own build's helm.
     #[serde(default)]
     pub family: String,
+    /// The launcher can use this exact word for the family's current model. Old catalog JSON has no shorthand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_word: Option<String>,
     /// The current model for this family on this harness. Defaults to true for the same JSON, which listed only
     /// current models.
     #[serde(default = "catalog_default_latest")]
     pub latest: bool,
     pub harness: LaunchHarness,
     pub efforts: Vec<LaunchEffort>,
+}
+
+impl LaunchCatalogModel {
+    /// A family word selects only the current catalog row, even when the same family has older selectable IDs.
+    pub fn matches_family_word(&self, query: &str) -> bool {
+        self.latest
+            && self
+                .family_word
+                .as_deref()
+                .is_some_and(|word| word.eq_ignore_ascii_case(query))
+    }
+}
+
+/// Words are stable across model releases. A key can name several harnesses' versions of the same family.
+const FAMILY_WORDS: &[(&str, &str)] = &[
+    ("astra", "astra"),
+    ("claude-fable-5", "fable"),
+    ("glm-5.3", "glm"),
+    ("luna", "luna"),
+    ("sol", "sol"),
+    ("muse-spark-1.3-contributor", "spark"),
+    ("terra", "terra"),
+];
+
+/// The release catalog's shorthand for a stable family key. The catalog decides which model is current.
+pub fn catalog_family_word(family: &str) -> Option<&'static str> {
+    FAMILY_WORDS
+        .iter()
+        .find_map(|&(key, word)| (key == family).then_some(word))
+}
+
+/// Recognize reserved family words even before the catalog has arrived. Ownership still comes from its rows.
+pub fn is_catalog_family_word(query: &str) -> bool {
+    FAMILY_WORDS
+        .iter()
+        .any(|&(_, word)| word.eq_ignore_ascii_case(query))
 }
 
 /// Read a catalog row without `latest` (JSON written before model families) as a current suggestion.
@@ -1515,6 +1554,7 @@ mod tests {
             LaunchCatalogModel {
                 id: "claude-fable-5".into(),
                 family: "claude-fable-5".into(),
+                family_word: None,
                 latest: true,
                 harness: LaunchHarness::Claude,
                 efforts: vec![LaunchEffort::High],
@@ -1522,6 +1562,7 @@ mod tests {
             LaunchCatalogModel {
                 id: "gpt-6-luna".into(),
                 family: "luna".into(),
+                family_word: None,
                 latest: true,
                 harness: LaunchHarness::Codex,
                 efforts: vec![LaunchEffort::Low, LaunchEffort::High],
@@ -2008,6 +2049,7 @@ mod tests {
         catalog.push(LaunchCatalogModel {
             id: "gpt-6-astra".into(),
             family: "astra".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::High],
@@ -2018,6 +2060,7 @@ mod tests {
         catalog.push(LaunchCatalogModel {
             id: "opencode/gpt-6-luna".into(),
             family: "luna".into(),
+            family_word: None,
             latest: true,
             harness: LaunchHarness::OpenCode,
             efforts: vec![],
@@ -2118,6 +2161,7 @@ mod tests {
             LaunchCatalogModel {
                 id: "gpt-6-astra".into(),
                 family: "astra".into(),
+                family_word: None,
                 latest: false,
                 harness: LaunchHarness::Codex,
                 efforts: vec![LaunchEffort::Low],
@@ -2125,6 +2169,7 @@ mod tests {
             LaunchCatalogModel {
                 id: "opencode/gpt-6-astra".into(),
                 family: "astra".into(),
+                family_word: None,
                 latest: false,
                 harness: LaunchHarness::OpenCode,
                 efforts: vec![],
@@ -2164,6 +2209,7 @@ mod tests {
         let catalog = [LaunchCatalogModel {
             id: "gpt-6-astra".into(),
             family: "astra".into(),
+            family_word: None,
             latest: false,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low],

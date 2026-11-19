@@ -8,8 +8,8 @@
 //!
 //! Two rules matter most, both SPEC.md's ("Creation"): typing a model never changes a chosen agent type (a typed id
 //! that only another agent offers is said, not applied), while picking another agent's model from the full list
-//! switches the agent on purpose; and Enter applies only a row the user moved to with the arrows, or what they typed,
-//! never the first row by default, which would quietly replace a valid choice.
+//! switches the agent on purpose. Enter uses an explicitly highlighted row or the typed text. Typing an exact
+//! family word can highlight its current model. A partial filter leaves the highlight alone.
 
 use farhelm_proto::LaunchHarness;
 use farhelm_proto::launcher::LaunchCatalogModel;
@@ -46,6 +46,16 @@ impl ModelOption {
     }
 }
 
+impl From<&LaunchCatalogModel> for ModelOption {
+    fn from(model: &LaunchCatalogModel) -> Self {
+        Self::Model {
+            id: model.id.clone(),
+            harness: model.harness,
+            latest: model.latest,
+        }
+    }
+}
+
 /// What Enter in the model field applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ModelEnterTarget {
@@ -57,6 +67,8 @@ pub(crate) enum ModelEnterTarget {
     Custom { id: String, harness: LaunchHarness },
     /// A typed id no agent type can own yet: [`NEEDS_HARNESS`].
     NeedsHarness(String),
+    /// Several agent types offer this family word. Which agent to use is a separate choice.
+    NeedsHarnessForFamily,
     /// A typed id only other agent types offer, while one is chosen: said ([`owned_elsewhere_message`]), not applied.
     OwnedElsewhere {
         id: String,
@@ -64,7 +76,7 @@ pub(crate) enum ModelEnterTarget {
     },
 }
 
-/// The list's rows for `query` (case-insensitive, matched within model ids): the default first, then the chosen agent
+/// The list's rows for `query` (within model IDs or an exact family word, case-insensitive): the default first, then the chosen agent
 /// type's catalog models (every agent type's with `show_all`, or with none chosen), with current models before older
 /// ones. Each section keeps the agent search order and the catalog order within each agent. The show-all toggle
 /// comes last when an agent type is chosen. An agent type that offers no model choice has no rows.
@@ -90,13 +102,11 @@ pub(crate) fn model_options(
             catalog
                 .iter()
                 .filter(|model| {
-                    model.harness == owner && model.id.to_ascii_lowercase().contains(&folded)
+                    model.harness == owner
+                        && (model.id.to_ascii_lowercase().contains(&folded)
+                            || model.matches_family_word(query))
                 })
-                .map(|model| ModelOption::Model {
-                    id: model.id.clone(),
-                    harness: model.harness,
-                    latest: model.latest,
-                }),
+                .map(ModelOption::from),
         );
     }
     options[1..].sort_by_key(ModelOption::is_older);
@@ -104,6 +114,33 @@ pub(crate) fn model_options(
         options.push(ModelOption::ShowAll);
     }
     options
+}
+
+/// Resolve an exact family word without guessing an agent type. The same family can have a different ID on each.
+pub(super) fn family_target(
+    catalog: &[LaunchCatalogModel],
+    harness: Option<LaunchHarness>,
+    query: &str,
+) -> Option<ModelEnterTarget> {
+    let mut latest = catalog
+        .iter()
+        .filter(|model| model.matches_family_word(query));
+    if let Some(current) = harness {
+        if let Some(model) = latest.clone().find(|model| model.harness == current) {
+            return Some(ModelEnterTarget::Option(model.into()));
+        }
+        let owners: Vec<_> = latest.map(|model| model.harness).collect();
+        return (!owners.is_empty()).then(|| ModelEnterTarget::OwnedElsewhere {
+            id: query.to_owned(),
+            owners,
+        });
+    }
+    let model = latest.next()?;
+    Some(if latest.next().is_none() {
+        ModelEnterTarget::Option(model.into())
+    } else {
+        ModelEnterTarget::NeedsHarnessForFamily
+    })
 }
 
 /// What Enter means, given the rows, the row moved to (`active`), the typed `draft` and the chosen agent type.
@@ -135,6 +172,9 @@ pub(crate) fn model_enter_target(
     if draft.trim().is_empty() {
         return ModelEnterTarget::Nothing;
     }
+    if let Some(target) = family_target(catalog, harness, draft) {
+        return target;
+    }
     if let Some(current) = harness {
         let catalog_id = current.catalog_model_id(draft);
         let owners: Vec<&LaunchCatalogModel> = catalog
@@ -151,11 +191,7 @@ pub(crate) fn model_enter_target(
                 }
             }
             // Any other match is the catalog row, its case included: the helm compares spellings exactly.
-            Some(known) => ModelEnterTarget::Option(ModelOption::Model {
-                id: known.id.clone(),
-                harness: current,
-                latest: known.latest,
-            }),
+            Some(known) => ModelEnterTarget::Option((*known).into()),
             None if owners.iter().any(|model| model.latest) => ModelEnterTarget::OwnedElsewhere {
                 id: draft.to_owned(),
                 owners: owners
@@ -175,11 +211,7 @@ pub(crate) fn model_enter_target(
         .filter(|model| model.id.eq_ignore_ascii_case(draft))
         .collect();
     if let [owner] = owners.as_slice() {
-        return ModelEnterTarget::Option(ModelOption::Model {
-            id: owner.id.clone(),
-            harness: owner.harness,
-            latest: owner.latest,
-        });
+        return ModelEnterTarget::Option((*owner).into());
     }
     ModelEnterTarget::NeedsHarness(draft.to_owned())
 }

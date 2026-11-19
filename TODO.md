@@ -328,11 +328,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Then sweep the repository once more for tmux, xterm.js, pane and old-terminal mentions and remove or reword whatever
   is left that does not belong to "phase 3". Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-- **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
-  field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete
-  to a model at all. Asked for by the maintainer on 2026-11-18 while planning `model-families`, which records the latest
-  model of each family that this needs. Plan: `plans/queue/model-family-shorthand.md`.
-
 - **Three small desktop-app fixes the docs screenshots showed.** Found restoring the docs pages' annotated screenshots
   (2026-11-18). (1) Settings → Hosts still says **Update remote hosts automatically** works "even with no window open"
   (hover help and help line, `crates/gui/farhelm-gui/src/settings/choices.rs`); SPEC.md says it works while Farhelm is

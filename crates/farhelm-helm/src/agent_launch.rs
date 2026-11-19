@@ -23,9 +23,8 @@
 //! reports only the host identity a template named.
 
 use farhelm_proto::launcher::{
-    LaunchCatalogModel, LaunchTemplate, LauncherKind, LauncherState, TemplateContext,
-    TemplateDestination, TemplateFields, TemplateNameKind, TemplateRefusal, apply_template,
-    apply_templates,
+    LaunchTemplate, LauncherKind, LauncherState, TemplateContext, TemplateDestination,
+    TemplateFields, TemplateNameKind, TemplateRefusal, apply_template, apply_templates,
 };
 use farhelm_proto::{CommandLaunch, ErrorKind, LaunchRequest, LaunchSelection, SessionLaunch};
 
@@ -59,20 +58,6 @@ pub(crate) struct Resolution<L = SessionLaunch> {
 }
 
 use crate::sessions::invalid_request as invalid;
-
-/// The release catalog in the shape template application reads.
-fn catalog() -> Vec<LaunchCatalogModel> {
-    crate::launches::catalog()
-        .iter()
-        .map(|model| LaunchCatalogModel {
-            id: model.id.to_string(),
-            family: model.family.to_string(),
-            latest: model.latest,
-            harness: model.harness,
-            efforts: model.efforts.to_vec(),
-        })
-        .collect()
-}
 
 /// The install identities a template's `host` may name: every registered
 /// host with a recorded identity that is not currently reporting another
@@ -231,7 +216,7 @@ fn resolve_with(
                 })
         })
         .collect::<anyhow::Result<_>>()?;
-    let catalog = catalog();
+    let catalog = crate::launches::launcher_catalog();
     let context = TemplateContext {
         catalog: &catalog,
         known_hosts: placement.known_hosts,

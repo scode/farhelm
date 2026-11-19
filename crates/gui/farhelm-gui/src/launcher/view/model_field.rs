@@ -24,7 +24,7 @@
 //! launcher keeps the highlighted row and the show-all switch, which no other surface shares, and what is typed is the
 //! field's own text.
 
-use farhelm_proto::LaunchHarness;
+use farhelm_proto::{LaunchHarness, launcher::is_catalog_family_word};
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
@@ -38,8 +38,8 @@ use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, LaunchDraft, harness_label};
 use crate::launcher::model::{
-    ModelEnterTarget, ModelOption, NEEDS_HARNESS, OLDER_MODELS, model_enter_target, model_options,
-    owned_elsewhere_message,
+    ModelEnterTarget, ModelOption, NEEDS_HARNESS, OLDER_MODELS, family_target, model_enter_target,
+    model_options, owned_elsewhere_message,
 };
 use crate::theme::{self, metrics};
 
@@ -56,7 +56,7 @@ const MODEL_LIST: &str = "launcher-model-list";
 /// the user left it while the launcher is open.
 #[derive(Default)]
 pub(super) struct ModelField {
-    /// The list under the field, with the row moved to with the arrows.
+    /// The list under the field, with the row the user moved to with the arrows.
     list: FieldList,
     /// Whether the list shows every agent type's models.
     show_all: bool,
@@ -97,6 +97,24 @@ impl Launcher {
         rows
     }
 
+    /// Typing a family word supplies a highlight until the user moves it. Resolve it against the current rows so a
+    /// catalog read that settles while the field is open cannot leave an index pointing to another model.
+    fn model_highlight(&self, rows: &[ModelOption], cx: &App) -> Option<usize> {
+        self.model_field.list.highlighted.or_else(|| {
+            let target = family_target(
+                self.catalog.as_deref().unwrap_or_default(),
+                self.draft.agent.harness,
+                &self.model_input.text(cx),
+            );
+            match target {
+                Some(ModelEnterTarget::Option(option)) => {
+                    rows.iter().position(|row| *row == option)
+                }
+                _ => None,
+            }
+        })
+    }
+
     /// Whether the field holds a model not yet applied: typed into its open list, or said under it as not applicable.
     pub(super) fn model_pending(&self, cx: &App) -> bool {
         self.model_field.error.is_some()
@@ -135,9 +153,12 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let count = self.model_rows(cx).len();
-        if self.model_list_open(window, cx) && self.model_field.list.arrow(arrow, count) {
-            cx.notify();
+        if self.model_list_open(window, cx) {
+            let rows = self.model_rows(cx);
+            self.model_field.list.highlighted = self.model_highlight(&rows, cx);
+            if self.model_field.list.arrow(arrow, rows.len()) {
+                cx.notify();
+            }
         }
     }
 
@@ -146,6 +167,14 @@ impl Launcher {
     pub(super) fn model_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.model_list_open(window, cx) {
             let typed = self.model_input.text(cx);
+            // A family shortcut still needs the release catalog. Keep the text and wait for a subsequent Enter
+            // so a pending answer can neither store the shortcut as an ID nor pick a model by itself.
+            if self.catalog.is_none()
+                && self.model_field.list.highlighted.is_none()
+                && is_catalog_family_word(&typed)
+            {
+                return;
+            }
             let target = model_enter_target(
                 &self.model_rows(cx),
                 self.model_field.list.highlighted,
@@ -164,6 +193,10 @@ impl Launcher {
                 }
                 ModelEnterTarget::NeedsHarness(_) => {
                     self.model_field.error = Some(NEEDS_HARNESS.to_owned());
+                }
+                ModelEnterTarget::NeedsHarnessForFamily => {
+                    self.model_field.error =
+                        Some("Choose a harness for this model family".to_owned());
                 }
                 ModelEnterTarget::OwnedElsewhere { id, owners } => {
                     self.model_field.error = Some(owned_elsewhere_message(&id, &owners));
@@ -245,6 +278,13 @@ impl Launcher {
             .list
             .track_anchor("launcher-model-anchor", window, cx);
         let hint = match harness {
+            _ if self.catalog.is_none()
+                && self.catalog_error.is_none()
+                && self.model_field.list.opened()
+                && is_catalog_family_word(&self.model_input.text(cx)) =>
+            {
+                "Loading models…".to_owned()
+            }
             Some(harness) => {
                 let count = self
                     .catalog
@@ -264,7 +304,7 @@ impl Launcher {
                 &self.model_input,
                 "Model",
                 HoverHelp::tooltip(
-                    "Model: the agent's model; type to filter, or a custom model id and Enter",
+                    "Model: type to filter, pick a family with its short name, or enter a custom model id",
                 ),
             )
             .monospace()
@@ -319,7 +359,7 @@ fn draw_model_rows(
     let palette = theme::palette(cx);
     let list = list.role(Role::ListBox).aria_label("Model");
     let options = launcher.model_rows(cx);
-    let active = launcher.model_field.list.highlighted;
+    let active = launcher.model_highlight(&options, cx);
     let chosen = launcher.draft.agent.harness;
     let show_all = launcher.model_field.show_all;
     let mut children: Vec<AnyElement> = Vec::with_capacity(options.len() + 2);
