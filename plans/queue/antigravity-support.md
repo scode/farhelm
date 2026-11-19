@@ -446,28 +446,53 @@ script, write a closing entry in its log, and stop the watchdog. Never edit `pla
 Basic support for Antigravity (agy) is now available. It supports launching and session tracking - but session tracking
 requires manual installation of Antigravity hooks (see the Antigravity section of the documentation).
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-19 (claim 3414ff).
+### 2026-11-19: answer to a blocked question
 
-### Ship Antigravity launches while automatic Restart waits?
+The question, as the executor put it:
 
-The plan adds Antigravity to the launcher and follows its conversation through user-installed hooks so Restart can
-resume it. Its reporting design reuses the process check that Farhelm uses for Claude and Muse. That check allows the
-pinned process to update the conversation when it reports a new ID.
+> Blocked on 2026-11-19 (claim 3414ff).
+>
+> ### Ship Antigravity launches while automatic Restart waits?
+>
+> The plan adds Antigravity to the launcher and follows its conversation through user-installed hooks so Restart can
+> resume it. Its reporting design reuses the process check that Farhelm uses for Claude and Muse. That check allows the
+> pinned process to update the conversation when it reports a new ID.
+>
+> In Antigravity CLI 1.5.12, a read-only subagent sent the same SessionStart and Stop events as the main conversation,
+> with a different conversation ID. Both sets of hooks came from the same Antigravity process. Their payloads carried no
+> child marker. In a fresh run the subagent's SessionStart and Stop both arrived before the main conversation's final
+> Stop. With the planned design, Farhelm could offer to restart into that subagent's conversation while the work is
+> running. The existing exceptions for Goose and Pi expressly accept that risk for those harnesses.
+>
+> The installed CLI accepted the planned launch flags. It also resumed an explicit conversation ID and ran an initial
+> prompt in that conversation. Explicit selection requires the user to supply that ID. The unresolved choice is how much
+> support to ship while automatic conversation tracking lacks a way to identify the main conversation.
+>
+> I recommend shipping launch support and explicit conversation selection now, with automatic tracking and plain Restart
+> unavailable for Antigravity until Farhelm can verify which conversation reported. That puts the working launch path in
+> users' hands and avoids selecting a subagent. Keeping the full feature together delays launch support while Farhelm
+> looks for a reliable Antigravity signal or proves a check of the exact record named by the hook. That adds
+> investigation and tests for both the main and child conversations, and may require a vendor change.
 
-In Antigravity CLI 1.5.12, a read-only subagent sent the same SessionStart and Stop events as the main conversation,
-with a different conversation ID. Both sets of hooks came from the same Antigravity process. Their payloads carried no
-child marker. In a fresh run the subagent's SessionStart and Stop both arrived before the main conversation's final
-Stop. With the planned design, Farhelm could offer to restart into that subagent's conversation while the work is
-running. The existing exceptions for Goose and Pi expressly accept that risk for those harnesses.
+The maintainer's answer:
 
-The installed CLI accepted the planned launch flags. It also resumed an explicit conversation ID and ran an initial
-prompt in that conversation. Explicit selection requires the user to supply that ID. The unresolved choice is how much
-support to ship while automatic conversation tracking lacks a way to identify the main conversation.
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks"; it is not a huge question.
 
-I recommend shipping launch support and explicit conversation selection now, with automatic tracking and plain Restart
-unavailable for Antigravity until Farhelm can verify which conversation reported. That puts the working launch path in
-users' hands and avoids selecting a subagent. Keeping the full feature together delays launch support while Farhelm
-looks for a reliable Antigravity signal or proves a check of the exact record named by the hook. That adds investigation
-and tests for both the main and child conversations, and may require a vendor change.
+Decision: keep the plan's full scope, which the maintainer chose on the planning page (launch plus user-installed hook
+tracking, so that Restart resumes the conversation). Do not drop automatic tracking or plain Restart for Antigravity.
+Instead, treat Antigravity like Goose and Pi, whose exceptions already accept that a hook report from a child
+conversation of the same process can move the pinned conversation: add Antigravity to that exception with the same
+reasoning, citing what you observed in Antigravity CLI 1.5.12 (a read-only subagent sends SessionStart and Stop with its
+own conversation ID, from the same process, with no child marker). Say it plainly where users and readers will see it:
+the Antigravity docs page's gotchas (Restart can resume a subagent's conversation if one reported after the main one;
+choosing the conversation by ID avoids it), and the SPEC.md and SPEC_impl.md text on Antigravity's conversation
+tracking. Keep explicit conversation selection by ID as planned. If you find a reliable way to tell the main
+conversation from a subagent's within the plan's size, use it instead and say so; do not start a long investigation or
+wait on a vendor change.
+
+The alternative was the recommendation in the question: ship launch support and explicit conversation selection now, and
+leave automatic tracking and plain Restart unavailable until Farhelm can verify which conversation reported. If the
+maintainer later prefers that, it is a follow-up, not a reason to stop the plan.
