@@ -1693,11 +1693,6 @@ consequences.
   supervisors is not this race: both share the same process's live ownership claim. The possible consequence is a
   maintainer-test false failure only.
 
-- [`tab-survival-missing-live-exchange.md`](tab-survival-missing-live-exchange.md) — The converted tab-survival test can
-  potentially pass after a handoff has incorrectly ended the shell. Its successor checks the host's remembered child
-  number and old terminal text, rather than asking the shell to do anything. This is a test-coverage concern, not a
-  claim that shipped handoff kills shells. Exact false-pass scheduling remains unverified after investigation.
-
 - [`host-flood-stall-window-claim.md`](host-flood-stall-window-claim.md) — A migrated test now claims to cross the new
   terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
   does not establish output pressure. This is a new coverage-description error, with no observed product stall.

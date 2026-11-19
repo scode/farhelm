@@ -412,8 +412,8 @@ async fn tab_host_shell(sup: &Supervisor, session_id: &str, tab_id: &str) -> u32
 /// never noticed. Comparing the tab shell's pid across the restart (the
 /// tab host's child, as each supervisor's runtime for it reports it) is
 /// what distinguishes "found the same shell again" from "quietly started a
-/// new one", and replaying content written before the restart is what
-/// distinguishes a live reattachment from a fresh, empty terminal.
+/// new one". The reattached tab must replay its earlier output and answer a new command. The host can remember
+/// a PID and retain output after the shell stops, so a fresh response is the witness that the shell survived.
 #[farhelm_testtrace::test]
 async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
@@ -477,7 +477,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
         "a supervisor restart must find the SAME shell again, not start a new one"
     );
 
-    let (_chan2, initial_replay, mut rx2) = client
+    let (chan2, initial_replay, mut rx2) = client
         .attach_terminal_live(
             &session.id,
             80,
@@ -489,6 +489,16 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
         .expect("attach the rediscovered tab");
     let mut replay = initial_replay;
     wait_for(&mut rx2, &mut replay, "BEFORE-RESTART", 20).await;
+    run_in_shell(
+        &client,
+        chan2,
+        &mut rx2,
+        &mut replay,
+        "printf 'AFTER%sRESTART\\n' -",
+        "AFTER-RESTART",
+        20,
+    )
+    .await;
     drop(slot);
 }
 
