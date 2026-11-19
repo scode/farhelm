@@ -37,3 +37,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`antigravity-support`](reports/antigravity-support.report.md) landed 2026-11-19 in #4274, #4275: Support Google Antigravity (agy): structured launches, sidebar mark, user-installed hook conversation tracking, and docs (protocol bump)
 - [`emacs-text-field-keys`](reports/emacs-text-field-keys.report.md) landed 2026-11-19 in #4279: Emacs Control-key editing (Ctrl+F/B/N/P/A/E/D/H/K) in text fields on macOS and Linux
 - [`docs-shot-desktop-fixes`](reports/docs-shot-desktop-fixes.report.md) landed 2026-11-19 in #4280, #4286: Settings → Hosts auto-update wording, template summary ellipsis, session row place id for the docs shot
+- [`persist-environment-seal`](reports/persist-environment-seal.report.md) landed 2026-11-19 in #4282: Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
