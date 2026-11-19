@@ -797,9 +797,6 @@ consequences.
 - [`checkout-refusal-conflicts-with-failed-save-rule.md`](checkout-refusal-conflicts-with-failed-save-rule.md) — The
   general failed-Save discard rule does not explain the explicit checkout-refusal exception that retains the draft.
 
-- [`omp-permission-docs-retain-yolo-default.md`](omp-permission-docs-retain-yolo-default.md) — An OMP comment and
-  implementation specification still describe the old default permission mode after new launches changed to Guarded.
-
 - [`recent-setup-description-omits-wrapper-prefix.md`](recent-setup-description-omits-wrapper-prefix.md) — Different
   saved setups can look identical even though Enter restores and launches different wrapper prefixes.
 
