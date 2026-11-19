@@ -51,12 +51,12 @@
 //! the main view after the pane ([`Sidebar::grip`]), since GPUI gives the pointer to whatever is drawn last and the
 //! pane would otherwise take the 4 pixels the divider reaches over.
 //!
-//! The sidebar also draws the edge that hover help placed beside it sits against ([`layers::beside_edge`]: SPEC.md's
-//! session-row hovers and host progress card). It is drawn once per window, on a borderless box around the bordered
+//! The sidebar also draws the help edge its controls' beside-placed hover help sits against ([`layers::beside_edge`];
+//! lists and dialogs elsewhere draw their own). It is drawn on a borderless box around the bordered
 //! column, the host rail and the list included: a tracker covers the box inside its element's border, and the old app
 //! measured the help's 6-pixel gap from outside the column's 1-pixel right border, so drawing it on the column itself
-//! would put help a pixel nearer than the old app did. Without it, help that asks to sit beside the sidebar shows at
-//! the pointer.
+//! would put help a pixel nearer than the old app did. Without it, help that asks to sit beside the sidebar takes
+//! ordinary placement.
 
 mod header;
 

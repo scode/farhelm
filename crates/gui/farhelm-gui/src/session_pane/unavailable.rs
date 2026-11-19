@@ -521,6 +521,7 @@ fn resume_button(key: &str, offer: Offer, cx: &App) -> Button {
     };
     let key = key.to_owned();
     Button::new(RESUME_ID, label, HoverHelp::tooltip(help), Role::Button)
+        .help_below()
         .icon(Icon::Play)
         .tier(tier)
         .compact()

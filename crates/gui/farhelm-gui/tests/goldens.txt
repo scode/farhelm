@@ -142,6 +142,8 @@ linux/row-delete-confirmation--dark.png f62733eaba0b6dcb70147ed61cd18d59c0d0a4f8
 linux/row-delete-confirmation--light.png 032e83ab53b748610bb201bd4508f9635f69e193
 linux/scroll-box--dark.png 3829457cefb886f5512637f4243b9cf36fcbeabb
 linux/scroll-box--light.png 8070189a576b0710e4e5b033690ac661e968d352
+linux/scroll-box-pointer-help--dark.png b540e37d5169593f4128ba795cf15d5fd738e379
+linux/scroll-box-pointer-help--light.png f1af17418413ffa9a2befe3e91704055e22ad8d7
 linux/segmented-control--dark.png 2bf0f43052f67b49f8f5476f36d40765064197fb
 linux/segmented-control--light.png 550c106ff525440a2c4dce35ecf3cff5962e0dd6
 linux/select--dark.png 0239b95ebbde12d8da5e5a3fcbafc275004c0952

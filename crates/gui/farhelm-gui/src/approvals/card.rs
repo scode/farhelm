@@ -756,6 +756,7 @@ fn answer_button(card: &Card, answer: &Answer, busy: bool, on_answer: OnAnswer) 
     };
     let chosen = answer.answer;
     let button = Button::new(id, label, help, Role::Button)
+        .help_below()
         .tier(if answer.primary {
             Tier::Primary
         } else {

@@ -9,8 +9,76 @@ use gpui::{
     TestAppContext, VisualTestContext, div, point, px,
 };
 
-use crate::components::{HoverHelp, Role};
-use crate::test_support::{center, check, focused_id, frame, keys, open};
+use crate::components::{Divider, HoverHelp, Role};
+use crate::layers::{self, TooltipSide};
+use crate::test_support::{bounds, center, check, focused_id, frame, keys, open};
+
+/// Help follows the pointer's height along the divider after it is already visible. After Tab the same card
+/// sits beside the visible midpoint, keeping keyboard positioning independent of the last pointer location.
+#[gpui::test]
+fn divider_help_follows_the_pointer_and_centers_for_focus(cx: &mut TestAppContext) {
+    let strip_focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cx = open(cx, move |_, _| {
+        let divider = || {
+            Divider::new(
+                "divider",
+                "Pane width",
+                HoverHelp::tooltip("Drag to resize"),
+                Role::Splitter,
+                &strip_focus,
+                400,
+                300..=500,
+            )
+        };
+        div()
+            .relative()
+            .left(px(200.))
+            .w(px(12.))
+            .h(px(300.))
+            .child(divider())
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .child(divider().grip()),
+            )
+            .into_any_element()
+    });
+    let strip = bounds(cx, "divider");
+    let x = strip.center().x;
+    let y = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            let help = layers::shown_tooltip(window, cx).expect("the divider shows help");
+            assert_eq!(help.text.as_ref(), "Drag to resize");
+            assert_eq!(help.side(), TooltipSide::Beside);
+            assert!(
+                help.ring().is_none(),
+                "one focus ring is enough for the divider"
+            );
+        });
+        let card = bounds(cx, "tooltip-card");
+        assert!(card.left() > strip.right());
+        card.center().y
+    };
+    let top = strip.top() + px(55.);
+    let bottom = strip.bottom() - px(55.);
+    cx.simulate_mouse_move(point(x, top), None, Modifiers::none());
+    check(cx);
+    super::wait_hover_delay(cx);
+    assert!((y(cx) - top).abs() <= px(1.));
+    cx.simulate_mouse_move(point(x, bottom), None, Modifiers::none());
+    check(cx);
+    assert!((y(cx) - bottom).abs() <= px(1.));
+
+    cx.simulate_mouse_move(point(px(0.), bottom), None, Modifiers::none());
+    check(cx);
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("divider"));
+    super::wait_hover_delay(cx);
+    assert!((y(cx) - strip.center().y).abs() <= px(1.));
+}
 
 /// The divider owns no width, so everything its owner does rests on it reporting each gesture exactly once and in
 /// order: a second `End`, or a `Move` after the drag ended, would make the owner write twice or keep following the

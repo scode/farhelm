@@ -32,6 +32,7 @@ use gpui::{
 };
 
 use super::HoverHelp;
+use crate::layers::TallSide;
 
 /// The slider never gets shorter than this, in pixels (`SLIDER_MIN_HEIGHT` in grid-terminal.js).
 pub const SLIDER_MIN_HEIGHT: f32 = 20.;
@@ -130,7 +131,7 @@ impl Scrollbar {
         Scrollbar {
             id: id.into(),
             label: label.into(),
-            help,
+            help: help.beside_tall(TallSide::Left),
             role,
             lines,
             color,

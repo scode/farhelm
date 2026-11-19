@@ -60,6 +60,7 @@ use gpui::{
 
 use super::{HoverHelp, Ring, scroll_handle, scroll_stop_on};
 use crate::focus;
+use crate::layers::TallSide;
 use crate::theme::{self, metrics};
 
 /// `.approval-card-block`: the old box's padding, vertical then horizontal.
@@ -100,7 +101,7 @@ impl ScrollBox {
         ScrollBox {
             id: id.into(),
             label: label.into(),
-            help,
+            help: help.beside_tall(TallSide::Roomier),
             role,
             content: content.into_any_element(),
             min_height: None,

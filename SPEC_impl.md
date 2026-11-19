@@ -914,11 +914,11 @@ ordinary placement against the control, centered above with 6 pixels of clearanc
 roomier side clamped within the content area. If that fallback covers an open higher panel, the menu help is hidden for
 that frame.
 
-Top-band controls, dialog footer buttons and question answers try the 28-pixel below placement before the 6-pixel above
-placement. Both directions still honor the content-area margin and use the same roomier-side fallback if neither fits.
-Pointer and focus help use the same preference. An open popover keeps its space. If the preferred card would cover it,
-try above, and hide the card for that frame if the popover still needs the space. An answer inside an anchored question
-can use space in that question's panel.
+Top-band controls, dialog and status card footer buttons and question answers try the 28-pixel below placement before
+the 6-pixel above placement. Both directions still honor the content-area margin and use the same roomier-side fallback
+if neither fits. Pointer and focus help use the same preference. An open popover keeps its space. If the preferred card
+would cover it, try above, and hide the card for that frame if the popover still needs the space. An answer inside an
+anchored question can use space in that question's panel.
 
 The quick switcher, Templates, Trash, recent setups, browsed folders, queued approvals and Settings navigation, recipe
 and credential lists register in-tree help edges. In-tree rows find their own edge even when a popover crosses it.
@@ -927,9 +927,16 @@ and falls back to ordinary placement when the edge or room beside it is missing.
 fallback or hide it. Launcher and quick switcher option rows keep keyboard focus on their field or picker button as the
 selection moves.
 
+The divider, terminal scrollbar and scroll boxes use their clipped bounds as their help edge. While the pointer owns the
+help, a move along the control redraws the card at the current pointer height. Keyboard help uses the visible center.
+The side is fixed for the divider and scrollbar. A scroll box chooses the side with more room, favoring the right when
+equal. These cards keep the notch and omit the tall outline. If the side cannot fit the measured card or an open menu
+uses that space, ordinary placement uses the same height as its reference. A card that still covers the menu is hidden
+for that frame.
+
 Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
-with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar and
-rail help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the
+with the chosen height and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar, rail
+and list help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the
 on-fill color of a selected row. Menu help uses the active item's own highlight. The control's bounds are taken inside
 its border, where the ring goes. The old app measured from the border box and closed help on scroll. Here help follows
 its control while the pointer stays on it.

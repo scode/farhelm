@@ -112,7 +112,7 @@ use gpui::{
 
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
-use crate::layers::{self, BesideCues, Help, HelpPlacement, Hint, TooltipOwner};
+use crate::layers::{self, BesideCues, Help, HelpPlacement, Hint, TallSide, TooltipOwner};
 use crate::theme;
 
 /// What a control says when the user hovers it, moves keyboard focus onto it, or asks assistive technology about it.
@@ -232,6 +232,12 @@ impl HoverHelp {
         self
     }
 
+    /// The control is its own help edge. Placement follows the pointer down its visible height.
+    pub(crate) fn beside_tall(mut self, side: TallSide) -> Self {
+        self.placement = HelpPlacement::Tall(side);
+        self
+    }
+
     /// Rail help uses the same ring cues as sidebar help, and gives an open popover room for its choices.
     pub(crate) fn beside_rail(mut self) -> Self {
         self.placement = HelpPlacement::Rail(*self.beside_cues());
@@ -312,8 +318,8 @@ impl HoverHelp {
 /// reads: in its snapshots a status mark is an interactive entry, and a row button holding marks lists them under it
 /// rather than being a leaf.
 ///
-/// Help is placed against the control's own bounds, centered above it or else below, or beside the sidebar for help
-/// that asks for it ([`HoverHelp::beside`]), so while the control's help waits or shows this also adds a zero-cost
+/// Help is placed against the control's own bounds, centered above it or else below, or beside the nearest help edge
+/// that contains the control for help that asks for it ([`HoverHelp::beside`]), so while the control's help waits or shows this also adds a zero-cost
 /// child that records them in every frame ([`TooltipOwner::track`]); that is why the element must take children. A
 /// control whose help is not in play draws no such child: [`layers::help_drawn`] says when it is, and why the bounds
 /// are in place by the time the help shows.

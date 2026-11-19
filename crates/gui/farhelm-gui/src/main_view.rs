@@ -341,6 +341,7 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
                     ),
                     Role::Button,
                 )
+                .help_below()
                 .tier(Tier::Primary)
                 .on_click(|_, _, cx| {
                     if let Some(connection) = session::connection(cx) {
@@ -358,6 +359,7 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
                     HoverHelp::tooltip("Try connecting to the helm again"),
                     Role::Button,
                 )
+                .help_below()
                 .tier(Tier::Primary)
                 .on_click(|_, _, cx| {
                     if let Some(connection) = session::connection(cx) {

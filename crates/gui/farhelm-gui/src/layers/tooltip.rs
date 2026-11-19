@@ -286,6 +286,16 @@ pub(crate) enum HelpPlacement {
         cues: BesideCues,
         in_popover: bool,
     },
+    /// Tall controls use their own side at the pointer's height, or at their visible center on focus.
+    Tall(TallSide),
+}
+
+/// Which side of a tall control can hold its help. A scroll box leaves that choice to the window geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TallSide {
+    Right,
+    Left,
+    Roomier,
 }
 
 /// The words and placement a control hands to the layer manager. Ordinary help (a [`Help`] or a string, converted)
@@ -382,9 +392,9 @@ pub enum TooltipSide {
     /// Below and right of where the pointer was: help whose control has no recorded bounds, such as a probe a test or
     /// golden shows for an owner token no control drew ([`show_tooltip_at`]), or a control in a cached view.
     Pointer,
-    /// Beside the right edge of the containing surface.
+    /// Beside a surface or tall control's right edge.
     Beside,
-    /// Beside the left edge of a menu panel.
+    /// Beside a surface or tall control's left edge.
     BesideLeft,
     /// Centered above its control, normally the first choice for ordinary help.
     Above,
@@ -521,6 +531,14 @@ pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut A
     let id = owner.entity_id();
     let waiting = stack.update(cx, |stack, cx| {
         stack.settle_after_this_event(cx);
+        // Redraw the visible card as the pointer moves along its control. Focus-owned help stays centered.
+        if stack.by_focus.is_none()
+            && stack.tooltip.as_ref().is_some_and(|shown| {
+                shown.owner == id && matches!(shown.placement, HelpPlacement::Tall(_))
+            })
+        {
+            window.refresh();
+        }
         if let Some(moved) = &mut stack.round
             && !moved.contains(&id)
         {
@@ -683,7 +701,18 @@ fn settle_focus(
     };
     let by_focus = ByFocus::watching(&owner, focus, window, cx);
     if stack.read(cx).current_owner() == Some(owner.entity_id()) {
-        stack.update(cx, |stack, _| stack.by_focus = Some(by_focus));
+        stack.update(cx, |stack, cx| {
+            let moves_card = stack.by_focus.is_none()
+                && stack
+                    .tooltip
+                    .as_ref()
+                    .is_some_and(|shown| matches!(shown.placement, HelpPlacement::Tall(_)));
+            stack.by_focus = Some(by_focus);
+            if moves_card {
+                // The focus frame used the pointer's height. Redraw once to center the now focus-owned card.
+                cx.notify();
+            }
+        });
     } else {
         begin_tooltip(&owner, help, Some(by_focus), window, cx);
     }
