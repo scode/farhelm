@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing b7a330] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
 - [in-flight cf10b9] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
 - [landing 71af18] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
-- [complete] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
+- [landing 4062dc] `checkout-settings-stale-save.md` — Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
 - [complete] `concealed-link-target.md` — Hidden terminal text cannot change where a printed link goes
 - [complete] `triage-misc-nov18.md` — natural-detach input order, launching containers out of the leftovers list, a test fixture's group kill, two spec notes
 - [complete] `triage-discards-nov18.md` — nine discards from the 2026-11-18 highest-bucket triage
