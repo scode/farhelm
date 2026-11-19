@@ -2367,8 +2367,9 @@ the window; short sections leave space below their content, and longer sections 
 footer. At 620px wide and below, the dialog shows either the selected section or the list; **‹ Settings** returns to the
 list. The gear always opens sessions and focuses its first switch, including at phone width. Trust hints instead open
 agent trust at the relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab
-rules. Switching sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields.
-Escape and either close control return focus to the gear.
+rules. Switching sections preserves unsaved fields, outcome lines and pending saves. A recipe draft can hold Settings
+open for the editor's leave question. Closing discards other unsaved fields. Escape and either close control return
+focus to the gear when Settings closes.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can

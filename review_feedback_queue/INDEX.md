@@ -1409,9 +1409,6 @@ consequences.
   an SSH capture may leave local helpers or pipe readers alive beyond the caller. Their actual surviving lifetime
   remains unverified after investigation.
 
-- [`settings-close-tooltip-promises-immediate-discard.md`](settings-close-tooltip-promises-immediate-discard.md) —
-  Settings' Close tooltip says edits will be discarded even though unsaved recipe changes open a guarded leave question.
-
 - [`restart-with-does-not-resume-suspended-host.md`](restart-with-does-not-resume-suspended-host.md) — Restart with on a
   suspended sandbox does not perform the resume step, so the requested restart fails instead of continuing.
 
