@@ -2046,18 +2046,6 @@
   same change.
 - Execution: planned in `plans/queue/gui-ux-wording.md`
 
-## agent-endpoint-refuses-valid-at-sign-path.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Endpoint URL with @
-  in its path is refused as credentials. https://api.example.com/@team/v1 can't be saved. Confirmed. Bucket: other.
-- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
-- Completion criteria: fix code: refuse @ only in the host part (~20 with tests). Size gate: about 100 lines of diff
-  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
-
 ## brace-literal-command-display-is-bash-inexact.md
 
 - Outcome: `fix code`.

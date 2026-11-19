@@ -1436,9 +1436,6 @@ consequences.
 - [`recipe-destination-refuses-absolute-dns-name.md`](recipe-destination-refuses-absolute-dns-name.md) — A valid final
   DNS dot is refused in recipe tunnel destinations and agent endpoint hostnames.
 
-- [`agent-endpoint-refuses-valid-at-sign-path.md`](agent-endpoint-refuses-valid-at-sign-path.md) — A valid at-sign in an
-  agent endpoint's URL path is rejected as though it supplied credentials.
-
 - [`privileged-sandbox-tunnel-port-compatibility-unresolved.md`](privileged-sandbox-tunnel-port-compatibility-unresolved.md)
   — Recipe tunnels accept privileged sandbox listener ports that the gateway may refuse. Actual gateway enforcement
   remains unverified after investigation.
