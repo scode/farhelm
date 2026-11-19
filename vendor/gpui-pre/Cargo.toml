@@ -286,6 +286,11 @@ name = "driver_record"
 path = "tests/driver_record.rs"
 required-features = ["test-support"]
 
+[[test]]
+name = "hitbox_occlusion"
+path = "tests/hitbox_occlusion.rs"
+required-features = ["test-support"]
+
 [dependencies.accesskit]
 version = "0.24.0"
 features = ["enumn"]

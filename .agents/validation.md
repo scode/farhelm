@@ -610,13 +610,13 @@ systemd or SSH substrate ran.
   from the workspace, so no workspace test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md` and
   `vendor/pair-tests/Cargo.toml`) reaches them, and CI does not run them. Run all three when anything under `vendor/`
   changes; seconds, plus a first download of the crates' own locked dependencies.
-- `python3 scripts/record-test-run.py --kind development --selection 'vendored gpui-pre native keys and driver record' --concurrency 'libtest default threads' -- cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record`
-  — the vendored GPUI core's tests of Farhelm's native-key and bridge layers (`vendor/README.md`, "GPUI"): original
-  repeat, Down and Up propagation, consumption before logical key matching, unchanged binding selection, and no native
-  identity on synthetic keys or replayed prefixes; and a list item's selected, not-selected and unmarked states in the
-  bridge's driver record. Like the terminal crates, the GPUI trees are excluded from the workspace, so nothing else runs
-  it. Run it when anything under `vendor/gpui-pre*` or `vendor/patches/gpui/` changes; minutes, since it builds GPUI on
-  its own.
+- `python3 scripts/record-test-run.py --kind development --selection 'vendored gpui-pre native keys, driver record and hitbox occlusion' --concurrency 'libtest default threads' -- cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record --test hitbox_occlusion`
+  — the vendored GPUI core's tests of Farhelm's patch layers (`vendor/README.md`, "GPUI"): original repeat, Down and Up
+  propagation, consumption before logical key matching, unchanged binding selection, and no native identity on synthetic
+  keys or replayed prefixes; and a list item's selected, not-selected and unmarked states in the bridge's driver record.
+  The occlusion test covers the order and clipped bounds of mouse-blocking hitboxes in the rendered frame. The GPUI
+  trees are excluded from the workspace. Run this selection when anything under `vendor/gpui-pre*` or
+  `vendor/patches/gpui/` changes. It takes minutes, since it builds GPUI on its own.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
