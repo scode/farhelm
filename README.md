@@ -35,7 +35,7 @@
      this image the first time around. -->
 <!-- readme-hero-url -->
 
-![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal open](https://raw.githubusercontent.com/scode/farhelm/4f215446a7b4f19d839479c0812ade6c647c9c15/readme-hero.png)
+![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal open](https://raw.githubusercontent.com/scode/farhelm/6a62abbefb318bde48f853453636da48a48d8f97/readme-hero.png)
 
 <!-- /readme-hero-url -->
 

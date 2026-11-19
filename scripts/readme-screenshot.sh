@@ -12,14 +12,14 @@
 #   scripts/readme-screenshot.sh --mac DEST [--output PATH] [--no-build]
 #   scripts/readme-screenshot.sh --local [--output PATH] [--no-build] [--lock FILE]
 #
+#   --local        capture on this machine (the default unless
+#                  FARHELM_MEDIA_MAC names a Mac): on Linux on a private
+#                  headless Mutter at the scenario's scale, on a Mac on its
+#                  real screen.
 #   --mac DEST     capture on a Mac reached over ssh at DEST (the default
-#                  when FARHELM_MEDIA_MAC names one): the picture comes from
-#                  there, because only a Mac renders it at the scenario's
-#                  scale. The checkout's files (those git would not ignore)
-#                  are shipped to it, built there and run under its lock.
-#   --local        capture on this machine: on a Mac, the picture itself;
-#                  on Linux a development run, which renders at scale 1 and
-#                  so always stops at the size check.
+#                  when FARHELM_MEDIA_MAC names one). The checkout's files
+#                  (those git would not ignore) are shipped to it, built
+#                  there and run under its lock.
 #   --output PATH  where to write the PNG (default
 #                  target/readme-hero/readme-hero.png). Removed first, and
 #                  written only when every check passed.
@@ -111,6 +111,16 @@ mac="${mac:-${FARHELM_MEDIA_MAC:-}}"
 # did not end cleanly keeps its directory for its logs and the shot `capture` refused; a clean one is removed. Any
 # CARGO_TARGET_DIR works: gui-agent.py asks cargo where it builds and runs the binaries from there.
 
+# The scenario's viewport scale, read through the same loader the capture uses, so this script never restates it.
+scenario_scale() {
+  PYTHONDONTWRITEBYTECODE=1 python3 -I - "$repo/scripts" "$repo/docs/readme-hero/scenario.json5" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import scenario_json5
+print(scenario_json5.load(sys.argv[2])["viewport"].get("scale", 1))
+PY
+}
+
 capture_here() {
   local tmp run status started captured stopped
   tmp="$(mktemp -d /tmp/fh-hero.XXXXXX)" || exit 1
@@ -143,6 +153,14 @@ capture_here() {
   rm -f "$output"
   mkdir -p "$(dirname "$output")" || exit 1
   local start=(start --scenario "$repo/docs/readme-hero/scenario.json5" --appearance dark)
+  # Linux renders on the run's private headless Mutter, which takes its output scale from the start command; without
+  # the scenario's scale it renders at 1 and the capture's size check refuses the picture. A Mac uses its real screen
+  # and refuses --scale.
+  if [ "$(uname -s)" = Linux ]; then
+    local scale
+    scale="$(scenario_scale)" || { echo "cannot read the scale from the hero scenario" >&2; exit 1; }
+    start+=(--scale "$scale")
+  fi
   [ "$build" = true ] || start+=(--no-build)
   [ -z "$lock" ] || start+=(--lock "$lock")
   step "${agent[@]}" "${start[@]}"
