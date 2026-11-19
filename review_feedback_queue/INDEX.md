@@ -58,10 +58,6 @@ consequences.
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
   when the pointer moves.
 
-- [`template-number-key-save-overwrites-committed-binding.md`](template-number-key-save-overwrites-committed-binding.md)
-  — A number-key change in Templates can undo an agent's already saved binding on a different key if the helm is still
-  sending the window an older set of bindings.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An

@@ -21460,6 +21460,20 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `vwwovoqkxvmy`, bookmark `plan/triage-discards-nov18/02-discard-masked-text-services`,
   https://github.com/scode/farhelm/pull/4158/changes.
 
+## template-number-key-save-overwrites-committed-binding.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed by reading (timing not run).
+  The Templates window builds the whole number-key map from its pushed copy at the click, and the helm holds pushes back
+  while a slow request is in flight, so a change can undo an agent's binding on another key. SPEC.md accepts
+  last-write-wins for number keys; a binding takes a moment to redo; the 2026-10-26 triage discarded the close
+  quick-launch analogue. Bucket: other.
+- Decision: the user picked "Refuse for what a launch runs; overwrite for bindings" (2026-11-18 highest-bucket triage
+  page, Q6); the spec statement of that split is carried by `stale-checkout-settings-overwrite-cli-edits.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `qtpwxmkrqrlm`, bookmark `plan/triage-discards-nov18/03-discard-number-key-binding`,
+  https://github.com/scode/farhelm/pull/4161/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
