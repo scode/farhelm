@@ -23948,6 +23948,22 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `plan/gui-ux-wording/07-status-documentation-probe-versus`,
   [PR #4259](https://github.com/scode/farhelm/pull/4259/changes).
 
+## bash-source-admission-retains-literal-splitter.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Some valid Bash
+  commands are refused despite SPEC's "reaches Bash unchanged". The shell-word check and exact placeholder slots are
+  deliberate in SPEC_impl; SPEC.md promises more. Bucket: other.
+- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
+  on 2026-10-26 (Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code (fix spec: name the limits in SPEC.md (~3-5); widening the code is
+  ~80-150). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
+  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
+  and its index entry in the same change.
+- Execution: change `rolqrsllunxtonrotumznovpwqsutkww`, bookmark `plan/gui-ux-wording/08-bash-source-admission-retains`,
+  [PR #4260](https://github.com/scode/farhelm/pull/4260/changes).
+
 ## trailing-retired-session-tcp-relay-cache-only-admission.md
 
 - Outcome: `fix code`.

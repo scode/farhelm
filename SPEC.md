@@ -1135,37 +1135,39 @@ agent choice is independent of that destination:
   explicitly cleared; ordinary newlines and tabs remain editable. The message travels with the create request, including
   managed checkouts and named conversations where supported, and for a create the command line or an agent sends with an
   idempotency key, its exact value is part of that key's retry identity.
-- Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. The text
-  reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments, compound
-  commands, pipes and redirection have Bash meaning. In the launcher's editable command fields, a spelled-out invisible
-  character such as `<U+200B>` stands for that character. Each placeholder must stand as its own unquoted word; a quoted
-  placeholder, or one joined to other text where it cannot be substituted safely, is refused on save and again at spawn
-  for an older stored command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument
-  for `{farhelm_args}`. The command may reference the session's working directory as `{cwd}` and takes a required YOLO
-  assertion: the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety checks, and
-  Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it runs,
-  or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
-  `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent type's
-  own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
-  `--no-daemon`, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so the rule
-  never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused. Farhelm
-  passes whatever turns its integration on as arguments, never through the environment: every process the agent starts
-  inherits the environment, including another agent of the same type that it shells out to, so a hook carried there
-  would reach runs that are not the session's. The environment carries only settings that Farhelm's own reporter reads
-  once an argument has turned it on, set on the launched process directly and never written into the command. Declaring
-  an agent type gives the session that agent type's status reading and conversation reporting. It also allows opting
-  into Resume, which requires a resume command containing `{conversation}` and `{farhelm_args}`, each as a whole
-  argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the resume command as written. Codex gets
-  `--no-daemon` even with hooks off. A custom Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`,
-  or runs `codex agents` or `codex queue` fails because Codex refuses that flag there; Farhelm does not detect these
-  incompatible commands. `{conversation}` in the start command is refused. The one exception to "as written" in either
-  command: Codex's internal workspace-trust markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled
-  wherever one stands as a whole argument, exactly as in a composed Codex agent launch (see SPEC_impl.md). A command
-  launch with no declared agent type, or one that does not opt into Resume, can never be restarted (see Lifecycle
-  operations). The YOLO assertion covers the resume command too. Search while the command launch kind is active still
-  offers agent types, models, and recent setups, and accepting one switches to the agent launch kind; accepting a
-  folder, host, or name keeps the current launch kind, and a template keeps it unless the template sets one. The command
-  tab's YOLO assertion, declared agent type and Resume choice are set in that tab's own fields, not through search.
+- Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. Farhelm
+  first checks the start and resume commands with a literal shell-word splitter, which can refuse valid Bash source.
+  Accepted text reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments,
+  compound commands, pipes and redirection have Bash meaning. In the launcher's editable command fields, a spelled-out
+  invisible character such as `<U+200B>` stands for that character. Each placeholder must stand as its own unquoted word
+  in Bash and occupy a complete word from the literal split. A quoted placeholder, or one joined to other text where it
+  cannot be substituted safely, is refused on save and again at spawn for an older stored command. Farhelm inserts each
+  filled value as a single-quoted word, or one such word per argument for `{farhelm_args}`. The command may reference
+  the session's working directory as `{cwd}` and takes a required YOLO assertion: the user states whether the command
+  bypasses human, classifier, AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never
+  reads a command line to decide whether it is YOLO, what agent it runs, or how to resume it. A command launch may
+  optionally declare the agent type it runs. A declared agent type requires `{farhelm_args}` as a whole argument exactly
+  once in the command, which marks where Farhelm places that agent type's own launch integration arguments (including
+  the conversation-reporting hook, instructions pointer and Codex's `--no-daemon`, see Durability); it is replaced by
+  nothing for an agent type that takes no such arguments, so the rule never depends on which agent type was declared.
+  `{farhelm_args}` without a declared agent type is refused. Farhelm passes whatever turns its integration on as
+  arguments, never through the environment: every process the agent starts inherits the environment, including another
+  agent of the same type that it shells out to, so a hook carried there would reach runs that are not the session's. The
+  environment carries only settings that Farhelm's own reporter reads once an argument has turned it on, set on the
+  launched process directly and never written into the command. Declaring an agent type gives the session that agent
+  type's status reading and conversation reporting. It also allows opting into Resume, which requires a resume command
+  containing `{conversation}` and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills those and
+  `{cwd}` in and otherwise runs the resume command as written. Codex gets `--no-daemon` even with hooks off. A custom
+  Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`, or runs `codex agents` or `codex queue`
+  fails because Codex refuses that flag there; Farhelm does not detect these incompatible commands. `{conversation}` in
+  the start command is refused. The one exception to "as written" in either command: Codex's internal workspace-trust
+  markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument,
+  exactly as in a composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one
+  that does not opt into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume
+  command too. Search while the command launch kind is active still offers agent types, models, and recent setups, and
+  accepting one switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and
+  a template keeps it unless the template sets one. The command tab's YOLO assertion, declared agent type and Resume
+  choice are set in that tab's own fields, not through search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
@@ -3927,8 +3929,8 @@ observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure
 needed for Muse.
 
 A resume command is never run with `{conversation}` unfilled: no captured conversation means no Restart, with the reason
-shown, not a garbled command line. `{cwd}` is always filled where it stands as a whole argument, on every launch and
-restart; there is no launch without a working directory.
+shown, not a garbled command line. Farhelm fills `{cwd}` on every launch and restart where it stands as a whole argument
+and, for a command launch, occupies a complete word from the literal split. Every launch has a working directory.
 
 Existing Muse agent launches derive the Muse integration from their stored harness and gain its hooks through their
 stored `{farhelm_args}` at the next start. They retain their original missing resume command: Restart explains that

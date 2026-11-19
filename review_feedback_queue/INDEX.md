@@ -930,9 +930,6 @@ consequences.
 - [`selected-expanded-host-hover-white-on-white.md`](selected-expanded-host-hover-white-on-white.md) — In Light
   appearance, hovering the selected expanded host can make its name and destination unreadable.
 
-- [`bash-source-admission-retains-literal-splitter.md`](bash-source-admission-retains-literal-splitter.md) — Some valid
-  Bash command source is refused despite the product's Bash-source promise.
-
 - [`template-save-placeholder-validation-contract-conflict.md`](template-save-placeholder-validation-contract-conflict.md)
   — Template Save can retain a prefix that Launch later refuses, despite wording that the new placement check runs at
   Save time.
