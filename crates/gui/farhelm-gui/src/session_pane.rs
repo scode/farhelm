@@ -553,6 +553,7 @@ impl Render for SessionPane {
             )
         });
         let Some((key, terminals, copies, card_focus, scroll)) = shown else {
+            self.header.clear_action();
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
@@ -654,6 +655,7 @@ impl Render for SessionPane {
                 card::Drawn {
                     key: &key,
                     row,
+                    action: self.header.action(),
                     focus: &card_focus,
                     question: card::question(&key, cx),
                     launcher_wait: session_list::menu::launcher_wait(cx),

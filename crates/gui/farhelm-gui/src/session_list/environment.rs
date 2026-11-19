@@ -249,7 +249,7 @@ pub(crate) fn deleting_reason(key: &str, cx: &App) -> Option<&'static str> {
 
 /// The environment of the session the current UI session's store holds under `key`, or `None` for a key with no row
 /// and a session that is not an environment session ([`Environment::of`]).
-fn of_key<'a>(key: &str, cx: &'a App) -> Option<Environment<'a>> {
+pub(super) fn of_key<'a>(key: &str, cx: &'a App) -> Option<Environment<'a>> {
     let collections = session::current_store(cx)?.read(cx).collections();
     Environment::of(collections.get::<SessionRow>(key)?, collections)
 }
@@ -392,11 +392,29 @@ pub(crate) struct Asked {
     pub(crate) guard: SessionStopRequest,
 }
 
-/// The user asked `key`'s environment for Stop and suspend (`stop`) or for its toggle, Suspend or Resume as the phase
-/// reads now. Resume goes at once; Suspend and Stop and suspend read the host's activity first and then either go
-/// ahead or hand the frozen request to `ask` inside `window`, which opens the question [`question`] builds, beside
-/// whatever the user pressed. Nothing happens for a session that is not an environment session, while its commands are
-/// refused, or while its control is unavailable.
+/// The part of an environment's state that decides which command its controls offer. Keep the provider and phase
+/// with the session's action data so a late press cannot reverse the toggle or act on another environment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Shown {
+    pub(crate) host: i64,
+    pub(crate) ui: ProviderUi,
+    resumable: bool,
+    stopped: bool,
+}
+
+impl Environment<'_> {
+    /// The command offered by the environment's phase, independent of whether a pending operation holds the control.
+    pub(super) fn shown(self) -> Shown {
+        Shown {
+            host: self.host.id,
+            ui: self.ui,
+            resumable: self.resumable(),
+            stopped: self.stopped(),
+        }
+    }
+}
+
+/// The row menu's entry point. The actual request runs through the same snapshot as the header's toggle.
 pub(crate) fn begin(
     key: &str,
     stop: bool,
@@ -407,26 +425,39 @@ pub(crate) fn begin(
     let Some(target) = menu::actionable(key, cx) else {
         return;
     };
-    let Some(store) = session::current_store(cx) else {
+    begin_shown(&target, stop, window, cx, ask);
+}
+
+/// Suspend or Resume the environment as the activated control showed it. A changed phase can refuse the operation.
+/// Resume goes at once. Suspend and Stop and suspend still read live host activity, which can require an additional
+/// warning and leaves the original Stop guards intact.
+pub(crate) fn begin_shown(
+    target: &menu::Actionable,
+    stop: bool,
+    window: AnyWindowHandle,
+    cx: &mut App,
+    ask: impl FnOnce(Asked, ProviderUi, &mut Window, &mut App) + 'static,
+) {
+    let Some(shown) = target.environment else {
         return;
     };
-    let collections = store.read(cx).collections();
-    let Some(environment) = Environment::of(&target.row, collections) else {
-        return;
-    };
-    if unavailable(key, environment, cx) || (stop && environment.resumable()) {
+    let key = &target.key;
+    if !target.allows(cx, |_| true)
+        || (stop && shown.resumable)
+        || !of_key(key, cx).is_some_and(|now| now.shown() == shown && !unavailable(key, now, cx))
+    {
         return;
     }
     let verb = if stop {
         Verb::StopAndSuspend
-    } else if environment.resumable() {
+    } else if shown.resumable {
         Verb::Resume
     } else {
         Verb::Suspend
     };
-    let (ui, host) = (environment.ui, environment.host.id);
+    let (ui, host) = (shown.ui, shown.host);
     let asked = Asked {
-        key: key.to_owned(),
+        key: key.clone(),
         host,
         verb,
         guard: super::stop::guard(&target.row),
@@ -438,7 +469,7 @@ pub(crate) fn begin(
     // Stop and suspend also asks wherever an ordinary Stop of the clicked row would.
     let stop_asks = stop && super::stop::asks(&target.row, target.skips_questions);
     set_reading(key, true, cx);
-    let reading = key.to_owned();
+    let reading = key.clone();
     let sent = read_activity(host, cx, move |activity_says_ask, cx| {
         // Cleared here, outside the window, so a window closed meanwhile cannot leave the session's commands
         // refused.

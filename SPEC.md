@@ -5298,8 +5298,10 @@ next view or save starts from what the helm reports, and the user redoes the cha
 failure keeps the rule that an action is never lost silently (see Losing the connection to the helm).
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
-behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a
-redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
+behind another, may be carried out as delivered. A pointer or keyboard action uses the target, consent and preconditions
+from the frame the user was shown, or is ignored when that frame has not yet been shown or its target is no longer in
+view. A drop lands where the pointer was released. A Cancel and a submit of the same dialog that arrive together before
+a redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
 explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry, still hold.
 
 ### Remote input, session defaults, and availability

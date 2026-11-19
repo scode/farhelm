@@ -940,10 +940,18 @@ A confirmation freezes what it shows when it opens: targets, consequences and pr
 pre-wired to that frozen state, so feature code never wires an answer by hand. Commands name their targets by stable id,
 never by list position, and the helm refuses a target that is gone. The existing per-route refusals of a target that
 changed since its prompt stay (a delete or restart that goes beyond what its confirmation said is refused, commit
-`6aef8dc2`). No new generic precondition protocol is added; new precondition checks go only where SPEC already requires
-them.
+`6aef8dc2`). No new generic precondition protocol is added on the helm or supervisor; the GUI sends each route's
+existing preconditions, and new precondition checks go only where SPEC already requires them. One confirmation does not
+freeze: the launcher's YOLO question keeps its warning about the source session live while it is open, and its answer
+acts on the warning it displayed when answered.
 
 This is the structural fix for the old GUI's largest bug class: an action that ran on state the user was not shown.
+
+The same rule starts at the control that asks the question or sends the request directly. Its handlers carry the drawn
+session key, row, skip preference and the parts of the environment's state that determine the command. The prompt's
+`when_shown` signal admits an action snapshot after presentation. GPUI can draw a dirty frame before dispatching a key,
+so a handler for a newly drawn frame may have to refuse the press. Live state may also refuse a missing or unavailable
+target. The question and request use the snapshot that admitted the press.
 
 SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw run as delivered, so a Confirm queued
 behind a Cancel may still submit. What the prompt guarantees is that whatever runs acts on the state the confirmation

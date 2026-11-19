@@ -381,7 +381,9 @@ pub(super) fn row_delete_confirmation_setup(state: &SceneState, _: &mut Window, 
         state,
         |list, _, window, cx| {
             let mark = Mark::take(cx);
-            list.update(cx, |list, cx| list.delete("b", &mark, window, cx));
+            if let Some(target) = crate::session_list::menu::actionable("b", cx) {
+                list.update(cx, |list, cx| list.delete(&target, &mark, window, cx));
+            }
         },
         cx,
     );

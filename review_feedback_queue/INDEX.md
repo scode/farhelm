@@ -21,11 +21,6 @@ consequences.
   — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`header-actions-follow-unseen-session.md`](header-actions-follow-unseen-session.md) — A Stop, Restart, Replace or
-  Delete aimed at one session can act on a different session when the selection just changed. Replace on the
-  interrupted-session card has the same problem. Skipping confirmations can make the wrong action take effect
-  immediately.
-
 - [`session-actions-use-unseen-liveness.md`](session-actions-use-unseen-liveness.md) — Deleting an ended session can
   kill an agent that restarted after the screen was drawn. Stop, Restart and Replace can also act on more running work
   than the window showed.

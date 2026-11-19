@@ -74,7 +74,7 @@ use super::SessionPane;
 use crate::components::{self, Button, HoverHelp, Ring, Tier};
 use crate::focus::Mark;
 use crate::operations::Work;
-use crate::prompt::{self, Inline};
+use crate::prompt::{self, Inline, ShownAction};
 use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{self, menu, outcome, replace, restart};
@@ -365,6 +365,9 @@ impl Follow {
 pub(crate) struct Drawn<'a> {
     pub(crate) key: &'a str,
     pub(crate) row: &'a SessionRow,
+    /// Shared with the header. A held card can still draw after its session is missing from the store, but has no
+    /// live action snapshot until the row returns.
+    pub(crate) action: Option<ShownAction<menu::Actionable>>,
     pub(crate) focus: &'a FocusHandle,
     pub(crate) question: Option<Inline<replace::Frozen>>,
     /// [`menu::launcher_wait`], read by the caller, which has the `&mut App` it needs (the pane's render, as for the
@@ -389,6 +392,7 @@ pub(crate) fn draw(
     let Drawn {
         key,
         row,
+        action,
         focus,
         question,
         launcher_wait,
@@ -444,7 +448,7 @@ pub(crate) fn draw(
         );
     }
     let replace_button = if offers_replace_with(row) {
-        let owner = key.to_owned();
+        let captured = action.clone();
         Button::new(
             "session-card-replace-with",
             "Replace with",
@@ -460,7 +464,10 @@ pub(crate) fn draw(
         // the launcher opens, Sessions shows in place of the Hosts panel, as the old card's did through the header's
         // path.
         .on_click(move |_, window, cx| {
-            if launcher::entry::open_replace_with(&owner, window, cx) {
+            if let Some(target) = captured.as_ref().and_then(ShownAction::shown)
+                && target.allows(cx, offers_replace_with)
+                && launcher::entry::open_replace_with(&target.key, window, cx)
+            {
                 session_list::show_sessions(window, cx);
             }
         })
@@ -474,9 +481,12 @@ pub(crate) fn draw(
         .busy(wait.is_some())
         .expanded(asking)
         .on_click(move |_, window, cx| {
-            let mark = Mark::take(cx);
-            // The pane may be gone with its window; then there is nothing to act on.
-            let _ = pane.update(cx, |pane, cx| pane.replace_from_card(&mark, window, cx));
+            if let Some(target) = action.as_ref().and_then(ShownAction::shown) {
+                let mark = Mark::take(cx);
+                let _ = pane.update(cx, |pane, cx| {
+                    pane.replace_from_card(target, &mark, window, cx)
+                });
+            }
         })
     };
     buttons.push(
@@ -558,17 +568,22 @@ fn restart_from_card(key: &str, cx: &mut App) {
 impl SessionPane {
     /// The card's Replace at `mark`: ask Replace's question inside the card and keep it ([`keep_question`]), or send it
     /// at once when confirmations are skipped (`replace::begin` decides). Nothing happens while the card's question is
-    /// open, for a session the store holds no row for, or for one with a request in flight: `menu::actionable` refuses
-    /// all three, the first through [`asks`].
-    fn replace_from_card(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(key) = self.open_key(cx) else {
+    /// open, when the card no longer owns this target, or when the session refuses competing commands.
+    fn replace_from_card(
+        &mut self,
+        target: &menu::Actionable,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = &target.key;
+        if self.open_key(cx).as_ref() != Some(key)
+            || !target.allows(cx, |row| shows_row(key, row, cx))
+        {
             return;
-        };
-        let Some(target) = menu::actionable(&key, cx) else {
-            return;
-        };
+        }
         let asked = replace::begin(
-            &key,
+            key,
             &target.row,
             target.skips_questions,
             Surface::Card,
@@ -577,7 +592,7 @@ impl SessionPane {
         )
         .map(|ask| prompt::ask_inline(ask(), mark, replace::confirm, window, cx));
         match asked {
-            Some(question) => keep_question(&key, question, cx),
+            Some(question) => keep_question(key, question, cx),
             // Sent at once: an earlier question, answered by now, has nothing left to draw.
             None => drop_question(cx),
         }

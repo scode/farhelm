@@ -131,7 +131,7 @@ use crate::focus::{self, Mark};
 use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::Work;
-use crate::prompt::{self, Question};
+use crate::prompt::{self, ActionFrame, Question, ShownAction};
 use crate::session;
 use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{
@@ -420,6 +420,8 @@ fn menu_line(text: &str) -> String {
 /// some other way needs no bookkeeping here.
 #[derive(Default)]
 pub(super) struct Header {
+    /// The header and card share the pane's snapshot. The Delete shortcut has no button handler to carry it.
+    action: ActionFrame<menu::Actionable, ActionOffer>,
     anchors: HashMap<Control, Anchor>,
     asked: Option<(Control, LayerId)>,
     /// Each caret as last drawn: the anchor its menu opens below, and its focus handle, which the menu names as where
@@ -430,6 +432,16 @@ pub(super) struct Header {
 }
 
 impl Header {
+    /// The snapshot this frame gave its session controls, also shared with the interrupted card and Delete shortcut.
+    pub(super) fn action(&self) -> Option<ShownAction<menu::Actionable>> {
+        self.action.current()
+    }
+
+    /// An empty pane has no action for the Delete shortcut to activate.
+    pub(super) fn clear_action(&mut self) {
+        self.action.clear();
+    }
+
     /// The split button whose caret menu is open now, if any.
     pub(super) fn open_menu(&mut self, window: &Window, cx: &App) -> Option<Split> {
         let (split, layer) = self.menu?;
@@ -459,22 +471,31 @@ impl Header {
 struct Shown<'a> {
     /// The session's row as the store holds it, listed or carried outside the list.
     row: &'a SessionRow,
+    action: ShownAction<menu::Actionable>,
     skipped: bool,
+    /// The spinner's step, from the pane's spinner.
+    step: u8,
+    offer: ActionOffer,
+}
+
+/// Availability shown in the header and interrupted card. These can change independently of the session's row, such
+/// as when the launcher finishes work on a different host.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ActionOffer {
     busy: bool,
+    asking: Option<Control>,
     /// [`menu::launch_wait`].
     launch_wait: Option<&'static str>,
     /// Why the launcher cannot open now, if it cannot ([`menu::launcher_wait`]), for Clone and the "with…" choices.
     launcher_wait: Option<&'static str>,
     stopping: bool,
-    /// The spinner's step, from the pane's spinner.
-    step: u8,
     /// An environment session's own control, `None` for any other session.
     environment: Option<EnvironmentShown>,
 }
 
 /// What the header draws for an environment session's own control and what its environment withholds, read from the
 /// registry and the operation store now ([`environment::Environment`]), so nothing drawn borrows the store.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct EnvironmentShown {
     ui: ProviderUi,
     /// Suspended, stopped, changing or being deleted: Stop, Restart and Replace are unavailable.
@@ -568,6 +589,7 @@ impl SessionPane {
         let left = fit::Left { strip, pill, gap };
         let row = title_band::row(row, Row::SessionTop);
         let Some(store) = session::current_store(cx) else {
+            self.header.clear_action();
             return row.child(left.build(None)).into_any_element();
         };
         let collections = store.read(cx).collections();
@@ -578,6 +600,7 @@ impl SessionPane {
             .filter(|row| !retired::is(row))
             .and_then(|row| EnvironmentShown::of(key, row, collections, cx));
         if let Some(guard) = delete::in_flight(key, cx) {
+            self.header.clear_action();
             self.header.anchors.clear();
             self.header.carets.clear();
             return row
@@ -590,21 +613,31 @@ impl SessionPane {
         }
         // No row, no actions (the module docs' "The open session by key").
         let Some(row_now) = row_now else {
+            self.header.clear_action();
             self.header.anchors.clear();
             self.header.carets.clear();
             return row.child(left.build(None)).into_any_element();
         };
-        let shown = Shown {
-            row: &row_now,
-            skipped,
+        let Some(target) = menu::Actionable::drawn(key, row_now.clone(), cx) else {
+            self.header.clear_action();
+            return row.child(left.build(None)).into_any_element();
+        };
+        let offer = ActionOffer {
             // `refused` counts the interrupted card's open Replace question too (`card::asks`), as any open
             // lifecycle question.
             busy: menu::refused(key, cx),
+            asking: self.header.open_question(window, cx),
             launch_wait: menu::launch_wait(cx),
             launcher_wait: menu::launcher_wait(cx),
             stopping: stop::in_flight(key, cx),
-            step,
             environment,
+        };
+        let shown = Shown {
+            row: &row_now,
+            action: self.header.action.capture(target, offer, window),
+            skipped,
+            step,
+            offer,
         };
         // A retired session's row draws Delete alone (the module docs).
         let retired = retired::is(&row_now);
@@ -619,7 +652,7 @@ impl SessionPane {
         let mut slots = Vec::new();
         for &action in actions {
             // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
-            if action == Action::Stop && shown.environment.is_some() {
+            if action == Action::Stop && shown.offer.environment.is_some() {
                 let anchor = Anchor::for_element(
                     SharedString::from(format!("{ENVIRONMENT_ID}-anchor")),
                     window,
@@ -649,7 +682,7 @@ impl SessionPane {
                 carets.insert(split, (anchor, focus));
                 (
                     split,
-                    Choices::of(split, key, shown.row, shown.launcher_wait, cx),
+                    Choices::of(split, key, shown.row, shown.offer.launcher_wait, cx),
                 )
             });
             slots.push((action, caret));
@@ -659,7 +692,7 @@ impl SessionPane {
             slots: &slots,
             anchors: &anchors,
             carets: &carets,
-            open: self.header.open_question(window, cx),
+            open: offer.asking,
             menu_open: self.header.open_menu(window, cx),
             pane: cx.weak_entity(),
             retired,
@@ -726,11 +759,7 @@ impl SessionPane {
             || environment::pending_of(key, cx).is_some()
     }
 
-    /// The user activated `action` in the open session's header at `mark`. It goes as the row's menu goes for the same
-    /// session, through the same functions, with the question (when it asks) hung under the action's button. Nothing
-    /// happens while that question is open, for a session the store holds no row for, or for one with a request in
-    /// flight. Clone that opens the launcher calls [`session_list::show_sessions`], which reads the main view and
-    /// updates the session list, so call this outside any update of either (GPUI refuses a second one).
+    /// The Delete shortcut uses the header's current render, subject to the same presentation check as its button.
     pub(crate) fn header_action(
         &mut self,
         action: Action,
@@ -738,51 +767,58 @@ impl SessionPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(key) = self.open_key(cx) else {
-            return;
-        };
-        // The card's open question refuses through `actionable` below, as any open lifecycle question does.
-        if self.header.open_question(window, cx).is_some() {
+        if let Some(target) = self.header.action().as_ref().and_then(ShownAction::shown) {
+            self.act_from_header(action, target, mark, window, cx);
+        }
+    }
+
+    /// Run the activated header action or the plain choice from its caret menu. Hang a question under the main button
+    /// only while the pane still owns that target. Live state may block a pending, stale or retired action.
+    pub(super) fn act_from_header(
+        &mut self,
+        action: Action,
+        target: &menu::Actionable,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = &target.key;
+        if self.open_key(cx).as_ref() != Some(key)
+            || self.header.open_question(window, cx).is_some()
+        {
             return;
         }
-        let Some(target) = menu::actionable(&key, cx) else {
-            return;
+        let allowed = match action {
+            Action::Stop => target.allows_active(true, cx),
+            Action::Restart | Action::Replace => target.allows_active(false, cx),
+            Action::Clone => target.allows(cx, |row| !retired::is(row)),
+            Action::Delete => target.allows_delete(cx),
         };
+        if !allowed {
+            return;
+        }
         let (row, skipped) = (&target.row, target.skips_questions);
-        // A retired session supports Delete only; its row draws nothing else, and a stale press does nothing.
-        if retired::is(row) && action != Action::Delete {
-            return;
-        }
-        // A frozen environment withholds Stop, Restart and Replace, drawn unavailable; a stale press does nothing.
-        if frozen(row, cx) && matches!(action, Action::Stop | Action::Restart | Action::Replace) {
-            return;
-        }
         let asking = Asking {
             control: Control::Action(action),
-            key: &key,
+            key,
             mark,
         };
         // Each action's own `begin` decides whether it asks or goes ahead, the same decision the row's menu makes, so
         // the two cannot drift apart; the header adds only where its questions hang.
         match action {
             Action::Stop => {
-                // A session on a host that is not connected cannot be stopped; the button is drawn disabled, and a
-                // stale press does nothing.
-                if row.stale {
-                    return;
-                }
-                if let Some(ask) = stop::begin(&key, row, skipped, cx) {
+                if let Some(ask) = stop::begin(target, cx) {
                     self.ask(asking, ask, stop::confirm, window, cx);
                 }
             }
             Action::Restart => {
-                if let Some(ask) = restart::begin(&key, row, skipped, cx) {
+                if let Some(ask) = restart::begin(key, row, skipped, cx) {
                     self.ask(asking, ask, restart::confirm, window, cx);
                 }
             }
             Action::Replace => {
                 if let Some(ask) = replace::begin(
-                    &key,
+                    key,
                     row,
                     skipped,
                     Surface::Header,
@@ -796,7 +832,7 @@ impl SessionPane {
                 // The launcher refuses while New is unavailable, as the button is drawn then; a press that beats
                 // that frame opens nothing. An opened one is a New handoff, which shows Sessions in place of the
                 // Hosts panel (the module docs' "Into the launcher from Hosts").
-                if entry::open_clone(&key, window, cx) {
+                if entry::open_clone(key, window, cx) {
                     session_list::show_sessions(window, cx);
                 } else {
                     tracing::debug!("the launcher refused to open Clone from the header");
@@ -805,7 +841,7 @@ impl SessionPane {
             Action::Delete => {
                 // SPEC.md: the header's Delete "asks first in the same anchored way, even for a session that has
                 // ended", unlike the row's, which deletes a session with nothing alive unasked.
-                if let Some(ask) = delete::begin(&key, row, skipped, true, cx) {
+                if let Some(ask) = delete::begin(target, true, cx) {
                     let again = self.ask_delete_again(window, cx);
                     self.ask(asking, ask, delete::confirming(Some(again)), window, cx);
                 }
@@ -814,18 +850,23 @@ impl SessionPane {
     }
 
     /// The user activated an environment session's own control at `mark`: Resume goes at once, and Suspend reads the
-    /// host's activity first and may ask, under this control (`session_list::environment::begin`, which the row's menu
+    /// host's activity first and may ask, under this control (`session_list::environment::begin_shown`, which the row's menu
     /// goes through too). Nothing happens while the control's question is open.
-    fn environment_action(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(key) = self.open_key(cx) else {
-            return;
-        };
-        if self.header.open_question(window, cx).is_some() {
+    fn environment_action(
+        &mut self,
+        target: &menu::Actionable,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_key(cx).as_ref() != Some(&target.key)
+            || self.header.open_question(window, cx).is_some()
+        {
             return;
         }
         let (pane, mark) = (cx.weak_entity(), *mark);
-        environment::begin(
-            &key,
+        environment::begin_shown(
+            target,
             false,
             window.window_handle(),
             cx,
@@ -956,7 +997,7 @@ impl Drawn<'_> {
             let action = *action;
             // An environment session's Suspend or Resume, immediately left of Stop (SPEC.md, "Sandbox sessions").
             if action == Action::Stop
-                && let Some(environment) = self.shown.environment
+                && let Some(environment) = self.shown.offer.environment
             {
                 let asking = self.open == Some(Control::Environment);
                 let button = environment_button(
@@ -965,6 +1006,7 @@ impl Drawn<'_> {
                     asking,
                     condensed,
                     &self.pane,
+                    &self.shown.action,
                     cx,
                 );
                 buttons.push(
@@ -996,16 +1038,16 @@ impl Drawn<'_> {
             // `busy: lifecycle.busy() || sandbox_frozen` did.
             let frozen = self
                 .shown
+                .offer
                 .environment
                 .is_some_and(|environment| environment.frozen);
-            let caret = caret_button(
+            let caret = self.caret_button(
                 *split,
                 choices,
-                self.shown.busy || frozen,
+                self.shown.offer.busy || frozen,
                 self.menu_open == Some(*split),
                 condensed,
                 focus,
-                &self.pane,
             );
             // The two parts side by side with no gap, as the old `.header-action-split`; the row's default stretch
             // gives the icon-only caret the main part's height. The caret is its menu's anchor.
@@ -1050,17 +1092,19 @@ fn action_button(
     cx: &App,
 ) -> Button {
     let pane = pane.clone();
+    let captured = shown.action.clone();
     let row = shown.row;
+    let offer = shown.offer;
     // A launch waiting for a host change says why in place of what it does, and so does Clone while the launcher
     // cannot open.
     let wait = match action {
-        Action::Clone => shown.launcher_wait,
-        _ => shown.launch_wait.filter(|_| action.would_launch(row)),
+        Action::Clone => offer.launcher_wait,
+        _ => offer.launch_wait.filter(|_| action.would_launch(row)),
     };
     let help = wait.map_or_else(|| hover_help(action, row, shown.skipped), str::to_owned);
     // An environment session's Stop says what plain Stop leaves running there, and its freeze withholds Stop, Restart
     // and Replace (the old header's). While it is being deleted, Stop, Clone and Delete say why nothing is available.
-    let help = match (action, shown.environment) {
+    let help = match (action, offer.environment) {
         (
             Action::Stop | Action::Clone | Action::Delete,
             Some(EnvironmentShown {
@@ -1077,10 +1121,10 @@ fn action_button(
         ),
         _ => help,
     };
-    let frozen = shown
+    let frozen = offer
         .environment
         .is_some_and(|environment| environment.frozen);
-    let stopping = action == Action::Stop && shown.stopping;
+    let stopping = action == Action::Stop && offer.stopping;
     let label = if stopping {
         stop::PROGRESS_LABEL
     } else {
@@ -1093,9 +1137,12 @@ fn action_button(
         .condensed(condensed.then_some(Condensed::Words))
         .expanded(asking)
         .on_click(move |_, window, cx| {
-            let mark = Mark::take(cx);
-            // The pane may be gone with its window; then there is nothing to act on.
-            let _ = pane.update(cx, |pane, cx| pane.header_action(action, &mark, window, cx));
+            if let Some(target) = captured.shown() {
+                let mark = Mark::take(cx);
+                let _ = pane.update(cx, |pane, cx| {
+                    pane.act_from_header(action, target, &mark, window, cx)
+                });
+            }
         });
     if stopping {
         // The old header's Stop while stopping: its icon, then the spinner and "Stopping…" in place of the label, which
@@ -1123,12 +1170,12 @@ fn action_button(
         Action::Restart => button
             .accessible_name(restart::offer_label(row.info.restart_offer))
             .busy(!restart::offered(row) || wait.is_some())
-            .disabled(shown.busy || frozen),
-        Action::Replace => button.busy(wait.is_some()).disabled(shown.busy || frozen),
-        Action::Stop => button.disabled(shown.busy || row.stale || frozen),
+            .disabled(offer.busy || frozen),
+        Action::Replace => button.busy(wait.is_some()).disabled(offer.busy || frozen),
+        Action::Stop => button.disabled(offer.busy || row.stale || frozen),
         // Clone opens the launcher, so it waits while the launcher cannot open, as Restart and Replace wait.
-        Action::Clone => button.busy(wait.is_some()).disabled(shown.busy),
-        Action::Delete => button.disabled(shown.busy),
+        Action::Clone => button.busy(wait.is_some()).disabled(offer.busy),
+        Action::Delete => button.disabled(offer.busy),
     }
 }
 
@@ -1146,6 +1193,7 @@ fn environment_button(
     asking: bool,
     condensed: bool,
     pane: &WeakEntity<SessionPane>,
+    captured: &ShownAction<menu::Actionable>,
     cx: &App,
 ) -> Button {
     let resume = match environment.pending {
@@ -1163,6 +1211,7 @@ fn environment_button(
         None => environment.ui.suspend_help(),
     };
     let pane = pane.clone();
+    let captured = captured.clone();
     let button = Button::new(
         ENVIRONMENT_ID,
         label,
@@ -1175,8 +1224,12 @@ fn environment_button(
     .expanded(asking)
     .disabled(environment.unavailable)
     .on_click(move |_, window, cx| {
-        let mark = Mark::take(cx);
-        let _ = pane.update(cx, |pane, cx| pane.environment_action(&mark, window, cx));
+        if let Some(target) = captured.shown() {
+            let mark = Mark::take(cx);
+            let _ = pane.update(cx, |pane, cx| {
+                pane.environment_action(target, &mark, window, cx)
+            });
+        }
     });
     let Some(pending) = environment.pending else {
         return button.icon(icon);
@@ -1199,73 +1252,78 @@ fn environment_button(
 const COMPACT_GLYPH: gpui::Pixels = px(13.);
 const COMPACT_GLYPH_GAP: gpui::Pixels = px(4.);
 
-/// Whether `row`'s environment is frozen now (`session_list::environment::Environment::frozen`): Stop, Restart and
-/// Replace, with their carets' choices, are withheld. `false` for any other session.
-fn frozen(row: &SessionRow, cx: &App) -> bool {
-    session::current_store(cx).is_some_and(|store| {
-        environment::Environment::of(row, store.read(cx).collections())
-            .is_some_and(|shown| shown.frozen())
-    })
-}
-
-/// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), in the actions' ordinary look or
-/// `condensed`, tracking `focus`, and opening its menu through `pane`. It is unavailable only while the session's
-/// commands are refused (`busy`), as the old caret was: while neither choice can run it is muted but still opens the
-/// menu, which is where the reasons are (SPEC.md: "the menu remains available to inspect reasons"). Down and Up open the
-/// closed menu on its first or last choice, as the old caret did.
-fn caret_button(
-    split: Split,
-    choices: &Choices,
-    busy: bool,
-    open: bool,
-    condensed: bool,
-    focus: &FocusHandle,
-    pane: &WeakEntity<SessionPane>,
-) -> IconButton {
-    let help = if choices.none_available() {
-        "Neither option is available. Open the menu for the reasons.".to_owned()
-    } else {
-        format!(
-            "{} options: use the current settings or edit them first",
-            split.label()
+impl Drawn<'_> {
+    /// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), in the actions' ordinary look or
+    /// `condensed`, tracking `focus`, and opening its menu through `pane`. It is unavailable only while the session's
+    /// commands are refused (`busy`), as the old caret was: while neither choice can run it is muted but still opens the
+    /// menu, which is where the reasons are (SPEC.md: "the menu remains available to inspect reasons"). Down and Up open the
+    /// closed menu on its first or last choice, as the old caret did.
+    fn caret_button(
+        &self,
+        split: Split,
+        choices: &Choices,
+        busy: bool,
+        open: bool,
+        condensed: bool,
+        focus: &FocusHandle,
+    ) -> IconButton {
+        let help = if choices.none_available() {
+            "Neither option is available. Open the menu for the reasons.".to_owned()
+        } else {
+            format!(
+                "{} options: use the current settings or edit them first",
+                split.label()
+            )
+        };
+        let (clicked, keyed) = (self.pane.clone(), self.pane.clone());
+        let (click_target, key_target) = (self.shown.action.clone(), self.shown.action.clone());
+        IconButton::new(
+            split.caret_id(),
+            Icon::ChevronDown,
+            format!("{} options", split.label()),
+            HoverHelp::tooltip(help),
+            Role::Button,
         )
-    };
-    let (clicked, keyed) = (pane.clone(), pane.clone());
-    IconButton::new(
-        split.caret_id(),
-        Icon::ChevronDown,
-        format!("{} options", split.label()),
-        HoverHelp::tooltip(help),
-        Role::Button,
-    )
-    .tier(Tier::Neutral)
-    .compact()
-    .condensed(condensed.then_some(Condensed::Words))
-    .split(SplitPart::Caret {
-        muted: choices.none_available(),
-    })
-    .expanded(open)
-    .disabled(busy)
-    .focus(focus)
-    .on_key_down(toggle_arrow_keys(move |start, window, cx| {
-        let _ = keyed.update(cx, |pane, cx| {
-            pane.open_caret_menu(split, start, window, cx)
-        });
-    }))
-    .on_click(move |_, window, cx| {
-        // The pane may be gone with its window; then there is no menu to open.
-        let _ = clicked.update(cx, |pane, cx| pane.toggle_caret_menu(split, window, cx));
-    })
+        .tier(Tier::Neutral)
+        .compact()
+        .condensed(condensed.then_some(Condensed::Words))
+        .split(SplitPart::Caret {
+            muted: choices.none_available(),
+        })
+        .expanded(open)
+        .disabled(busy)
+        .focus(focus)
+        .on_key_down(toggle_arrow_keys(move |start, window, cx| {
+            if let Some(target) = key_target.shown() {
+                let _ = keyed.update(cx, |pane, cx| {
+                    pane.open_caret_menu(target, split, start, window, cx)
+                });
+            }
+        }))
+        .on_click(move |_, window, cx| {
+            if let Some(target) = click_target.shown() {
+                let _ = clicked.update(cx, |pane, cx| {
+                    pane.toggle_caret_menu(target, split, window, cx)
+                });
+            }
+        })
+    }
 }
 
 impl SessionPane {
     /// `split`'s caret was activated (a click, Enter or Space): open its menu on the first choice, or close it if it is
     /// open.
-    fn toggle_caret_menu(&mut self, split: Split, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_caret_menu(
+        &mut self,
+        target: &menu::Actionable,
+        split: Split,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.header.open_menu(window, cx) == Some(split) {
             self.close_caret_menu(window, cx);
         } else {
-            self.open_caret_menu(split, MenuStart::First, window, cx);
+            self.open_caret_menu(target, split, MenuStart::First, window, cx);
         }
     }
 
@@ -1274,6 +1332,7 @@ impl SessionPane {
     /// does, and names the caret as where closing returns focus; its own Tab closes it ([`CaretMenu`]).
     fn open_caret_menu(
         &mut self,
+        target: &menu::Actionable,
         split: Split,
         start: MenuStart,
         window: &mut Window,
@@ -1282,11 +1341,7 @@ impl SessionPane {
         if self.header.open_menu(window, cx).is_some() {
             return;
         }
-        let Some(key) = self.open_key(cx) else {
-            return;
-        };
-        let frozen_now = menu::actionable(&key, cx).is_some_and(|target| frozen(&target.row, cx));
-        if menu::refused(&key, cx) || frozen_now {
+        if self.open_key(cx).as_ref() != Some(&target.key) || !target.allows_active(false, cx) {
             return;
         }
         let Some((anchor, caret)) = self.header.carets.get(&split).cloned() else {
@@ -1301,9 +1356,10 @@ impl SessionPane {
         let pane = cx.weak_entity();
         let view = cx.new(|_| CaretMenu {
             pane,
-            key,
+            key: target.key.clone(),
             split,
             items,
+            action: ActionFrame::default(),
         });
         let opened = layers::open_popover(
             Popover::menu(view, cx.focus_handle(), anchor, start)
@@ -1326,29 +1382,28 @@ impl SessionPane {
         }
     }
 
-    /// A choice of `split`'s menu, opened on the session `key`, was activated at `mark`: close the menu, which returns
-    /// focus to the caret, then go on as the plain action's button goes on ([`SessionPane::header_action`], so the
+    /// A choice of `split`'s menu for `target` was activated at `mark`: close the menu, which returns
+    /// focus to the caret, then go on as the plain action's button goes on ([`SessionPane::act_from_header`], so the
     /// same question hangs under the main part), or open the variant's launcher, which returns focus to the caret when
     /// it closes (SPEC.md: "Cancelling Restart with returns to that persistent caret"). Nothing happens when the open
-    /// session is no longer `key`.
+    /// session has changed.
     fn caret_choice(
         &mut self,
         split: Split,
-        key: &str,
+        target: &menu::Actionable,
         with: bool,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.close_caret_menu(window, cx);
-        if self.open_key(cx).as_deref() != Some(key) {
+        if self.open_key(cx).as_ref() != Some(&target.key) {
             return;
         }
         // A frozen environment withholds the variants too, as `header_action` withholds the plain choice.
-        let open = menu::actionable(key, cx).is_some_and(|target| !frozen(&target.row, cx));
         if !with {
-            self.header_action(split.action(), mark, window, cx);
-        } else if open && !split.open_with(key, window, cx) {
+            self.act_from_header(split.action(), target, mark, window, cx);
+        } else if target.allows_active(false, cx) && !split.open_with(&target.key, window, cx) {
             tracing::debug!(
                 ?split,
                 "the launcher refused to open from the header's menu"
@@ -1373,19 +1428,21 @@ pub(crate) struct CaretMenu {
     split: Split,
     /// The two choices' focus handles, plain first: the menu starts on either, and Home and End move there.
     items: [FocusHandle; 2],
+    action: ActionFrame<menu::Actionable, [bool; 2]>,
 }
 
 /// The old `.header-action-menu`'s width.
 const CARET_MENU_WIDTH: f32 = 260.;
 
 impl Render for CaretMenu {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let id = self.split.caret_id();
         let panel = layers::panel(cx)
             .id(SharedString::from(format!("{id}-menu")))
             .debug_selector(move || format!("{id}-menu"))
             .w(px(CARET_MENU_WIDTH));
         let Some(store) = session::current_store(cx) else {
+            self.action.clear();
             return panel;
         };
         let Some(row) = store
@@ -1394,11 +1451,21 @@ impl Render for CaretMenu {
             .get::<SessionRow>(&self.key)
             .cloned()
         else {
+            self.action.clear();
             return panel;
         };
         let launcher_wait = menu::launcher_wait(cx);
         let choices = Choices::of(self.split, &self.key, &row, launcher_wait, cx);
         let busy = menu::refused(&self.key, cx);
+        let Some(target) = menu::Actionable::drawn(&self.key, row, cx) else {
+            self.action.clear();
+            return panel;
+        };
+        let offer = [
+            busy || choices.plain_unavailable,
+            busy || choices.with_unavailable,
+        ];
+        let captured = self.action.capture(target, offer, window);
         let summary = if choices.none_available() {
             "Unavailable for this session"
         } else {
@@ -1423,7 +1490,7 @@ impl Render for CaretMenu {
                     choices.plain_unavailable,
                 )
             };
-            let (pane, key, split) = (self.pane.clone(), self.key.clone(), self.split);
+            let (pane, captured, split) = (self.pane.clone(), captured.clone(), self.split);
             MenuItem::new(
                 format!("{id}-{}", if with { "with" } else { "plain" }),
                 icon,
@@ -1435,10 +1502,12 @@ impl Render for CaretMenu {
             .disabled(busy || unavailable)
             .focus(&self.items[usize::from(with)])
             .on_click(move |_, window, cx| {
-                let mark = Mark::take(cx);
-                let _ = pane.update(cx, |pane, cx| {
-                    pane.caret_choice(split, &key, with, &mark, window, cx)
-                });
+                if let Some(target) = captured.shown() {
+                    let mark = Mark::take(cx);
+                    let _ = pane.update(cx, |pane, cx| {
+                        pane.caret_choice(split, target, with, &mark, window, cx)
+                    });
+                }
             })
         };
         let (first, last) = (self.items[0].clone(), self.items[1].clone());

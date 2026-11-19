@@ -37,7 +37,7 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
-use super::environment::{self, Environment};
+use super::environment;
 use super::{SessionList, menu};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::environment_ui::ProviderUi;
@@ -164,46 +164,35 @@ pub(crate) fn command(session: &str, guard: SessionStopRequest) -> Result<Comman
 // ---- Starting a Stop -------------------------------------------------------------------------------------------------
 
 impl SessionList {
-    /// The user asked to stop `key` (its row's Stop) at `mark`: stop it at once when the row lists no tabs or
+    /// Stop `target`'s row at `mark`: stop it at once when the row lists no tabs or
     /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is drawn and centered
-    /// when it is not. Nothing happens for a session the store holds no row for, or that has any request in
-    /// flight.
+    /// when it is not. The menu checks that the live session accepts a new action before calling this.
     pub(crate) fn stop(
         &mut self,
-        key: &str,
+        target: &menu::Actionable,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = menu::actionable(key, cx) else {
-            return;
-        };
-        if let Some(ask) = begin(key, &target.row, target.skips_questions, cx) {
-            self.ask_about_row(key, ask, mark, confirm, window, cx);
+        if let Some(ask) = begin(target, cx) {
+            self.ask_about_row(&target.key, ask, mark, confirm, window, cx);
         }
     }
 }
 
-/// Start a Stop of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
-/// Stop's ask-or-send rule, for the row's menu and the open session's header alike. When nothing needs asking, the
-/// Stop is sent at once with the guard of `row` as drawn, and there is nothing to ask. Otherwise nothing is sent, and
-/// what comes back builds the question to ask (as often as the caller needs to try showing it), whose answer goes to
-/// [`confirm`].
+/// Start a Stop from the activated control's row. The ask-or-send choice, the request guards and the option to
+/// suspend the environment all come from that same snapshot. The returned builder is used only when Stop asks.
 pub(crate) fn begin<'a>(
-    key: &'a str,
-    row: &'a SessionRow,
-    skipped: bool,
+    target: &'a menu::Actionable,
     cx: &mut App,
 ) -> Option<impl Fn() -> Question<Frozen> + 'a> {
+    let (key, row) = (&target.key, &target.row);
     let guard = guard(row);
-    if !asks(row, skipped) {
+    if !asks(row, target.skips_questions) {
         send(key, guard, cx);
         return None;
     }
-    let environment = session::current_store(cx).and_then(|store| {
-        Environment::of(row, store.read(cx).collections())
-            .map(|environment| (environment.ui, environment.host.id))
-    });
+    let environment = target.environment.map(|shown| (shown.ui, shown.host));
     Some(move || question(key, row, guard, environment))
 }
 

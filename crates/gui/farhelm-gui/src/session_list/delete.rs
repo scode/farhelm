@@ -207,24 +207,20 @@ pub(super) const MANAGED_CHECKOUT: &str = "The managed checkout stays while anot
 // ---- Starting a Delete -----------------------------------------------------------------------------------------------
 
 impl SessionList {
-    /// The user asked to delete `key` (its row's Delete) at `mark`: delete it at once when nothing shows alive or
+    /// Delete `target`'s row at `mark`: delete it at once when nothing shows alive or
     /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in the list's view
     /// and centered when it is not (scrolled away). A session in a disposable environment is always asked ([`begin`]).
-    /// Nothing happens for a session the store holds no row for, or that has any request in flight. Visible to the
-    /// crate for the screenshot goldens, which ask the question without a click.
+    /// Called after checking that the live session accepts a new action. The screenshot goldens ask without a click.
     pub(crate) fn delete(
         &mut self,
-        key: &str,
+        target: &menu::Actionable,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = menu::actionable(key, cx) else {
-            return;
-        };
-        if let Some(ask) = begin(key, &target.row, target.skips_questions, false, cx) {
+        if let Some(ask) = begin(target, false, cx) {
             let again = self.ask_again_at_row(window, cx);
-            self.ask_about_row(key, ask, mark, confirming(Some(again)), window, cx);
+            self.ask_about_row(&target.key, ask, mark, confirming(Some(again)), window, cx);
         }
     }
 
@@ -259,7 +255,7 @@ impl SessionList {
     }
 }
 
-/// Start a Delete of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
+/// Start a Delete from the activated control's snapshot. This is the one statement of
 /// Delete's ask-or-send rule, for the row's menu and the open session's header alike. The row's Delete goes ahead
 /// unasked on a session that shows nothing alive; the header's asks even then (SPEC.md: it "asks first in the same
 /// anchored way, even for a session that has ended"), which `ask_when_nothing_alive` says. Skipped questions go ahead
@@ -270,15 +266,14 @@ impl SessionList {
 /// A session in a disposable environment is always asked, skipped or not and alive or not, in the lane the hosts read
 /// picks now (`environment_delete`'s "Always asked").
 pub(crate) fn begin<'a>(
-    key: &'a str,
-    row: &'a SessionRow,
-    skipped: bool,
+    target: &'a menu::Actionable,
     ask_when_nothing_alive: bool,
     cx: &mut App,
 ) -> Option<impl Fn() -> Question<Frozen> + 'a> {
+    let (key, row) = (&target.key, &target.row);
     let guard = guard(row);
-    let environment = environment_delete::asked(row, cx);
-    let unasked = skipped || (shows_nothing_alive(row) && !ask_when_nothing_alive);
+    let environment = &target.environment_delete;
+    let unasked = target.skips_questions || (shows_nothing_alive(row) && !ask_when_nothing_alive);
     if environment.is_none() && unasked {
         send_delete(key, guard, cx);
         return None;

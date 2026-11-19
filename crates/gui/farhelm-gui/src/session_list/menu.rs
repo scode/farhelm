@@ -521,17 +521,24 @@ impl SessionList {
     /// then go on as `command` goes on for the row (its Replace, Stop or Delete), so any question opens from there.
     fn lifecycle_from_menu(
         &mut self,
-        key: &str,
+        target: &Actionable,
         mark: &Mark,
         command: LifecycleCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_menu(key, window, cx);
+        self.close_menu(&target.key, window, cx);
+        let allowed = match command {
+            LifecycleCommand::Replace | LifecycleCommand::Stop => target.allows_active(false, cx),
+            LifecycleCommand::Delete => target.allows_delete(cx),
+        };
+        if !allowed {
+            return;
+        }
         match command {
-            LifecycleCommand::Replace => self.replace(key, mark, window, cx),
-            LifecycleCommand::Stop => self.stop(key, mark, window, cx),
-            LifecycleCommand::Delete => self.delete(key, mark, window, cx),
+            LifecycleCommand::Replace => self.replace(target, mark, window, cx),
+            LifecycleCommand::Stop => self.stop(target, mark, window, cx),
+            LifecycleCommand::Delete => self.delete(target, mark, window, cx),
         }
     }
 
@@ -598,13 +605,70 @@ enum LifecycleCommand {
     Delete,
 }
 
-/// A row a lifecycle action was asked for, as the store held it when the user asked.
+/// The target and consent a session action was drawn from. Keep these together so a click can use the same row and
+/// preferences whether it sends a request immediately or opens a question.
+#[derive(PartialEq, Eq)]
 pub(crate) struct Actionable {
-    /// The row as the store holds it now: what any question is drawn from and any precondition is taken from.
+    store: gpui::EntityId,
+    pub(crate) key: String,
+    /// The drawn row is the source of the question's wording and the request's preconditions.
     pub(crate) row: SessionRow,
     /// Whether the helm-wide **Skip session confirmations** preference is on, so the action goes ahead on the click
     /// with the guard of what the row showed (SPEC.md, "Lifecycle operations").
     pub(crate) skips_questions: bool,
+    pub(crate) environment: Option<environment::Shown>,
+    pub(crate) environment_delete: Option<super::environment_delete::Asked>,
+}
+
+impl Actionable {
+    /// Capture `row` along with the preferences and environment that supplied its controls' wording.
+    pub(crate) fn drawn(key: &str, row: SessionRow, cx: &App) -> Option<Self> {
+        let store = session::current_store(cx)?;
+        let collections = store.read(cx).collections();
+        Some(Self {
+            store: store.entity_id(),
+            key: key.to_owned(),
+            skips_questions: skips_questions(collections),
+            environment: environment::Environment::of(&row, collections).map(|env| env.shown()),
+            environment_delete: super::environment_delete::asked_in(&row, collections),
+            row,
+        })
+    }
+
+    /// Check the live session solely for refusal. A reconnect or retarget can reuse the key, so check the store and
+    /// host identity too. The caller's test can narrow availability without replacing the drawn consent.
+    pub(crate) fn allows(&self, cx: &App, available: impl FnOnce(&SessionRow) -> bool) -> bool {
+        let Some(store) = session::current_store(cx) else {
+            return false;
+        };
+        store.entity_id() == self.store
+            && !refused(&self.key, cx)
+            && store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(&self.key)
+                .is_some_and(|row| {
+                    row.host == self.row.host
+                        && row.host_identity == self.row.host_identity
+                        && available(row)
+                })
+    }
+
+    /// Stop, Restart and Replace have no route on a retired or frozen session. Stop additionally requires a live host.
+    pub(crate) fn allows_active(&self, must_reach_host: bool, cx: &App) -> bool {
+        self.allows(cx, |row| {
+            !super::retired::is(row)
+                && (!must_reach_host || !row.stale)
+                && !environment::of_key(&self.key, cx).is_some_and(Environment::frozen)
+        })
+    }
+
+    /// A different environment Delete lane requires a different warning, so refuse the old action.
+    pub(crate) fn allows_delete(&self, cx: &App) -> bool {
+        self.allows(cx, |row| {
+            super::environment_delete::asked(row, cx) == self.environment_delete
+        })
+    }
 }
 
 /// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, the open session's header, or its
@@ -619,10 +683,7 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     if refused(key, cx) {
         return None;
     }
-    Some(Actionable {
-        row,
-        skips_questions: skips_questions(collections),
-    })
+    Actionable::drawn(key, row, cx)
 }
 
 /// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
@@ -903,9 +964,11 @@ impl RowMenu {
                 .disabled(busy)
                 .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
-                    let _ = list.update(cx, |list, cx| {
-                        list.lifecycle_from_menu(&key, &mark, command, window, cx)
-                    });
+                    if let Some(target) = actionable(&key, cx) {
+                        let _ = list.update(cx, |list, cx| {
+                            list.lifecycle_from_menu(&target, &mark, command, window, cx)
+                        });
+                    }
                 })
         };
         // Replace waits for a host change, its help saying why ([`launch_wait`]).

@@ -24,7 +24,7 @@ use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    AppContext as _, Context, Entity, HeadlessAppContext, IntoElement, Modifiers,
+    AppContext as _, Context, Entity, HeadlessAppContext, IntoElement, Keystroke, Modifiers,
     ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point,
     px, size,
 };
@@ -166,6 +166,85 @@ fn stop(key: &str, refuse_if_tabs_open: bool, refuse_if_agent_running: bool) -> 
             "refuse_if_agent_running": refuse_if_agent_running,
         }),
     )
+}
+
+/// Two ended sessions with distinguishable keys. Delete is skipped so a wrong target is visible on the wire.
+fn two_ended_sessions(
+    cx: &mut TestAppContext,
+) -> (FakeHelm, Entity<SessionPane>, &mut VisualTestContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(snapshot_of(
+        vec![entry(&ended("a"), 0), entry(&ended("b"), 0)],
+        true,
+    ));
+    cx.run_until_parked();
+    let (main, cx) = test_support::open_view(cx, MainView::new);
+    let pane = cx.update(|_, cx| main.read(cx).session_pane().clone());
+    test_support::show_next_frame(cx);
+    pending(&mut fake);
+    (fake, pane, cx)
+}
+
+/// A selection may change before the associated redraw. The pointer still hits the previous frame's Stop button,
+/// which never has authority to stop the newly mounted session.
+#[gpui::test]
+fn a_header_click_cannot_stop_a_session_that_has_not_drawn(cx: &mut TestAppContext) {
+    let (mut fake, pane, cx) = two_ended_sessions(cx);
+    let position = test_support::center(cx, "session-header-stop");
+    cx.update(|window, cx| {
+        assert!(crate::local_state::select("b", cx));
+        pane.update(cx, |pane, cx| {
+            pane.sync(window, cx);
+            assert_eq!(pane.open_key(cx).as_deref(), Some("b"));
+            let frame = pane.header.action().unwrap();
+            assert_eq!(frame.shown().unwrap().key, "a");
+        });
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert!(
+        pending(&mut fake).is_empty(),
+        "the old Stop press is refused"
+    );
+
+    test_support::show_next_frame(cx);
+    let position = test_support::center(cx, "session-header-stop");
+    cx.update(|window, cx| test_support::click_before_redraw(position, window, cx));
+    test_support::settle(cx);
+    assert_eq!(answered(&mut fake), [stop("b", true, true)]);
+}
+
+/// GPUI can install a dirty frame's handlers while dispatching the key itself. The Delete shortcut waits for a
+/// presentation boundary before it can use the new frame's target and consent.
+#[gpui::test]
+fn the_delete_shortcut_refuses_a_newly_drawn_unshown_session(cx: &mut TestAppContext) {
+    let (mut fake, pane, cx) = two_ended_sessions(cx);
+    cx.update(|window, cx| {
+        let key = Keystroke::parse_with_os(DELETE_SESSION_CHORD, cx.platform_info().os).unwrap();
+        assert!(crate::local_state::select("b", cx));
+        pane.update(cx, |pane, cx| pane.sync(window, cx));
+        assert!(
+            window.dispatch_keystroke(key, cx),
+            "the key binding consumed Delete"
+        );
+        let frame = pane.read(cx).header.action().unwrap();
+        assert!(
+            frame.shown().is_none(),
+            "Delete drew the new target before it was shown"
+        );
+    });
+    test_support::settle(cx);
+    assert!(
+        pending(&mut fake).is_empty(),
+        "the shortcut cannot delete an unseen target"
+    );
+
+    test_support::show_next_frame(cx);
+    test_support::keys(cx, DELETE_SESSION_CHORD);
+    let [(_, path, _)] = &pending(&mut fake)[..] else {
+        panic!("the shown session received one Delete");
+    };
+    assert_eq!(path, "/api/sessions/b?only_if_nothing_alive=true");
 }
 
 /// A plain Restart of `key` with this consent to stop a working agent, as the window sends it: the shared client body
@@ -1049,6 +1128,33 @@ fn probe_alone(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
     probe.id
 }
 
+/// A host change can finish without a session push. Enter on a busy Replace cannot run just because the next frame
+/// enables it. The new availability has to be visible too.
+#[gpui::test]
+fn a_newly_available_replace_waits_for_presentation(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], true));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    let probe = probe_alone(&mut fake, cx);
+    let button = "session-header-replace";
+    test_support::click(cx, button);
+    assert_eq!(focused_id(cx).as_deref(), Some(button));
+    assert!(cx.update(|_, cx| crate::hosts::host_change_in_flight(cx)));
+    assert!(pending(&mut fake).is_empty(), "Replace is busy");
+
+    fake.reply(probe, 200, Some(json!({})));
+    test_support::settle(cx);
+    assert!(!cx.update(|_, cx| crate::hosts::host_change_in_flight(cx)));
+    cx.simulate_keystrokes("enter");
+    assert!(
+        pending(&mut fake).is_empty(),
+        "ready Replace is not shown yet"
+    );
+
+    test_support::keys(cx, "enter");
+    assert_eq!(answered(&mut fake), [replace("a", false, false)]);
+}
+
 /// SPEC.md, "Errors and diagnostics": "Every failed operation surfaces a concrete, actionable error", and no dialog
 /// may close as though it succeeded. A question that opened before a host change and is confirmed during one cannot
 /// send its launch (Restart and Replace wait for host changes), so the refusal must show where the session's refusals
@@ -1885,11 +1991,14 @@ fn clone_and_the_with_choices_from_hosts_show_sessions_and_a_refusal_leaves_host
     }
 
     test_support::click(cx, "hosts-panel-toggle");
+    test_support::show_next_frame(cx);
+    let captured = cx.update(|_, cx| pane.read(cx).header.action().unwrap());
+    let target = captured.shown().expect("Clone was shown before the probe");
     start_host_change(cx, HostChange::Probe);
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
         pane.update(cx, |pane, cx| {
-            pane.header_action(Action::Clone, &mark, window, cx)
+            pane.act_from_header(Action::Clone, target, &mark, window, cx)
         });
     });
     test_support::settle(cx);
@@ -2187,6 +2296,7 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
         assert!(node.focus.is_some(), "{caret} tracks a focus handle");
     }
     cx.update_window(window.into(), |_, window, cx| {
+        window.simulate_next_frame(cx);
         let mark = Mark::take(cx);
         pane.update(cx, |pane, cx| {
             pane.header_action(Action::Restart, &mark, window, cx)
@@ -2269,6 +2379,7 @@ impl RealPane {
         let pane = self.pane.clone();
         self.cx
             .update_window(self.window, |_, window, cx| {
+                window.simulate_next_frame(cx);
                 let mark = Mark::take(cx);
                 pane.update(cx, |pane, cx| pane.header_action(action, &mark, window, cx))
                     .expect("the pane is alive");
