@@ -29697,10 +29697,10 @@ exit 1
     /// session, not one per launch.
     ///
     /// The bug this pins is a lost update with no symptom at the moment it
-    /// happens. `sample_pass` clones an entry, awaits a read of its
-    /// terminal's screen, and only then dates what it saw; a restart landing in
-    /// that window republishes a new entry under the same id. With a
-    /// per-launch cell the late write would advance the ABANDONED entry
+    /// happens. After `sample_pass` selects live terminals, it keeps their
+    /// entries until they are sampled. Restart can publish a replacement
+    /// under the same id before the pass dates activity through the earlier
+    /// entry. With a per-launch cell the late write would advance that entry
     /// while the same sampler's durable write advanced the row, leaving
     /// this supervisor answering every reply from a value older than its
     /// own database — and staying wrong until some later change crossed
@@ -29748,7 +29748,7 @@ exit 1
         sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
             .await;
 
-        // The handle a sampling pass would be holding across its await.
+        // The handle a sampling pass could still hold after Restart republishes the entry.
         let sampled = sup
             .sessions
             .lock()
