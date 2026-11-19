@@ -4614,6 +4614,22 @@ usual notices collection delivers additions and resolutions to the rail.
   gets one re-probe: a unit its durable row says was scoped, and a tab whose host's tag records that it was opened in a
   scope.
 
+  The shared reaper also reads direct scope membership before any scope signal to give Podman a chance to finish its own
+  bookkeeping. It recognizes main `conmon` processes by their executable name and cleanup arguments. It checks the
+  effective user's ownership of the process, its start time and its current cgroup before using the full container ID
+  and an allowlist of the storage options from the monitor's command line. Exec monitors and processes outside the
+  selected scopes supply no container targets. This read shares the diagnostic's 16 KiB membership cap but has no 32-PID
+  log cap. Nested cgroups are outside this read.
+
+  The supervisor runs the Podman it resolves on its own PATH and strips the Farhelm markers and private tmux variables.
+  Stops run concurrently with `podman stop --time 5`. Discovery, stops, removal and state checks share a 15-second
+  deadline per reaper call. The startup pass uses a deadline shared across old terminals, leaving the last ten seconds
+  of the startup cleanup budget for scope signals and the portable sweep. A failed or timed-out stop can still succeed
+  if Podman reports the container absent or confirms it stopped. The supervisor asks Podman to remove stopped `--rm`
+  containers without force before signalling their scope. On Podman 4.9, the stop can return while the monitor is still
+  removing the container, so a scope signal straight after the stop can cut it short. The ordinary scope and process
+  cleanup follows even if Podman cannot confirm completion.
+
   Confirmed 2026-11-08: the shared reaper skips the machine-wide marker scan and PPID walk only when containment is
   established for every target, a usable manager handles at least one named scope, every named scope is confirmed
   collected, and no validated explicit root survives afterwards. It checks only those root identities, not the process

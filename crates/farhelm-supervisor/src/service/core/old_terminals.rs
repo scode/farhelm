@@ -84,7 +84,8 @@
 //! and short, so accepted, like the reboot conversion's same window.
 
 use super::super::notifications::{NotificationKind, OLD_TERMINAL_ENDED_TEXT};
-use super::{ScopeKillFailure, ScopeUnits, SweepTarget, launch_scope_unit, reap_process_tree};
+use super::super::sweep::reap_process_tree_with_podman_deadline;
+use super::{ScopeKillFailure, ScopeUnits, SweepTarget, launch_scope_unit};
 use crate::hosts::process::{
     TerminateError, Termination, names_tmux_server_socket, peer_process, terminate_process_within,
 };
@@ -296,6 +297,12 @@ impl OldTerminals {
         if converted.is_empty() && self.panes.is_empty() {
             return;
         }
+        let started = Instant::now();
+        let remaining = OLD_TERMINALS_DEADLINE.saturating_sub(self.spent);
+        let deadline = started + remaining;
+        // Share the optional pass's deadline across all old terminals. Its
+        // storage waits must leave room for the signal graces and backstop.
+        let podman_deadline = started + remaining.saturating_sub(Duration::from_secs(10));
         let work = async {
             for (id, generation, scoped) in converted {
                 let roots = self
@@ -303,13 +310,14 @@ impl OldTerminals {
                     .get(&PaneOwner::Agent(id.clone()))
                     .cloned()
                     .unwrap_or_default();
-                if let Err(error) = reap_process_tree(
+                if let Err(error) = reap_process_tree_with_podman_deadline(
                     scopes,
                     ScopeUnits::recorded(launch_scope_unit(id, *generation, *scoped)),
                     roots,
                     id,
                     &SweepTarget::AgentOnly,
                     ScopeKillFailure::Warn,
+                    Some(podman_deadline),
                 )
                 .await
                 {
@@ -332,13 +340,14 @@ impl OldTerminals {
                     tab: tab.clone(),
                 };
                 let roots = self.panes.get(&owner).cloned().unwrap_or_default();
-                if let Err(error) = reap_process_tree(
+                if let Err(error) = reap_process_tree_with_podman_deadline(
                     scopes,
                     ScopeUnits::possible(crate::scope::tab_unit_name(&session, &tab)),
                     roots,
                     &session,
                     &SweepTarget::Tab(tab.clone()),
                     ScopeKillFailure::Warn,
+                    Some(podman_deadline),
                 )
                 .await
                 {
@@ -348,7 +357,6 @@ impl OldTerminals {
                 }
             }
         };
-        let deadline = Instant::now() + OLD_TERMINALS_DEADLINE.saturating_sub(self.spent);
         if tokio::time::timeout_at(deadline, work).await.is_err() {
             warn!(
                 "sweeping what the old terminals left ran out of time; whatever it did not \

@@ -130,6 +130,15 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
+    // The lifecycle tests need a live process with conmon's argv, including
+    // its binary name. Invoking the fixture through a symlink preserves that
+    // name and lets the test run without a container engine.
+    #[cfg(target_os = "linux")]
+    if let Some(program) = std::env::args_os().next()
+        && std::path::Path::new(&program).file_name() == Some(std::ffi::OsStr::new("conmon"))
+    {
+        return hold_conmon();
+    }
     match Cli::parse().command {
         Cmd::FakeAgent {
             script,
@@ -162,6 +171,21 @@ fn main() -> anyhow::Result<()> {
         }
         Cmd::SpawnTerminalHost { farhelm, state_dir } => spawn_host::run(&farhelm, &state_dir),
     }
+}
+
+/// Publish the monitor's PID from inside its scope and stay alive until the
+/// operation under test reaps it. A deadline backs up the test's cleanup guard
+/// if the test dies before it can read the PID.
+#[cfg(target_os = "linux")]
+fn hold_conmon() -> anyhow::Result<()> {
+    let ready = std::env::args_os()
+        .skip_while(|arg| arg != "--fixture-ready")
+        .nth(1)
+        .ok_or_else(|| anyhow::anyhow!("conmon fixture requires --fixture-ready PATH"))?;
+    std::fs::write(ready, std::process::id().to_string())?;
+    // sleep-ok: finite fixture lifetime, with its PID already published to the test.
+    std::thread::sleep(std::time::Duration::from_secs(120));
+    Ok(())
 }
 
 #[cfg(test)]

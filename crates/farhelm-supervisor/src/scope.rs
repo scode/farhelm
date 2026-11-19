@@ -136,9 +136,17 @@ fn parse_process_snapshot(text: &str, byte_cap_reached: bool) -> Option<(Vec<u32
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
     pids.sort_unstable();
-    let truncated = pids.len() > 32 || byte_cap_reached;
-    pids.truncate(32);
-    Some((pids, truncated))
+    pids.dedup();
+    Some((pids, byte_cap_reached))
+}
+
+/// A bounded read of the scope's direct members. Container cleanup rechecks
+/// the current cgroup of a pinned process before acting on this evidence.
+pub(crate) struct ScopeMembers {
+    pub(crate) pids: Vec<u32>,
+    pub(crate) truncated: bool,
+    #[cfg(target_os = "linux")]
+    pub(crate) group: String,
 }
 
 /// The transient scope unit name for one launch of one session, or `None`
@@ -392,6 +400,8 @@ struct Tools {
 /// live user session is not a failure mode this tool needs to be robust to.
 pub struct ScopeManager {
     mode: Mode,
+    #[cfg(all(target_os = "linux", any(test, feature = "test-seams")))]
+    podman: Option<PathBuf>,
     /// A synchronous mutex because every critical section is await-free, and
     /// because [`ProbeRollback`] must restore the verdict from `Drop`, where
     /// an async lock cannot be awaited.
@@ -503,6 +513,8 @@ impl ScopeManager {
     pub fn systemd() -> ScopeManager {
         ScopeManager {
             mode: Mode::Systemd,
+            #[cfg(all(target_os = "linux", any(test, feature = "test-seams")))]
+            podman: None,
             verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
@@ -513,9 +525,30 @@ impl ScopeManager {
     pub fn disabled() -> ScopeManager {
         ScopeManager {
             mode: Mode::Disabled,
+            #[cfg(all(target_os = "linux", any(test, feature = "test-seams")))]
+            podman: None,
             verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Supply an executable to this test's scoped reaper without changing
+    /// the PATH shared by all supervisors in the test process.
+    #[cfg(all(target_os = "linux", any(test, feature = "test-seams")))]
+    pub fn with_podman(mut self, podman: PathBuf) -> Self {
+        self.podman = Some(podman);
+        self
+    }
+
+    /// Stop always uses the supervisor's executable lookup. The scope's
+    /// members supply storage coordinates and a container ID only.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn podman_program(&self) -> Option<PathBuf> {
+        #[cfg(any(test, feature = "test-seams"))]
+        if let Some(path) = &self.podman {
+            return Some(path.clone());
+        }
+        resolve_program("podman")
     }
 
     /// A test double reporting every operation to `sink`; see [`ScopeOp`].
@@ -718,6 +751,8 @@ impl ScopeManager {
                 sink,
                 probe_gate: None,
             },
+            #[cfg(target_os = "linux")]
+            podman: None,
             verdict: std::sync::Mutex::new(Verdict::Unprobed),
             verdict_changed: tokio::sync::Notify::new(),
         }
@@ -1083,15 +1118,18 @@ impl ScopeManager {
         }
     }
 
-    /// Best-effort diagnostic snapshot of direct members of this scope.
-    /// It grants no kill authority and cannot affect teardown success. A
-    /// concurrent fork, exit or cgroup move can change recipients after this
-    /// sample; callers must label it as a snapshot, not a signal receipt.
-    /// None means unavailable; the boolean says the 32-PID list was capped.
-    pub(crate) async fn process_snapshot(&self, unit: &str) -> Option<(Vec<u32>, bool)> {
+    /// Best-effort evidence of direct scope membership. A concurrent fork,
+    /// exit or cgroup move may change it. Signal confirmation still comes
+    /// from the manager, and callers must never use a partial PID record.
+    pub(crate) async fn process_members(&self, unit: &str) -> Option<ScopeMembers> {
         #[cfg(test)]
         if matches!(self.mode, Mode::Fake { .. }) {
-            return Some((Vec::new(), false));
+            return Some(ScopeMembers {
+                pids: Vec::new(),
+                truncated: false,
+                #[cfg(target_os = "linux")]
+                group: String::new(),
+            });
         }
         if !matches!(self.mode, Mode::Systemd) {
             return None;
@@ -1118,20 +1156,40 @@ impl ScopeManager {
         {
             return None;
         }
-        let group = std::path::Path::new("/sys/fs/cgroup").join(relative);
+        let path = std::path::Path::new("/sys/fs/cgroup").join(relative);
+        #[cfg(target_os = "linux")]
+        let group = group.to_owned();
         tokio::task::spawn_blocking(move || {
             use std::io::Read;
             let mut text = String::new();
-            std::fs::File::open(group.join("cgroup.procs"))
+            std::fs::File::open(path.join("cgroup.procs"))
                 .ok()?
                 .take(16 * 1024)
                 .read_to_string(&mut text)
                 .ok()?;
-            parse_process_snapshot(&text, text.len() == 16 * 1024)
+            let (pids, truncated) = parse_process_snapshot(&text, text.len() == 16 * 1024)?;
+            Some(ScopeMembers {
+                pids,
+                truncated,
+                #[cfg(target_os = "linux")]
+                group,
+            })
         })
         .await
         .ok()
         .flatten()
+    }
+
+    /// Limit a lifecycle log to 32 PIDs even when a scope contains more.
+    pub(crate) async fn process_snapshot(&self, unit: &str) -> Option<(Vec<u32>, bool)> {
+        let ScopeMembers {
+            mut pids,
+            truncated,
+            ..
+        } = self.process_members(unit).await?;
+        let truncated = truncated || pids.len() > 32;
+        pids.truncate(32);
+        Some((pids, truncated))
     }
 
     /// Send `signal` to EVERY process in `unit`'s cgroup.

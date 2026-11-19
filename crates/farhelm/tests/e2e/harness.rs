@@ -2715,7 +2715,16 @@ pub(crate) async fn wait_for_pid_file(path: &std::path::Path, secs: u64) -> u32 
 pub(crate) async fn probed_scope_manager(
     test: &str,
 ) -> Option<Arc<farhelm_supervisor::scope::ScopeManager>> {
-    let scopes = Arc::new(farhelm_supervisor::scope::ScopeManager::systemd());
+    probe_scope_manager(test, farhelm_supervisor::scope::ScopeManager::systemd()).await
+}
+
+/// Gate a scope test on the manager it will inject, including any seam the
+/// test installs. The same instance carries the probe verdict into the launch.
+pub(crate) async fn probe_scope_manager(
+    test: &str,
+    scopes: farhelm_supervisor::scope::ScopeManager,
+) -> Option<Arc<farhelm_supervisor::scope::ScopeManager>> {
+    let scopes = Arc::new(scopes);
     if scopes.available().await {
         return Some(scopes);
     }

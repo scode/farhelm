@@ -2170,6 +2170,15 @@ so these are accepted limits of such hosts, not defects to engineer around. The 
 processes when the tab is closed, reaped, or deleted. Detached services started by shell initialization before the agent
 launches are outside the cleanup guarantee: they may serve the user's login environment beyond this session.
 
+On Linux with systemd scopes, Farhelm first asks Podman to stop containers started inside each scope the operation is
+cleaning up. Stop and Restart cover the agent's scope, closing a tab covers that tab's scope, and Delete covers all
+scopes of the session. Stop also cleans up any tabs it closes. Cleanup of failed launches and old terminals follows the
+same rule. Podman removes containers started with `--rm` and keeps other stopped containers, including on Delete.
+Farhelm ends the processes of a `podman exec` session without stopping the container it joined. An exec with a terminal
+ends by hangup, and one without a terminal can keep running inside the container. Docker, `sudo podman`, the Podman
+machine on macOS and launches without a systemd scope are outside this cleanup. Pod members get the same individual stop
+attempts, so an infra container that refuses to stop while its members are running can be left behind.
+
 Confirmed 2026-09-28: when Farhelm cannot confirm that the cleanup an operation needs has finished, the operation fails
 visibly instead of reporting success or carrying on. Restart does not relaunch, and Stop, Delete and closing a tab
 report the failure; a later attempt may retry the cleanup. "Confirmed" is judged by every mechanism the processes in
@@ -2178,7 +2187,8 @@ portable sweep found nothing, because the scope can hold processes the sweep can
 has no usable systemd user manager does not excuse skipping a scope that such a launch or tab may have. A process
 Farhelm tried to reap but could not examine counts as unconfirmed, never as gone. The accepted limits of hosts without a
 usable user manager described above are not unconfirmed cleanup: processes Farhelm has no way to identify do not make an
-operation fail.
+operation fail. When Podman cannot confirm a container stopped, Farhelm falls back to process cleanup and judges whether
+that cleanup completed by the same rules.
 
 Confirmed 2026-10-10: these cleanup and resume rules cover single ordinary failures. They do not extend to a supervisor
 crash that lands at one exact moment of an operation, or to two independent rare faults coinciding (a crash and a failed
