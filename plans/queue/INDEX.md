@@ -19,4 +19,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `replace-with-checkout-hint.md` — Replace with on a managed checkout says the replacement keeps its checkout, and warns before a fresh clone
 - [in-flight 7e75ca] `one-helm-per-supervisor.md` — Each host records its owning helm, refuses others, and is taken over only on request (protocol bump)
 - [pending] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
-- [pending] `unusable-folder-refusals.md` — A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
+- [in-flight cc131e] `unusable-folder-refusals.md` — A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
