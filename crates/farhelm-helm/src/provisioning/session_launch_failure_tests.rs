@@ -798,6 +798,8 @@ async fn normal_launch_rolls_back_every_login_and_common_installer_boundary() {
 /// Client loss cannot cancel an accepted task. An unanswered absent session
 /// run retains its pending row, and failed rm retains its canonical resource;
 /// neither may be hidden by deleting the registry row or reporting success.
+/// For that same empty container, the cleanup route distinguishes a running
+/// first launch from a failed one by reading the helm's provisioning state.
 #[farhelm_testtrace::test]
 async fn normal_launch_preserves_ambiguous_send_or_failed_cleanup_after_waiter_loss() {
     for ambiguous in [true, false] {
@@ -836,22 +838,45 @@ async fn normal_launch_preserves_ambiguous_send_or_failed_cleanup_after_waiter_l
                     .session_ids()
                     .contains(binding.container_id.as_ref().unwrap())
             );
-            let response = crate::environment::podman::list_leftovers(axum::extract::State(
-                f.harness.state.clone(),
-            ))
-            .await;
-            assert!(response.status().is_success());
-            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
-                .await
-                .unwrap();
-            let entries: Vec<farhelm_proto::environment::ContainerLeftoverView> =
-                serde_json::from_slice(&body).unwrap();
+            let list = || async {
+                let response =
+                    crate::environment::podman::list_leftovers(axum::extract::State(f.state()))
+                        .await;
+                assert!(response.status().is_success());
+                let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<Vec<farhelm_proto::environment::ContainerLeftoverView>>(
+                    &body,
+                )
+                .unwrap()
+            };
             assert!(
-                entries
+                list()
+                    .await
                     .iter()
                     .any(|entry| entry.host == Some(accepted.host_id)
                         && Some(entry.id.as_str()) == binding.container_id.as_deref()),
                 "retained incomplete row must be discoverable for confirmed Delete"
+            );
+            // Hold everything the route sees constant apart from the phase
+            // of the same Add run, as it would be before the first session.
+            let mut run = f
+                .service
+                .runs()
+                .await
+                .runs
+                .into_iter()
+                .find(|run| run.host_id == accepted.host_id)
+                .unwrap();
+            run.status = RunStatus::Running;
+            f.service.insert_run_for_test(run).await;
+            assert!(
+                list()
+                    .await
+                    .iter()
+                    .all(|entry| entry.host != Some(accepted.host_id)),
+                "a running first launch must keep its container out of the cleanup list"
             );
         }
         assert!(

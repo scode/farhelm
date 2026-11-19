@@ -30,7 +30,7 @@ use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
 use anyhow::{Context as _, bail};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -3217,6 +3217,25 @@ impl ProvisioningService {
             .get(&host)
             .cloned()
             .unwrap_or_else(|| ProvisioningView::idle(host)))
+    }
+
+    /// Hosts with Add work still in flight, including a new environment's
+    /// first session launch. A container can exist before that launch adds
+    /// a cached session, so absence from the cache alone cannot mark it as
+    /// leftover. Failed runs and launches interrupted by a helm restart
+    /// leave no running Add here.
+    pub(crate) async fn hosts_adding(&self) -> HashSet<HostId> {
+        self.memory
+            .lock()
+            .await
+            .runs
+            .values()
+            .filter(|run| {
+                run.operation == Some(ProvisioningOperation::Add)
+                    && run.status == RunStatus::Running
+            })
+            .map(|run| run.host_id)
+            .collect()
     }
 
     /// Every run this helm process retains, ordered by host id: the UI channel's host-progress collection.

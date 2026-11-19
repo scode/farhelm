@@ -78,10 +78,6 @@ consequences.
   covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
   edit it.
 
-- [`container-leftover-delete-races-first-session.md`](container-leftover-delete-races-first-session.md) — A container
-  can appear as a leftover while Farhelm is still launching its first session. If you open Delete then and confirm after
-  the launch finishes, it can delete the new session and its work.
-
 - [`template-number-key-save-overwrites-committed-binding.md`](template-number-key-save-overwrites-committed-binding.md)
   — A number-key change in Templates can undo an agent's already saved binding on a different key if the helm is still
   sending the window an older set of bindings.
