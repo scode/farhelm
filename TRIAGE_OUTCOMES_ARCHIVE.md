@@ -21485,6 +21485,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `vrwtuvlvoyyl`, bookmark `plan/triage-discards-nov18/04-discard-stale-target-fallback`,
   https://github.com/scode/farhelm/pull/4162/changes.
 
+## trailing-removed-lone-legacy-tab-lifecycle-oracles.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main 7a7899dff (git history): incorrect as a shipped or current problem. The
+  test deletion (#3360, 647f0227) and the end of old terminals (#3362, dbfc69751) are adjacent commits that first
+  shipped together in v0.39.0, so no release served old tabs without those tests, and old tabs no longer exist. Bucket:
+  other.
+- Decision: the user accepted the batch of plain recommendations (2026-11-18 highest-bucket triage page, Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: change `zpyquwlkvzol`, bookmark `plan/triage-discards-nov18/05-discard-lone-tab-oracles`,
+  https://github.com/scode/farhelm/pull/4164/changes.
+
 ## concealed-terminal-cells-change-link-target.md
 
 - Outcome: `fix code`.
