@@ -1746,32 +1746,16 @@
   Tensorlake idle suspension, details wrongly say Farhelm suspended it, at the old time. SPEC.md "Topology" (Tensorlake
   hosts): "Its details say since when, and whether Tensorlake suspended it on its own." Bucket: other (diagnostic
   wording).
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage). Taken out
+  of the backend fixes plan on 2026-11-19 so it can be scheduled separately. A correct fix needs more room than that
+  plan allowed to handle a new Suspend while Farhelm records that the sandbox ran, and a Retry after an attempt to clear
+  the old timestamp failed.
 - Completion criteria: the stored Farhelm suspension time is cleared once the host is seen running again, without racing
   a Farhelm Suspend (which holds the connection), so a later suspension is attributed to Tensorlake with its own time;
   with a test. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
   removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
   feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
-
-## approval-answer-acknowledged-after-expiry.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. The
-  approval waiter can choose Expired while its answer channel is still alive, and the answer handler's ordinary path
-  ignores whether the answer was used and replies 204 (`let _ = entry.answer.send(verdict)` in
-  crates/farhelm-helm/src/approvals.rs); only Host Add waits for a receipt. The app shows its late-answer notice only on
-  410, so the card disappears silently while the agent got "expired", and an Always allow setting may still have been
-  saved. SPEC_impl.md: the answer route "returns 410 once the request no longer waits", and "the answer gets 410 and the
-  setting stays on, and the GUI's notice says the answer did not take effect". The rare-glitch filter does not apply
-  (success reported for an operation that did not take effect). Bucket: other.
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
-- Completion criteria: ordinary approval answers use the receipt Host Add already uses, so an answer that lost the race
-  with expiry gets 410 and the GUI shows its existing notice; with a paused-clock test. Size gate: about 100 lines of
-  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-backend-fixes.md`
+- Execution: `pending`.
 
 ## transition-accessor-comment.md
 

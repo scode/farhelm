@@ -8931,7 +8931,7 @@ in the dialog's ordinary add binding. The existing approval table's take elects 
 Allow carries a oneshot receipt with its destination: the answer POST returns 204 only after the waiting host-add
 handler selected that answer and passed its final origin check. A failed send, expiry, or dropped receipt returns Gone
 and permits no discovery probe. Sending the positive receipt is the last fallible approval step, with no intervening
-await or later origin veto. Other actions keep their existing answer semantics.
+await or later origin veto. For other actions the waiter sends its receipt when it takes the answer.
 
 An agent's host add is answered through the ordinary Add host dialog (`hosts::add::open_for_agent`), with the request's
 state in the approvals module (`approvals::host_add`); nothing else keeps a pending registry or an installer of its own.

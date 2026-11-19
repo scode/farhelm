@@ -23916,6 +23916,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `lyvvxzollqnvowzwuxtnunyrrwmrszxn`, bookmark
   `plan/gui-ux-backend-fixes/05-stalled-tab-request-resets`, https://github.com/scode/farhelm/pull/4243/changes.
 
+## approval-answer-acknowledged-after-expiry.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. The
+  approval waiter can choose Expired while its answer channel is still alive, and the answer handler's ordinary path
+  ignores whether the answer was used and replies 204 (`let _ = entry.answer.send(verdict)` in
+  crates/farhelm-helm/src/approvals.rs); only Host Add waits for a receipt. The app shows its late-answer notice only on
+  410, so the card disappears silently while the agent got "expired", and an Always allow setting may still have been
+  saved. SPEC_impl.md: the answer route "returns 410 once the request no longer waits", and "the answer gets 410 and the
+  setting stays on, and the GUI's notice says the answer did not take effect". The rare-glitch filter does not apply
+  (success reported for an operation that did not take effect). Bucket: other.
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage).
+- Completion criteria: ordinary approval answers use the receipt Host Add already uses, so an answer that lost the race
+  with expiry gets 410 and the GUI shows its existing notice; with a paused-clock test. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: change `mpxxnvsuxuupnllzsrnkznxymvnysznt`, bookmark
+  `plan/gui-ux-backend-fixes/07-approval-answer-acknowledged-after`, https://github.com/scode/farhelm/pull/4250/changes.
+
 ## approval-scrollports-lack-keyboard-entry.md
 
 - Outcome: `fix code`.
