@@ -26,6 +26,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit allowing drawn-frame-actions' launcher fix about 240 changed lines.** Decided on the maintainer's behalf by
+  the landing monitor on 2026-11-19, when drawn-frame-actions blocked a second time: the launcher's fix for warnings
+  that change while Restart with's or Replace with's YOLO question is open may use about 240 changed lines in one PR,
+  after a scope review found no way to fit both waits (the host setting's save and the checkout preview) and their tests
+  in about 140. The alternative was splitting the main button's fix from the follow-up answer's fix, each with its own
+  allowance.
+
 - **Revisit splitting drawn-frame-actions' lifecycle work and raising its line limit.** Decided on the maintainer's
   behalf by the landing monitor on 2026-11-19, when drawn-frame-actions blocked: the remaining work on acting on the
   session state the user saw is split into two PRs (the session menu and interrupted-session card, then the Restart with
