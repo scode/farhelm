@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [landing 85c393] `session-group-follow-ups.md` — Session groups: indent members, mark a collapsed group holding the open session, drag sessions into and out of groups
 - [landing d604da] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
-- [complete] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
+- [landing 96f90c] `session-limit-notice.md` — Rail bell notice when a host or the helm hits the 500-session ceiling
 - [complete] `reserved-resource-names.md` — SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
 - [in-flight cf10b9] `drawn-frame-actions.md` — Actions act on what the user was shown (header, row menu, launcher, environment Stop and suspend, Wayland drop): one spec standard, one mechanism
 - [complete] `secrets-logs-and-screen.md` — The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
