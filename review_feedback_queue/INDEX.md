@@ -98,21 +98,9 @@ consequences.
   post-clone command from a Settings window that was already open can erase newer edits you made from the command line.
   Using the old view’s Use default can also clear a newer host-folder override.
 
-- [`retired-session-delete-removes-reused-container-name.md`](retired-session-delete-removes-reused-container-name.md) —
-  Deleting an old experimental container session can remove someone’s later container if it uses the same Podman name.
-  That removes the new container’s files and running work.
-
-- [`tensorlake-pending-create-adopts-replacement-sandbox.md`](tensorlake-pending-create-adopts-replacement-sandbox.md) —
-  If an interrupted Tensorlake create never reached the provider or its original sandbox was removed, retrying a build
-  or deleting a host or recipe can terminate a replacement sandbox using the reserved name.
-
 - [`container-leftover-delete-races-first-session.md`](container-leftover-delete-races-first-session.md) — A container
   can appear as a leftover while Farhelm is still launching its first session. If you open Delete then and confirm after
   the launch finishes, it can delete the new session and its work.
-
-- [`podman-container-clone-inherits-leftover-ownership.md`](podman-container-clone-inherits-leftover-ownership.md) — A
-  container you clone and use independently can show up in Settings as a Farhelm leftover. Deleting it from that list
-  permanently removes the clone and its work.
 
 - [`template-number-key-save-overwrites-committed-binding.md`](template-number-key-save-overwrites-committed-binding.md)
   — A number-key change in Templates can undo an agent's already saved binding on a different key if the helm is still

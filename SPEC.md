@@ -5066,6 +5066,18 @@ the trash is not refused. This never relaxes the remote-host boundary, removes a
 for a specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing
 unknown app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
 
+The reserved namespace is Farhelm's. A resource that matches Farhelm's reserved names or carries its required ownership
+labels is treated as Farhelm's own under the existing cleanup rules, even when it was created outside Farhelm, reuses a
+reserved name, or is a copy that kept Farhelm's labels. Those names and labels are:
+
+- in the configured Tensorlake account, the sandbox prefixes `farhelm-host-`, `farhelm-sess-`, `farhelm-build-` and
+  `farhelm-prepare-`. A name that no host or recipe build or preparation on this helm owns is a leftover, and deleting a
+  leftover asks for confirmation. An outstanding create whose sandbox ID is still unknown recovers its sandbox by its
+  exact recorded name, without asking, and cleanup targets the recorded ID once it is known;
+- the legacy `farhelm-<session-id>` container name, which Delete of a retired Podman session uses;
+- in the place's Unix account, this helm's `farhelm.helm=<tag>` label together with a `farhelm.role` of `session`,
+  `build` or `prepare`, both of which Podman leftover cleanup requires before it asks to delete a leftover.
+
 A supervisor trusts its owning helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote
 host must not gain unauthorized execution or access to secrets on the helm's machine or another host through Farhelm.

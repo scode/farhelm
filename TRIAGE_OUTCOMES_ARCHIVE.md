@@ -21434,6 +21434,57 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Remove the feedback file and its index entry immediately, without code or spec changes.
 - Execution: complete; removed during the 2026-11-18 highest-bucket triage.
 
+## retired-session-delete-removes-reused-container-name.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Delete of a retired container
+  session runs `podman rm -f --ignore farhelm-<session uuid>` and checks only that the name is gone afterwards
+  (crates/farhelm-supervisor/src/container.rs), so an unrelated container someone later created under that exact name is
+  force-removed. The finding's suggested label check cannot work: the old creator set no labels. The "upgrade plus rare
+  condition" filter does not clearly match, because the loss is outside the affected session. Bucket: highest (route
+  established in code).
+- Decision: the user picked "Yes: the reserved namespace is Farhelm's" (2026-11-18 highest-bucket triage page, Q2).
+  Principle: what someone puts under Farhelm's reserved resource names or ownership labels (`farhelm-<session id>`
+  containers, the `farhelm-build-<tag>-` and `farhelm-sess-<tag>-` Tensorlake prefixes, the `farhelm.helm` and
+  `farhelm.role` Podman labels) may be treated, and destroyed, as Farhelm's.
+- Completion criteria: one SPEC.md paragraph (about 5-10 lines) states that principle, where the reserved names and
+  labels are specified, so reviews stop raising deliberate reuse of them. No code change. Remove this feedback file,
+  `tensorlake-pending-create-adopts-replacement-sandbox.md` and `podman-container-clone-inherits-leftover-ownership.md`,
+  with their index entries, in the same change.
+- Execution: change `mzksymrpnzutmkutqsvlzmktzrmylkqr`, bookmark
+  `plan/reserved-resource-names/01-reserved-namespace-is-farhelms`,
+  [PR #4148](https://github.com/scode/farhelm/pull/4148/changes).
+
+## tensorlake-pending-create-adopts-replacement-sandbox.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. With a create recorded as
+  outstanding, build retry, host Delete and recipe Delete look the sandbox up by its reserved name and adopt and
+  terminate whatever has it, snapshots included (tensorlake/build.rs reconcile_builder, tensorlake/hosts.rs); the build
+  retry asks nothing. SPEC_impl.md allows name recovery under an outstanding create and SPEC.md reserves the prefixes,
+  but neither said whether a sandbox someone deliberately created under them may be destroyed. Bucket: highest.
+- Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
+  highest-bucket triage page, Q2); see that entry for the principle.
+- Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
+- Execution: change `mzksymrpnzutmkutqsvlzmktzrmylkqr`, bookmark
+  `plan/reserved-resource-names/01-reserved-namespace-is-farhelms`,
+  [PR #4148](https://github.com/scode/farhelm/pull/4148/changes).
+
+## podman-container-clone-inherits-leftover-ownership.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): mechanism confirmed. Ownership of Podman
+  containers is labels only (environment/podman.rs, as SPEC_impl.md specifies), so a `podman container clone` that keeps
+  them is listed under Settings → Containers not on this helm and Delete removes it (that clones keep labels is Podman's
+  documented behavior, not checked with a run). The prompt names that container and warns everything in it will be
+  removed, so the deletion is within consent. Bucket: high.
+- Decision: settled by the same pick as `retired-session-delete-removes-reused-container-name.md` (2026-11-18
+  highest-bucket triage page, Q2); see that entry for the principle.
+- Completion criteria: carried by `retired-session-delete-removes-reused-container-name.md`.
+- Execution: change `mzksymrpnzutmkutqsvlzmktzrmylkqr`, bookmark
+  `plan/reserved-resource-names/01-reserved-namespace-is-farhelms`,
+  [PR #4148](https://github.com/scode/farhelm/pull/4148/changes).
+
 ## trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md
 
 - Outcome: `other`.
