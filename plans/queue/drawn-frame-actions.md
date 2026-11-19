@@ -352,3 +352,34 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 ## Release note
 
 No release note needed.
+
+## Blocked
+
+Blocked on 2026-11-19 (claim 80124b).
+
+### Session actions and the launcher's follow-up warning
+
+The desktop can still show an ended agent while a newer update says it is running. If the user chooses Delete from that
+row with confirmations skipped, the new agent can be stopped. The agreed fix makes the session menu, interrupted-session
+card and Restart with or Replace with launcher use the state the user saw. This part of the fix has a 100-line limit for
+code, tests and docs, excluding the shared frame mechanism and bookkeeping.
+
+The launcher can ask separately for permission to start a YOLO session. For example, the first press of Replace can warn
+that it will stop the old agent. If that agent exits while the follow-up is open, the warning can disappear. Answering
+the follow-up at that point can nevertheless carry the old permission to delete a running agent, and kill one that
+restarts before the delete runs. The answer can also wait for a host setting to save or a checkout preview to arrive.
+The fix needs to use the warning the user saw at the answer through either wait.
+
+The smallest attempted correction that accounts for those waits and Cancel changed 129 lines under the same counting
+rule. Reusing an existing supervisor test would reduce it to 118. That candidate also froze the warning during the
+follow-up. I recommend keeping the warning live as specified and binding each answer to the warning it displayed.
+
+Should the remaining lifecycle work be split into two reviewable PRs, or have a higher limit for one PR? I recommend
+splitting the session menu and interrupted card from the launcher. The draft stack would contain both before the monitor
+lands the plan. Review could check the smaller GUI changes separately from the launcher timing. A single larger PR would
+put the complete fix in one landing commit and needs an exception to the 100-line limit.
+
+Three independent fixes are in draft PRs. The session header and interrupted card’s Replace are in
+[#4176](https://github.com/scode/farhelm/pull/4176/changes), Stop and suspend is in
+[#4181](https://github.com/scode/farhelm/pull/4181/changes), and the Wayland drop correction is in
+[#4183](https://github.com/scode/farhelm/pull/4183/changes).
