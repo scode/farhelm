@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `session-group-follow-ups.md` — Session groups: indent members, mark a collapsed group holding the open session, drag sessions into and out of groups
 - [landing ed32b0] `submenus-open-on-hover.md` — Submenus open on hover, keeping their parent item highlighted
-- [complete] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
+- [landing 401f78] `clone-keeps-invisible-characters.md` — Launcher fields keep invisible characters when edited; the suspended-host refusal matches the button
 - [complete] `retire-old-terminal-announcement.md` — Remove the stale 0.37.0 old-terminal in-app announcement
 - [complete] `quick-switcher-shot-paths.md` — Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
 - [complete] `model-families.md` — Known models with a latest model per family, replacing the retired-model special case
