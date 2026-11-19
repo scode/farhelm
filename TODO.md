@@ -395,6 +395,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Show the version in Settings > App.** add the current version of farhelm in the settings -> app dialog in addition
   to the header of the app (user feedback, someone looked for it there).
 
+- **Emacs C-f and C-b in text fields.** emacs c-f and c-b keyboard shortcuts dont work in text fields (c-a and c-e do
+  work). fix it. also consider other common ones like skipping words etc.
+
 ## Mid term
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
