@@ -111,13 +111,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the release notes. Focused capture evidence: recorder run `0f04c908-2a73-40e0-a5bc-1044b0ffdec8`. Plan:
   `plans/queue/quick-switcher-shot-paths.md`.
 
-- **Test that the template editor ignores New sandbox or New container with nothing left to place it on.** The launcher
-  and the template editor share one placement picker (#4068). The editor ignores a press on the already chosen New
-  sandbox or New container segment once nothing is left to place it on (the last container host removed while the editor
-  was open, say), where passing the press on would move the template to Existing host; the launcher ignores the same
-  press on its own. `docs/gpui/parity/templates-and-quick-launch.md` states the behavior, but no test covers it, so a
-  later change to the shared picker could break it unnoticed. Plan: `plans/queue/shared-placement-picker.md`.
-
 - **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
   the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
   a reference picture. Today it runs only during development and landings: its reference pictures live outside this
@@ -449,17 +442,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   builds), and copy-pasted neighbours in `launch_tests.rs` and `environment_recents_tests.rs`. Found by a skeptical
   re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18. Plan:
   `plans/queue/clone-keeps-invisible-characters.md`.
-
-- **Shared placement picker: drop a no-op event and give it a shared home.** Since gpui-shared-placement (#4068), the
-  launcher and the template editor share one placement picker (`crates/gui/farhelm-gui/src/launcher/view/placement.rs`).
-  Pressing an already chosen "New" segment that has nowhere to go sends a "New, no target" change that the launcher
-  ignores and the template editor needs its own guard against (it would otherwise move the template to Existing host);
-  that guard is untested. Drop the press inside the shared picker and let the change carry only the target (about 10
-  lines less, and the guard and its comment go). Separately, the shared picker lives in a launcher-private file that the
-  GUI ownership table (`docs/gpui/foundation-ownership.md`) does not cover, so a change there alters the template editor
-  without the ownership check reporting it: move the shared items to a sibling module and add an ownership row. Found by
-  a skeptical re-review of GPT-6.2 Sol plans; recorded by the maintainer on 2026-11-18. Plan:
-  `plans/queue/shared-placement-picker.md`.
 
 - **Typing a model family picks its latest model.** Typing just "sol" (or another family name) in the launcher's model
   field should choose that family's latest model, the way "yolo" completes to a permission; today it does not complete

@@ -72,11 +72,10 @@ use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, row};
 use crate::assets::Icon;
-use crate::components::{
-    HoverHelp, OptionRow, RadioGroup, RadioOption, Role, TextInputEvent, TextInputState, Vertical,
-};
+use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
+use crate::launcher::destination_rows::destination_choice;
 use crate::launcher::draft::{
     AgentChoices, CommandChoices, DestinationKind, Field, Tab, repo_identifier,
 };
@@ -1233,40 +1232,6 @@ impl Launcher {
     pub(crate) fn repository_focused(&self, window: &Window, cx: &App) -> bool {
         self.checkout.repository.focus_handle(cx).is_focused(window)
     }
-}
-
-/// The Folder or Managed checkout choice, with their glyphs and words, as the launcher's Where row and the template
-/// editor's destination both draw it (the old app's shared `DestinationTypeControl`), under `id`, with `chosen` chosen
-/// and `help` as the group's hover help. It only reports a choice through `on_change`: what changing the kind does (the
-/// launcher restores a folder draft; the editor keeps the destination's text) is each caller's own. Enter on it only
-/// chooses, as the old control's did.
-pub(crate) fn destination_choice(
-    id: &'static str,
-    chosen: DestinationKind,
-    help: HoverHelp,
-    on_change: impl Fn(DestinationKind, &mut Window, &mut App) + 'static,
-) -> RadioGroup<DestinationKind> {
-    RadioGroup::new(id, "Destination type", help, Role::Group)
-        .option(
-            RadioOption::new(
-                "Folder",
-                HoverHelp::tooltip("Folder: start in an existing folder on this host"),
-                DestinationKind::Folder,
-            )
-            .icon(Icon::Folder),
-        )
-        .option(
-            RadioOption::new(
-                "Managed checkout",
-                HoverHelp::tooltip(
-                    "Managed checkout: Farhelm clones a repository into a new folder for this session",
-                ),
-                DestinationKind::Checkout,
-            )
-            .icon(Icon::Branch),
-        )
-        .chosen(Some(chosen))
-        .on_change(move |kind, window, cx| on_change(*kind, window, cx))
 }
 
 /// The open suggestions list's rows (`field_list`): a branch glyph and the `owner/repo` per suggestion, or, with none,

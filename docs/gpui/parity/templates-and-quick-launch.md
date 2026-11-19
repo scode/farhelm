@@ -724,8 +724,10 @@ orchestrator.
   for one). The old editor asked the helm to check every host that had never been checked.
 - **The Runs on switch's two small differences.** A chosen segment that has nowhere to enter (New container on a
   container template while no listed host can hold containers) is drawn enabled and does nothing when pressed, where the
-  old one was drawn disabled. A new environment entered with no recipe the provider can run shows "Choose a recipe" in
-  its Recipe select, where the old select showed "Unavailable recipe (retained)" for the empty name. Tested by
+  old one was drawn disabled. Tested by
+  `templates::editor_tests::pressing_selected_new_container_with_no_hosts_keeps_the_template_placement`. A new
+  environment entered with no recipe the provider can run shows "Choose a recipe" in its Recipe select, where the old
+  select showed "Unavailable recipe (retained)" for the empty name. Tested by
   `templates::editor_tests::retained_choices_and_an_unusable_only_host_stay_in_reach` (the empty recipe).
 - **A rename's bindings are read from the pushed preferences.** The old rename read the preferences again after saving
   the new name and said "shortcut bindings could not be read" when that read failed. Here the store is that read, so the

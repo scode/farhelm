@@ -43,11 +43,11 @@ use crate::components::{
 };
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
-use crate::launcher::draft::{DestinationKind, harness_label};
-use crate::launcher::model::{ModelOption, model_options};
-use crate::launcher::view::{
+use crate::launcher::destination_rows::{
     PlacementEdit, PlacementMode, build_placement_rows, destination_choice,
 };
+use crate::launcher::draft::{DestinationKind, harness_label};
+use crate::launcher::model::{ModelOption, model_options};
 use crate::templates::apply::install_identity;
 use crate::templates::dialog::TemplatesDialog;
 use crate::templates::fields::{Field, effort_options, permission_options};
