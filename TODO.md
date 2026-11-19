@@ -256,21 +256,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   follow a symlinked `refs/`, and the repair on the background cleanup path are untested and worth covering with
   whichever fix lands. Recorded by the maintainer on 2026-11-18 from the plan's review.
 
-- **Keep a sealed environment's record across helm restarts.** Since environment-agent-operations (#3334 to #3364), the
-  last Delete in a sandbox or container makes the Farhelm inside seal itself, and the helm then destroys the
-  environment. The helm's record that an environment is sealed lives in memory only. If destroying it fails and the helm
-  then restarts, the helm forgets the seal until it connects to the environment again: until then Hosts shows an
-  ordinary sandbox or container with no sessions instead of "Deleting failed" with Retry. A running sandbox reconnects
-  and is destroyed then. But when the helm stays down for more than about half an hour, Tensorlake's 30-minute idle
-  timeout suspends the sandbox, Farhelm never resumes one on its own, and the sandbox sits in Hosts as an empty sandbox
-  billing for snapshot storage until the user notices and resumes or deletes it. The fix is to persist the helm's seal
-  record (environment and when the seal was seen) so a restarted helm keeps showing the failed deletion with Retry, and
-  can finish the destruction of a suspended sealed sandbox without waiting for a connection. This is helm-side state
-  about a session's end, which SPEC_impl.md forbids; the maintainer wants it anyway, so the change also writes that
-  exception into SPEC_impl.md. A process inside an environment writing the seal itself is not a trust boundary the
-  maintainer cares about (decided 2026-11-18). Recorded by the maintainer on 2026-11-18 from the plan's review. Plan:
-  `plans/queue/persist-environment-seal.md`.
-
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
   installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0

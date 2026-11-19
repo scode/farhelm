@@ -1304,8 +1304,8 @@ pub struct ConnectionManager {
     /// destroyed yet, with the last destruction's failure (which then waits
     /// for Retry). Filled by the actors from their drains and by the
     /// environment Delete, emptied by a successful removal (SPEC_impl.md,
-    /// "Environment Delete and the seal"). Not durable: after a helm restart
-    /// the next listing reports the seal again.
+    /// "Environment Delete and the seal"). Startup restores the seals whose
+    /// destruction was attempted. A previous failure's reason lives only here.
     ///
     /// Also what such a host SHOWS: [`Self::status`] and [`Self::snapshots`]
     /// report every host in it as `HostState::Deleting` with no client,
@@ -1613,9 +1613,18 @@ impl ConnectionManager {
         Ok(manager)
     }
 
-    /// Subscribe after registering the initial actors. The notice observer
-    /// starts with a full read, including cached rows from unreachable hosts.
+    /// Restore seals before the first actor can publish. Even a suspended environment's initial status must show
+    /// its pending deletion. Subscribe to notices after registering the actors, including unreachable hosts.
     async fn start_registry(self: &Arc<Self>) -> anyhow::Result<()> {
+        let remembered = self.store.remembered_environment_seals().await?;
+        self.sealed
+            .lock()
+            .expect("sealed host map mutex poisoned")
+            .extend(
+                remembered
+                    .into_iter()
+                    .map(|host| (host, SealedHost::Pending)),
+            );
         self.sync_registry().await?;
         crate::notices::watch_fleet_session_limit(self, &self.store);
         Ok(())
@@ -2813,6 +2822,18 @@ impl ConnectionManager {
             .filter(|(_, state)| matches!(state, SealedHost::Pending))
             .map(|(host, _)| *host)
             .collect()
+    }
+
+    /// Recheck a finisher's queue entry under the provisioning lock. A Delete or Retry may have acted on this seal
+    /// since the finisher took its snapshot of pending work.
+    pub(crate) fn seal_is_pending(&self, host: HostId) -> bool {
+        matches!(
+            self.sealed
+                .lock()
+                .expect("sealed host map mutex poisoned")
+                .get(&host),
+            Some(SealedHost::Pending)
+        )
     }
 
     /// Wait until a seal is noted or a sealed host is put back in line.

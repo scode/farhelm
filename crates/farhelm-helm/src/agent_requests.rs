@@ -18110,6 +18110,13 @@ mod tests {
             );
             assert!(registered(&h, remote).await);
             assert!(!h.manager.is_sealed(remote), "never queued for destruction");
+            assert!(
+                h.store
+                    .remembered_environment_seals()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
             assert_eq!(
                 containers
                     .destroys
@@ -18162,6 +18169,10 @@ mod tests {
                 registered(&h, owned).await,
                 "a failed destruction keeps the host"
             );
+            assert_eq!(
+                h.store.remembered_environment_seals().await.unwrap(),
+                [owned]
+            );
             // Whatever the connection does next (here: reconnecting to the
             // sealed supervisor and listing again), the host keeps showing
             // its deletion and the failure, and routes nothing.
@@ -18202,6 +18213,13 @@ mod tests {
             assert!(
                 !registered(&h, owned).await,
                 "Retry finishes the destruction"
+            );
+            assert!(
+                h.store
+                    .remembered_environment_seals()
+                    .await
+                    .unwrap()
+                    .is_empty()
             );
         }
 

@@ -335,7 +335,10 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 88;
+pub(crate) const SCHEMA_VERSION: i64 = 89;
+
+/// The host row owns its pending destruction record, so forgetting the host also clears the seal.
+const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
 
 mod environment_history;
 mod podman;
@@ -2780,6 +2783,7 @@ pub struct HelmStore {
 /// - 86: shared session mute state.
 /// - 87: session groups and their membership.
 /// - 88: host and app-wide session ceiling notices, with trash history preserved.
+/// - 89: the time a sealed environment's destruction was first attempted, retained with its host row.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3123,13 +3127,15 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 88;",
+              PRAGMA user_version = 89;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
         .context("creating schema")?;
         podman::migrate(&tx)?;
         environment_history::migrate(&tx)?;
+        tx.execute_batch(ADD_ENVIRONMENT_SEAL)
+            .context("adding the environment seal record")?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -4970,6 +4976,21 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 88")?;
         version = 88;
     }
+    if version == 88 {
+        // Old databases cannot infer a seal from the cached session count. A version-only test fixture can
+        // already have the column, in which case its recorded seals must survive the upgrade.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'environment_sealed_at'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(ADD_ENVIRONMENT_SEAL)?;
+        }
+        tx.execute_batch("PRAGMA user_version = 89;")
+            .context("migrating helm.db to schema version 89")?;
+        version = 89;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -6649,6 +6670,49 @@ impl HelmStore {
                 move |conn: &mut Connection| -> anyhow::Result<()> {
                     conn.execute_batch("DROP TABLE session_seen;")
                         .context("dropping session_seen for a failure-injection test")
+                },
+            )
+            .await
+    }
+
+    /// Remember when a session-owned environment first reached an attempt to destroy it after its supervisor sealed.
+    /// The caller checks ownership and holds the host's provisioning lock through destruction. A failed write prevents
+    /// that attempt, so a provider failure can always be retried after the helm restarts.
+    pub(crate) async fn remember_environment_seal(
+        &self,
+        host: HostId,
+        now: i64,
+    ) -> anyhow::Result<()> {
+        self.conn
+            .call_full_sync_if(
+                true,
+                "environment seal write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let updated = conn.execute(
+                        "UPDATE hosts SET environment_sealed_at = COALESCE(environment_sealed_at, ?2)
+                         WHERE id = ?1 AND session_owned = 1",
+                        rusqlite::params![host, now],
+                    )?;
+                    anyhow::ensure!(updated == 1, "host {host} is not a registered session-owned environment");
+                    Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Recover only seals whose session-owned host row still exists. A failure reason belongs to the current
+    /// destruction attempt and is never restored from disk.
+    pub(crate) async fn remembered_environment_seals(&self) -> anyhow::Result<Vec<HostId>> {
+        self.conn
+            .call(
+                "environment seal read task panicked",
+                |conn: &mut Connection| -> anyhow::Result<Vec<HostId>> {
+                    let mut stmt = conn.prepare(
+                        "SELECT id FROM hosts WHERE environment_sealed_at IS NOT NULL AND session_owned = 1",
+                    )?;
+                    stmt.query_map([], |row| row.get(0))?
+                        .collect::<Result<Vec<_>, _>>()
+                        .context("reading the recorded environment seals")
                 },
             )
             .await
@@ -16474,12 +16538,13 @@ mod tests {
         .expect("read schema")
     }
 
-    /// Historical fixtures must remove schema 83 before rewinding older host
-    /// columns. Leaving these columns in place changes their final position
-    /// when the migration ladder appends the older columns again.
+    /// Historical fixtures rewind the environment columns added in schemas 83 and 89 before removing older host
+    /// columns. Leaving a newer column in place changes its final position when the migration ladder appends the
+    /// older columns again.
     fn rewind_environment_host_columns(conn: &Connection) {
         conn.execute_batch(
             "DROP INDEX hosts_place_host;
+             ALTER TABLE hosts DROP COLUMN environment_sealed_at;
              ALTER TABLE hosts DROP COLUMN environment_provider;
              ALTER TABLE hosts DROP COLUMN place_host;
              ALTER TABLE hosts DROP COLUMN podman_container_id;
@@ -16914,6 +16979,80 @@ mod tests {
                 disk_gb: 10,
             },
         }
+    }
+
+    /// An upgrade must preserve existing registrations without inventing a seal. Reopening after a write must
+    /// keep the first timestamp through retry and drop the seal when the host is removed.
+    #[farhelm_testtrace::test]
+    async fn schema_89_remembers_only_the_first_seal_attempt_until_host_removal() {
+        let (dir, store) = fresh_store().await;
+        let host = store
+            .register_session_sandbox(sandbox_registration("remembered"))
+            .await
+            .unwrap();
+        let before = store.list_hosts().await.unwrap();
+        let schema = schema_objects(&store.conn.lock());
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "ALTER TABLE hosts DROP COLUMN environment_sealed_at; PRAGMA user_version = 88;",
+            )
+            .unwrap();
+        assert!(
+            store
+                .conn
+                .lock()
+                .prepare("SELECT environment_sealed_at FROM hosts")
+                .is_err()
+        );
+        drop(store);
+
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(store.list_hosts().await.unwrap(), before);
+        assert_eq!(schema_objects(&store.conn.lock()), schema);
+        assert!(
+            store
+                .remembered_environment_seals()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        store.remember_environment_seal(host, 123).await.unwrap();
+        store.remember_environment_seal(host, 456).await.unwrap();
+        assert!(
+            store
+                .remember_environment_seal(before[0].id, 123)
+                .await
+                .is_err()
+        );
+        drop(store);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(store.remembered_environment_seals().await.unwrap(), [host]);
+        let stamp: i64 = store
+            .conn
+            .lock()
+            .query_row(
+                "SELECT environment_sealed_at FROM hosts WHERE id = ?1",
+                [host],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stamp, 123);
+        // This fixture registered a host row and never created a resource, so it has the rollback proof.
+        let proof = crate::environment::Destroyed::Tensorlake(
+            crate::tensorlake::hosts::SandboxDeleted::never_created(host),
+        );
+        store.remove_host_row(host, Some(&proof)).await.unwrap();
+        assert!(
+            store
+                .remembered_environment_seals()
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// Session ownership must be durable before creation, keep ordinary host

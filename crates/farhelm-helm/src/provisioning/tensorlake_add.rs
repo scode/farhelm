@@ -1154,10 +1154,11 @@ impl ProvisioningService {
                 let cleanup = crate::hosts::forget_host_locked(
                     &launch.state,
                     host,
-                    host_write,
+                    &host_write,
                     RunTask::Detach,
                 )
                 .await;
+                drop(host_write);
                 let message = match cleanup {
                     Ok(()) => format!("Not launched. {error:#}"),
                     Err(cleanup) => format!(

@@ -1569,12 +1569,13 @@ never skipped, since it may destroy the sandbox. If other sessions remain, only 
 checkout discarded rather than moved to the checkout trash (unless another session still uses that checkout), and the
 result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them, when that answer comes
 within 20 seconds (below). If it was the last, the helm destroys the sandbox through the ordinary Tensorlake deletion
-path. A sealed sandbox's Farhelm reports the seal whenever it lists its sessions, and the helm finishes destroying any
-sealed sandbox it sees, whether or not it sent the Delete: after a lost reply, a failed destruction or its own restart.
-While that runs, and if it fails, Hosts and the sidebar attention area show the sandbox as being deleted, with the
-reason and **Retry**, and its sessions show as being deleted with their actions unavailable. Deleting a sandbox's last
-two sessions at once (from the window and an agent, say) can briefly show "the sandbox stays" for one Delete just before
-the other seals it; the list then shows the truth.
+path. A sealed sandbox's Farhelm reports the seal whenever it lists its sessions, so the helm can finish deletion even
+after a lost Delete reply. The helm remembers the seal before its first destruction attempt. After a helm restart, it
+makes one attempt to finish each remembered deletion as soon as it can take the host, including a sandbox it can no
+longer reach. While deletion runs, Hosts and the sidebar attention area show the sandbox as being deleted, and its
+sessions show as being deleted with their actions unavailable. If deletion fails, Hosts and the sidebar show the reason
+and wait for **Retry**. Deleting a sandbox's last two sessions at once (from the window and an agent, say) can briefly
+show "the sandbox stays" for one Delete just before the other seals it; the list then shows the truth.
 
 When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
 this helm cannot talk to until it is updated), or the request gets no answer within 20 seconds (below), nothing is
