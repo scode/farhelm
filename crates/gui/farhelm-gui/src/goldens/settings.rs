@@ -544,8 +544,8 @@ pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Wind
 }
 
 /// Settings at App (reference `settings-app`), over a fake desktop updater kept as the app's
-/// (`desktop::updates::fake`), so the section is listed, after Notifications, and shows its note and the switch on, the
-/// app's default, with the on help. Focus starts on the switch, whose ring shows only under keyboard focus, so the
+/// (`desktop::updates::fake`), so the section is listed after Notifications and shows the running version, its check
+/// button, and automatic updates on. Focus starts on the switch, whose ring shows only under keyboard focus, so the
 /// picture shows none.
 pub(super) fn settings_app_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     use crate::desktop::updates::fake::{Feed, Seen, fake_host};

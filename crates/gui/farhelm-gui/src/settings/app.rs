@@ -1,11 +1,9 @@
-//! Settings → App: the installed desktop app's automatic-updates switch, the one choice in the dialog that belongs to
-//! this app installation rather than to the helm.
+//! Settings → App shows the running version, the on-demand check and the app's automatic-updates switch. The switch
+//! belongs to this app installation. The check uses the sidebar readout's updater and leaves its result there.
 //!
-//! SPEC.md, "Session list" ("The installed desktop app's dialog also has an **App** section with a switch for
-//! installing updates automatically ... kept with the app rather than by the helm") and "Installation and updates" (on
-//! by default; off stops the startup and daily checks and the background installs, while on-demand checks keep
-//! working). Ported from the old app's `settings.rs` (the `settings-app` section) at reference commit `24bc0580`, with
-//! its note, label, hover help and the two help lines, one for each state.
+//! SPEC.md, "Session list" (the version row and the app's own setting) and "Installation and updates" (the shared
+//! on-demand check and its progress). The switch keeps the old app's note, label and hover help from its `settings-app`
+//! section at reference commit `24bc0580`.
 //!
 //! The section exists only while the desktop app's updater runs (`desktop::updates::runs`): the dialog lists App only
 //! then, as SPEC.md has it ("followed by **App** only in a desktop app whose updater is active"). The switch reads and
@@ -18,12 +16,15 @@
 //! as the updater last read or saved it. A failed write leaves the setting as it was and shows the updater's short
 //! reason under the switch until the next press, as the old switch did ("Only a saved choice is shown as the choice").
 
+use farhelm_proto::BUILD_VERSION;
 use gpui::{
     App, Div, FocusHandle, ParentElement as _, Role, SharedString, Styled as _, Window, div, px,
 };
 
 use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
-use crate::components::{Checkbox, HoverHelp};
+use crate::components::{Button, Checkbox, HoverHelp, StatusMark, Tier};
+use crate::desktop::updates;
+use crate::update_readout::{InlineStatus, inline_status};
 
 /// The switch's element id, which tests and the test bridge find it by.
 pub(super) const ID: &str = "settings-app-automatic-updates";
@@ -31,7 +32,12 @@ pub(super) const ID: &str = "settings-app-automatic-updates";
 /// The failure line's element id.
 pub(super) const ERROR_ID: &str = "settings-app-automatic-updates-error";
 
-/// The note above the switch, the old section's: what sets this section apart from the rest of the dialog. The updater
+/// The version mark's id, distinct from the one in the sidebar.
+pub(super) const VERSION_ID: &str = "settings-app-version";
+/// The Settings check button's id, distinct from the other update controls.
+pub(super) const CHECK_ID: &str = "settings-app-check-for-updates";
+
+/// The note at the start of the section explains which app these controls apply to. The updater
 /// runs only in the installed Mac app, so "this Mac" holds wherever the section is drawn.
 const NOTE: &str = "This one belongs to this Farhelm app on this Mac.";
 
@@ -46,8 +52,8 @@ const HELP_ON: &str = "Farhelm checks for a new release when it starts and about
                        background. Restarting Farhelm finishes the update.";
 
 /// The help under the switch while it is off: the on-demand routes that still install a release.
-const HELP_OFF: &str = "Farhelm installs a new release only when you check for updates from the ? menu or this \
-                        machine's update item, or run the installer yourself.";
+const HELP_OFF: &str = "Farhelm installs a new release only when you check for updates (above, from the version in \
+                        the sidebar, the ? menu or this machine's update item) or run the installer yourself.";
 
 /// What the open dialog keeps for the section: the switch's focus handle, so it stays the same control while the
 /// section is hidden and shown again, and the reason the last press was not saved, until the next press.
@@ -73,14 +79,73 @@ impl AppUpdates {
     }
 }
 
-/// The section's content below its heading: the note, then the switch with its help and, after a failed press, the
-/// updater's reason. `None` when no updater runs, which never lists the section, so there is nothing to draw.
+/// Share the updater's published progress words with the sidebar, which owns check results and their lifetime.
+fn busy_status(cx: &App) -> Option<InlineStatus> {
+    let readout = updates::readout(cx)?;
+    inline_status(&readout.activity, readout.update_ready, None).filter(|status| status.spinning())
+}
+
+/// Match the geometry of a Settings switch row. Keep the check button's focus through progress so a second keypress
+/// cannot land on the automatic-updates switch.
+fn version_group(cx: &App) -> Div {
+    let busy = busy_status(cx);
+    let help = "The Farhelm release this app is running.";
+    let version = StatusMark::new(
+        VERSION_ID,
+        BUILD_VERSION,
+        HoverHelp::tooltip(help),
+        Role::Label,
+        BUILD_VERSION,
+    )
+    .monospace();
+    let check = Button::new(
+        CHECK_ID,
+        busy.map_or("Check for updates", InlineStatus::text),
+        HoverHelp::tooltip("Check for and install a newer Farhelm release. The version at the top of the sidebar shows the result."),
+        Role::Button,
+    )
+    .tier(Tier::Neutral)
+    .busy(busy.is_some())
+    .on_click(|_, _, cx| {
+        // An update started elsewhere can reach the updater before Settings draws the disabled button.
+        if busy_status(cx).is_none() {
+            updates::check_now(cx);
+        }
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(GROUP_GAP))
+        .min_w_0()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(16.))
+                .text_size(px(LABEL_TEXT))
+                .line_height(px(LABEL_LINE_HEIGHT))
+                .child("Version")
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(version)
+                        .child(check),
+                ),
+        )
+        .child(choices::help(help, cx))
+}
+
+/// The note, version group and automatic-updates group. The last carries the updater's reason after a refused save.
+/// The App section only exists while the updater runs.
 pub(super) fn section(
     state: &AppUpdates,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
-) -> Option<[Div; 2]> {
-    let on = crate::desktop::updates::automatic_updates(cx)?;
+) -> Option<[Div; 3]> {
+    let on = updates::automatic_updates(cx)?;
     let switch = div()
         .text_size(px(LABEL_TEXT))
         .line_height(px(LABEL_LINE_HEIGHT))
@@ -104,5 +169,5 @@ pub(super) fn section(
                 .clone()
                 .map(|reason| choices::failure_line(ERROR_ID.to_owned(), reason, cx)),
         );
-    Some([choices::help(NOTE, cx), group])
+    Some([choices::help(NOTE, cx), version_group(cx), group])
 }
