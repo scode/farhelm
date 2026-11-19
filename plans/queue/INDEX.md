@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
 - [complete] `unusable-folder-refusals.md` — A folder that cannot be entered and a zero-size terminal are refused clearly; six tests lost with tmux come back
 - [complete] `gui-ux-discards.md` — Fifty discards from the 2026-11-18 GUI UX triage, in one PR
-- [in-flight 503dac] `gui-ux-backend-test-gaps.md` — Fifteen small supervisor, terminal-host and e2e test fixes from the 2026-11-18 GUI UX triage
+- [complete] `gui-ux-backend-test-gaps.md` — Fifteen small supervisor, terminal-host and e2e test fixes from the 2026-11-18 GUI UX triage
 - [complete] `gui-ux-gui-test-gaps.md` — Five small desktop app, helm and release-test fixes from the 2026-11-18 GUI UX triage
 - [pending] `gui-ux-wording.md` — Comment, spec and docs corrections from the 2026-11-18 GUI UX triage, two spec acceptances and the user's-own-configuration principle
 - [pending] `gui-ux-desktop-fixes.md` — Header question anchors, Close all after navigation, selected-template contrast, host text in tooltips and refusals, wrong action names, approval keyboard tab stops
