@@ -980,19 +980,31 @@ mod tests {
         );
         let started = std::time::Instant::now();
         let result = spawn_host_within(&program, state.path(), child(), &tag(), short(10, 1)).await;
-        let holder: Option<libc::pid_t> = std::fs::read_to_string(&pid_file)
-            .ok()
-            .and_then(|text| text.trim().parse().ok());
-        if let Some(pid) = holder.filter(|&pid| pid > 1) {
-            // SAFETY: ending the stand-in's own background sleep.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+        let elapsed = started.elapsed();
+        let holder: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("the stand-in recorded its stderr holder")
+            .trim()
+            .parse()
+            .expect("the holder has a pid");
+        assert!(holder > 1, "invalid holder pid {holder}");
+        // A dead or zombie holder would let even a spawn waiting for stderr EOF succeed.
+        let observed = crate::procs::read_process(holder as u32);
+        if !matches!(
+            observed,
+            Ok(None | Some((_, _, crate::procs::ProcessState::Zombie)))
+        ) {
+            // SAFETY: ending the stand-in's own background sleep, including on an inspection error.
+            unsafe { libc::kill(holder, libc::SIGKILL) };
         }
-        assert!(result.is_ok(), "{result:?}");
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "{:?}",
-            started.elapsed()
+            matches!(
+                observed,
+                Ok(Some((_, _, crate::procs::ProcessState::Running)))
+            ),
+            "the stderr holder {holder} must be alive at readiness: {observed:?}"
         );
+        assert!(result.is_ok(), "{result:?}");
+        assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
     }
 
     /// A host program that cannot be run is reported as such.
