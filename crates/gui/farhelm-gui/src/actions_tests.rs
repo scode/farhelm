@@ -554,6 +554,22 @@ fn escape_in_a_terminal_goes_to_the_program_and_leaves_a_tooltip_open(cx: &mut T
     assert!(shown, "and the tooltip stayed open");
 }
 
+/// Text editing is local to fields. A terminal must still deliver these Control keys to its program, including keys
+/// that Kit also binds inside a field on its own.
+#[gpui::test]
+fn text_editing_control_keys_reach_the_focused_terminal(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    for chord in [
+        "ctrl-f", "ctrl-b", "ctrl-n", "ctrl-p", "ctrl-a", "ctrl-e", "ctrl-d", "ctrl-h", "ctrl-k",
+    ] {
+        assert!(
+            opened.reaches_terminal(chord),
+            "{chord} reached the terminal"
+        );
+    }
+}
+
 // ---- Chord prefixes --------------------------------------------------------------------------------------------------
 
 /// The walk SPEC_impl.md asks for, over the app's whole keymap (GPUI Kit's and Farhelm's bindings) in a focused

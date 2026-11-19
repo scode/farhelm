@@ -38,13 +38,6 @@ use crate::test_support::{
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// The project's Discord invite, as SPEC.md names it.
 const DISCORD: &str = "https://discord.gg/G3bukxTjXR";
 
@@ -150,7 +143,7 @@ fn message_focused(cx: &mut VisualTestContext) -> bool {
 /// Put focus in the contact field with a click, select what it holds, and type `keystrokes` over it.
 fn type_contact(cx: &mut VisualTestContext, keystrokes: &str) {
     click(cx, "feedback-contact-field");
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     keys(cx, keystrokes);
 }
 

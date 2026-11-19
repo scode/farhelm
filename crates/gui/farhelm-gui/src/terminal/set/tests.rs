@@ -35,13 +35,6 @@ use crate::test_support::{self, click, keys, settle, started};
 /// Tab t1's element id, as [`tab_element_id`] names it (the click helper takes a static id).
 const T1_TAB: &str = "session-terminal-tab-t1";
 
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// Every fake terminal the connection handed out, in the order they were opened, with the attach each was for.
 type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
 
@@ -520,7 +513,7 @@ fn a_reaped_tab_leaves_focus_in_an_open_rename_field(cx: &mut TestAppContext) {
         window.focus_inside("rename-title"),
         "the premise: Rename's title field has focus"
     );
-    keys(window.cx, SELECT_ALL);
+    crate::test_support::select_all_text(window.cx);
     keys(window.cx, "d r a f t");
 
     window.opened.borrow_mut()[t1]

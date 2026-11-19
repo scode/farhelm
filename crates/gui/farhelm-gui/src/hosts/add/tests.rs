@@ -187,13 +187,6 @@ fn field_focused(cx: &mut VisualTestContext, field: fn(&AddHostDialog) -> &Draft
     })
 }
 
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// The dialog's error line, as assistive technology reads it.
 pub(crate) fn error_line(cx: &mut VisualTestContext) -> Option<String> {
     label(cx, "add-host-error")
@@ -223,7 +216,7 @@ fn a_destination_already_added_is_refused_naming_it_without_a_probe(cx: &mut Tes
     );
     assert_eq!(destination(cx), ADDED, "the destination is kept");
 
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     type_text(cx, "dev@BUILDBOX");
     keys(cx, "enter");
     let (_, body) = one_probe(&mut helm);

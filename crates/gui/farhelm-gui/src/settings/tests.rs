@@ -3061,13 +3061,6 @@ fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut 
 
 // ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
 
-/// Kit's select-all in a text field on this platform.
-pub(super) const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// The helm's ntfy settings as its route answers them, on `server` with the given topic, priority and token presence.
 fn ntfy(server: &str, topic: &str, priority: &str, token_set: bool) -> Value {
     json!({ "enabled": false, "server_url": server, "topic": topic, "priority": priority, "token_set": token_set })
@@ -3122,7 +3115,7 @@ pub(super) fn into_view(cx: &mut VisualTestContext, selector: &'static str) {
 pub(super) fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
     into_view(cx, selector);
     click(cx, selector);
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     if text.is_empty() {
         keys(cx, "backspace");
     } else {

@@ -351,9 +351,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Emacs C-f and C-b in text fields.** emacs c-f and c-b keyboard shortcuts dont work in text fields (c-a and c-e do
-  work). fix it. also consider other common ones like skipping words etc. Plan: `plans/queue/emacs-text-field-keys.md`.
-
 - **SSH askpass so 2FA works through Farhelm.** Support ssh's askpass mechanism so 2FA (a keyboard-interactive prompt
   after public-key auth succeeds) can just work through farhelm. It will still mean it's super annoying and will prompt
   people all the time on reconnects, but it needs to just work; guiding them on what to do to avoid that being
@@ -365,6 +362,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2FA attempt. `SSH_ASKPASS_REQUIRE` needs OpenSSH 8.4 or later. Plan: `plans/queue/ssh-askpass-2fa.md`.
 
 ## Mid term
+
+- **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
+  the start of the line, as on macOS, so Linux text fields have no select-all key (no Edit menu, and fields have no
+  context menu). Decide how and whether to have one.
 
 - **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
   the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.

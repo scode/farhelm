@@ -1151,12 +1151,7 @@ fn session_shortcuts_act_on_the_open_session_while_another_is_marked(cx: &mut Te
 
     test_support::keys(cx, RENAME_SESSION_CHORD);
     assert!(drawn(cx, "rename"), "the editor opened");
-    let select_all = if cfg!(target_os = "macos") {
-        "cmd-a"
-    } else {
-        "ctrl-a"
-    };
-    test_support::keys(cx, select_all);
+    test_support::select_all_text(cx);
     test_support::keys(cx, "r e n a m e d enter");
     test_support::settle(cx);
     let paths: Vec<String> = requests(&mut fake)

@@ -239,13 +239,6 @@ const PASTE: &str = if cfg!(target_os = "macos") {
     "ctrl-v"
 };
 
-/// Select the whole text, as the platform's shortcut does in a text field.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
-};
-
 /// Enter with the platform modifier, which Kit binds to its secondary Enter.
 const PLATFORM_ENTER: &str = if cfg!(target_os = "macos") {
     "cmd-enter"
@@ -381,7 +374,7 @@ fn typing_enter_in_the_field_that_keeps_line_breaks_submits_and_inserts_nothing(
             ("ab".into(), vec![TextInputEvent::Submitted { held: false }]),
             "{chord} submitted and inserted nothing"
         );
-        keys(cx, SELECT_ALL);
+        crate::test_support::select_all_text(cx);
         keys(cx, chord);
         assert_eq!(
             take(cx, kept),
@@ -504,14 +497,72 @@ fn a_shift_enter_never_reads_an_earlier_enter_that_submitted_nothing(cx: &mut Te
     );
 }
 
+// ---- Control-key editing --------------------------------------------------------------------------------------------
+
+/// Both Kit field types must use the installed editing bindings, including Linux's former Select All chord.
+/// Verify caret movement by inserting at the new position and check each deletion against the resulting text.
+#[gpui::test]
+fn control_keys_edit_text_in_fields_and_text_areas(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("line", TextInputState::new),
+            ("kept", TextInputState::new_keeping_line_breaks),
+            ("growing", |window, cx| {
+                TextInputState::new_growing(3, window, cx)
+            }),
+        ],
+    );
+    for (selector, field) in ["line", "kept", "growing"].into_iter().zip(&fields) {
+        focus_field(cx, selector, field);
+        assert_eq!(take(cx, field).0, "", "the premise: {selector} is empty");
+        for (chords, expected) in [
+            ("a b c ctrl-b ctrl-b x", "axbc"),
+            ("ctrl-f y", "axbyc"),
+            ("ctrl-a ctrl-d", "xbyc"),
+            ("ctrl-e ctrl-h", "xby"),
+            ("ctrl-a ctrl-f ctrl-k", "x"),
+        ] {
+            keys(cx, chords);
+            assert_eq!(take(cx, field).0, expected, "{selector}: {chords}");
+        }
+    }
+}
+
+/// A text area without suggestions uses the Control keys to move and edit within individual lines.
+/// Distinct lines reveal whether a key moved to a field boundary or removed text beyond the current line.
+#[gpui::test]
+fn control_keys_respect_line_boundaries_in_text_areas(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[("growing", |window, cx| {
+            TextInputState::new_growing(3, window, cx)
+        })],
+    );
+    let field = &fields[0];
+    focus_field(cx, "growing", field);
+    keys(cx, "a b enter c d enter e f");
+    assert_eq!(take(cx, field).0, "ab\ncd\nef");
+
+    keys(cx, "ctrl-b ctrl-p x");
+    assert_eq!(take(cx, field).0, "ab\ncxd\nef");
+    keys(cx, "ctrl-b ctrl-n y");
+    assert_eq!(take(cx, field).0, "ab\ncxd\neyf");
+
+    keys(cx, "ctrl-p ctrl-a i ctrl-e j");
+    assert_eq!(take(cx, field).0, "ab\nicxdj\neyf");
+    keys(cx, "ctrl-b ctrl-b ctrl-k");
+    assert_eq!(take(cx, field).0, "ab\nicx\neyf");
+}
+
 // ---- A field that drives a list: the arrows handed over -------------------------------------------------------------
 
 /// Why this matters: GPUI Kit's single-line field takes Up and Down for caret moves it then does nothing with, so
 /// without the hand-over a search field could never move a selection in the list beside it (the quick switcher's
 /// arrows). Taking the keys must not cost the field its text or its focus.
 ///
-/// Specification: in a field drawn with `on_vertical`, after typing `ab`, Down, Up and Down reach the handler once
-/// each, in order, and the field still holds `ab` and focus.
+/// Specification: in a field drawn with `on_vertical`, the arrows and their Control-key equivalents reach
+/// the handler once each in order. The field keeps its text and focus.
 #[gpui::test]
 fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestAppContext) {
     let arrows = Rc::new(RefCell::new(Vec::new()));
@@ -538,12 +589,19 @@ fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestApp
             .into_any_element()
     });
     click(cx, "field-box");
-    keys(cx, "a b down up down");
+    let state = made.borrow().clone().expect("the field was drawn");
+    assert!(cx.update(|window, cx| state.focus_handle(cx).is_focused(window)));
+    keys(cx, "a b down up down ctrl-p ctrl-n");
     assert_eq!(
         *arrows.borrow(),
-        [Vertical::Down, Vertical::Up, Vertical::Down]
+        [
+            Vertical::Down,
+            Vertical::Up,
+            Vertical::Down,
+            Vertical::Up,
+            Vertical::Down,
+        ]
     );
-    let state = made.borrow().clone().expect("the field was drawn");
     assert_eq!(cx.update(|_, cx| state.text(cx)).as_ref(), "ab");
     assert!(
         cx.update(|window, cx| state.focus_handle(cx).is_focused(window)),
@@ -746,7 +804,7 @@ fn by_the_mac_rule_cut_with_nothing_selected_runs_the_handler_and_with_a_selecti
     assert_eq!(begun.get(), 1, "Cut with nothing selected ran the handler");
     assert_eq!(text_of(cx, &state), "ab", "and cut nothing");
 
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     assert!(
         !nothing_selected(cx, &state),
         "the premise: Select All selected the text"
@@ -775,7 +833,7 @@ fn by_the_linux_rule_only_the_chord_runs_the_handler_and_only_with_nothing_selec
     );
     assert_eq!(text_of(cx, &state), "ab");
 
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     assert!(
         !nothing_selected(cx, &state),
         "the premise: Select All selected the text"

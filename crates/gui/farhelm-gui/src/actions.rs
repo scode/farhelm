@@ -15,7 +15,9 @@
 //! (Tab and Escape included). A key Farhelm binds in [`CONTEXT`] therefore reaches a focused text field's ancestors and
 //! runs there, unless that deeper context says otherwise: SPEC.md has the Linux Delete chord, Ctrl+Shift+Backspace,
 //! leave text editors other than the terminal alone, so [`install`] binds it to GPUI's `NoAction` in Kit's input
-//! context. A menu sets [`MENU_CONTEXT`], where Up and Down walk its items.
+//! context. The one other group bound in Kit's input context is text editing itself: `TextInput::control_key_bindings`
+//! gives every field the Emacs Control keys SPEC.md lists, bound after Kit's defaults so they win (on Linux, Ctrl+A
+//! moves to the line's start instead of selecting all). A menu sets [`MENU_CONTEXT`], where Up and Down walk its items.
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`), besides an action and its binding in [`CONTEXT`]: a row in
 //! [`TERMINAL_KEYS`] (with its action, once the terminal command it names has one), a row in [`PHYSICAL_KEYS`] for a
@@ -438,6 +440,7 @@ pub fn install(cx: &mut App) {
             .iter()
             .map(|chord| KeyBinding::new(chord, NoAction, Some(TEXT_INPUT_CONTEXT))),
     );
+    cx.bind_keys(crate::components::TextInput::control_key_bindings());
     // `NoAction` in the deeper context suppresses every binding for the same keys further out, Farhelm's and Kit's
     // alike, so the key goes on to the terminal's own listener. App shortcuts are left alone: their features bind them
     // in `CONTEXT`, and those bindings must keep working from a terminal.

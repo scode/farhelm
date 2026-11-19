@@ -107,7 +107,7 @@ pub(super) fn type_into(cx: &mut VisualTestContext, id: &str, text: &str) {
                 .is_some_and(|field| field.focus_handle(cx).is_focused(window))
         });
         if focused {
-            keys(cx, super::tests::SELECT_ALL);
+            crate::test_support::select_all_text(cx);
             cx.simulate_input(text);
             crate::test_support::check(cx);
             return;

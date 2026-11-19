@@ -14,7 +14,7 @@ use super::draft::Mode;
 use super::entry::open_replace_with;
 use super::entry_tests::{destination, environment_window, window_with};
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{Field, SELECT_ALL, draft, focused, name_of, shown_refusal};
+use super::view_tests::{Field, draft, focused, name_of, shown_refusal};
 use crate::local_state;
 use crate::session_list::tests::{change, listing_meta, session};
 use crate::test_support::{self, any_open, keys, settle};
@@ -186,7 +186,7 @@ fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppConte
     assert_eq!(name_of(cx, folder), None);
     assert_eq!(name_of(cx, mark), None);
 
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     cx.simulate_input("/work/widget/lib");
     settle(cx);
     assert_eq!(draft(cx).folder.value(), "/work/widget/lib");

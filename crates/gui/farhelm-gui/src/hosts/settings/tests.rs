@@ -27,13 +27,8 @@ use crate::layers;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::settings::Refused;
-use crate::test_support::{any_open, bounds, click, focused_id, frame, keys, settle};
-
-/// Kit's select-all in a text field on this platform.
-const SELECT_ALL: &str = if cfg!(target_os = "macos") {
-    "cmd-a"
-} else {
-    "ctrl-a"
+use crate::test_support::{
+    any_open, bounds, click, focused_id, frame, keys, select_all_text, settle,
 };
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -435,7 +430,8 @@ fn the_destination_saves_as_typed_and_a_refusal_stays_in_place(cx: &mut TestAppC
     assert_eq!(seeded, "dev@build-box");
     assert!(focused, "focus went into the field");
 
-    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    select_all_text(cx);
+    keys(cx, "n e w b o x enter");
     let (id, path, body) = one_command(&mut helm);
     assert_eq!(path, "/api/hosts/2/destination");
     assert_eq!(body, json!({ "ssh": "newbox" }));
@@ -491,7 +487,8 @@ fn the_destination_waits_for_a_launch_and_the_alias_does_not(cx: &mut TestAppCon
     let (mut helm, cx) = open_build_box(cx);
     let launch = start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
     click(cx, "host-settings-edit-destination");
-    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    select_all_text(cx);
+    keys(cx, "n e w b o x enter");
     assert!(helm.commands().is_empty(), "nothing was sent");
     assert_eq!(
         label(cx, "host-settings-destination-launch"),
@@ -519,7 +516,8 @@ fn the_destination_waits_for_a_launch_and_the_alias_does_not(cx: &mut TestAppCon
 
     start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
     click(cx, "host-settings-edit-alias");
-    keys(cx, &format!("{SELECT_ALL} b o x enter"));
+    select_all_text(cx);
+    keys(cx, "b o x enter");
     let (_, path, _) = one_command(&mut helm);
     assert_eq!(
         path, "/api/hosts/2/alias",
@@ -569,7 +567,8 @@ fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppC
     assert_eq!(focused_id(cx).as_deref(), Some("host-settings-edit-alias"));
 
     keys(cx, "enter");
-    keys(cx, &format!("{SELECT_ALL} b o x enter"));
+    select_all_text(cx);
+    keys(cx, "b o x enter");
     let (id, path, body) = one_command(&mut helm);
     assert_eq!(path, "/api/hosts/2/alias");
     assert_eq!(body, json!({ "alias": "box" }));
@@ -578,7 +577,8 @@ fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppC
     settle(cx);
 
     keys(cx, "enter");
-    keys(cx, &format!("{SELECT_ALL} backspace enter"));
+    select_all_text(cx);
+    keys(cx, "backspace enter");
     let (_, _, body) = one_command(&mut helm);
     assert_eq!(body, json!({ "alias": null }));
 }
@@ -618,7 +618,8 @@ fn a_local_host_pushed_with_an_alias_is_named_by_it(cx: &mut TestAppContext) {
 fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);
     click(cx, "host-settings-edit-destination");
-    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    select_all_text(cx);
+    keys(cx, "n e w b o x enter");
     let (id, _, _) = one_command(&mut helm);
     assert_eq!(host_work(cx), Some(Work::Save), "the premise: in flight");
 
@@ -664,7 +665,8 @@ fn a_press_during_another_save_on_the_host_says_why_it_sent_nothing(cx: &mut Tes
     assert_eq!(host_work(cx), Some(Work::Save), "the premise: in flight");
 
     click(cx, "host-settings-edit-alias");
-    keys(cx, &format!("{SELECT_ALL} b o x"));
+    select_all_text(cx);
+    keys(cx, "b o x");
     click(cx, "host-settings-alias-save");
     assert!(helm.commands().is_empty(), "the key held the alias back");
     assert_eq!(editing(cx), Some(Field::Alias), "the field stays open");
@@ -805,7 +807,8 @@ fn tab_walks_down_the_body_while_a_destination_save_is_held(cx: &mut TestAppCont
     let below = node(&frame(cx), last).is_some_and(|node| node.bounds.top() >= body.bottom());
     assert!(below, "the premise: the last switch is below the fold");
     click(cx, "host-settings-edit-destination");
-    keys(cx, &format!("{SELECT_ALL} n e w b o x enter"));
+    select_all_text(cx);
+    keys(cx, "n e w b o x enter");
     let (_, path, _) = one_command(&mut helm);
     assert_eq!(
         path, "/api/hosts/2/destination",
@@ -955,7 +958,7 @@ fn type_folder(cx: &mut VisualTestContext, text: &str) {
     let dialog = dialog(cx);
     let focused = cx.update(|window, cx| dialog.read(cx).checkout.read(cx).focused(window, cx));
     assert!(focused, "the premise: the click put focus in the field");
-    keys(cx, SELECT_ALL);
+    select_all_text(cx);
     cx.simulate_input(text);
     settle(cx);
 }

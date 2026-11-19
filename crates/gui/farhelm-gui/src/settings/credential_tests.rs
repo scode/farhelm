@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use super::Section;
 use super::credentials::Editor;
 use super::tests::{
-    SELECT_ALL, available, drawn, fill, label_of, open_rail, open_settings, painted, reach,
-    section_button, sent,
+    available, drawn, fill, label_of, open_rail, open_settings, painted, reach, section_button,
+    sent,
 };
 use crate::layers;
 use crate::local_time;
@@ -520,7 +520,7 @@ fn the_editor_checks_the_name_and_the_secret_before_sending(cx: &mut TestAppCont
         keys(cx, "shift-tab");
     }
     assert!(editor_start_focused(cx), "the premise: Name holds focus");
-    keys(cx, SELECT_ALL);
+    crate::test_support::select_all_text(cx);
     cx.simulate_input("codex-login");
     assert!(!drawn(cx, "credential-error"), "an edit clears the line");
     reach(cx, "credential-save");
