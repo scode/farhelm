@@ -885,26 +885,28 @@ systemd or SSH substrate ran.
   returning focus to the avatar, and the rail's Expand control makes the helm store `host_rail_open` true and the window
   paint the expanded foot's Collapse label, and again stores false with the label gone; and on two sessions of its own,
   pinned through the helm, a drag of the second's grip onto the first's pin glyph makes the helm list the second above
-  the first. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from
-  the recorder) still stops its app run, and the second run if one is up, for which the recorder's `--termination-grace`
-  leaves it time: 30 s covers the two `stop`s in a row, each a few seconds normally. Its 49 steps (one skipped on Linux)
-  took longer than the 42 before the two terminal steps came: 46 of them took 150 s on a build worker on 2026-11-15, and
-  43 of them took 305 s on a loaded development machine shared with other agents on 2026-11-15, the second run's start
-  and stop included (42 took 137 s on a build worker that day; 114 s for 39, 98 s for 37 and 91 s for 34 steps earlier,
-  62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps), plus the app's start; it builds the app first
-  unless given `--no-build`. Linux needs headless Mutter, `dbus-run-session` and Mesa's software renderer (`mutter`,
-  `dbus-daemon`, `mesa-vulkan-drivers` and `libegl-mesa0`). macOS needs a logged-in GUI session of the same user. The
-  x86_64 Linux release gate runs it after the desktop tests with `--kind release` and the shared release evidence root.
-  The harness builds the debug app with the automation bridge, `farhelm`, `farhelm-fixtures` and `gpui-agent` in the
-  same Cargo target directory. Run it when the app's session list, row menu, session header, Delete, Rename, Stop,
-  Restart, Replace (its YOLO question included), Mark read and Mark unread, quick switcher, host rail (Add host among
-  its entries, an avatar's setup or update warning, an avatar's menu and expansion) and its foot (Hosts, the Settings
-  gear and the Expand control), the Hosts attention list, status segments, host menu, Remove host, host Update and host
-  Uninstall, Help menu or Send feedback dialog, Welcome card or the start dialogs (the Welcome card and announcements at
-  a window start), Trash button and dialog, Keyboard shortcuts overview, approval cards or their region, the helm's
-  approval path, sidebar width or divider, terminal attach, replay, paste, text input, scrollback or text size, the
-  order menu (Compact included), compact rows, pins and the order hold, the heading's New, the row's summary card, the
-  bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  the first. On two other sessions, dragging a loose session by its grip to the other session's group header makes the
+  helm list it in that group, still unpinned. A failed run keeps its run directory under `/tmp` for its logs. An
+  interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, and the second run if one is up, for
+  which the recorder's `--termination-grace` leaves it time: 30 s covers the two `stop`s in a row, each a few seconds
+  normally. Its 50 steps (one skipped on Linux) took longer than the 42 before the two terminal steps came: 46 of them
+  took 150 s on a build worker on 2026-11-15, and 43 of them took 305 s on a loaded development machine shared with
+  other agents on 2026-11-15, the second run's start and stop included (42 took 137 s on a build worker that day; 114 s
+  for 39, 98 s for 37 and 91 s for 34 steps earlier, 62 s for 24 steps on 2026-11-14; 4, 18 and 23 s with fewer steps),
+  plus the app's start; it builds the app first unless given `--no-build`. Linux needs headless Mutter,
+  `dbus-run-session` and Mesa's software renderer (`mutter`, `dbus-daemon`, `mesa-vulkan-drivers` and `libegl-mesa0`).
+  macOS needs a logged-in GUI session of the same user. The x86_64 Linux release gate runs it after the desktop tests
+  with `--kind release` and the shared release evidence root. The harness builds the debug app with the automation
+  bridge, `farhelm`, `farhelm-fixtures` and `gpui-agent` in the same Cargo target directory. Run it when the app's
+  session list, row menu, session header, Delete, Rename, Stop, Restart, Replace (its YOLO question included), Mark read
+  and Mark unread, quick switcher, host rail (Add host among its entries, an avatar's setup or update warning, an
+  avatar's menu and expansion) and its foot (Hosts, the Settings gear and the Expand control), the Hosts attention list,
+  status segments, host menu, Remove host, host Update and host Uninstall, Help menu or Send feedback dialog, Welcome
+  card or the start dialogs (the Welcome card and announcements at a window start), Trash button and dialog, Keyboard
+  shortcuts overview, approval cards or their region, the helm's approval path, sidebar width or divider, terminal
+  attach, replay, paste, text input, scrollback or text size, the order menu (Compact included), compact rows, pins and
+  the order hold, the heading's New, the row's summary card, the bridge's wiring, the app's startup or
+  `scripts/gui-agent.py` change.
 - `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
   — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
   `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,

@@ -455,6 +455,7 @@ pub(crate) fn row(
     let mut control = ListRow::new(id.clone(), label, help, Role::Button)
         .selected(selected)
         .content_indent(indent)
+        .paint_hover_fill(drag.membership_outline.is_none())
         .line(identity);
     if !compact && (ended.is_some() || cause.is_some() || suspended || deleting.is_some()) {
         // The being-deleted phase takes the cause's place, as the Suspended badge does.
@@ -496,6 +497,15 @@ pub(crate) fn row(
         .when(marked && !selected, |row| {
             row.bg(theme::color(palette.marked_bg))
         })
+        .when(drag.membership_outline.is_some(), |row| {
+            let tint = theme::color(palette.marked_bg);
+            // Keep the selected row's fill legible under its white labels while carrying the destination tint.
+            row.bg(if selected {
+                theme::color(palette.accent_fill).blend(tint.opacity(0.10))
+            } else {
+                tint
+            })
+        })
         // After the selected and marked fills, which the lift replaces while it lasts. Tests find a lifted row by its
         // debug selector, `session-pin-lifted-<key>`.
         .when(drag.lifted, |row| {
@@ -531,6 +541,7 @@ pub(crate) fn row(
         }))
         .children(drag.recorder)
         .children(drag.grip)
+        .children(drag.membership_outline)
         .children(drag.drop_line)
         .children(marked.then(|| marker(session.key, selected, palette)))
         .into_any_element()

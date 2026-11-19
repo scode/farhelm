@@ -200,11 +200,9 @@ impl Hold {
         key: &str,
         band: Band,
         neighbor: Option<(&str, pins::Placement)>,
+        pinned: impl Fn(&str) -> bool,
     ) {
         let Some(held) = &mut self.held else { return };
-        if !held.original_pins.contains(key) {
-            return;
-        }
         let Some(old) = held.ids.iter().position(|id| id == key) else {
             return;
         };
@@ -217,9 +215,30 @@ impl Hold {
                     .map(|index| index + usize::from(placement == pins::Placement::After))
             })
             .or_else(|| {
-                held.ids
+                // A pin append goes below every held pin slot, even across a gap left by unpinning. Inserting it
+                // earlier would let manual order rotate another pin into the new slot. An unpinned row goes after
+                // the leading pins so the divider and movable run keep their meaning.
+                let mut positions = held
+                    .ids
                     .iter()
-                    .position(|id| held.bands.get(id) == Some(&band))
+                    .enumerate()
+                    .filter(|(_, id)| held.bands.get(*id) == Some(&band));
+                let (first, id) = positions.next()?;
+                if pinned(&moved) {
+                    return Some(
+                        positions
+                            .rfind(|(_, id)| pinned(id))
+                            .map_or(first + usize::from(pinned(id)), |(index, _)| index + 1),
+                    );
+                }
+                if !pinned(id) {
+                    return Some(first);
+                }
+                let last = positions
+                    .take_while(|(_, id)| pinned(id))
+                    .last()
+                    .map_or(first, |(i, _)| i);
+                Some(last + 1)
             })
             .unwrap_or(held.ids.len());
         held.bands.insert(moved.clone(), band);
@@ -418,6 +437,45 @@ mod tests {
     use super::*;
     use crate::session_list::tests::session;
     use farhelm_proto::ui_channel::SessionRow;
+
+    /// A remote unpin leaves a gap until the hold ends. Inserting an accepted pin in that gap would let
+    /// manual order move another pin up into the gap. The arriving pin needs its slot below that survivor.
+    #[test]
+    fn a_pin_appends_below_the_last_held_pin_even_after_a_gap() {
+        let list = ListId {
+            answered: Query::default(),
+            order: Order::Activity,
+        };
+        let group = Band::Group(10);
+        let ids = ["source", "first", "gap", "last", "loose"].map(str::to_owned);
+        let bands = ids
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, id)| (id, if index == 0 { Band::GlobalPins } else { group }))
+            .collect();
+        let mut hold = Hold {
+            held: Some(Held {
+                list,
+                ids: ids.into(),
+                bands,
+                original_pins: ["source", "first", "gap", "last"].map(str::to_owned).into(),
+                groups: Vec::new(),
+            }),
+            ..Hold::default()
+        };
+        hold.crossed("source", group, None, |key| {
+            matches!(key, "source" | "first" | "last")
+        });
+        assert_eq!(
+            hold.held.map(|held| held.ids),
+            Some(
+                ["first", "gap", "last", "source", "loose"]
+                    .map(str::to_owned)
+                    .into()
+            )
+        );
+    }
 
     /// SPEC.md: "Changing the list's host, filter, or order is asking for a different list, so the hold does not apply
     /// to it", and the old app ended a hold taken while a changed query's reply was on its way once that reply landed.

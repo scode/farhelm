@@ -2504,6 +2504,43 @@ class Smoke(unittest.TestCase):
                 pin(key, False)
         eventually(lambda: positions() == [None, None], "the helm listing both unpinned again")
 
+    def test_79_dragging_an_unpinned_session_into_a_group(self) -> None:
+        """A group drop reaches the real helm as a membership move through the same grip as a pin drag.
+
+        Start with one member and a loose unpinned session. The group header is the visible destination, and the
+        helm must list the dragged row in that group with its pin state still off.
+        """
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        stamp = uuid.uuid4().hex[:8]
+        ids = []
+        for title in (f"Group member {stamp}", f"Move into group {stamp}"):
+            body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            ids.append(gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"])
+            self.ok("wait", "--text", title)
+
+        group = gui_agent.helm_request(
+            RUN, "POST", "/api/session-groups", {"name": f"Project {stamp}", "sessions": ids[:1]}
+        )["id"]
+
+        def location() -> tuple[int | None, bool] | None:
+            for row in gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]:
+                if row["id"] == ids[1]:
+                    return row.get("group"), row["pinned"]
+            return None
+
+        try:
+            eventually(lambda: location() == (None, False), "the loose unpinned session in the listing")
+            toggle = f"id:session-group-{group}-toggle"
+            grip = f"id:session-pin-grip-{ids[1]}"
+            self.ok("hover", "id:session-count")
+            self.ok("wait", toggle)
+            self.ok("wait", grip)
+            self.ok("drag", grip, toggle)
+            eventually(lambda: location() == (group, False), "the helm listing the unpinned session in the group")
+        finally:
+            gui_agent.helm_request(RUN, "DELETE", f"/api/session-groups/{group}")
+
 
 def seed_stamped_basic(title: str, origin: str) -> None:
     """Create a basic fake-agent session titled `title` whose terminal shows `origin` on its first line, before the

@@ -45,7 +45,8 @@ use farhelm_proto::session_requests::{PinMoveAreas, SessionGroupTarget};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     App, InteractiveElement, IntoElement, ParentElement, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, WeakEntity, div, px, relative,
+    StatefulInteractiveElement as _, Styled, WeakEntity, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 use serde_json::json;
 
@@ -528,7 +529,8 @@ pub(super) enum Separator {
     Groups,
 }
 
-pub(super) fn separator(kind: Separator, palette: &Palette) -> impl IntoElement {
+/// A group pin divider carries the guide and, during a membership drag, the sides of the group outline.
+pub(super) fn separator(kind: Separator, highlighted: bool, palette: &Palette) -> impl IntoElement {
     let (id, label) = match kind {
         Separator::GlobalPins => (SEPARATOR_ID.to_owned(), "Pinned sessions"),
         Separator::GroupPins(id) => (
@@ -552,6 +554,19 @@ pub(super) fn separator(kind: Separator, palette: &Palette) -> impl IntoElement 
         separator
             .relative()
             .pb(px(gap))
+            .when(highlighted, |separator| {
+                separator.bg(theme::color(palette.marked_bg)).child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .border_l_1()
+                        .border_r_1()
+                        .border_color(theme::color(palette.accent)),
+                )
+            })
             .child(
                 div()
                     .ml(metrics::ROW_PAD.1 + super::groups::MEMBER_INDENT)
