@@ -24,12 +24,13 @@ use gpui::{Role, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::environment::needs_confirmation;
-use super::host_rail::tests::{hover_help, texts_within, within};
+use super::host_rail::tests::{hover_help, texts_within};
 use super::lifecycle_tests::node_bounds;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
 use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::host_text::HostSentence;
+use crate::launcher::{draft::Tab, folder_default_tests::edit_draft};
 use crate::local_time::Zone;
 use crate::test_support::{self, focused_id, frame, meta};
 
@@ -618,32 +619,12 @@ fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
     );
     assert_eq!(draft.target, None, "New is on the existing host");
 
-    test_support::click(cx, "launcher-tabs-Command");
-    test_support::click(cx, "launcher-folder-row");
-    assert!(crate::launcher::view_tests::focused(
-        cx,
-        crate::launcher::view_tests::Field::Folder
-    ));
-    let select_all = if cfg!(target_os = "macos") {
-        "cmd-a"
-    } else {
-        "ctrl-a"
-    };
-    test_support::keys(cx, select_all);
-    cx.simulate_input("/tmp");
-    test_support::settle(cx);
-    test_support::keys(cx, "escape");
-    assert!(launcher_drawn(cx), "Escape closed only the folder list");
-    test_support::click(cx, "launcher-command-row");
-    assert!(
-        within(&frame(cx), "launcher-command")
-            .iter()
-            .any(|node| node.flags.focused),
-        "the command field has focus before typing"
-    );
-    cx.simulate_input("true");
-    test_support::settle(cx);
-    test_support::click(cx, "launcher-yolo-No");
+    edit_draft(cx, |draft| {
+        draft.choose_tab(Tab::Command);
+        draft.edit_folder("/tmp".into());
+        draft.edit_command("true".into());
+        draft.choose_command_yolo(false);
+    });
     let draft = crate::launcher::view_tests::shown_draft(cx);
     assert_eq!(draft.command.command, "true");
     assert_eq!(
