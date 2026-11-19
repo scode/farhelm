@@ -420,23 +420,39 @@ fn quit_on_signal() -> anyhow::Result<tokio::sync::oneshot::Receiver<()>> {
 /// are that OTHER binary's, running in a spawned subprocess; this desktop app
 /// embeds a helm directly in ITS OWN process ([`DesktopBootstrap::start`])
 /// and never goes through that code path, so it needs the same setup
-/// independently. Mirrors that function's filter default (`RUST_LOG`, else
-/// `info`) and its choice of stderr.
+/// independently. The desktop log filter keeps the `RUST_LOG` setting and
+/// sends diagnostics to stderr.
 fn init_tracing() {
-    // Build-sensitive default: debug builds (the development flow's default)
-    // keep debug-level events, release stays at info. `RUST_LOG` overrides both.
-    let default_filter = if cfg!(debug_assertions) {
+    use tracing_subscriber::prelude::*;
+
+    let rust_log = std::env::var("RUST_LOG").ok();
+    tracing_subscriber::registry()
+        .with(desktop_log_filter(rust_log.as_deref()))
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .init();
+}
+
+const CLIENT_HANDSHAKE_LOG: &str = "tungstenite::handshake::client";
+
+/// The handshake client logs sensitive request details. Exclude that target independently of user-selected log
+/// levels, before the log bridge forwards records to the formatter. Other targets use the usual build default or
+/// `RUST_LOG` filter.
+fn desktop_log_filter(
+    rust_log: Option<&str>,
+) -> impl tracing_subscriber::Layer<tracing_subscriber::Registry> {
+    use tracing_subscriber::{EnvFilter, Layer, filter::filter_fn};
+
+    // Build-sensitive default: debug builds (the development flow's default) keep debug-level events, release stays at
+    // info. `RUST_LOG` overrides both; the handshake target is excluded whatever the level.
+    let default_level = if cfg!(debug_assertions) {
         "debug"
     } else {
         "info"
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    let env_filter = rust_log
+        .and_then(|value| EnvFilter::try_new(value).ok())
+        .unwrap_or_else(|| EnvFilter::new(default_level));
+    filter_fn(|metadata| metadata.target() != CLIENT_HANDSHAKE_LOG).and_then(env_filter)
 }
 
 /// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port, the payload directory a
@@ -1701,6 +1717,40 @@ mod tests {
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// The application logger excludes the sensitive handshake target even under an explicit trace setting. An error
+    /// event also exercises the target exclusion under the default filter, which would suppress any trace event.
+    #[test]
+    fn desktop_filter_excludes_handshake_diagnostics() {
+        use tracing_subscriber::prelude::*;
+
+        for rust_log in [
+            None,
+            Some("trace"),
+            Some("trace,tungstenite::handshake::client=trace"),
+        ] {
+            let subscriber = tracing_subscriber::registry()
+                .with(desktop_log_filter(rust_log))
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::sink));
+            tracing::subscriber::with_default(subscriber, || {
+                assert!(
+                    !tracing::event_enabled!(target: CLIENT_HANDSHAKE_LOG, tracing::Level::TRACE)
+                );
+                assert!(
+                    !tracing::event_enabled!(target: CLIENT_HANDSHAKE_LOG, tracing::Level::ERROR)
+                );
+                assert!(tracing::event_enabled!(
+                    target: "tungstenite::handshake::server", tracing::Level::ERROR
+                ));
+                assert_eq!(
+                    tracing::event_enabled!(
+                        target: "tungstenite::handshake::server", tracing::Level::TRACE
+                    ),
+                    rust_log.is_some()
+                );
+            });
+        }
+    }
 
     /// The README hero and the docs screenshots need the app's window to show several hosts, and an installed app's
     /// helm never registers any at startup; a staged agent run's ensure-hosts file is the only way it gets its fleet.

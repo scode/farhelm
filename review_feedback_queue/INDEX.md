@@ -74,10 +74,6 @@ consequences.
   can run the command already on the line while Farhelm is still fetching pasted text meant to finish it. The paste can
   then arrive at the next prompt.
 
-- [`websocket-trace-logs-desktop-credential.md`](websocket-trace-logs-desktop-credential.md) — When WebSocket trace
-  logging is enabled, Farhelm’s logs can contain a credential that grants access to the running app’s terminal, command,
-  and file-transfer APIs.
-
 - [`concealed-terminal-cells-change-link-target.md`](concealed-terminal-cells-change-link-target.md) — A printed link
   can look like one site but open another when the terminal hides part of the address. Farhelm’s ordinary printed-link
   click does not disclose that difference.
