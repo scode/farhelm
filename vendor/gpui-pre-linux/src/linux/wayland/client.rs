@@ -427,8 +427,10 @@ struct DragState<DataOffer = wl_data_offer::WlDataOffer, Window = WaylandWindowS
 }
 
 impl<DataOffer, Window> DragState<DataOffer, Window> {
-    fn begin_uri_read(&mut self) -> u64 {
+    /// Start tracking the pointer at Enter. Motion can arrive before the URI list has been read.
+    fn begin_uri_read(&mut self, position: Point<Pixels>) -> u64 {
         self.invalidate_uri_read();
+        self.position = position;
         self.uri_read_generation
     }
 
@@ -461,6 +463,16 @@ where
     DataOffer: FileDragDataOffer + Clone,
     Window: Clone,
 {
+    /// Remember motion even before the window can receive a file drag event. Wayland's Drop has no coordinates.
+    fn handle_motion(&mut self, position: Point<Pixels>) -> Option<(Window, PlatformInput)> {
+        self.position = position;
+        let window = self.window.clone()?;
+        Some((
+            window,
+            PlatformInput::FileDrop(FileDropEvent::Pending { position }),
+        ))
+    }
+
     fn handle_leave(&mut self) -> Option<(Window, PlatformInput)> {
         self.invalidate_uri_read();
         let window = self.window.clone()?;
@@ -487,12 +499,12 @@ where
         ))
     }
 
+    /// Enter the window at the most recent pointer position. The URI read can take long enough to cross drop areas.
     fn complete_uri_read(
         &mut self,
         generation: u64,
         data_offer: DataOffer,
         window: Window,
-        position: Point<Pixels>,
         paths: gpui::ExternalPaths,
     ) -> Option<(Window, PlatformInput)> {
         if !self.is_uri_read_current(generation) {
@@ -502,10 +514,12 @@ where
 
         self.data_offer = Some(data_offer);
         self.window = Some(window.clone());
-        self.position = position;
         Some((
             window,
-            PlatformInput::FileDrop(FileDropEvent::Entered { position, paths }),
+            PlatformInput::FileDrop(FileDropEvent::Entered {
+                position: self.position,
+                paths,
+            }),
         ))
     }
 }
@@ -2933,7 +2947,8 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                     let Some(drag_window) = get_window(&mut state, &surface.id()) else {
                         return;
                     };
-                    let uri_read_generation = state.drag.begin_uri_read();
+                    let uri_read_generation =
+                        state.drag.begin_uri_read(Point::new(x.into(), y.into()));
 
                     const ACTIONS: DndAction = DndAction::Copy;
                     data_offer.set_actions(ACTIONS, ACTIONS);
@@ -2977,8 +2992,6 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                                     }
                                 })
                                 .collect();
-                            let position = Point::new(x.into(), y.into());
-
                             // Prevent dropping text from other programs.
                             if paths.is_empty() {
                                 data_offer.destroy();
@@ -2993,7 +3006,6 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                                 uri_read_generation,
                                 data_offer,
                                 drag_window,
-                                position,
                                 gpui::ExternalPaths(paths),
                             );
 
@@ -3006,15 +3018,11 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                 }
             }
             wl_data_device::Event::Motion { x, y, .. } => {
-                let Some(drag_window) = state.drag.window.clone() else {
-                    return;
-                };
-                let position = Point::new(x.into(), y.into());
-                state.drag.position = position;
-
-                let input = PlatformInput::FileDrop(FileDropEvent::Pending { position });
+                let input = state.drag.handle_motion(Point::new(x.into(), y.into()));
                 drop(state);
-                drag_window.handle_input(input);
+                if let Some((drag_window, input)) = input {
+                    drag_window.handle_input(input);
+                }
             }
             wl_data_device::Event::Leave => {
                 let input = state.drag.handle_leave();
@@ -3322,7 +3330,6 @@ mod tests {
             generation,
             data_offer,
             window,
-            Point::default(),
             gpui::ExternalPaths(SmallVec::from_vec(vec![PathBuf::from("/tmp/file")])),
         )
     }
@@ -3336,11 +3343,40 @@ mod tests {
         }
     }
 
+    /// Motion during the URI read can leave the original drop area. With no further motion after the read, both
+    /// Entered and Submit must still hit the release point.
+    #[test]
+    fn drop_uses_the_latest_motion_from_while_reading_paths() {
+        let mut drag = drag_state();
+        let entry = Point::new(gpui::px(200.), gpui::px(100.));
+        let release = Point::new(gpui::px(30.), gpui::px(100.));
+        let generation = drag.begin_uri_read(entry);
+        let between = Point::new(gpui::px(120.), gpui::px(100.));
+        assert!(drag.handle_motion(between).is_none());
+        assert!(
+            drag.handle_motion(release).is_none(),
+            "the paths are pending"
+        );
+        let offer = FakeDataOffer::new("A");
+        let entered = complete_drag_uri_read(&mut drag, generation, offer.clone(), "window A");
+        assert!(matches!(
+            entered,
+            Some(("window A", PlatformInput::FileDrop(FileDropEvent::Entered { position, .. })))
+                if position == release
+        ));
+        assert!(matches!(
+            drag.handle_drop(),
+            Some(("window A", PlatformInput::FileDrop(FileDropEvent::Submit { position })))
+                if position == release
+        ));
+        assert!(offer.finished.get() && offer.destroyed.get());
+    }
+
     #[test]
     fn leave_discards_pending_drag_uri_read() {
         let mut drag = drag_state();
         let data_offer = FakeDataOffer::new("A");
-        let generation = drag.begin_uri_read();
+        let generation = drag.begin_uri_read(Point::default());
         let mut entered_windows = Vec::new();
 
         record_entered(drag.handle_leave(), &mut entered_windows);
@@ -3359,7 +3395,7 @@ mod tests {
     fn drop_then_leave_discards_pending_drag_uri_read() {
         let mut drag = drag_state();
         let data_offer = FakeDataOffer::new("A");
-        let generation = drag.begin_uri_read();
+        let generation = drag.begin_uri_read(Point::default());
         let mut entered_windows = Vec::new();
 
         record_entered(drag.handle_drop(), &mut entered_windows);
@@ -3381,12 +3417,12 @@ mod tests {
     fn stale_completion_preserves_newer_drag_destination() {
         let mut drag = drag_state();
         let data_offer_a = FakeDataOffer::new("A");
-        let generation_a = drag.begin_uri_read();
+        let generation_a = drag.begin_uri_read(Point::default());
         let mut entered_windows = Vec::new();
         record_entered(drag.handle_leave(), &mut entered_windows);
 
         let data_offer_b = FakeDataOffer::new("B");
-        let generation_b = drag.begin_uri_read();
+        let generation_b = drag.begin_uri_read(Point::default());
         record_entered(
             complete_drag_uri_read(&mut drag, generation_b, data_offer_b.clone(), "window B"),
             &mut entered_windows,

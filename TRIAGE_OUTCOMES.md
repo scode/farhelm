@@ -1736,26 +1736,6 @@
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `pending`.
 
-## wayland-file-drop-uses-entry-position.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed in GPUI's Wayland backend (the
-  vendored `gpui-pre-linux` crate, vendor/gpui-pre-linux/src/linux/wayland/client.rs): while the drag's file list is
-  being read, pointer motion is ignored, and when the read finishes the drag position is set to the entry point; a drop
-  with no motion since is delivered there, and the terminal accepts a drop anywhere on its pane. So a file dragged in
-  over the terminal and released over the sidebar can be uploaded to the session's host. Releasing before the list
-  arrives is discarded safely. The sub-second filter does not apply (a local file crosses to a host). Bucket: highest
-  (route established in code; narrow trigger).
-- Decision: settled by the same pick as `header-actions-follow-unseen-session.md` (2026-11-18 highest-bucket triage
-  page, Q3), with the user's instruction that this follow one specified standard and reusable mechanism, not an ad hoc
-  fix; see that entry.
-- Completion criteria: a drop is delivered where the pointer was when it was released (the latest position recorded
-  while the file list was being read), as a new patch layer on the vendored GPUI Linux crate with its patch file
-  (vendor/README.md), plus a unit test. Where the standard from `header-actions-follow-unseen-session.md` applies to
-  drop delivery, follow it rather than inventing a separate rule. Remove the feedback file and its index entry in the
-  same change.
-- Execution: planned in `plans/queue/drawn-frame-actions.md`
-
 ## stalled-tab-request-resets-healthy-helm-channel.md
 
 - Outcome: `fix code`.

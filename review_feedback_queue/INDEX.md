@@ -17,10 +17,6 @@ consequences.
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`wayland-file-drop-uses-entry-position.md`](wayland-file-drop-uses-entry-position.md) — Dragging across a terminal
-  and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
-  when the pointer moves.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
