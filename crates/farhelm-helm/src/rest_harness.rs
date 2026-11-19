@@ -993,6 +993,7 @@ impl Harness {
             _dir.path(),
             crate::provisioning::PayloadSelection::Default,
             crate::RELEASE_BUILD,
+            None,
         )
         .expect("select restarted provisioning seams");
         // Assemble immutable provider slots before actors can observe them.
@@ -1390,6 +1391,7 @@ impl FleetBuilder {
             &state_dir,
             crate::provisioning::PayloadSelection::Default,
             crate::RELEASE_BUILD,
+            None,
         )
         .expect("select harness provisioning seams");
         let sources = match self.place_commands {

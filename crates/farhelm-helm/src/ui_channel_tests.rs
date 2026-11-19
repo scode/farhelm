@@ -1165,6 +1165,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
             Collection::Preferences,
             Collection::Approvals,
             Collection::SshQuestions,
+            Collection::SshSignInCompletions,
             Collection::Templates,
             Collection::Notices,
             Collection::Announcements,
@@ -1204,6 +1205,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
     for empty in [
         Collection::Approvals,
         Collection::SshQuestions,
+        Collection::SshSignInCompletions,
         Collection::Templates,
         Collection::Notices,
         Collection::HostProgress,
@@ -1899,7 +1901,7 @@ async fn ssh_answers_reach_only_the_waiting_attempt() {
     let question = SshQuestion {
         id: "test-ssh-question".into(),
         attempt: "test-ssh-attempt".into(),
-        host: 42,
+        target: farhelm_proto::ui_channel::SshQuestionTarget::Host { host: 42 },
         purpose: SshConnectionPurpose::Sessions,
         startup: false,
         prompt: "Verification code:".into(),

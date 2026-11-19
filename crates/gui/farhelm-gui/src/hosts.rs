@@ -121,6 +121,7 @@ pub(crate) mod remedies;
 pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
+pub(crate) mod setup_sign_in;
 pub mod ssh_help;
 pub mod status;
 pub(crate) mod uninstall;

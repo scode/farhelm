@@ -25,7 +25,9 @@ use super::plan::{
     PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
     ResolvedPath, UninstallFacts,
 };
-use crate::manager::{ConnectionManager, HostState, ProvisionLockGuard, peer_text};
+use crate::manager::{
+    ConnectionManager, ConnectionStage, HostState, ProvisionLockGuard, peer_text,
+};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
@@ -255,6 +257,7 @@ pub(crate) enum RunTask {
 /// Process-local orchestration authority for probes and one run per host.
 pub(crate) struct ProvisioningService {
     backend: Arc<dyn ProvisioningBackend>,
+    pub(super) setup_sign_in: Option<Arc<super::setup_sign_in::SetupSignIn>>,
     delivery: Arc<CredentialDelivery>,
     payloads: Arc<dyn PayloadSource>,
     store: HelmStore,
@@ -504,6 +507,7 @@ pub(super) fn upgrade_floor_refusal(
 /// second environment selection would leave initial work using different seams.
 pub(crate) struct ProductionProvisioning {
     backend: Arc<dyn ProvisioningBackend>,
+    setup_sign_in: Option<Arc<super::setup_sign_in::SetupSignIn>>,
     preparation_backend: Arc<dyn ProvisioningBackend>,
     payloads: Arc<dyn PayloadSource>,
     pub(crate) delivery: Arc<CredentialDelivery>,
@@ -572,9 +576,17 @@ impl ProductionProvisioning {
         state_dir: &Path,
         selection: PayloadSelection,
         release_build: bool,
+        ssh_sign_in: Option<Arc<crate::ssh_sign_in::SignIn>>,
     ) -> anyhow::Result<Self> {
-        let (backend, preparation_backend, payloads): Transport = match scripted_backend(state_dir)?
-        {
+        let scripted = scripted_backend(state_dir)?;
+        // A scripted test backend may list made-up hosts. It must not open actual SSH connections to them.
+        let setup_sign_in = if scripted.is_none() {
+            ssh_sign_in
+                .map(|relay| Arc::new(super::setup_sign_in::SetupSignIn::new(relay, "ssh".into())))
+        } else {
+            None
+        };
+        let (backend, preparation_backend, payloads): Transport = match scripted {
             Some(scripted) => scripted,
             None => {
                 // Resolve a relative payload selection against the same cwd as
@@ -597,6 +609,7 @@ impl ProductionProvisioning {
         let delivery = CredentialDelivery::with_places(store, Arc::clone(&backend), places);
         Ok(Self {
             backend,
+            setup_sign_in,
             preparation_backend,
             payloads,
             delivery,
@@ -700,6 +713,7 @@ impl ProvisioningService {
             std::env::current_exe().context("locating the running farhelm binary")?;
         Ok(Arc::new(Self {
             backend: sources.backend,
+            setup_sign_in: sources.setup_sign_in,
             delivery: sources.delivery,
             payloads: sources.payloads,
             store,
@@ -740,6 +754,7 @@ impl ProvisioningService {
         Arc::new(Self {
             delivery: CredentialDelivery::new(store.clone(), Arc::clone(&backend)),
             backend,
+            setup_sign_in: None,
             payloads,
             store,
             manager,
@@ -939,6 +954,7 @@ impl ProvisioningService {
             .as_ref()
             .and_then(|row| row.kind.ssh_access())
             .unwrap_or(crate::ssh::SshAccessKind::UserConfig);
+        let registered_host = stored.as_ref().map(|row| row.id);
         if let Some(row) = stored {
             request.remote_farhelm = request.remote_farhelm.or(row.remote_farhelm);
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
@@ -959,6 +975,9 @@ impl ProvisioningService {
         } = &registration
         {
             self.store.check_new_entry(destination, entry).await?;
+        }
+        if let Some(setup) = &self.setup_sign_in {
+            setup.prepare(&target.transport, registered_host).await?;
         }
         // Discovery comes FIRST, on every transport including the local
         // one: a running supervisor answers the protocol hello and is
@@ -1309,6 +1328,22 @@ impl ProvisioningService {
             if let Some((expected_identity, owner_revision)) = takeover {
                 self.manager
                     .take_over_discovered(host, &expected_identity, &owner_revision)?;
+            } else if inserted && self.setup_sign_in.is_some() {
+                // The newly started sessions actor owns its first dial. A second retry could interrupt its askpass.
+                anyhow::ensure!(
+                    self.manager.status(host).is_some(),
+                    "the registered host actor is missing"
+                );
+            } else if self.setup_sign_in.is_some() {
+                // Reconciliation applies a changed destination. Discovering an already-running supervisor at
+                // confirmation does not give this run the right to interrupt the unchanged actor's question.
+                anyhow::ensure!(
+                    self.manager
+                        .retry_for_provisioning(host, false)
+                        .await?
+                        .is_some(),
+                    "the registered host actor was not available for retry"
+                );
             } else if !self.manager.retry_now(host).await? {
                 bail!("the registered host actor was not available for retry");
             }
@@ -1511,13 +1546,30 @@ impl ProvisioningService {
         self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
+        self.plan_update_guarded(host, false).await
+    }
+
+    /// The desktop can receive a pending reply and resume planning after setup authentication. The automatic
+    /// fleet scan uses the existing batch planner, since it cannot hand that reply to a user.
+    pub(super) async fn plan_update_for_ui(
+        self: &Arc<Self>,
+        host: HostId,
+    ) -> anyhow::Result<HostPlanResponse> {
+        self.plan_update_guarded(host, true).await
+    }
+
+    async fn plan_update_guarded(
+        self: &Arc<Self>,
+        host: HostId,
+        interactive: bool,
+    ) -> anyhow::Result<HostPlanResponse> {
         let row = self.host_row(host).await?;
         if !row.kind.panel_updates() {
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                 LOCAL_REOPEN_HANDOFF.to_string(),
             )));
         }
-        self.plan_update_unguarded(host).await
+        self.plan_update_unguarded(host, interactive).await
     }
 
     /// [`Self::plan_update`] without the local-row refusal, for the tests
@@ -1537,7 +1589,7 @@ impl ProvisioningService {
         self: &Arc<Self>,
         host: HostId,
     ) -> anyhow::Result<HostPlanResponse> {
-        self.plan_update_unguarded(host).await
+        self.plan_update_unguarded(host, false).await
     }
 
     /// Own UPDATE's bounded probe through its process-group cleanup.
@@ -1546,15 +1598,20 @@ impl ProvisioningService {
     async fn plan_update_unguarded(
         self: &Arc<Self>,
         host: HostId,
+        interactive: bool,
     ) -> anyhow::Result<HostPlanResponse> {
         let service = Arc::clone(self);
-        crate::run_owned(async move { service.plan_update_owned(host).await }).await
+        crate::run_owned(async move { service.plan_update_owned(host, interactive).await }).await
     }
 
     /// Finish UPDATE planning even if its requester disappears during the probe.
     /// The backend reaps its process group only when its bounded probe finishes;
     /// keeping this work owned prevents SSH helpers and pipe readers being orphaned.
-    async fn plan_update_owned(&self, host: HostId) -> anyhow::Result<HostPlanResponse> {
+    async fn plan_update_owned(
+        &self,
+        host: HostId,
+        interactive: bool,
+    ) -> anyhow::Result<HostPlanResponse> {
         let _slot = self
             .plan_slots
             .acquire()
@@ -1581,6 +1638,11 @@ impl ProvisioningService {
         self.require_update_trusted(host)
             .map_err(anyhow::Error::new)?;
         let original_target = self.probe_target_for_row(&row).await?;
+        if interactive && let Some(setup) = &self.setup_sign_in {
+            setup
+                .prepare(&original_target.transport, Some(host))
+                .await?;
+        }
         let observation = self
             .backend
             .probe(&original_target)
@@ -1896,7 +1958,7 @@ impl ProvisioningService {
             .acquire()
             .await
             .expect("the provisioning planning semaphore is never closed");
-        let plan = self.uninstall_plan(host, &row).await?;
+        let plan = self.uninstall_plan(host, &row, true).await?;
         let probe_id = uuid::Uuid::new_v4().to_string();
         let confirmation = plan.confirmation();
         self.retain_plan(
@@ -1916,6 +1978,24 @@ impl ProvisioningService {
             plan,
             confirmation,
         })
+    }
+
+    /// The same uninstall checks run at planning and after confirmation. Planning hands a pending attempt back to
+    /// the ordered UI channel. The already-accepted run can wait on its owned task.
+    async fn sign_in_for_uninstall(
+        &self,
+        target: &ProvisioningTarget,
+        host: HostId,
+        pending_reply: bool,
+    ) -> anyhow::Result<()> {
+        if let Some(setup) = &self.setup_sign_in {
+            if pending_reply {
+                setup.prepare(target, Some(host)).await?;
+            } else {
+                setup.establish_for_run(target, host).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Decide whether Farhelm may be removed from `row`'s host right now,
@@ -1946,6 +2026,7 @@ impl ProvisioningService {
         &self,
         host: HostId,
         row: &HostRow,
+        pending_reply: bool,
     ) -> anyhow::Result<ProvisioningPlan> {
         let refused =
             |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
@@ -1959,6 +2040,18 @@ impl ProvisioningService {
         let (dialed, state_dir) = match &client {
             Some(client) => {
                 require_no_running_sessions(client).await?;
+                self.sign_in_for_uninstall(&target.transport, host, pending_reply)
+                    .await?;
+                if !pending_reply && self.setup_sign_in.is_some() {
+                    // The sessions connection can keep serving while the setup connection waits for a code.
+                    let current = self
+                        .manager
+                        .status(host)
+                        .filter(|status| status.state.is_connected())
+                        .and_then(|status| status.client)
+                        .ok_or_else(not_connected)?;
+                    require_no_running_sessions(&current).await?;
+                }
                 match self
                     .backend
                     .probe(&target)
@@ -2042,6 +2135,25 @@ impl ProvisioningService {
                         return Err(anyhow::Error::new(ProvisioningRequestError::RemoveInstead(
                             message,
                         )));
+                    }
+                }
+                self.sign_in_for_uninstall(&target.transport, host, pending_reply)
+                    .await?;
+                if !pending_reply && self.setup_sign_in.is_some() {
+                    let current = self.manager.status(host);
+                    // Connecting and unreachable can trade places while the setup master asks. What matters is
+                    // that this is still the same entry, and no sessions connection or unsafe peer appeared.
+                    let same_disconnected_entry = current.as_ref().is_some_and(|current| {
+                        status
+                            .as_ref()
+                            .is_some_and(|before| current.entry_uuid == before.entry_uuid)
+                            && !current.state.is_connected()
+                            && !matches!(current.state, HostState::Retired { .. })
+                            && super::uninstall_refusal::unusable_host(&current.state, None)
+                                .is_none()
+                    });
+                    if !same_disconnected_entry {
+                        return Err(not_connected());
                     }
                 }
                 match self.backend.probe(&target).await {
@@ -2558,6 +2670,15 @@ impl ProvisioningService {
                 if let Some(reason) = self.known_owner_refusal(host) {
                     return Err(BackendFailure::new(reason, ""));
                 }
+                if let Some(setup) = &self.setup_sign_in {
+                    setup
+                        .establish_for_run(&original_target.transport, host)
+                        .await?;
+                    // The sessions actor can learn the owner while the setup connection waits for the user.
+                    if let Some(reason) = self.known_owner_refusal(host) {
+                        return Err(BackendFailure::new(reason, ""));
+                    }
+                }
                 let mut observation = self.backend.probe(original_target).await?;
                 let installed_target = ProbeTarget {
                     transport: pending.plan.target.clone(),
@@ -2650,6 +2771,10 @@ impl ProvisioningService {
                     .await?;
                 self.require_not_suspended(&row)?;
                 self.require_update_trusted(host)?;
+                if let Some(setup) = &self.setup_sign_in {
+                    setup.establish_for_run(&target.transport, host).await?;
+                    self.require_update_trusted(host)?;
+                }
                 let observation = self.backend.probe(target).await?;
                 let (plan, discovered) = match observation {
                     ProbeObservation::Supervisor {
@@ -2770,7 +2895,7 @@ impl ProvisioningService {
                     BackendFailure::new(format!("re-reading the confirmed host row: {error:#}"), "")
                 })?;
                 let replanned = self
-                    .uninstall_plan(host, &row)
+                    .uninstall_plan(host, &row, false)
                     .await
                     .map_err(|error| BackendFailure::new(format!("{error:#}"), ""))?;
                 if replanned != pending.plan {
@@ -3230,7 +3355,7 @@ impl ProvisioningService {
     /// Wait for a new usable connection after setup or a prepared clone's
     /// boot. The caller owns run progress and install-coordinate admission;
     /// attachment retains the same refusal ticket and fresh retry window.
-    async fn attach_supervisor(
+    pub(super) async fn attach_supervisor(
         &self,
         host: HostId,
         target: &ProvisioningTarget,
@@ -3238,7 +3363,10 @@ impl ProvisioningService {
         if let Some(outcome) = self.backend.injected_attach(target).await? {
             return Ok(outcome);
         }
-        let previous_incarnation = self.manager.status(host).map(|status| status.incarnation);
+        let previous = self.manager.status(host);
+        let previous_incarnation = previous.as_ref().map(|status| status.incarnation);
+        let interactive = self.setup_sign_in.is_some()
+            && super::setup_sign_in::SetupSignIn::destination(target).is_some();
         // A fresh window, not a plain retry: this step runs seconds
         // after starting or restarting the supervisor's own unit, or
         // after a prepared clone booted with that unit enabled,
@@ -3254,39 +3382,71 @@ impl ProvisioningService {
         // `ConnectionManager::retry_now_with_fresh_window`). `None`
         // (no such host) stops nothing early; the loop below then
         // reports the host as gone, as before.
-        let ticket = self
-            .manager
-            .retry_now_with_fresh_window(host)
-            .await
-            .map_err(|error| {
-                BackendFailure::new("requesting supervisor attach", error.to_string())
-            })?;
-        let attached = tokio::time::timeout(ATTACH_TIMEOUT, async {
-            loop {
-                let status = self.manager.status(host)?;
-                if status.state.is_connected()
-                    && status.client.is_some()
-                    && Some(status.incarnation) != previous_incarnation
-                {
-                    return Some(Ok(()));
-                }
-                if ticket.is_some_and(|ticket| status.refusal_attempt > ticket)
-                    && let Some(failure) = attach_refusal(&status.state)
-                {
-                    return Some(Err(failure));
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .map_err(|_| BackendFailure::new("waiting for the provisioned supervisor", "timed out"))?;
-        attached.ok_or_else(|| {
-            BackendFailure::new(
-                "waiting for the provisioned supervisor",
-                "the registered host actor disappeared",
+        let attach_error = |error: anyhow::Error| {
+            BackendFailure::new("requesting supervisor attach", error.to_string())
+        };
+        let (ticket, sign_in_ticket) = if interactive {
+            (
+                None,
+                self.manager
+                    .retry_for_provisioning(host, true)
+                    .await
+                    .map_err(attach_error)?,
             )
-        })??;
-        Ok(ActionOutcome::Completed)
+        } else {
+            (
+                self.manager
+                    .retry_now_with_fresh_window(host)
+                    .await
+                    .map_err(attach_error)?,
+                None,
+            )
+        };
+        let attach_failed =
+            |reason| BackendFailure::new("waiting for the provisioned supervisor", reason);
+        let mut deadline = Some(tokio::time::Instant::now() + ATTACH_TIMEOUT);
+        loop {
+            let status = self
+                .manager
+                .status(host)
+                .ok_or_else(|| attach_failed("the registered host actor disappeared"))?;
+            if status.state.is_connected()
+                && status.client.is_some()
+                && Some(status.incarnation) != previous_incarnation
+            {
+                return Ok(ActionOutcome::Completed);
+            }
+            if matches!(status.state, HostState::SignInNeeded) {
+                return Err(BackendFailure::new(
+                    "Sign-in needed. Use Sign in to connect to the provisioned supervisor.",
+                    "",
+                ));
+            }
+            if (ticket.is_some_and(|ticket| status.refusal_attempt > ticket)
+                || sign_in_ticket
+                    .as_ref()
+                    .is_some_and(|ticket| ticket.sees_refusal(status.refusal_attempt)))
+                && let Some(failure) = attach_refusal(&status.state)
+            {
+                return Err(failure);
+            }
+            if matches!(
+                status.state,
+                HostState::Connecting {
+                    stage: ConnectionStage::WaitingForSignIn,
+                    ..
+                }
+            ) {
+                // The SSH attempt owns the question's expiry. Give the new supervisor its ordinary attach window
+                // after the user answers, even if the question used up the earlier budget.
+                deadline = None;
+            } else if tokio::time::Instant::now()
+                >= *deadline.get_or_insert_with(|| tokio::time::Instant::now() + ATTACH_TIMEOUT)
+            {
+                return Err(attach_failed("timed out"));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Retain `view` as its host's run without publishing it, the way admission stores a run before its feed bump;

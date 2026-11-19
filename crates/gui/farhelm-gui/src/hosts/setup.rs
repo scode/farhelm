@@ -86,6 +86,7 @@ use std::rc::Rc;
 use super::add::{self, Reply};
 use super::identity::{display_name, host_mark};
 use super::offers::{HostKind, SetupRerun};
+use super::setup_sign_in;
 use crate::assets;
 use crate::components::{Button, HoverHelp, Role, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
@@ -539,8 +540,10 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
         Target::New { .. } | Target::Sandbox(_) => true,
         Target::Registered { .. } => false,
     };
+    let adding_ssh_host = matches!(offer.target, Target::New { .. });
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
+            setup_sign_in::accepted(&settled.outcome, adding_ssh_host, offer.mark, window, cx);
             // A registered host's refusal is the store's record under the host's key, which its row shows; it also
             // warns the host's rail avatar while Hosts is closed, as any failed setup does.
             // A new host's falls back to the panel's line, which reads the same record under the add's key, which
@@ -726,9 +729,6 @@ pub(crate) fn rerun_command(host: &HostView, how: SetupRerun) -> Result<Command,
 /// launch is in flight ([`super::launch_in_flight`]) it sends nothing either, and says so on the Hosts panel's line:
 /// "Re-run <host>: not started, …" ([`not_started`]).
 pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
     let Some(how) = HostKind::of(host).setup_rerun() else {
         return;
     };
@@ -755,65 +755,71 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
     let handle = window.window_handle();
     let probed = key.clone();
     let id = host.id;
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, move |settled, cx| {
-            let target = |creates| Target::Registered {
-                host: id,
-                name: name.clone(),
-                icon,
-                color,
-                creates,
-            };
-            let offer = |probe_id, confirmation, steps, creates| Offer {
-                key: probed.clone(),
-                probe_id,
-                confirmation,
-                steps,
-                target: target(creates),
-                mark,
-            };
-            let plan = match how {
-                SetupRerun::Ssh => match add::read_reply(&settled.outcome) {
-                    // The pushed hosts and host progress already show what the helm did.
-                    Reply::Added => return,
-                    Reply::Show(problem) => Err(problem),
-                    Reply::TakeOver { owner, .. } => Err(add::ownership_problem(&owner)),
-                    Reply::Setup {
-                        probe_id,
-                        confirmation,
-                        steps,
-                    } => Ok((offer(probe_id, confirmation, steps, None), asks_first(cx))),
-                },
-                SetupRerun::Tensorlake => match add::read_plan(&settled.outcome) {
-                    Ok(plan) => {
-                        let creates = Some(plan.resources);
-                        let offer = offer(plan.probe_id, plan.confirmation, plan.steps, creates);
-                        ask_or_create(offer, handle, cx);
-                        return;
-                    }
-                    Err(problem) => Err(problem),
-                },
-            };
-            let problem = match plan {
-                // A refusal or a manual setup is a failed attempt, which warns the rail while Hosts is closed; a plan
-                // that arrived after the user moved on is not, since nothing was refused and nothing ran.
-                Err(problem) => {
-                    super::status::failed(id, super::status::Action::Setup, cx);
-                    problem.text()
-                }
-                Ok((offer, false)) => {
-                    submit(offer, handle, cx);
+    let started = setup_sign_in::plan(key, command, mark, handle, cx, move |result, mark, cx| {
+        let settled = match result {
+            Ok(settled) => settled,
+            Err(reason) => {
+                super::status::failed(id, super::status::Action::Setup, cx);
+                note_rerun(&probed, reason, cx);
+                return;
+            }
+        };
+        let target = |creates| Target::Registered {
+            host: id,
+            name: name.clone(),
+            icon,
+            color,
+            creates,
+        };
+        let offer = |probe_id, confirmation, steps, creates| Offer {
+            key: probed.clone(),
+            probe_id,
+            confirmation,
+            steps,
+            target: target(creates),
+            mark,
+        };
+        let plan = match how {
+            SetupRerun::Ssh => match add::read_reply(&settled.outcome) {
+                // The pushed hosts and host progress already show what the helm did.
+                Reply::Added { .. } => return,
+                Reply::Show(problem) => Err(problem),
+                Reply::TakeOver { owner, .. } => Err(add::ownership_problem(&owner)),
+                Reply::Setup {
+                    probe_id,
+                    confirmation,
+                    steps,
+                } => Ok((offer(probe_id, confirmation, steps, None), asks_first(cx))),
+            },
+            SetupRerun::Tensorlake => match add::read_plan(&settled.outcome) {
+                Ok(plan) => {
+                    let creates = Some(plan.resources);
+                    let offer = offer(plan.probe_id, plan.confirmation, plan.steps, creates);
+                    ask_or_create(offer, handle, cx);
                     return;
                 }
-                Ok((offer, true)) => {
-                    if ask(offer, handle, cx) {
-                        return;
-                    }
-                    HostText::from_host(RERUN_MOVED_ON)
+                Err(problem) => Err(problem),
+            },
+        };
+        let problem = match plan {
+            // A refusal or a manual setup is a failed attempt, which warns the rail while Hosts is closed; a plan
+            // that arrived after the user moved on is not, since nothing was refused and nothing ran.
+            Err(problem) => {
+                super::status::failed(id, super::status::Action::Setup, cx);
+                problem.text()
+            }
+            Ok((offer, false)) => {
+                submit(offer, handle, cx);
+                return;
+            }
+            Ok((offer, true)) => {
+                if ask(offer, handle, cx) {
+                    return;
                 }
-            };
-            note_rerun(&probed, problem, cx);
-        })
+                HostText::from_host(RERUN_MOVED_ON)
+            }
+        };
+        note_rerun(&probed, problem, cx);
     });
     match started {
         Ok(()) => show(cx, |lines| lines.not_started = None),

@@ -33,7 +33,7 @@ use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::recipes::{RecipePlaceView, RecipeView};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionMeta, CollectionState, HostView, KeyedEntry,
-    Preferences, SessionRow, SshQuestion,
+    Preferences, SessionRow, SshQuestion, SshSignInCompletion,
 };
 use serde::de::DeserializeOwned;
 
@@ -49,6 +49,7 @@ pub enum PushedEntry {
     Preferences(Preferences),
     Approval(PendingApproval),
     SshQuestion(SshQuestion),
+    SshSignInCompletion(SshSignInCompletion),
     Template(LaunchTemplate),
     Notice(Notice),
     Announcements(AnnouncementQueue),
@@ -112,6 +113,17 @@ impl Pushed for SshQuestion {
     fn from_entry(entry: &PushedEntry) -> Option<&Self> {
         match entry {
             PushedEntry::SshQuestion(question) => Some(question),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for SshSignInCompletion {
+    const COLLECTION: Collection = Collection::SshSignInCompletions;
+
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::SshSignInCompletion(completion) => Some(completion),
             _ => None,
         }
     }
@@ -240,6 +252,9 @@ fn decode_entries(
             Collection::Preferences => |value| typed(value, PushedEntry::Preferences),
             Collection::Approvals => |value| typed(value, PushedEntry::Approval),
             Collection::SshQuestions => |value| typed(value, PushedEntry::SshQuestion),
+            Collection::SshSignInCompletions => {
+                |value| typed(value, PushedEntry::SshSignInCompletion)
+            }
             Collection::Templates => |value| typed(value, PushedEntry::Template),
             Collection::Notices => |value| typed(value, PushedEntry::Notice),
             Collection::Announcements => |value| typed(value, PushedEntry::Announcements),

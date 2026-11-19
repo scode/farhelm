@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use farhelm_proto::ui_channel::{SshConnectionPurpose, SshQuestion};
+use farhelm_proto::ui_channel::{SshConnectionPurpose, SshQuestion, SshQuestionTarget};
 use tokio::io::AsyncReadExt as _;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::process::{Child, Command};
@@ -36,6 +36,51 @@ pub(crate) struct BeforeQuestion {
     pub(crate) snapshot: SshSnapshot,
     /// A timed-out child was stopped by the helm. Its exit cannot diagnose a remote refusal.
     pub(crate) timed_out: bool,
+}
+
+/// The identity of one proposed interactive SSH process. Setup planning allocates it before returning pending,
+/// so the questions and the eventual result carry the same correlation even when no question was needed.
+#[derive(Clone, Debug)]
+pub(crate) struct Attempt {
+    pub(crate) id: String,
+    target: SshQuestionTarget,
+    connection: SharedConnection,
+    startup: bool,
+}
+
+impl Attempt {
+    /// Only the sessions actor knows whether it is making an initial startup dial.
+    pub(crate) fn for_sessions(host: i64, startup: bool) -> Self {
+        Self {
+            startup,
+            ..Self::for_host(host, SharedConnection::Supervisor)
+        }
+    }
+
+    /// A draft has no registry row to retain its sign-in after the dialog closes.
+    pub(crate) fn is_draft(&self) -> bool {
+        matches!(self.target, SshQuestionTarget::Draft { .. })
+    }
+
+    pub(crate) fn for_host(host: i64, connection: SharedConnection) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            target: SshQuestionTarget::Host { host },
+            connection,
+            startup: false,
+        }
+    }
+
+    /// A new destination has no registry id. Its pending reply identifies the checking attempt in the Add dialog.
+    pub(crate) fn for_draft() -> Self {
+        let id = Uuid::new_v4().to_string();
+        Self {
+            target: SshQuestionTarget::Draft { draft: id.clone() },
+            connection: SharedConnection::Provisioning,
+            id,
+            startup: false,
+        }
+    }
 }
 
 /// Use SSH's expanded control path as the gate key. Distinct aliases can name the same socket. Only the ordinary
@@ -69,18 +114,37 @@ impl SignIn {
         gate
     }
 
+    /// Whether the setup caller can use its ordinary batch path without starting an interactive SSH process.
+    /// An unshareable socket keeps the batch path and its existing diagnostic.
+    pub(crate) async fn setup_ready(
+        &self,
+        program: &Path,
+        destination: &str,
+        deadline: Instant,
+    ) -> anyhow::Result<bool> {
+        if ssh::control_socket(&self.state_dir, SharedConnection::Provisioning).is_none() {
+            return Ok(true);
+        }
+        let args = ssh::ssh_base_args(
+            destination,
+            &self.state_dir,
+            SharedConnection::Provisioning,
+            &SshAccess::UserConfig,
+        )?;
+        control_is_live(program, &args, deadline).await
+    }
+
     /// Reuse a live shared connection, even one Farhelm did not start. If sharing is unavailable the ordinary client
     /// still gets its existing batch invocation and diagnostic. Every socket probe is local and bounded.
     pub(crate) async fn establish(
         &self,
         program: &Path,
         destination: &str,
-        host: i64,
-        startup: bool,
+        attempt: &Attempt,
         connect_timeout: Duration,
         on_question: &mut (dyn FnMut(bool) + Send),
     ) -> anyhow::Result<()> {
-        let connection = SharedConnection::Supervisor;
+        let connection = attempt.connection;
         let Some(_) = ssh::control_socket(&self.state_dir, connection) else {
             return Ok(());
         };
@@ -156,14 +220,7 @@ impl SignIn {
         }
         let mut process = InteractiveChild::new(command.spawn().context("starting SSH sign-in")?);
         let result = process
-            .run(
-                listener,
-                &self.questions,
-                host,
-                startup,
-                deadline,
-                on_question,
-            )
+            .run(listener, &self.questions, attempt, deadline, on_question)
             .await;
         if process.has_asked() {
             on_question(false);
@@ -318,12 +375,10 @@ impl InteractiveChild {
         &mut self,
         listener: UnixListener,
         questions: &Questions,
-        host: i64,
-        startup: bool,
+        attempt: &Attempt,
         mut deadline: Instant,
         on_question: &mut (dyn FnMut(bool) + Send),
     ) -> anyhow::Result<ExitStatus> {
-        let attempt = Uuid::new_v4().to_string();
         loop {
             let (stream, _) = tokio::select! {
                 biased;
@@ -354,10 +409,13 @@ impl InteractiveChild {
             let mut question = questions.open(
                 SshQuestion {
                     id: Uuid::new_v4().to_string(),
-                    attempt: attempt.clone(),
-                    host,
-                    purpose: SshConnectionPurpose::Sessions,
-                    startup,
+                    attempt: attempt.id.clone(),
+                    target: attempt.target.clone(),
+                    purpose: match attempt.connection {
+                        SharedConnection::Supervisor => SshConnectionPurpose::Sessions,
+                        SharedConnection::Provisioning => SshConnectionPurpose::Setup,
+                    },
+                    startup: attempt.startup,
                     prompt,
                     notice,
                     expires_at: crate::manager::unix_millis()

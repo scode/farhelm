@@ -13,7 +13,10 @@
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::{CollectionState, HostView};
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, CollectionState, HostView, KeyedEntry, SshConnectionPurpose,
+    SshQuestion, SshQuestionTarget,
+};
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Render,
     Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
@@ -312,6 +315,221 @@ fn add_sends_the_probe_with_its_new_entry_under_the_dialogs_key(cx: &mut TestApp
         [],
         "a second Add while the probe is out sent nothing"
     );
+}
+
+/// Planning can push a question before its 202. Only the attempt named in that reply belongs to this dialog.
+/// Collection changes can carry Ready ahead of Send's receipt. Replay waits for both, so the accepted answer's
+/// input mark still lets the setup confirmation open.
+#[gpui::test]
+fn ssh_add_resumes_its_unchanged_probe_after_the_setup_master_answers(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_for_setup(cx);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    keys(cx, "tab");
+    type_text(cx, "newbox1");
+    click(cx, "add-host-submit");
+    let (probe, body) = one_probe(&mut helm);
+    push_questions(
+        &mut helm,
+        &[
+            inline_question("this-check"),
+            inline_question("other-check"),
+        ],
+        &[],
+    );
+    helm.reply(probe, 202, Some(json!({"attempt": "this-check"})));
+    settle(cx);
+    assert_eq!(probe_work(cx), Some(Work::Probe));
+    assert!(inline_answer_has_focus(cx));
+
+    type_text(cx, "123456");
+    keys(cx, "enter");
+    let (answer, sent) = one_command(&mut helm, Method::Post, "/api/ssh-questions/this-check");
+    assert_eq!(sent, json!({"action": "send", "answer": "123456"}));
+    push_questions(
+        &mut helm,
+        &[inline_question("other-check")],
+        &["this-check"],
+    );
+    setup_completed(
+        &mut helm,
+        json!({"attempt": "this-check", "result": "ready"}),
+    );
+    settle(cx);
+    assert!(
+        helm.commands().is_empty(),
+        "the ready result alone must leave the focused Send's mark pending"
+    );
+    assert_eq!(probe_work(cx), Some(Work::Probe));
+
+    helm.reply(answer, 204, None);
+    settle(cx);
+    let (probe, replayed) = one_probe(&mut helm);
+    assert_eq!(
+        replayed, body,
+        "discovery must use exactly the confirmed draft"
+    );
+    helm.reply(
+        probe,
+        200,
+        Some(json!({
+            "result": "provisionable", "probe_id": "p-1", "plan": {}, "confirmation": "the plan",
+            "steps": { "lead": "lead", "steps": [], "kept": null },
+        })),
+    );
+    settle(cx);
+    assert!(
+        label(cx, "setup-title").is_some(),
+        "the setup confirmation opened"
+    );
+}
+
+/// Cancellation answers the visible question only. The failed setup master releases the busy draft and keeps both
+/// values so the operator can edit them and start an explicit retry.
+#[gpui::test]
+fn cancel_inline_ssh_sign_in_keeps_the_destination_and_alias(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_for_setup(cx);
+    open_dialog(cx);
+    type_text(cx, "dev@newbox");
+    keys(cx, "tab");
+    type_text(cx, "newbox1");
+    click(cx, "add-host-submit");
+    let (probe, _) = one_probe(&mut helm);
+    helm.reply(probe, 202, Some(json!({"attempt": "this-check"})));
+    push_questions(&mut helm, &[inline_question("this-check")], &[]);
+    settle(cx);
+
+    assert!(
+        inline_answer_has_focus(cx),
+        "the draft owns the visible question"
+    );
+    keys(cx, "escape");
+    let (answer, sent) = one_command(&mut helm, Method::Post, "/api/ssh-questions/this-check");
+    assert_eq!(sent, json!({"action": "cancel"}));
+    push_questions(&mut helm, &[], &["this-check"]);
+    helm.reply(answer, 204, None);
+    setup_completed(
+        &mut helm,
+        json!({"attempt": "this-check", "result": "failed", "reason": "SSH sign-in stopped"}),
+    );
+    settle(cx);
+    assert!(any_open(cx));
+    assert_eq!(destination(cx), "dev@newbox");
+    assert_eq!(alias(cx), "newbox1");
+    assert_eq!(probe_work(cx), None);
+    assert!(helm.commands().is_empty());
+}
+
+/// No question id exists while an SSH peer is still connecting. Closing Add must cancel its attempt, including
+/// when the pending reply crosses the dismissal. Otherwise its question can chime with no dialog to answer it.
+#[gpui::test]
+fn closing_add_before_the_first_question_cancels_its_attempt(cx: &mut TestAppContext) {
+    let (mut helm, cx, _add) = open_rail_for_setup(cx);
+    for reply_before_close in [false, true] {
+        open_dialog(cx);
+        type_text(cx, "dev@newbox");
+        click(cx, "add-host-submit");
+        let (probe, _) = one_probe(&mut helm);
+        let reply = Some(json!({"attempt": "silent-check"}));
+        if reply_before_close {
+            helm.reply(probe, 202, reply.clone());
+            settle(cx);
+        }
+        cx.update(|_, cx| {
+            let dialog = layers::last_opened::<AddHostDialog>(cx).expect("the draft is open");
+            let sign_in = dialog.read(cx).sign_in.as_ref();
+            assert_eq!(
+                sign_in.map(|pending| pending.attempt.as_str()),
+                reply_before_close.then_some("silent-check"),
+                "only the 202 associates the attempt with the draft",
+            );
+            assert!(
+                sign_in.is_none_or(|pending| pending.form.is_none()),
+                "the host has yet to ask its first question",
+            );
+        });
+        keys(cx, "escape");
+        assert!(!any_open(cx));
+        if !reply_before_close {
+            helm.reply(probe, 202, reply);
+            settle(cx);
+        }
+        let commands = helm.commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].method, Method::Post);
+        assert_eq!(
+            commands[0].path,
+            "/api/ssh-sign-in-drafts/silent-check/cancel"
+        );
+        helm.reply(commands[0].id, 204, None);
+        settle(cx);
+        assert_eq!(probe_work(cx), None);
+    }
+}
+
+/// Complete the initial snapshot before pushing incremental changes to the two setup sign-in collections.
+fn open_rail_for_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, FocusHandle) {
+    open_rail_with(
+        cx,
+        vec![
+            crate::sign_in::tests::questions(&[]),
+            CollectionState {
+                collection: Collection::SshSignInCompletions,
+                meta: test_support::meta(&[]),
+                entries: Vec::new(),
+            },
+        ],
+    )
+}
+
+fn inline_question(attempt: &str) -> SshQuestion {
+    SshQuestion {
+        id: attempt.into(),
+        attempt: attempt.into(),
+        target: SshQuestionTarget::Draft {
+            draft: attempt.into(),
+        },
+        purpose: SshConnectionPurpose::Setup,
+        startup: false,
+        prompt: "Verification code:".into(),
+        notice: false,
+        expires_at: i64::MAX,
+    }
+}
+
+fn push_questions(helm: &mut FakeHelm, shown: &[SshQuestion], gone: &[&str]) {
+    let state = crate::sign_in::tests::questions(shown);
+    helm.push(CollectionChanges {
+        collection: state.collection,
+        meta: state.meta,
+        upsert: state.entries,
+        remove: gone.iter().map(|id| (*id).into()).collect(),
+    });
+}
+
+fn setup_completed(helm: &mut FakeHelm, value: Value) {
+    helm.push(CollectionChanges {
+        collection: Collection::SshSignInCompletions,
+        meta: test_support::meta(&["this-check"]),
+        upsert: vec![KeyedEntry {
+            key: "this-check".into(),
+            value,
+        }],
+        remove: Vec::new(),
+    });
+}
+
+fn inline_answer_has_focus(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| {
+        let dialog = layers::last_opened::<AddHostDialog>(cx).expect("the draft is open");
+        let (_, form) = dialog
+            .read(cx)
+            .sign_in
+            .as_ref()
+            .and_then(|sign_in| sign_in.form.as_ref())
+            .expect("the draft's setup question is open");
+        form.read(cx).first_stop(cx).is_focused(window)
+    })
 }
 
 /// Why this matters: adding a host while a session is being launched is the race the old app's page-wide token kept

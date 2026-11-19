@@ -64,6 +64,14 @@ pub enum RunStatus {
     Failed,
 }
 
+/// The accepted identity of a long host operation. A desktop input mark can follow this run's setup sign-in
+/// while its progress is still running.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunAccepted {
+    pub host_id: i64,
+    pub run_id: String,
+}
+
 /// One host's provisioning progress: the run this helm process retains for it, or an explicit idle view for a host
 /// that has none.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

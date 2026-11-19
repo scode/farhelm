@@ -62,6 +62,7 @@ use super::identity::{display_name, host_mark};
 use super::listed;
 use super::refusal;
 use super::setup::PlanBody;
+use super::setup_sign_in;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, StatusMark, Tier, copy_button};
 use crate::focus::Mark;
@@ -177,9 +178,6 @@ pub(super) fn start(host: i64, mark: Mark, window: &mut Window, cx: &mut App) {
         refuse_during_launch(&view, cx);
         return;
     }
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
     let command = match plan_command(host) {
         Ok(command) => command,
         Err(error) => {
@@ -190,25 +188,30 @@ pub(super) fn start(host: i64, mark: Mark, window: &mut Window, cx: &mut App) {
     let key = OpKey::host(&HostView::key(host));
     let planned = key.clone();
     let handle = window.window_handle();
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, move |settled, cx| {
-            match &settled.outcome {
-                // The host as listed when the plan arrives, which is what the confirmation freezes: up to the helm's
-                // host-wait bound can have passed since the press.
-                Outcome::Done(body) => {
-                    let view = listed(host, cx).unwrap_or(view);
-                    offer(view, &planned, body.clone(), mark, handle, cx)
-                }
-                Outcome::Refused(refusal) => {
-                    let view = listed(host, cx).unwrap_or(view);
-                    if refused(&view, refusal, mark, handle, cx) {
-                        forget(&planned, cx);
-                    }
-                }
-                // The plan request is answered 200; the helm never starts an uninstall without a confirmed plan.
-                Outcome::Accepted(_) => {}
+    let started = setup_sign_in::plan(key, command, mark, handle, cx, move |result, mark, cx| {
+        let settled = match result {
+            Ok(settled) => settled,
+            Err(reason) => {
+                note(&planned, reason, cx);
+                return;
             }
-        })
+        };
+        match &settled.outcome {
+            // The host as listed when the plan arrives, which is what the confirmation freezes: up to the helm's
+            // host-wait bound can have passed since the press.
+            Outcome::Done(body) => {
+                let view = listed(host, cx).unwrap_or(view);
+                offer(view, &planned, body.clone(), mark, handle, cx)
+            }
+            Outcome::Refused(refusal) => {
+                let view = listed(host, cx).unwrap_or(view);
+                if refused(&view, refusal, mark, handle, cx) {
+                    forget(&planned, cx);
+                }
+            }
+            // The pending reply has already been handled by the sign-in continuation.
+            Outcome::Accepted(_) => {}
+        }
     });
     match started {
         // A line about an earlier press not started belongs to that press; one has started since.
@@ -379,6 +382,8 @@ fn submit(plan: Plan, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
                 if refused(&view, refusal, mark, window, cx) {
                     forget(&confirmed, cx);
                 }
+            } else {
+                setup_sign_in::accepted(&settled.outcome, false, mark, window, cx);
             }
         })
     });

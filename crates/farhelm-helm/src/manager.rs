@@ -82,6 +82,7 @@ use farhelm_proto::{
     ErrorKind, SESSIONS_CHANGED_MIN_GAP, SessionInfo, SessionStatus, WhenStatusUnanswered,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -1087,7 +1088,7 @@ struct Takeover {
 /// receiver that was not waiting still sees the change on its next check),
 /// and so two requests that arrive together collapse into one restart
 /// rather than two.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 struct Nudge {
     /// Monotonic; only its CHANGES are meaningful.
     revision: u64,
@@ -1104,6 +1105,80 @@ struct Nudge {
     /// restarting the supervisor's own unit: the host is coming back by
     /// our own action, and a single probe would race that start latency.
     fresh_window: bool,
+    /// A watch can coalesce publications. Preserve an unseen user retry or retarget even if the latest
+    /// publication is from provisioning.
+    last_interrupt: u64,
+    interrupt_fresh_window: bool,
+    /// If the actor keeps its asking dial, record its number for the requester to recognize its refusal.
+    preserved_attempt: Option<Arc<AtomicU64>>,
+    /// Attach owns the fresh window and waits on this receipt. A background discovery can request a plain
+    /// retry at the same time, but it has no waiter and must not erase Attach's pending receipt.
+    last_attach: Option<(u64, Arc<AtomicU64>)>,
+}
+
+impl Nudge {
+    fn send(
+        channel: &watch::Sender<Self>,
+        fresh_window: bool,
+        preserved_attempt: Option<Arc<AtomicU64>>,
+    ) {
+        channel.send_modify(|nudge| {
+            nudge.revision += 1;
+            nudge.fresh_window = fresh_window;
+            if preserved_attempt.is_none() {
+                nudge.last_interrupt = nudge.revision;
+                nudge.interrupt_fresh_window = fresh_window;
+            } else if fresh_window {
+                nudge.last_attach = preserved_attempt
+                    .as_ref()
+                    .map(|receipt| (nudge.revision, Arc::clone(receipt)));
+            }
+            nudge.preserved_attempt = preserved_attempt;
+        });
+    }
+
+    fn preserves_sign_in(&self) -> bool {
+        self.preserved_attempt.is_some()
+    }
+}
+
+/// The receiver remembers the last request it read so a coalesced update cannot mask a pending interruption.
+struct NudgeReceiver {
+    channel: watch::Receiver<Nudge>,
+    seen: u64,
+}
+
+impl NudgeReceiver {
+    fn new(channel: watch::Receiver<Nudge>) -> Self {
+        Self { channel, seen: 0 }
+    }
+
+    fn read(&mut self) -> Nudge {
+        let mut request = self.channel.borrow_and_update().clone();
+        if request.last_interrupt > self.seen {
+            request.preserved_attempt = None;
+            request.fresh_window |= request.interrupt_fresh_window;
+        } else if let Some((revision, receipt)) = &request.last_attach
+            && *revision > self.seen
+        {
+            request.preserved_attempt = Some(Arc::clone(receipt));
+            request.fresh_window = true;
+        }
+        self.seen = request.revision;
+        request
+    }
+}
+
+/// The numbering fence for a provisioning dial, including a dial that was already asking when Attach requested it.
+pub(crate) struct ProvisioningRetry {
+    after: u64,
+    preserved: Arc<AtomicU64>,
+}
+
+impl ProvisioningRetry {
+    pub(crate) fn sees_refusal(&self, attempt: u64) -> bool {
+        attempt > self.after || (attempt != 0 && attempt == self.preserved.load(Ordering::Acquire))
+    }
 }
 
 /// The manager's handle on one running actor.
@@ -1198,17 +1273,14 @@ impl ActorHandle {
         if !armed {
             return Err(ManagerError::TakeoverSuperseded(self.row.id));
         }
-        self.nudge(true);
+        self.nudge(true, None);
         Ok(())
     }
 
     /// Wake the actor with an explicit retry policy, replacing any policy
     /// carried by the previous nudge.
-    fn nudge(&self, fresh_window: bool) {
-        self.nudge.send_modify(|nudge| {
-            nudge.revision += 1;
-            nudge.fresh_window = fresh_window;
-        });
+    fn nudge(&self, fresh_window: bool, preserved_attempt: Option<Arc<AtomicU64>>) {
+        Nudge::send(&self.nudge, fresh_window, preserved_attempt);
     }
 }
 
@@ -1745,10 +1817,7 @@ impl ConnectionManager {
                 hold = status.incarnation;
                 status.hold = Some(hold);
             });
-            handle.nudge.send_modify(|nudge| {
-                nudge.revision += 1;
-                nudge.fresh_window = false;
-            });
+            handle.nudge(false, None);
             let running = !handle.task.is_finished() && !handle.nudge.is_closed();
             (handle.status.subscribe(), hold, running, withdrawn)
         };
@@ -1781,10 +1850,7 @@ impl ConnectionManager {
                 status.hold = None;
                 status.parked = None;
             });
-            handle.nudge.send_modify(|nudge| {
-                nudge.revision += 1;
-                nudge.fresh_window = fresh_window;
-            });
+            handle.nudge(fresh_window, None);
         }
     }
 
@@ -2005,10 +2071,7 @@ impl ConnectionManager {
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         });
                         retire_withdrawn(withdrawn);
-                        handle.nudge.send_modify(|nudge| {
-                            nudge.revision += 1;
-                            nudge.fresh_window = true;
-                        });
+                        handle.nudge(true, None);
                         shape_changed = true;
                     } else {
                         // An alias edit needs no reconnection, but every open
@@ -2164,7 +2227,9 @@ impl ConnectionManager {
                 if gate_rx.await.is_err() {
                     return ActorCompletion::NeverStarted;
                 }
-                actor.run(row, nudge_rx, refresh_rx, startup).await;
+                actor
+                    .run(row, NudgeReceiver::new(nudge_rx), refresh_rx, startup)
+                    .await;
                 ActorCompletion::Ran
             }
         };
@@ -3083,7 +3148,7 @@ impl ConnectionManager {
                 error.downcast_ref::<HostStoreError>(),
                 Some(HostStoreError::IdentityClaimed { .. })
             ) {
-                self.nudge_now(host, false).await?;
+                self.nudge_now(host, false, None).await?;
             }
             return Err(error.context(format!("adopting host {host}'s new identity")));
         }
@@ -3183,7 +3248,7 @@ impl ConnectionManager {
     /// registry entry, which the REST edge reports as a 404 rather than
     /// answering 200 to a retry that could not possibly have happened.
     pub async fn retry_now(&self, host: HostId) -> anyhow::Result<bool> {
-        Ok(self.nudge_now(host, false).await?.is_some())
+        Ok(self.nudge_now(host, false, None).await?.is_some())
     }
 
     /// Authorize the choice shown on the frozen Hosts row. The actor
@@ -3252,7 +3317,21 @@ impl ConnectionManager {
     /// already performed, where this call nudges nothing; it is never a
     /// false early stop, only the attach step's ordinary timeout.
     pub async fn retry_now_with_fresh_window(&self, host: HostId) -> anyhow::Result<Option<u64>> {
-        self.nudge_now(host, true).await
+        self.nudge_now(host, true, None).await
+    }
+
+    /// Registration and post-install attachment need a new dial only when SSH has no question to finish.
+    /// Check at the actor, where a question can open between a caller's status read and dispatch.
+    pub(crate) async fn retry_for_provisioning(
+        &self,
+        host: HostId,
+        fresh_window: bool,
+    ) -> anyhow::Result<Option<ProvisioningRetry>> {
+        let preserved = Arc::new(AtomicU64::new(0));
+        Ok(self
+            .nudge_now(host, fresh_window, Some(Arc::clone(&preserved)))
+            .await?
+            .map(|after| ProvisioningRetry { after, preserved }))
     }
 
     /// The shared body of [`Self::retry_now`] and
@@ -3261,7 +3340,12 @@ impl ConnectionManager {
     /// window the nudge carries differs. Returns the attempt ticket
     /// [`Self::retry_now_with_fresh_window`] documents, or `None` when there
     /// is no such host.
-    async fn nudge_now(&self, host: HostId, fresh_window: bool) -> anyhow::Result<Option<u64>> {
+    async fn nudge_now(
+        &self,
+        host: HostId,
+        fresh_window: bool,
+        preserved_attempt: Option<Arc<AtomicU64>>,
+    ) -> anyhow::Result<Option<u64>> {
         // Read FIRST, before deciding between the live and the revive
         // branch and before any nudge is sent. Read after the nudge, a dial
         // the nudge itself started could already have drawn a number at or
@@ -3283,7 +3367,7 @@ impl ConnectionManager {
             let retired = matches!(handle.status.borrow().state, HostState::Retired { .. });
             let unreachable_actor = handle.nudge.is_closed() || handle.task.is_finished();
             if !(retired || unreachable_actor) {
-                handle.nudge(fresh_window);
+                handle.nudge(fresh_window, preserved_attempt);
                 return Ok(Some(ticket));
             }
             true
@@ -3626,11 +3710,16 @@ fn display_destination(row: &HostRow) -> String {
 /// actor's handle is gone, so an abort is already on its way, and the
 /// alternative (returning immediately, forever) would spin the loop hot in
 /// the window before that abort lands.
-async fn next_nudge(nudge: &mut watch::Receiver<Nudge>) -> Nudge {
-    match nudge.changed().await {
-        Ok(()) => *nudge.borrow_and_update(),
+async fn next_nudge(nudge: &mut NudgeReceiver) -> Nudge {
+    match nudge.channel.changed().await {
+        Ok(()) => nudge.read(),
         Err(_) => std::future::pending().await,
     }
+}
+
+/// A stopped SSH attempt needs a user retry or a registry change. Provisioning cannot start it again.
+async fn wait_after_sign_in_stopped(nudge: &mut NudgeReceiver) {
+    while next_nudge(nudge).await.preserves_sign_in() {}
 }
 
 /// Whether [`HostActor::publish_refresh`] writes unconditionally, or only
@@ -3684,14 +3773,15 @@ async fn hold_at_gate(slot: &DuplicateGateSlot, destination: &str) {
 /// the row must not publish its result, because the manager has already
 /// published the new row's state and the actor's would overwrite it with
 /// the old connection's.
-fn taken_nudge(nudge: &mut watch::Receiver<Nudge>) -> Option<Nudge> {
+fn taken_nudge(nudge: &mut NudgeReceiver) -> Option<Nudge> {
     // An `Err` means the sender is gone — this actor's handle was dropped
     // and its abort is on the way — which is not a pending request, so it
     // reads the same as "nothing arrived".
     nudge
+        .channel
         .has_changed()
         .is_ok_and(|changed| changed)
-        .then(|| *nudge.borrow_and_update())
+        .then(|| nudge.read())
 }
 
 #[cfg(test)]
@@ -3893,7 +3983,7 @@ impl SshCapability {
 fn take_settled_outcome(
     outcome: AttemptOutcome,
     active: &mut bool,
-    nudge: &mut watch::Receiver<Nudge>,
+    nudge: &mut NudgeReceiver,
 ) -> Option<AttemptOutcome> {
     // An interrupted attempt already consumed the nudge that ended it and
     // carries that request's fresh-window decision itself. Leave any newer
@@ -3905,6 +3995,9 @@ fn take_settled_outcome(
     let Some(request) = taken_nudge(nudge) else {
         return Some(outcome);
     };
+    if request.preserves_sign_in() && matches!(outcome, AttemptOutcome::SignInNeeded) {
+        return Some(outcome);
+    }
     *active |= request.fresh_window;
     None
 }
@@ -4014,7 +4107,7 @@ impl HostActor {
     async fn run(
         self,
         mut row: HostRow,
-        mut nudge: watch::Receiver<Nudge>,
+        mut nudge: NudgeReceiver,
         mut refresh: watch::Receiver<u64>,
         mut startup: bool,
     ) {
@@ -4098,7 +4191,11 @@ impl HostActor {
                 // ownership evidence. Keep provisioning blocked, including
                 // while the attempt is in flight above.
                 self.set_refusal(refusal, attempt);
-                next_nudge(&mut nudge).await;
+                if matches!(outcome, AttemptOutcome::SignInNeeded) {
+                    wait_after_sign_in_stopped(&mut nudge).await;
+                } else {
+                    next_nudge(&mut nudge).await;
+                }
                 active = true;
                 continue;
             }
@@ -4206,7 +4303,7 @@ impl HostActor {
                 }
                 AttemptOutcome::SignInNeeded => {
                     self.set_refusal(HostState::SignInNeeded, attempt);
-                    next_nudge(&mut nudge).await;
+                    wait_after_sign_in_stopped(&mut nudge).await;
                     active = true;
                 }
                 AttemptOutcome::Unverified { recorded } => {
@@ -4367,7 +4464,7 @@ impl HostActor {
         ladder: &[Duration],
         active: bool,
         incarnation: u64,
-        nudge: &mut watch::Receiver<Nudge>,
+        nudge: &mut NudgeReceiver,
         startup: bool,
     ) -> (AttemptOutcome, u64) {
         let mut last: Option<AttemptOutcome> = None;
@@ -4422,11 +4519,25 @@ impl HostActor {
                 .attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                 + 1;
-            let outcome = tokio::select! {
-                nudge = next_nudge(nudge) => AttemptOutcome::Interrupted {
-                    fresh_window: nudge.fresh_window,
-                },
-                outcome = self.deadlined_attempt(row, active, incarnation, startup && attempt == 0) => outcome,
+            let asked = std::sync::atomic::AtomicBool::new(false);
+            let dial =
+                self.deadlined_attempt(row, active, incarnation, startup && attempt == 0, &asked);
+            tokio::pin!(dial);
+            let mut fresh_after_question = false;
+            let outcome = loop {
+                tokio::select! {
+                    request = next_nudge(nudge) => {
+                        if let Some(preserved) = request.preserved_attempt
+                            && asked.load(Ordering::Relaxed)
+                        {
+                            preserved.store(number, Ordering::Release);
+                            fresh_after_question |= request.fresh_window;
+                        } else {
+                            break AttemptOutcome::Interrupted { fresh_window: request.fresh_window };
+                        }
+                    }
+                    outcome = &mut dial => break outcome,
+                }
             };
             match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
@@ -4436,6 +4547,11 @@ impl HostActor {
                         error = error.as_str(),
                         "host connection attempt failed"
                     );
+                    // An answer got SSH through. If the new supervisor was still coming up, Attach's fresh
+                    // retry window starts now, even when this was the last dial of the old window.
+                    if fresh_after_question {
+                        return (AttemptOutcome::Interrupted { fresh_window: true }, number);
+                    }
                     last = Some(outcome);
                 }
                 _ => return (outcome, number),
@@ -4462,6 +4578,7 @@ impl HostActor {
         active: bool,
         incarnation: u64,
         startup: bool,
+        asked: &std::sync::atomic::AtomicBool,
     ) -> AttemptOutcome {
         let prior_marker_seen = {
             let mut capability = self.ssh_capability.lock().expect("SSH capability mutex");
@@ -4476,12 +4593,20 @@ impl HostActor {
         };
         // Sign-in has its own bounded dial and a longer deadline while the user answers. The established
         // connection then gets the normal deadline for opening the supervisor stream and completing its hello.
-        let mut waiting = |open| self.publish_sign_in_stage(incarnation, open);
-        if let Err(error) = self
+        let mut waiting = |open| {
+            if open {
+                asked.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            self.publish_sign_in_stage(incarnation, open);
+        };
+        let sign_in = self
             .transport
             .sign_in(row, self.cadence.attempt_timeout, startup, &mut waiting)
-            .await
-        {
+            .await;
+        // Only the interactive preflight is worth keeping. Once it has settled, an Attach can restart an
+        // ordinary supervisor dial through the authenticated master, so an old hello cannot decide this run.
+        asked.store(false, Ordering::Relaxed);
+        if let Err(error) = sign_in {
             if error.is::<crate::ssh_sign_in::SignInNeeded>() {
                 return AttemptOutcome::SignInNeeded;
             }
@@ -5147,7 +5272,7 @@ impl HostActor {
         identity: Option<String>,
         build_version: String,
         incarnation: u64,
-        nudge: &mut watch::Receiver<Nudge>,
+        nudge: &mut NudgeReceiver,
         refresh: &mut watch::Receiver<u64>,
     ) {
         // Anything sent before this connection existed is not about it.
@@ -5886,11 +6011,7 @@ impl HostActor {
     /// around to waiting — and so the request's own terms (see
     /// [`Nudge::fresh_window`]) survive with it, which a bare notification
     /// could not carry.
-    async fn wait_or_nudge(
-        &self,
-        nudge: &mut watch::Receiver<Nudge>,
-        wait: Duration,
-    ) -> Option<Nudge> {
+    async fn wait_or_nudge(&self, nudge: &mut NudgeReceiver, wait: Duration) -> Option<Nudge> {
         tokio::select! {
             _ = tokio::time::sleep(wait) => None,
             nudge = next_nudge(nudge) => Some(nudge),
@@ -5905,7 +6026,7 @@ impl HostActor {
     /// that simply elapsed means keep re-probing, and one cut short by a
     /// nudge means the ladder only if that nudge asked for it (a registry
     /// edit does; a plain retry does not — see [`Nudge::fresh_window`]).
-    async fn hold(&self, nudge: &mut watch::Receiver<Nudge>, wait: Duration) -> bool {
+    async fn hold(&self, nudge: &mut NudgeReceiver, wait: Duration) -> bool {
         self.wait_or_nudge(nudge, wait)
             .await
             .is_some_and(|nudge| nudge.fresh_window)
@@ -7172,13 +7293,66 @@ mod tests {
 
     /// Build a receiver whose changed bit represents a retarget already
     /// waiting at the settled-result boundary.
-    fn pending_nudge(fresh_window: bool) -> (watch::Sender<Nudge>, watch::Receiver<Nudge>) {
+    fn pending_nudge(fresh_window: bool) -> (watch::Sender<Nudge>, NudgeReceiver) {
         let (sender, receiver) = watch::channel(Nudge::default());
-        sender.send_modify(|nudge| {
-            nudge.revision = 1;
-            nudge.fresh_window = fresh_window;
-        });
-        (sender, receiver)
+        Nudge::send(&sender, fresh_window, None);
+        (sender, NudgeReceiver::new(receiver))
+    }
+
+    /// Both requests can arrive while an actor is between polls. Provisioning can preserve an SSH question
+    /// only once the actor has observed the explicit retarget or Sign in that superseded it.
+    #[farhelm_testtrace::test]
+    fn provisioning_cannot_mask_an_unread_retarget_or_sign_in() {
+        let (sender, mut receiver) = pending_nudge(true);
+        Nudge::send(&sender, false, Some(Arc::new(AtomicU64::new(0))));
+        let request = taken_nudge(&mut receiver).expect("the two requests coalesced");
+        assert!(!request.preserves_sign_in());
+        assert!(
+            request.fresh_window,
+            "the retarget's fresh window survives too"
+        );
+
+        Nudge::send(&sender, false, Some(Arc::new(AtomicU64::new(0))));
+        let request = taken_nudge(&mut receiver).expect("a later provisioning request arrived");
+        assert!(request.preserves_sign_in());
+        assert!(!request.fresh_window);
+    }
+
+    /// Discovery can race Attach by registering the same working host. The run still owns the fresh
+    /// retry window and needs the receipt if its existing SSH question resolves to a supervisor refusal.
+    #[farhelm_testtrace::test]
+    fn discovery_cannot_mask_an_unread_attach_window_or_receipt() {
+        let (sender, receiver) = watch::channel(Nudge::default());
+        let mut receiver = NudgeReceiver::new(receiver);
+        let attach = Arc::new(AtomicU64::new(0));
+        let discover = Arc::new(AtomicU64::new(0));
+        Nudge::send(&sender, true, Some(Arc::clone(&attach)));
+        Nudge::send(&sender, false, Some(Arc::clone(&discover)));
+        let request = taken_nudge(&mut receiver).expect("the two requests coalesced");
+        assert!(request.fresh_window);
+        assert!(Arc::ptr_eq(&request.preserved_attempt.unwrap(), &attach));
+
+        Nudge::send(&sender, false, Some(Arc::clone(&discover)));
+        let request = taken_nudge(&mut receiver).expect("a later discovery arrived");
+        assert!(!request.fresh_window);
+        assert!(Arc::ptr_eq(&request.preserved_attempt.unwrap(), &discover));
+    }
+
+    /// A refusal after Attach's request is current. A numbered dial already running at that boundary counts
+    /// only when the actor explicitly kept it, even if its question left the screen before Attach started.
+    #[farhelm_testtrace::test]
+    fn provisioning_accepts_a_refusal_only_from_a_new_or_preserved_dial() {
+        let preserved = Arc::new(AtomicU64::new(0));
+        let ticket = ProvisioningRetry {
+            after: 42,
+            preserved: Arc::clone(&preserved),
+        };
+        assert!(!ticket.sees_refusal(0));
+        assert!(!ticket.sees_refusal(39));
+        assert!(ticket.sees_refusal(43));
+        preserved.store(39, Ordering::Release);
+        assert!(ticket.sees_refusal(39));
+        assert!(!ticket.sees_refusal(38));
     }
 
     /// Install a one-shot gate in one of `manager`'s publication gate slots,
@@ -7252,7 +7426,8 @@ mod tests {
             reported: "new".to_string(),
         };
         let mut active = false;
-        let (_sender, mut no_nudge) = watch::channel(Nudge::default());
+        let (_sender, receiver) = watch::channel(Nudge::default());
+        let mut no_nudge = NudgeReceiver::new(receiver);
         assert!(matches!(
             take_settled_outcome(outcome, &mut active, &mut no_nudge),
             Some(AttemptOutcome::Mismatch { .. })
@@ -10584,7 +10759,7 @@ mod tests {
         // The retry under test lands in that window.
         let ticket = fixture
             .manager
-            .nudge_now(host, false)
+            .nudge_now(host, false, None)
             .await
             .unwrap()
             .expect("the host exists");

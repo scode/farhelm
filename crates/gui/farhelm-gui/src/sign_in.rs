@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use farhelm_helm_client::Collections;
+use farhelm_proto::provisioning::{ProvisioningView, RunStatus};
 use farhelm_proto::ui_channel::{HostStateView, HostView, SshConnectionPurpose, SshQuestion};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, FontWeight, Global,
@@ -18,6 +19,7 @@ use gpui::{
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::setup_sign_in::Waiting;
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::sign_in_form::SignInForm;
 use crate::{session, theme};
@@ -66,7 +68,13 @@ pub(crate) fn pending_on(collections: &Collections, host: i64) -> Option<&SshQue
     collections
         .ordered::<SshQuestion>()
         .into_iter()
-        .find(|question| question.host == host)
+        .filter(|question| question.target.host() == Some(host))
+        .min_by_key(|question| {
+            (
+                question.purpose != SshConnectionPurpose::Setup,
+                question.expires_at,
+            )
+        })
 }
 
 /// Why the window may focus a question without a press on its own control.
@@ -75,6 +83,8 @@ enum Intent {
     Startup,
     /// A user-started connection attempt on this host.
     Host(i64),
+    /// An Answer button can scroll its exact question into view before opening the popover.
+    Question(String),
     /// A Send or security-key touch may lead to a further question within the same sign-in.
     Followup(Followup),
 }
@@ -85,6 +95,26 @@ struct Followup {
     previous: String,
     attempt: String,
     already_waiting: HashSet<String>,
+}
+
+/// A confirmed Add can start both masters independently. Each gets one automatic opening. An accepted answer
+/// carries the mark to the other master even if its question only arrives after the Send.
+struct RunIntent {
+    id: String,
+    mark: Mark,
+    setup: bool,
+    sessions: bool,
+    handoff: Option<String>,
+}
+
+impl RunIntent {
+    /// The two purposes are tracked independently because the order follows the network.
+    fn offered(&mut self, purpose: SshConnectionPurpose) -> &mut bool {
+        match purpose {
+            SshConnectionPurpose::Setup => &mut self.setup,
+            SshConnectionPurpose::Sessions => &mut self.sessions,
+        }
+    }
 }
 
 /// A button's location and focus stop describe the same painted control. An offscreen stop can be revealed
@@ -106,6 +136,8 @@ impl Followup {
 pub(crate) struct SignIn {
     intent: Option<(Intent, Mark)>,
     open: Option<(String, LayerId)>,
+    setup: HashMap<String, Entity<Waiting>>,
+    runs: session::PerSession<HashMap<i64, RunIntent>>,
     _questions: session::ObservingCurrent,
 }
 
@@ -117,10 +149,14 @@ impl SignIn {
         let owner = cx.new(|cx| Self {
             intent: Some((Intent::Startup, Mark::at_ui_session_start(cx))),
             open: None,
+            setup: HashMap::new(),
+            runs: session::PerSession::default(),
             _questions: session::observe_current(cx, move |owner: &mut Self, cx| {
                 let _ = handle.update(cx, |_, window, cx| {
                     owner.close_answered(window, cx);
                     owner.clear_lost_intent(cx);
+                    owner.retire_runs(cx);
+                    owner.setup.retain(|_, wait| wait.read(cx).active());
                 });
             }),
         });
@@ -166,12 +202,39 @@ impl SignIn {
                             )
                         })
                 })
+        } else if let Intent::Question(id) = intent {
+            !question_exists(id, cx)
         } else {
             false
         };
         if focus::has_moved_on(mark, cx) || finished {
             self.intent = None;
         }
+    }
+
+    /// The run only owns the setup master while it is running. A newly added host's sessions can connect after
+    /// the run ends. Once that connection settles, a later reconnect needs an independent focus intent.
+    fn retire_runs(&mut self, cx: &App) {
+        let runs = self.runs.current(cx);
+        let Some(store) = session::current_store(cx) else {
+            runs.clear();
+            return;
+        };
+        let collections = store.read(cx).collections();
+        runs.retain(|host, intent| {
+            let key = HostView::key(*host);
+            if let Some(run) = collections.get::<ProvisioningView>(&key) {
+                intent.setup &=
+                    run.run_id.as_ref() == Some(&intent.id) && run.status == RunStatus::Running;
+            }
+            intent.sessions &= collections.get::<HostView>(&key).is_some_and(|host| {
+                !matches!(
+                    host.state,
+                    HostStateView::Connected { .. } | HostStateView::SignInNeeded
+                )
+            });
+            intent.setup || intent.sessions
+        });
     }
 
     /// A deferred request from a drawn control. All automatic opens pass the same input and layer checks.
@@ -184,24 +247,39 @@ impl SignIn {
         cx: &mut App,
     ) {
         self.close_answered(window, cx);
-        let Some((intent, mark)) = &self.intent else {
-            return;
-        };
-        if focus::has_moved_on(mark, cx) {
-            self.intent = None;
-            return;
-        }
         if self.open.is_some() || layers::focus_layer_open(window, cx) {
             return;
         }
-        let eligible = match intent {
-            Intent::Startup => question.startup,
-            Intent::Host(host) => *host == question.host,
-            Intent::Followup(followup) => followup.allows(&question, cx),
+        let setup_mark = self
+            .setup
+            .get(&question.attempt)
+            .map(|wait| wait.read(cx).mark());
+        let run_mark = question.target.host().and_then(|host| {
+            let run = self.runs.current(cx).get_mut(&host)?;
+            (*run.offered(question.purpose)).then_some(run.mark)
+        });
+        let mark = setup_mark
+            .into_iter()
+            .chain(run_mark)
+            .chain(self.intent.as_ref().and_then(|(intent, mark)| {
+                let eligible = match intent {
+                    Intent::Startup => question.startup,
+                    Intent::Host(host) => {
+                        question.target.host() == Some(*host)
+                            && question.purpose == SshConnectionPurpose::Sessions
+                    }
+                    Intent::Question(id) => question.id == *id,
+                    Intent::Followup(followup) => followup.allows(&question, cx),
+                };
+                eligible.then_some(*mark)
+            }))
+            .find(|mark| !focus::has_moved_on(mark, cx));
+        let Some(mark) = mark else {
+            return;
         };
-        if eligible && location.visible.get() {
-            self.show(question, name, location.anchor, *mark, window, cx);
-        } else if eligible {
+        if location.visible.get() {
+            self.show(question, name, location.anchor, mark, window, cx);
+        } else {
             // The attention and Hosts lists lay out their clipped rows too. Give their scroller a frame to reveal
             // the actual control before opening a layer beside it.
             focus::reveal_control(&location.focus, window, cx);
@@ -230,11 +308,13 @@ impl SignIn {
 
         let id = question.id.clone();
         let attempt = question.attempt.clone();
+        let host = question.target.host();
         let notice = question.notice;
         let purpose = question.purpose;
         let container = cx.focus_handle();
         let sent_id = id.clone();
         let sent_attempt = attempt.clone();
+        let waiting = self.setup.get(&attempt).map(Entity::downgrade);
         let form = cx.new(|cx| {
             SignInForm::new(
                 question,
@@ -257,9 +337,31 @@ impl SignIn {
                         already_waiting,
                     };
                     let window = window.window_handle();
-                    Box::new(move |cx| {
+                    let ready = waiting
+                        .as_ref()
+                        .and_then(WeakEntity::upgrade)
+                        .map(|wait| Waiting::answer_handoff(&wait, mark, cx));
+                    Box::new(move |accepted, cx| {
+                        if let Some(ready) = ready {
+                            ready(accepted, cx);
+                        }
+                        if !accepted {
+                            return;
+                        }
                         let _ = window.update(cx, |_, window, cx| {
-                            intend(Intent::Followup(followup), mark, window, cx);
+                            if !focus::has_moved_on(&mark, cx)
+                                && let Some(owner) = owner(window, cx)
+                            {
+                                let _ = owner.update(cx, |owner, cx| {
+                                    if let Some(run) =
+                                        host.and_then(|host| owner.runs.current(cx).get_mut(&host))
+                                        && run.handoff.as_ref() == Some(&followup.attempt)
+                                    {
+                                        run.mark = mark;
+                                    }
+                                    owner.intent = Some((Intent::Followup(followup), mark));
+                                });
+                            }
                             window.refresh();
                         });
                     })
@@ -282,6 +384,11 @@ impl SignIn {
         )
         .map(|layer| (id.clone(), layer));
         if self.open.is_some() {
+            if let Some(run) = host.and_then(|host| self.runs.current(cx).get_mut(&host))
+                && std::mem::replace(run.offered(purpose), false)
+            {
+                run.handoff = Some(attempt.clone());
+            }
             // Touching a security key is outside the app. Carry this mark to that attempt's next question even though
             // no Send button was pressed. A new attempt on this host still needs fresh input to open.
             self.intent = notice.then_some((
@@ -324,6 +431,50 @@ fn intend(intent: Intent, mark: Mark, window: &Window, cx: &mut App) {
 /// Remember which host an explicit operation started. Its later question still obeys the moved-on rule.
 pub(crate) fn started(host: i64, mark: Mark, window: &Window, cx: &mut App) {
     intend(Intent::Host(host), mark, window, cx);
+}
+
+/// Retain the operation hold for this window only. An unrelated setup question cannot use its input mark.
+pub(crate) fn watch_setup(
+    attempt: String,
+    waiting: Entity<Waiting>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(owner) = owner(window, cx) {
+        let _ = owner.update(cx, |owner, _| {
+            owner.setup.insert(attempt, waiting);
+        });
+        window.refresh();
+    }
+}
+
+/// Confirmation granted permission for this particular run. An Add also gets a second, sessions sign-in.
+pub(crate) fn started_run(
+    host: i64,
+    id: String,
+    adding: bool,
+    mark: Mark,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !focus::has_moved_on(&mark, cx)
+        && let Some(owner) = owner(window, cx)
+    {
+        let _ = owner.update(cx, |owner, cx| {
+            owner.runs.current(cx).insert(
+                host,
+                RunIntent {
+                    id,
+                    mark,
+                    setup: true,
+                    sessions: adding,
+                    handoff: None,
+                },
+            );
+            owner.retire_runs(cx);
+        });
+    }
+    window.refresh();
 }
 
 /// The same action opens the pending question from any of the three surfaces, or asks the host to retry. Only the
@@ -382,7 +533,7 @@ impl RenderOnce for Action {
             let mark = Mark::take(cx);
             if let Some(question) = question(id_host, cx) {
                 if !location.visible.get() {
-                    started(id_host, mark, window, cx);
+                    intend(Intent::Question(question.id), mark, window, cx);
                     focus::reveal_control(&location.focus, window, cx);
                 } else if let Some(owner) = &owner {
                     let _ = owner.update(cx, |owner, cx| {

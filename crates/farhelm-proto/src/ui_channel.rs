@@ -266,6 +266,8 @@ pub enum Collection {
     Approvals,
     /// Open SSH sign-in questions. Answers never enter the pushed collections.
     SshQuestions,
+    /// Terminal results of setup preflights that returned a pending reply.
+    SshSignInCompletions,
     /// Launch templates, as `GET /api/templates` serves them, keyed by name.
     Templates,
     /// Shared notices about hosts, as `GET /api/notices` serves them, keyed
@@ -1178,13 +1180,33 @@ pub enum SshConnectionPurpose {
     Setup,
 }
 
+/// A registered host can announce its question on a row. An Add host question instead belongs to one checking
+/// attempt in the dialog that requested it. Flattening keeps the registered host's existing wire field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum SshQuestionTarget {
+    Host { host: i64 },
+    Draft { draft: String },
+}
+
+impl SshQuestionTarget {
+    /// The registry id only when the question already has a host that can draw an attention row.
+    pub fn host(&self) -> Option<i64> {
+        match self {
+            Self::Host { host } => Some(*host),
+            Self::Draft { .. } => None,
+        }
+    }
+}
+
 /// One outstanding question from SSH. A fresh id on each request prevents an old answer reaching a later question.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SshQuestion {
     pub id: String,
     /// Shared by the successive questions of this SSH process. Only the question id accepts a reply.
     pub attempt: String,
-    pub host: i64,
+    #[serde(flatten)]
+    pub target: SshQuestionTarget,
     pub purpose: SshConnectionPurpose,
     /// This question comes from the first dial of a host registered when the helm started.
     /// The desktop also requires an untouched window before it can focus the answer field.
@@ -1196,6 +1218,29 @@ pub struct SshQuestion {
     pub notice: bool,
     /// Display time in Unix milliseconds. The helm owns the actual monotonic expiry.
     pub expires_at: i64,
+}
+
+/// The setup master is still being established. The original request can be repeated after the same attempt
+/// appears in the completion collection. This response authorizes no provisioner work.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingSshSignIn {
+    pub attempt: String,
+}
+
+/// A bounded, ephemeral result of an SSH preflight that returned pending to its UI command. A success means the
+/// setup socket answered after authentication, so the normal batch planning route can now be used.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SshSignInCompletion {
+    pub attempt: String,
+    #[serde(flatten)]
+    pub outcome: SshSignInOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum SshSignInOutcome {
+    Ready,
+    Failed { reason: String },
 }
 
 #[cfg(test)]
