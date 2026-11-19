@@ -30,8 +30,8 @@
 //!   refused save shows the stored value again, with the failure line under the control until its next save starts
 //!   (SPEC.md: "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic,
 //!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field the
-//!   user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads its
-//!   route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
+//!   user saves explicitly, a [`CheckoutField`] of its own. It discards a refused draft and reads back after either
+//!   a done or refused save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
 //!   explicitly, a view of its own ([`ntfy`]). So is Terminal's file-types field, which saves its preference only when
 //!   the user presses Save, keeping a refused or malformed draft ([`file_types`]). So is Credentials, whose named
 //!   secrets each save under their own key, with the Tensorlake API key form above them ([`credentials`],
@@ -145,7 +145,7 @@ use tensorlake_key::{Place, TensorlakeAccount, TensorlakeKey};
 /// What the session view's trust hint band says for an agent, kept with the rest of that agent's trust vocabulary.
 pub(crate) use agent_trust::BandWords;
 pub use agent_trust::TrustAgent;
-pub use checkout_field::{CheckoutField, FolderScope, Saved};
+pub use checkout_field::{CheckoutField, CheckoutUpdated, FolderScope};
 /// The one way the GUI asks the helm for Podman checks, for the launcher too ([`containers::check_container_hosts`]).
 pub(crate) use containers::check_container_hosts;
 /// The line saying why a press sent nothing, shared with the host settings dialog, whose saves share a host's key the way

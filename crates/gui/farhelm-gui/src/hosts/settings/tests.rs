@@ -1013,7 +1013,7 @@ fn the_checkouts_section_sits_between_appearance_and_permissions_on_every_host(
 /// what the helm stores, not a local copy: `host-checkout-folder.spec.ts` saved, refused, read back and cleared it
 /// through the host's own route. And the save must be work on the host's key, which the dialog's other saves share, so
 /// that two writes to one host never race. The old case also checked that nothing in the field overflowed, which a
-/// helm refusal longer than the field once did here. Specified: a refused folder keeps its draft and shows the helm's
+/// helm refusal longer than the field once did here. Specified: a refused folder discards its draft and shows the helm's
 /// words, wrapped inside the section however long they are; a saved one goes as `PUT /api/hosts/2/checkout-root`
 /// `{"root": ...}` under the host's key, is read back, says "Checkout folder saved" and offers Use default; Use default
 /// sends `{"root": null}`, and the read back empties the field, takes Use default away and shows the default as the
@@ -1032,7 +1032,7 @@ fn the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it(cx: &mut 
     helm.reply(id, 400, Some(json!(refusal)));
     settle(cx);
     assert_eq!(label(cx, "checkout-folder-error").as_deref(), Some(refusal));
-    assert_eq!(folder_text(cx), "~another-user/work", "the draft was kept");
+    assert_eq!(folder_text(cx), "", "the rejected draft was discarded");
     let nodes = frame(cx);
     let right = |id: &str| {
         node(&nodes, id)
@@ -1044,6 +1044,9 @@ fn the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it(cx: &mut 
         right("checkout-folder-error") <= right("host-settings-checkouts"),
         "the refusal wraps inside its section"
     );
+    let (id, _) = one_folder_command(&mut helm, Method::Get);
+    helm.reply(id, 200, Some(json!({ "root": null, "default": "~/def" })));
+    settle(cx);
 
     type_folder(cx, "/srv/box");
     click(cx, "checkout-folder-save");

@@ -1901,28 +1901,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-discards-nov18.md`
 
-## stale-checkout-settings-overwrite-cli-edits.md
-
-- Outcome: `fix spec+code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. Settings → Checkouts reads
-  the all-hosts post-clone command and host folder overrides once when it opens (settings/checkout_field.rs); an edited
-  field is saved without the value it was based on and the helm checks only for "nothing changed"
-  (crates/farhelm-helm/src/checkout_config.rs), so a command-line change made meanwhile is overwritten, and Use default
-  can clear a newer folder override. SPEC.md: "A GUI write must not undo a change an agent or the command line made
-  while that view was open"; the 2026-10-21 exception names only templates and number keys. Bucket: high (the folder
-  variant alone other).
-- Decision: the user picked "Refuse for what a launch runs; overwrite for bindings" (2026-11-18 highest-bucket triage
-  page, Q6), in their words: "this behavior should be SPECed. ideally we have a common mechanism/representation for
-  these things. minimize duplication as this ends up in various places oer time." Principle: a GUI save of configuration
-  a launch runs or depends on is refused when the value changed since the view read it; convenience bindings stay
-  last-write-wins; this is specified once and implemented through one shared mechanism.
-- Completion criteria: SPEC.md states the rule (which settings are compare-and-set and which are last-write-wins, in
-  line with the 2026-10-26 convenience-state decision), and SPEC_impl.md the shared mechanism. A save carries the value
-  it was based on, the helm refuses a mismatch, and the window re-reads, through one common representation that later
-  settings reuse rather than per-field code; the post-clone command and host folder overrides use it, with tests. Remove
-  the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/checkout-settings-stale-save.md`
-
 ## template-number-key-save-overwrites-committed-binding.md
 
 - Outcome: `discard`.

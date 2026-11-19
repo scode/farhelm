@@ -14,13 +14,11 @@
 //!   migration's orchestrator settled for reads that are not pushed. Until the read answers the field is read-only and
 //!   Save does nothing, so a slow read can never turn the empty field into a clear (the old "stays locked until its
 //!   initial read completes"). A failed read shows the helm's reason with Retry in place of Save.
-//! - **Explicit Save, of an edited draft only.** The field is a [`DraftInput`]. Save is unavailable until the user
-//!   edits the field: the draft was read once, so saving it untouched would put the old value back over a change the
-//!   command line made meanwhile (SPEC.md, "One GUI at a time"), and for the command would turn an explicit disable
-//!   (shown as an empty field) into an unset one. While the save is in flight the field is read-only and Save reads
-//!   "Saving…". A refused save keeps the draft editable with the helm's reason under it, until the next save starts. A
-//!   done save reads the route again, so the field shows what the helm stored (the old "success refetches"), and says
-//!   so ("… saved") until the user edits the field again.
+//! - **Explicit Save, of an edited draft only.** The field is a [`DraftInput`]. Save and Use default carry the exact
+//!   value last loaded, so the helm can refuse a save if the command line has since changed that field (SPEC.md,
+//!   "One GUI at a time"). Both a done and a refused save lead to a fresh read. A refusal discards the edit and shows
+//!   the helm's reason until the next save starts. The field is read-only through the save and the read that follows,
+//!   so a second save always starts from a value the user has had a chance to see.
 //! - **What Save sends.** A folder is sent trimmed, and an empty one as `null`, which clears that scope (a host then
 //!   inherits the default). A command is sent verbatim, spacing and newlines included, and only an all-whitespace one
 //!   as `null` (SPEC.md: "clears it when an all-whitespace field is saved"; "The command field preserves all other
@@ -194,10 +192,14 @@ impl Target {
         }
     }
 
-    /// `PUT` of the route with `value`, or `null` for `None` (Use default): a folder trimmed and `null` when that
-    /// leaves nothing, a command verbatim and `null` only when it is all whitespace (the module docs).
-    fn command(&self, value: Option<&str>) -> Result<Command, PathError> {
-        let body = match self {
+    /// Normalize the proposed value as usual, and send the raw base unchanged. An omitted comparison is how old
+    /// helms accept the request; a present null is a comparison against an unset value.
+    fn command(
+        &self,
+        value: Option<&str>,
+        expected: Option<Option<&str>>,
+    ) -> Result<Command, PathError> {
+        let mut body = match self {
             Target::Folder(_) => {
                 let root = value.map(str::trim).filter(|root| !root.is_empty());
                 serde_json::json!({ "root": root })
@@ -207,6 +209,9 @@ impl Target {
                 serde_json::json!({ "command": command })
             }
         };
+        if let Some(expected) = expected {
+            body["expected"] = serde_json::json!(expected);
+        }
         Ok(Command::new(
             Work::Save,
             Method::Put,
@@ -225,11 +230,14 @@ struct Stored {
     root: Option<String>,
     command: Option<String>,
     default: Option<String>,
+    /// An older helm rejects unknown keys in a PUT, so only send the base when the read advertises it.
+    #[serde(default)]
+    compare_on_save: bool,
 }
 
-/// Raised by a [`CheckoutField`] after a save the helm has done, for an owner that refreshes what depends on it (the
-/// launcher's repository suggestions and checkout preview, once its inline setup uses the field).
-pub struct Saved;
+/// Refresh dependent views when a save succeeds or a refusal's refetch finds a different stored value. The launcher's
+/// inline field can learn that the CLI configured a folder, so its old suggestions and preview need to be checked.
+pub struct CheckoutUpdated;
 
 /// One explicitly saved checkout field, as a view of its own: its label, field, note, Save (or Retry) and outcome line.
 ///
@@ -237,7 +245,7 @@ pub struct Saved;
 /// host settings dialog draws it over a host's own folder ([`FolderScope::Host`], the default as placeholder and Use
 /// default to clear the override, SPEC.md "Topology"); and the launcher's managed-checkout destination is to draw
 /// it over the default folder when the chosen host has no folder in effect (SPEC.md, "Managed checkouts"), subscribing
-/// to [`Saved`] to refresh its suggestions and preview. Each owner makes the view when its dialog or section first
+/// to [`CheckoutUpdated`] to refresh its suggestions and preview. Each owner makes the view when its dialog or section first
 /// shows (which reads the route then), keeps the entity for as long as the dialog is open, and draws it as a child: a
 /// new view for each opening, so a reply reaches only the opening it was sent for. Enter in the field saves nothing, as
 /// in the old field, where saving the folder and submitting a surrounding form were separate acts.
@@ -257,8 +265,12 @@ pub struct CheckoutField {
     /// The words under the field: the caller's for a folder (the old field's `note`), the old wording for the command.
     note: SharedString,
     input: DraftInput,
-    /// Whether a read has answered. Until then the field is read-only and Save does nothing.
+    /// Whether the latest read completed successfully. A pending read or a failure locks the field and both saves.
     loaded: bool,
+    /// The load the rendered buttons belong to. A mouse event can reach the last frame after a fresh read has
+    /// answered. The old Use default button must never clear a newer override that frame did not show.
+    read_generation: u64,
+    compare_on_save: bool,
     /// Why the last read failed, until a read answers; Retry takes Save's place meanwhile.
     unreadable: Option<HostText>,
     /// Whether the last read found a value of the scope's own, which offers Use default ([`Target::offers_default`]).
@@ -272,7 +284,7 @@ pub struct CheckoutField {
     window: AnyWindowHandle,
 }
 
-impl EventEmitter<Saved> for CheckoutField {}
+impl EventEmitter<CheckoutUpdated> for CheckoutField {}
 
 impl CheckoutField {
     /// A folder field over `scope`'s folder with `note` under it, reading the folder now (see [`CheckoutField`]).
@@ -316,6 +328,8 @@ impl CheckoutField {
             note,
             input,
             loaded: false,
+            read_generation: 0,
+            compare_on_save: false,
             unreadable: None,
             has_override: false,
             saved: false,
@@ -335,8 +349,8 @@ impl CheckoutField {
         });
     }
 
-    /// A read answered: the field takes the stored value where its draft follows it ([`DraftInput::follow`]: only while
-    /// untouched and not saving), and becomes editable the first time; or the reason shows with Retry.
+    /// Install a fresh base and show it before unlocking the field. Reads only happen while editing is locked,
+    /// so a reload cannot discard a new edit made after the save settled.
     fn read_answered(
         &mut self,
         answer: Result<Stored, HostText>,
@@ -347,15 +361,19 @@ impl CheckoutField {
             Ok(stored) => {
                 self.unreadable = None;
                 let value = self.target.value(&stored);
+                let changed_after_refusal =
+                    self.refusal().is_some() && value.as_deref() != self.input.stored();
                 self.has_override = value.is_some();
+                self.compare_on_save = stored.compare_on_save;
                 if let Some(placeholder) = self.target.placeholder(&stored) {
                     self.input.input().set_placeholder(placeholder, window, cx);
                 }
-                self.input
-                    .follow(value.as_deref().unwrap_or_default(), window, cx);
-                if !self.loaded {
-                    self.loaded = true;
-                    self.input.input().set_read_only(false, cx);
+                self.input.reload(value, window, cx);
+                self.read_generation += 1;
+                self.loaded = true;
+                self.input.input().set_read_only(false, cx);
+                if changed_after_refusal {
+                    cx.emit(CheckoutUpdated);
                 }
             }
             Err(reason) => self.unreadable = Some(reason),
@@ -363,12 +381,11 @@ impl CheckoutField {
         cx.notify();
     }
 
-    /// Retry: read the route again. Does nothing while a save is in flight.
+    /// Only failed reads can be retried. A queued second Retry must not leave two reads racing to replace the base.
     fn retry(&mut self, cx: &mut Context<Self>) {
-        if self.input.draft().is_saving() {
+        if self.unreadable.take().is_none() {
             return;
         }
-        self.unreadable = None;
         Self::send_read(&self.target, self.window, cx);
         cx.notify();
     }
@@ -377,9 +394,15 @@ impl CheckoutField {
     /// has answered, while it failed, while a save is in flight, for an untouched draft, and for Use default where it
     /// is not offered, all cases in which the button is drawn busy or not drawn. A save the operation store refuses
     /// because another save holds the key says so under the field ([`Refused`]).
-    fn save(&mut self, use_default: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn save(
+        &mut self,
+        use_default: bool,
+        shown_read: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let draft = self.input.draft();
-        if !self.loaded || self.unreadable.is_some() || draft.is_saving() {
+        if !self.loaded || self.read_generation != shown_read || draft.is_saving() {
             return;
         }
         let allowed = if use_default {
@@ -392,19 +415,23 @@ impl CheckoutField {
         }
         let key = self.target.key();
         let target = self.target.clone();
+        let expected = self
+            .compare_on_save
+            .then(|| self.input.stored().map(str::to_owned));
         let started = DraftInput::save(
             self,
             |field| &mut field.input,
             &key,
-            move |value| target.command((!use_default).then_some(value)),
+            move |value| {
+                target.command(
+                    (!use_default).then_some(value),
+                    expected.as_ref().map(|base| base.as_deref()),
+                )
+            },
             window,
             cx,
             |field, settled, cx| {
-                if let Outcome::Done(_) = settled.outcome {
-                    field.saved = true;
-                    Self::send_read(&field.target, field.window, cx);
-                    cx.emit(Saved);
-                }
+                field.save_answered(&settled.outcome, cx);
             },
         );
         // Another save may hold the key (any Settings save, for the all-hosts configuration), which the field then says.
@@ -414,6 +441,27 @@ impl CheckoutField {
             Err(not_started) => tracing::debug!(?not_started, "checkout field not saved"),
         }
         cx.notify();
+    }
+
+    /// Keep the field locked across the save and its refetch. A refusal discards the edit now so even a failed read
+    /// cannot leave the rejected intent around. This route finishes synchronously, so it never returns Accepted.
+    fn save_answered(&mut self, outcome: &Outcome, cx: &mut Context<Self>) {
+        match outcome {
+            Outcome::Done(_) => self.saved = true,
+            Outcome::Refused(_) => self.input.discard(self.window, cx),
+            Outcome::Accepted(_) => return,
+        }
+        self.loaded = false;
+        self.input.input().set_read_only(true, cx);
+        Self::send_read(&self.target, self.window, cx);
+        if self.saved {
+            cx.emit(CheckoutUpdated);
+        }
+    }
+
+    /// The refused save belongs to the launcher even if a successful refresh takes the inline setup field away.
+    pub(crate) fn refusal(&self) -> Option<&HostText> {
+        self.input.draft().refusal()
     }
 
     /// The field's text, for tests (Settings' and the host dialog's), which find no other way to it: GPUI Kit's field
@@ -452,6 +500,7 @@ impl Render for CheckoutField {
         let id = |part: &str| format!("{}-{part}", words.id);
         let draft = self.input.draft();
         let saving = draft.is_saving();
+        let shown_read = self.read_generation;
         let weak = cx.weak_entity();
 
         let input = TextInput::new(
@@ -491,7 +540,7 @@ impl Render for CheckoutField {
                 // Busy, not disabled, so a clicked Save keeps focus through its save, as the old `aria-disabled` did.
                 .busy(!self.loaded || saving || !draft.is_touched())
                 .on_click(move |_, window, cx| {
-                    let _ = save.update(cx, |field, cx| field.save(false, window, cx));
+                    let _ = save.update(cx, |field, cx| field.save(false, shown_read, window, cx));
                 }),
             );
             if self.target.offers_default() && self.has_override {
@@ -508,21 +557,35 @@ impl Render for CheckoutField {
                     .tier(Tier::Neutral)
                     .busy(!self.loaded || saving)
                     .on_click(move |_, window, cx| {
-                        let _ = weak.update(cx, |field, cx| field.save(true, window, cx));
+                        let _ =
+                            weak.update(cx, |field, cx| field.save(true, shown_read, window, cx));
                     }),
                 );
             }
         }
 
-        // A failed read, or the helm's refusal of the last save; else the saved line while nothing was typed since.
-        let failure = self.unreadable.as_ref().or(draft.refusal()).map(|reason| {
-            let sentence = HostSentence::new(ElementId::Name(id("error").into())).host(reason);
-            Self::line(theme::color(palette.danger))
-                .id(ElementId::Name(id("error").into()))
-                .debug_selector(|| id("error"))
-                .role(Role::Alert)
-                .aria_label(sentence.accessible_name())
-                .child(sentence)
+        // A failed refetch gives Retry its own reason without hiding why the edit was discarded.
+        let refusal = draft.refusal();
+        let read_error_id = if refusal.is_some() {
+            "read-error"
+        } else {
+            "error"
+        };
+        let failures = [
+            ("error", refusal),
+            (read_error_id, self.unreadable.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(part, reason)| {
+            reason.map(|reason| {
+                let sentence = HostSentence::new(ElementId::Name(id(part).into())).host(reason);
+                Self::line(theme::color(palette.danger))
+                    .id(ElementId::Name(id(part).into()))
+                    .debug_selector(|| id(part))
+                    .role(Role::Alert)
+                    .aria_label(sentence.accessible_name())
+                    .child(sentence)
+            })
         });
         let refused = self.refused.line(words.id, |id, text| {
             Self::line(theme::color(palette.danger))
@@ -532,8 +595,8 @@ impl Render for CheckoutField {
                 .aria_label(text)
                 .child(text)
         });
-        let saved =
-            (failure.is_none() && self.saved && !saving && !draft.is_touched()).then(|| {
+        let saved = (self.unreadable.is_none() && self.saved && !saving && !draft.is_touched())
+            .then(|| {
                 Self::line(theme::color(palette.fg_1))
                     .id(ElementId::Name(id("saved").into()))
                     .debug_selector(|| id("saved"))
@@ -553,7 +616,7 @@ impl Render for CheckoutField {
             .child(label)
             .child(Self::line(theme::color(palette.fg_1)).child(self.note.clone()))
             .children(buttons)
-            .children(failure)
+            .children(failures)
             .children(refused)
             .children(saved)
     }

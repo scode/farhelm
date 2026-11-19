@@ -12,8 +12,8 @@
 //! so it outlives the editor's view, and [`save`] settles the draft before the editor's own completion runs, so no
 //! editor can forget to. A failed save is reported and never retried or treated as saved: the draft keeps its text
 //! and its touched mark, and holds the refusal for the editor to show. That is the Rename editor's rule (SPEC.md: "a
-//! refusal leaves its draft and error visible for correction"); an editor whose SPEC rule reverts on failure reloads
-//! its draft itself.
+//! refusal leaves its draft and error visible for correction"). A compare-on-save editor discards the refused edit
+//! and loads the stored value again, keeping the refusal visible.
 //!
 //! An untouched draft holds the raw value it was loaded with, so saving it untouched sends back the helm's own bytes,
 //! hidden characters included; an escaped presentation never becomes a saved value (SPEC_impl.md, "Host-supplied
@@ -36,7 +36,11 @@
 //! the editor even when the user moved on, and focus goes back to the opener only if it is still inside the editor.
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`): a new editor holds a [`Draft`] per field and saves through
-//! [`save`], or a [`DraftInput`] per text field and saves through [`DraftInput::save`]. Partial saves are not built:
+//! [`save`], or a [`DraftInput`] per text field and saves through [`DraftInput::save`]. A field whose save must not
+//! overwrite a newer stored value (compare-on-save) uses [`DraftInput::stored`] as the base its save compares against,
+//! [`DraftInput::reload`] to take a fresh read with the field locked, and [`DraftInput::discard`] to drop a refused edit;
+//! the first such editor, the checkout settings field (`settings/checkout_field.rs`), keeps its own read generation and
+//! lock, which a second editor would follow or move here. Partial saves are not built:
 //! they are used only where the API already supports them or where SPEC.md's "a GUI write must not undo a change an
 //! agent or the command line made" needs them, and the first editor with such a route adds them here.
 
@@ -180,8 +184,9 @@ pub struct DraftInput {
     input: TextInputState,
     /// Distinguishes intervening user edits even when the field has returned to the same text.
     edit_revision: u64,
-    /// The value the helm last pushed for the field: what an untouched draft takes up again after a refused save.
-    pushed: String,
+    /// The raw value from the helm, before rendering. In a checkout field, unset and empty look alike but compare
+    /// differently at save time. Other text fields always have a value and use this to follow pushes.
+    pushed: Option<String>,
     _events: Subscription,
 }
 
@@ -231,7 +236,7 @@ impl DraftInput {
             draft: Draft::load(value.to_owned()),
             input,
             edit_revision: 0,
-            pushed: value.to_owned(),
+            pushed: Some(value.to_owned()),
             _events: events,
         }
     }
@@ -254,10 +259,34 @@ impl DraftInput {
     /// The helm pushed `pushed` for this field: the field shows it if the draft follows it ([`Draft::follow`]: only
     /// while untouched and not saving). Setting the field raises no change event, so following never marks it touched.
     pub fn follow(&mut self, pushed: &str, window: &mut Window, cx: &mut App) {
-        self.pushed = pushed.to_owned();
+        self.pushed = Some(pushed.to_owned());
         if self.draft.follow(pushed.to_owned()) {
             self.input.set_text(self.draft.value().clone(), window, cx);
         }
+    }
+
+    /// The exact value shown by the last explicit load, for comparison when saving an edit or clear. Editors that
+    /// use this base hold the field read-only while loading it and use only [`Self::reload`]. [`Self::follow`]
+    /// instead advances the cached value even while a touched draft keeps its older text.
+    pub fn stored(&self) -> Option<&str> {
+        self.pushed.as_deref()
+    }
+
+    /// Start a new draft at a fresh read after the editor has locked the field. Adopt the raw stored value even
+    /// when the visible text is identical. The reason for a refused save stays until the user tries a new save.
+    pub fn reload(&mut self, stored: Option<String>, window: &mut Window, cx: &mut App) {
+        self.pushed = stored;
+        self.draft.touched = false;
+        if self.draft.follow(self.pushed.clone().unwrap_or_default()) {
+            self.input.set_text(self.draft.value().clone(), window, cx);
+        }
+    }
+
+    /// Drop an edit the helm refused, even if the editor's subsequent read fails. Until it gets a new value the
+    /// editor can display the last load read-only, with no unsaved change left to replay.
+    pub fn discard(&mut self, window: AnyWindowHandle, cx: &mut App) {
+        self.draft.touched = false;
+        self.follow_after_refusal(window, cx);
     }
 
     /// The user changed the field: mirror it into the draft. While a save is in flight the field is read-only, so an
@@ -313,8 +342,8 @@ impl DraftInput {
 
     /// Take up the last pushed value after a refused save, if the draft follows it. The field is set once the
     /// completion has returned, since a completion has no window at hand.
-    fn follow_after_refusal<V: 'static>(&mut self, window: AnyWindowHandle, cx: &mut Context<V>) {
-        if !self.draft.follow(self.pushed.clone()) {
+    fn follow_after_refusal(&mut self, window: AnyWindowHandle, cx: &mut App) {
+        if !self.draft.follow(self.pushed.clone().unwrap_or_default()) {
             return;
         }
         let input = self.input.clone();

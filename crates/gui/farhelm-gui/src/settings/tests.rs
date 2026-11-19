@@ -2523,13 +2523,12 @@ fn the_folder_saves_an_edited_draft_trimmed_and_reads_it_back(cx: &mut TestAppCo
     assert_eq!(body, json!({ "root": null }), "an empty folder clears it");
 }
 
-/// SPEC.md: "Settings ... shows a refused value's reason", and a refused draft "stays editable"; "Switching sections
-/// preserves unsaved fields, outcome lines and pending saves". The helm validates the folder's shape only, so its
-/// refusal is the only check the user gets. Specified: a typed relative folder refused with the helm's words keeps its
-/// text, shows those words as an alert, reads nothing back, and keeps both through showing Sessions and Checkouts
-/// again; Save then sends the draft again.
+/// Validation failures discard the edit just like a conflict. The alert must survive a fresh read and a section
+/// switch, and an untouched Save must never replay the rejected path.
 #[gpui::test]
-fn a_refused_folder_keeps_its_draft_and_reason_across_sections(cx: &mut TestAppContext) {
+fn a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections(
+    cx: &mut TestAppContext,
+) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     type_into(cx, Field::Folder, "relative-folder");
@@ -2538,9 +2537,18 @@ fn a_refused_folder_keeps_its_draft_and_reason_across_sections(cx: &mut TestAppC
     let reason = "fixture: not the relative path 'relative-folder'";
     helm.reply(id, 400, Some(json!(reason)));
     settle(cx);
-    assert_eq!(sent(&mut helm), [], "a refusal reads nothing back");
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, Field::Folder.path());
+    assert_eq!(
+        text(cx, Field::Folder),
+        "",
+        "the rejected path was discarded"
+    );
+    helm.reply(reads[0].0, 200, Some(json!({ "root": "~/current" })));
+    settle(cx);
     for _ in 0..2 {
-        assert_eq!(text(cx, Field::Folder), "relative-folder");
+        assert_eq!(text(cx, Field::Folder), "~/current");
         assert_eq!(
             label_of(cx, "checkout-folder-error").as_deref(),
             Some(reason)
@@ -2549,8 +2557,99 @@ fn a_refused_folder_keeps_its_draft_and_reason_across_sections(cx: &mut TestAppC
         click(cx, section_button(Section::Checkouts));
     }
     click(cx, Field::Folder.save());
-    let (_, body) = one_put(&mut helm, Field::Folder.path());
-    assert_eq!(body, json!({ "root": "relative-folder" }));
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the stored value is an untouched draft"
+    );
+}
+
+/// A rejected command is never replayed while waiting for the new base, even if that read fails. An explicit
+/// disable looks empty, so the first PUT proves the editor sends the raw stored value as its comparison base.
+#[gpui::test]
+fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, section_button(Section::Checkouts));
+    let reads = sent_reads(&mut helm);
+    assert_eq!(
+        reads
+            .iter()
+            .map(|(_, path)| path.as_str())
+            .collect::<Vec<_>>(),
+        CHECKOUT_READS
+    );
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "root": null, "compare_on_save": true })),
+    );
+    helm.reply(
+        reads[1].0,
+        200,
+        Some(json!({ "command": "", "compare_on_save": true })),
+    );
+    helm.reply(reads[2].0, 200, Some(json!({ "enabled": true })));
+    settle(cx);
+    assert_eq!(
+        text(cx, Field::PostClone),
+        "",
+        "explicit disable shows empty"
+    );
+    type_into(cx, Field::PostClone, "original edit");
+    click(cx, Field::PostClone.save());
+    let (id, body) = one_put(&mut helm, Field::PostClone.path());
+    assert_eq!(body, json!({ "command": "original edit", "expected": "" }));
+    let reason = "This checkout setting changed elsewhere.";
+    helm.reply(id, 409, Some(json!(reason)));
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, Field::PostClone.path());
+    type_into(cx, Field::PostClone, "typed before the reply");
+    assert_eq!(text(cx, Field::PostClone), "", "discarded and read-only");
+    click(cx, Field::PostClone.save());
+    assert_eq!(sent(&mut helm), []);
+
+    helm.reply(reads[0].0, 503, Some(json!("fixture: read failed")));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "checkout-post-clone-error").as_deref(),
+        Some(reason)
+    );
+    assert!(drawn(cx, "checkout-post-clone-read-error"));
+    assert!(!drawn(cx, Field::PostClone.save()));
+    click(cx, "checkout-post-clone-retry");
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, Field::PostClone.path());
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "command": "cli command", "compare_on_save": true })),
+    );
+    settle(cx);
+    assert_eq!(text(cx, Field::PostClone), "cli command");
+    assert_eq!(
+        label_of(cx, "checkout-post-clone-error").as_deref(),
+        Some(reason)
+    );
+    click(cx, Field::PostClone.save());
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the refusal never becomes an edit again"
+    );
+
+    type_into(cx, Field::PostClone, " # new edit");
+    let edited = text(cx, Field::PostClone);
+    assert_ne!(edited, "cli command", "the new value is editable");
+    click(cx, Field::PostClone.save());
+    let (_, body) = one_put(&mut helm, Field::PostClone.path());
+    assert_eq!(
+        body,
+        json!({ "command": edited, "expected": "cli command" })
+    );
 }
 
 /// SPEC.md: "The command field preserves all other spacing and newlines", only "an all-whitespace field" clears it,
@@ -2711,9 +2810,9 @@ fn the_spare_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut T
 struct HostFolder {
     root: root::Attachment,
     field: Entity<super::CheckoutField>,
-    /// How many times the field raised [`super::Saved`], as the launcher's refresh would see it.
-    saved: usize,
-    _saved: gpui::Subscription,
+    /// How many times the field raised [`super::CheckoutUpdated`], as the launcher's refresh would see it.
+    updates: usize,
+    _updated: gpui::Subscription,
 }
 
 impl Render for HostFolder {
@@ -2727,11 +2826,12 @@ impl Render for HostFolder {
 /// from Settings → Checkouts, shown as a placeholder; Use default clears a saved override"), and that dialog is built
 /// later on this interface, so the host scope is pinned here. A host's folder is its own work key, so it never waits
 /// on a Settings save. Specified: a field over host 2 reads `GET /api/hosts/2/checkout-root`; with an override of
-/// "/srv/own" and a default of "~/def" it shows the override and offers Use default; Use default sends
-/// `{"root": null}` to that route under the host's key; the done reply reads the route back, and the answer (no
+/// "/srv/own" and a default of "~/def" it shows the override and offers Use default. Use default compares the last
+/// loaded override, including after a conflict, and waits for the read before making another clear available. It
+/// sends a null root under the host's key; the done reply reads the route back, and the answer (no
 /// override) empties the field, shows "Default: ~/def" as its placeholder and takes Use default away. The field raises
-/// `Saved` once for that done save (the launcher's hook to refresh what depends on the folder), and not for a later
-/// save the helm refuses.
+/// `CheckoutUpdated` for a refresh that discovers the CLI edit and for the done save, so the launcher can refresh
+/// what depends on the folder. A refusal on its own is not an update.
 #[gpui::test]
 fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
     cx: &mut TestAppContext,
@@ -2748,17 +2848,20 @@ fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
                 cx,
             )
         });
-        let saved = cx.subscribe(&field, |host: &mut HostFolder, _, _: &super::Saved, _| {
-            host.saved += 1;
-        });
+        let updated = cx.subscribe(
+            &field,
+            |host: &mut HostFolder, _, _: &super::CheckoutUpdated, _| {
+                host.updates += 1;
+            },
+        );
         HostFolder {
             root: root::attach(window, cx),
             field,
-            saved: 0,
-            _saved: saved,
+            updates: 0,
+            _updated: updated,
         }
     });
-    let saved = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).saved);
+    let updates = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).updates);
     let path = "/api/hosts/2/checkout-root";
     let reads = sent_reads(&mut helm);
     assert_eq!(reads.len(), 1, "one read: {reads:?}");
@@ -2766,7 +2869,7 @@ fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
     helm.reply(
         reads[0].0,
         200,
-        Some(json!({ "root": "/srv/own", "default": "~/def" })),
+        Some(json!({ "root": "/srv/own", "default": "~/def", "compare_on_save": true })),
     );
     settle(cx);
     let shown =
@@ -2775,23 +2878,42 @@ fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
 
     click(cx, "checkout-folder-use-default");
     let (id, body) = one_put(&mut helm, path);
-    assert_eq!(body, json!({ "root": null }));
+    assert_eq!(body, json!({ "root": null, "expected": "/srv/own" }));
     let host_work = cx.update(|_, cx| {
         session::current_operations(cx)
             .and_then(|operations| operations.read(cx).in_flight(&OpKey::host("2")))
     });
     assert_eq!(host_work, Some(Work::Save));
     assert_eq!(preference_work(cx), None, "not the preference row's key");
-    assert_eq!(saved(cx), 0, "nothing saved yet");
+    assert_eq!(updates(cx), 0, "nothing saved yet");
+    helm.reply(id, 409, Some(json!("fixture conflict")));
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, path);
+    assert_eq!(updates(cx), 0, "a conflict alone does not signal an update");
+    click(cx, "checkout-folder-use-default");
+    assert_eq!(sent(&mut helm), [], "Use default waits for the read");
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "root": "/srv/cli", "default": "~/def", "compare_on_save": true })),
+    );
+    settle(cx);
+    assert_eq!(shown(cx), "/srv/cli");
+    assert_eq!(updates(cx), 1, "the reload found a new override");
+    click(cx, "checkout-folder-use-default");
+    let (id, body) = one_put(&mut helm, path);
+    assert_eq!(body, json!({ "root": null, "expected": "/srv/cli" }));
     helm.reply(id, 204, None);
     settle(cx);
-    assert_eq!(saved(cx), 1, "the done save raised Saved");
+    assert_eq!(updates(cx), 2, "the done save raised an update");
     let reads = sent_reads(&mut helm);
     assert_eq!(reads.len(), 1, "one read back: {reads:?}");
     helm.reply(
         reads[0].0,
         200,
-        Some(json!({ "root": null, "default": "~/def" })),
+        Some(json!({ "root": null, "default": "~/def", "compare_on_save": true })),
     );
     settle(cx);
     assert_eq!(shown(cx), "");
@@ -2803,10 +2925,11 @@ fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
     assert!(focused, "the premise: the click put focus in the field");
     cx.simulate_input("relative");
     click(cx, "checkout-folder-save");
-    let (id, _) = one_put(&mut helm, path);
+    let (id, body) = one_put(&mut helm, path);
+    assert_eq!(body, json!({ "root": "relative", "expected": null }));
     helm.reply(id, 400, Some(json!("fixture refusal")));
     settle(cx);
-    assert_eq!(saved(cx), 1, "a refused save raises nothing");
+    assert_eq!(updates(cx), 2, "a refused save raises nothing by itself");
 }
 
 /// Both old fields offered Retry when their read failed, and a failed read must never pass for an empty value: Save

@@ -1093,6 +1093,12 @@ the save replaces the object anyway. While a save is in flight its Save button i
 focus and its place in Tab's order and ignores presses, as the old app's Save did, because a disabled button gives up
 focus.
 
+The checkout folder and post-clone command use the same text binding. It keeps the raw base from the last shown read,
+including the difference between an unset command and an explicit empty one. Both Save and Use default send that base.
+The helm compares the exact stored field and writes in the same SQLite transaction, so a CLI write cannot slip between
+the check and the save. A change elsewhere in checkout configuration does not invalidate the base. On a refusal the
+binding drops the edit and keeps the reason. Checkout controls stay read-only until the setting is loaded again.
+
 Enforced by draft tests that push a change under a touched field, by save tests that load, save untouched and compare,
 by a save under a template's key, by tests of the bound field (a push under a touched field, a push and a keystroke
 while saving, the refusal follow-up), and by a test that a busy button keeps focus and ignores presses.
@@ -4749,18 +4755,23 @@ clone. Only validated GitHub HTTPS/scp/SSH origins become canonical pairs; raw o
 Recent-first deduplication, sorted discovered entries and explicit incomplete status keep a failed scan from disabling
 manual repository selection. The launcher's requests debounce for 150 ms and discard stale host/query generations.
 
-`GET`/`PUT /api/checkout-root` is an ordinary protected route with a required nullable `root` and no host or command
-fields. It calls the existing global setter/clearer; the revision watcher is the sole invalidation publisher for HTTP
-and CLI writes. `GET`/`PUT /api/hosts/{id}/checkout-root` checks host existence (404 if absent) and reads only its
-stored `root` and the global `default`, or sets/clears that host's root with the existing helpers. Neither route
-contacts a host; path validation is shape-only.
+`GET`/`PUT /api/checkout-root` is an ordinary protected route for the nullable global `root`.
+`GET`/`PUT /api/hosts/{id}/checkout-root` checks host existence (404 if absent). Its GET returns the host's stored
+`root` alongside the global `default`. Its PUT compares and writes only the host override. Both routes validate the
+shape of a path without contacting a host.
 
 The all-hosts post-clone command uses its own protected `GET`/`PUT /api/checkout-post-clone` route with a required
-nullable `command` and no other fields. Null is unset, an empty string is explicitly disabled, and nonempty text is
-stored verbatim; no GUI configuration route exposes a host's command override. The handler checks the shared 16 KiB cap
-before calling the existing global setter/clearer, returning a visible 400 refusal without quoting the command or
-changing the revision. Existing revision checks and frozen supervisor launch specs keep an accepted preparation and its
-retries on the command accepted with it.
+nullable `command`. Null is unset, an empty string is explicitly disabled, and nonempty text is stored verbatim. The GUI
+configuration routes expose only the all-hosts command. The handler checks the shared 16 KiB cap before writing and
+returns a visible 400 refusal without quoting the command. Existing revision checks and frozen supervisor launch specs
+keep an accepted preparation and its retries on the command accepted with it.
+
+The folder and command GET replies advertise `compare_on_save`. When advertised, the client includes `expected` in the
+matching PUT alongside the proposed `root` or `command`. A null base expects an unset field. After validating the
+proposed value, the helm returns a 409 if the comparison fails. A refusal leaves the value and revision intact. An
+omitted comparison uses the original unconditional write, which keeps both older clients and older helms compatible. The
+embedded helm and desktop app are from the same build ("Version and skew"). The revision watcher publishes invalidations
+for both HTTP and CLI writes.
 
 ### Shared preferences and announcements
 

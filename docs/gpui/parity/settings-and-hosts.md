@@ -297,9 +297,9 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   save writes nothing and edited paths are trimmed", "a pending checkout folder save survives closing settings"):
   `checkouts_reads_its_routes_once_and_stays_locked_until_they_answer` (the untouched Save),
   `the_folder_saves_an_edited_draft_trimmed_and_reads_it_back` (trimmed, read back, "Checkout folder saved", an empty
-  field clearing it), `a_refused_folder_keeps_its_draft_and_reason_across_sections` (the refusal through a section
-  switch), `a_folder_save_in_flight_goes_on_after_the_dialog_closes`, and the failed read with its Retry, which both old
-  fields had: `a_failed_folder_read_shows_its_reason_and_retry_reads_again`. The field is the shared
+  field clearing it), `a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections` (the refusal through a
+  section switch), `a_folder_save_in_flight_goes_on_after_the_dialog_closes`, and the failed read with its Retry, which
+  both old fields had: `a_failed_folder_read_shows_its_reason_and_retry_reads_again`. The field is the shared
   `settings::CheckoutField`; its host scope is pinned in the `tests/host-checkout-folder.spec.ts` section below.
 - Checkouts' post-clone command ("settings saves and clears the all-hosts post-clone command", "post-clone command stays
   locked until its initial read completes"):
@@ -312,10 +312,12 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   reopened settings before the next save", since the UI channel delivers in order (decided by the migration's
   orchestrator on 2026-11-16): a reopened Settings' read is admitted only after the pending save's reply, so the field
   it fills is read-only until then and shows the saved command; no Settings code orders it.
+  `a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again` covers a conflict, a failed refresh and a second
+  save based on the value from Retry.
 - Checkouts' drafts across sections ("checkout drafts survive switching sections and are discarded on close"):
   `an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog` (an unsaved command kept through a section
   switch with nothing sent, and the stored one shown after closing and opening again), and
-  `a_refused_folder_keeps_its_draft_and_reason_across_sections` for a refused folder.
+  `a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections` for a refused folder.
 - Checkouts' spare switch ("prepared checkout settings preserve saved choices across reads, refusals and close"):
   `the_spare_switch_saves_through_its_route_and_a_refusal_restores_it` (a failed read leaving it unavailable with the
   reason, the documentation link, a save through its route, a refusal restoring the stored choice). The switch shares
@@ -1081,8 +1083,8 @@ The host settings dialog draws the shared folder field (`settings::CheckoutField
   with "Default: <folder>" as its placeholder and no Use default, the old note's "new checkouts" wording, and the local
   host's dialog with "No default set").
 - Saving, refusing, reading back and clearing: `the_host_folder_saves_under_the_hosts_key_and_use_default_clears_it`
-  (`~another-user/work` refused with the helm's words, wrapped inside the section, and the draft kept, a folder saved
-  under the host's key and read back with "Checkout folder saved" and Use default, and Use default sending
+  (`~another-user/work` refused with the helm's words, wrapped inside the section, and the draft discarded, a folder
+  saved under the host's key and read back with "Checkout folder saved" and Use default, and Use default sending
   `{"root": null}`, then the empty field with the default as placeholder and Use default gone).
 - The old field's lock while other host writes ran, replaced by the host's operation key:
   `saves_on_the_host_wait_for_each_other_without_locking_the_folder` (Deviations, "One save per host at a time").
@@ -1681,11 +1683,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   link back at the end of the help's last sentence is not cheap: the host-text sentence pieces (`HostSentence`) join
   text parts only, and GPUI has no inline flow for a control inside a paragraph.
 - **A refused checkout field keeps its reason until the next save starts.** The old folder and post-clone fields cleared
-  the line on the next keystroke. Here the reason is the draft's (`DraftInput`), which reports edits to no one else, so
-  the line stays while the user corrects the field, as the Rename editor's does.
+  the line on the next keystroke. The checkout field discards a refused edit and fetches the current value before
+  editing can resume. The reason stays visible through the refresh and the next edit.
 - **The checkout folder field shows the trimmed folder only once the helm has saved it.** Save sends the folder trimmed,
-  as before; the old field also trimmed its own text as Save was pressed, so a refused folder showed trimmed. Here the
-  text stays as typed until the read after a done save shows the stored folder.
+  as before. The text stays as typed while the save is in flight. After either a done or a refused save the field reads
+  the stored folder.
 - **The post-clone command saves over a stored carriage return.** The old field refused to save a nonblank command when
   the stored one held a carriage return, because a browser's text area turned it into a line feed before the draft saw
   it, and a save would have rewritten the command silently. GPUI Kit's multi-line field keeps a carriage return as it is

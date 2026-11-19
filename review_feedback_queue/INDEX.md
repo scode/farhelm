@@ -86,10 +86,6 @@ consequences.
   covers tokens on screen, but the platform’s text input system can still receive the secret as ordinary text while you
   edit it.
 
-- [`stale-checkout-settings-overwrite-cli-edits.md`](stale-checkout-settings-overwrite-cli-edits.md) — Saving the
-  post-clone command from a Settings window that was already open can erase newer edits you made from the command line.
-  Using the old view’s Use default can also clear a newer host-folder override.
-
 - [`container-leftover-delete-races-first-session.md`](container-leftover-delete-races-first-session.md) — A container
   can appear as a leftover while Farhelm is still launching its first session. If you open Delete then and confirm after
   the launch finishes, it can delete the new session and its work.
