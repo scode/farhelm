@@ -336,8 +336,8 @@ fn every_base_accepts_optional_packages_and_refuses_apt_options() {
 /// path, and no credentials, query or fragment; named endpoint credentials
 /// use the same immutable-name grammar as recipes.
 ///
-/// Why: URLs must not smuggle a second secret, and credential names must be
-/// usable identities. Secret validation belongs to the separate catalog.
+/// Why: credentials belong to the separate catalog. An at-sign introduces
+/// credentials in the authority and is a literal character in the path.
 #[test]
 fn endpoint_urls_and_credential_names_are_checked() {
     for good in [
@@ -345,6 +345,7 @@ fn endpoint_urls_and_credential_names_are_checked() {
         "https://lb.internal/v1",
         "HTTP://Example.COM:443/",
         "http://[::1]:8080/path",
+        "https://api.example.com/@team/v1",
     ] {
         assert_eq!(check_base_url(good), Ok(()), "{good:?}");
     }
@@ -366,6 +367,10 @@ fn endpoint_urls_and_credential_names_are_checked() {
     ] {
         assert!(check_base_url(bad).is_err(), "{bad:?}");
     }
+    assert_eq!(
+        check_base_url("http://user@host/path"),
+        Err("use an http or https base URL without credentials, query or fragment")
+    );
     let with_token = |name: Option<&str>| {
         let mut save = recipe();
         save.claude = Some(EndpointSave {

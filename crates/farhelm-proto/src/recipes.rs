@@ -661,10 +661,14 @@ pub fn check_base_url(url: &str) -> Result<(), &'static str> {
     } else {
         return Err(SHAPE);
     };
-    if rest.contains(['?', '#', '@', '\\']) {
+    if rest.contains(['?', '#', '\\']) {
         return Err(SHAPE);
     }
     let authority = rest.split('/').next().unwrap_or_default();
+    // An at-sign belongs to userinfo only in the authority. Paths can use it.
+    if authority.contains('@') {
+        return Err(SHAPE);
+    }
     // A bracketed IPv6 host carries colons of its own, so the port is what
     // follows the closing bracket, not the last colon.
     let (host, port) = if authority.starts_with('[') {

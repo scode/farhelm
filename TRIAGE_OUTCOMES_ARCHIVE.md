@@ -23869,6 +23869,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `ylvqxqozswkopxqssvxoqpznwpxqkyoz`, bookmark
   `plan/gui-ux-backend-fixes/02-recovered-agent-retains-stale`, https://github.com/scode/farhelm/pull/4236/changes.
 
+## agent-endpoint-refuses-valid-at-sign-path.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Endpoint URL with @
+  in its path is refused as credentials. https://api.example.com/@team/v1 can't be saved. Confirmed. Bucket: other.
+- Decision: the user picked "Accept each row's recommendation" (2026-11-18 GUI UX triage page, QD).
+- Completion criteria: fix code: refuse @ only in the host part (~20 with tests). Size gate: about 100 lines of diff
+  (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
+  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
+  change.
+- Execution: change `szkmpottmlmkzuouqnmxzyzlulplxovy`, bookmark
+  `plan/gui-ux-backend-fixes/03-agent-endpoint-refuses-valid`, https://github.com/scode/farhelm/pull/4237/changes.
+
 ## approval-scrollports-lack-keyboard-entry.md
 
 - Outcome: `fix code`.
