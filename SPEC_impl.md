@@ -914,6 +914,12 @@ ordinary placement against the control, centered above with 6 pixels of clearanc
 roomier side clamped within the content area. If that fallback covers an open higher panel, the menu help is hidden for
 that frame.
 
+Top-band controls, dialog footer buttons and question answers try the 28-pixel below placement before the 6-pixel above
+placement. Both directions still honor the content-area margin and use the same roomier-side fallback if neither fits.
+Pointer and focus help use the same preference. An open popover keeps its space. If the preferred card would cover it,
+try above, and hide the card for that frame if the popover still needs the space. An answer inside an anchored question
+can use space in that question's panel.
+
 Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
 with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar and
 rail help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the

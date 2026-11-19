@@ -242,7 +242,7 @@ pub(super) fn band(cx: &App) -> Option<AnyElement> {
     let dismiss = Button::new(
         DISMISS_ID,
         "Dismiss",
-        HoverHelp::tooltip("Dismiss: hide this notice"),
+        HoverHelp::tooltip("Dismiss: hide this notice").below(),
         Role::Button,
     )
     .on_click(|_, _, cx| dismiss(cx));

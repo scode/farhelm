@@ -1226,7 +1226,7 @@ impl Editor {
         let save = Button::new(
             "templates-save",
             "Save",
-            HoverHelp::tooltip("Save the template's name, switch and shown fields"),
+            HoverHelp::tooltip("Save the template's name, switch and shown fields").below(),
             Role::Button,
         )
         .tier(Tier::Primary)
@@ -1251,7 +1251,7 @@ impl Editor {
             Button::new(
                 "templates-duplicate",
                 "Duplicate",
-                HoverHelp::tooltip("Open a new unsaved copy with a free name"),
+                HoverHelp::tooltip("Open a new unsaved copy with a free name").below(),
                 Role::Button,
             )
             .tier(Tier::Neutral)
@@ -1275,7 +1275,7 @@ impl Editor {
                     "Delete this template now; it fails current save rules, so undo is not available",
                 ),
             };
-            Button::new("templates-delete", label, HoverHelp::tooltip(help), Role::Button)
+            Button::new("templates-delete", label, HoverHelp::tooltip(help).below(), Role::Button)
                 .tier(Tier::Danger)
                 .busy(busy)
                 .on_click(move |_, window, cx| {

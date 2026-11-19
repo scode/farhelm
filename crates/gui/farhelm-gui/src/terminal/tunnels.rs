@@ -758,12 +758,16 @@ pub(crate) fn notice_line(
     if open {
         return None;
     }
-    notice_element(tunnels, cx)
+    notice_element(tunnels, HoverHelp::below, cx)
 }
 
 /// The notice of the last failures: a line per failure, then Dismiss. An alert, since it reports the failure of
-/// something the user just did.
-fn notice_element(tunnels: &Entity<Tunnels>, cx: &App) -> Option<AnyElement> {
+/// something the user just did. The terminal banner and the tunnels panel place Dismiss help with their own controls.
+fn notice_element(
+    tunnels: &Entity<Tunnels>,
+    place_help: fn(HoverHelp) -> HoverHelp,
+    cx: &App,
+) -> Option<AnyElement> {
     let lines = tunnels.read(cx).notice();
     if lines.is_empty() {
         return None;
@@ -815,7 +819,7 @@ fn notice_element(tunnels: &Entity<Tunnels>, cx: &App) -> Option<AnyElement> {
                 Button::new(
                     "terminal-tunnel-notice-dismiss",
                     "Dismiss",
-                    HoverHelp::tooltip("Put this message away"),
+                    place_help(HoverHelp::tooltip("Put this message away")),
                     Role::Button,
                 )
                 .on_click(move |_, _, cx| {
@@ -934,7 +938,7 @@ pub(crate) fn pill(
         .child(glyph(Icon::Tunnel))
         .child(text)
         .child(glyph(Icon::ChevronDown));
-    let button = Button::new(PILL_ID, label, help, Role::Button)
+    let button = Button::new(PILL_ID, label, help.below(), Role::Button)
         .tier(Tier::Tunnel)
         .content(content)
         .expanded(open)
@@ -1074,7 +1078,7 @@ impl Render for TunnelList {
             .shadow(layers::menu_shadow(palette))
             .child(heading)
             .children(
-                notice_element(&tunnels, cx)
+                notice_element(&tunnels, HoverHelp::beside_menu, cx)
                     .map(|notice| div().mx(px(7.)).mb(px(4.)).child(notice)),
             )
             .children(rows)

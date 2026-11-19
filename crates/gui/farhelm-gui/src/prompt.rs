@@ -1057,6 +1057,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .chain(std::iter::once(confirm))
             .collect();
         if self.shown == Shown::Inline {
+            let answers = answers.into_iter().map(Button::help_below).collect();
             return inline(self, answers, cx);
         }
         if self.shown == Shown::Anchored {
@@ -1112,7 +1113,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                         .flex_wrap()
                         .justify_end()
                         .gap(px(8.))
-                        .children(answers),
+                        .children(answers.into_iter().map(Button::help_below)),
                 );
             return scroll_from_controls(card, &self.text_scroll).into_any_element();
         }

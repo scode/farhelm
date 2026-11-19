@@ -230,7 +230,7 @@ pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
                 SMALLER_ID,
                 Icon::ZoomOut,
                 "Smaller terminal text",
-                HoverHelp::tooltip(format!("Smaller terminal text ({})", chord("−"))),
+                HoverHelp::tooltip(format!("Smaller terminal text ({})", chord("−"))).below(),
                 Role::Button,
             )
             .tier(Tier::Ghost)
@@ -243,7 +243,7 @@ pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
                 LARGER_ID,
                 Icon::ZoomIn,
                 "Larger terminal text",
-                HoverHelp::tooltip(format!("Larger terminal text ({})", chord("+"))),
+                HoverHelp::tooltip(format!("Larger terminal text ({})", chord("+"))).below(),
                 Role::Button,
             )
             .tier(Tier::Ghost)

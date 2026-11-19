@@ -1136,20 +1136,25 @@ fn action_button(
     } else {
         action.label()
     };
-    let mut button = Button::new(action.id(), label, HoverHelp::tooltip(help), Role::Button)
-        .icon(action.icon())
-        .tier(action.tier())
-        .compact()
-        .condensed(condensed.then_some(Condensed::Words))
-        .expanded(asking)
-        .on_click(move |_, window, cx| {
-            if let Some(target) = captured.shown() {
-                let mark = Mark::take(cx);
-                let _ = pane.update(cx, |pane, cx| {
-                    pane.act_from_header(action, target, &mark, window, cx)
-                });
-            }
-        });
+    let mut button = Button::new(
+        action.id(),
+        label,
+        HoverHelp::tooltip(help).below(),
+        Role::Button,
+    )
+    .icon(action.icon())
+    .tier(action.tier())
+    .compact()
+    .condensed(condensed.then_some(Condensed::Words))
+    .expanded(asking)
+    .on_click(move |_, window, cx| {
+        if let Some(target) = captured.shown() {
+            let mark = Mark::take(cx);
+            let _ = pane.update(cx, |pane, cx| {
+                pane.act_from_header(action, target, &mark, window, cx)
+            });
+        }
+    });
     if stopping {
         // The old header's Stop while stopping: its icon, then the spinner and "Stopping…" in place of the label, which
         // stays the button's accessible name. Its gap is the button's own, which condensing narrows.
@@ -1221,7 +1226,7 @@ fn environment_button(
     let button = Button::new(
         ENVIRONMENT_ID,
         label,
-        HoverHelp::tooltip(help),
+        HoverHelp::tooltip(help).below(),
         Role::Button,
     )
     .tier(tier)
@@ -1287,7 +1292,7 @@ impl Drawn<'_> {
             split.caret_id(),
             Icon::ChevronDown,
             format!("{} options", split.label()),
-            HoverHelp::tooltip(help),
+            HoverHelp::tooltip(help).below(),
             Role::Button,
         )
         .tier(Tier::Neutral)

@@ -113,7 +113,7 @@ impl HelpEdges {
         size: Size<Pixels>,
         area: Bounds<Pixels>,
     ) -> Option<Placed> {
-        let ordinary = || around_target(target.bounds, size, area);
+        let ordinary = || around_target(target.bounds, size, area, false);
         let visible = target.bounds.intersect(&target.clip);
         if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
             return Some(ordinary());
@@ -170,7 +170,7 @@ impl HelpEdges {
                         .any(|panel| panel.intersects(&card));
                 clear.then_some(placed)
             }
-            HelpPlacement::Ordinary => Some(ordinary()),
+            HelpPlacement::Ordinary | HelpPlacement::Below => Some(ordinary()),
         }
     }
 }
@@ -195,7 +195,7 @@ pub(super) fn place(
 ) -> Placed {
     let left = (edge_right + GAP).max(area.left() + EDGE);
     beside_at(TooltipSide::Beside, left, target.center().y, size, area)
-        .unwrap_or_else(|| around_target(target, size, area))
+        .unwrap_or_else(|| around_target(target, size, area, false))
 }
 
 /// Place a card at its exact horizontal gap from the surface. A narrow window rejects the candidate instead of
@@ -255,22 +255,28 @@ pub(super) fn place_menu(
             .filter(clear)
         })
         .or_else(|| {
-            let ordinary = around_target(target, size, area);
+            let ordinary = around_target(target, size, area, false);
             (!higher_panels.clone().any(|panel| covers(&ordinary, panel))).then_some(ordinary)
         })
 }
 
-/// `placeTooltip`: the old ordinary tooltip's place against `target` inside `area`: ordinary help's, focus help's, and
-/// the one beside placement falls back to.
-fn around_target(target: Bounds<Pixels>, size: Size<Pixels>, area: Bounds<Pixels>) -> Placed {
+/// Vertical placement for both input methods. The top band and dialog answers prefer below when both sides
+/// fit, using the same clearance and narrow-window fallback as ordinary above-first help.
+pub(super) fn around_target(
+    target: Bounds<Pixels>,
+    size: Size<Pixels>,
+    area: Bounds<Pixels>,
+    below_first: bool,
+) -> Placed {
     let left = (target.center().x - size.width / 2.)
         .min(area.right() - EDGE - size.width)
         .max(area.left() + EDGE);
     let above = target.top() - GAP - size.height;
     let below = target.bottom() + GAP_BELOW;
-    let (side, top) = if above >= area.top() + EDGE {
+    let fits_below = below + size.height <= area.bottom() - EDGE;
+    let (side, top) = if above >= area.top() + EDGE && (!below_first || !fits_below) {
         (TooltipSide::Above, above)
-    } else if below + size.height <= area.bottom() - EDGE {
+    } else if fits_below {
         (TooltipSide::Below, below)
     } else {
         // Fits on neither side: the roomier one, clamped inside the area even if that covers the control.
@@ -312,6 +318,9 @@ pub(super) fn at_pointer(at: Point<Pixels>, size: Size<Pixels>, area: Bounds<Pix
 /// The card leaves pointer presses to whatever the user can reach underneath.
 pub(super) struct PlacedBeside {
     against: Against,
+    below_first: bool,
+    /// Menus that could occupy the space below a top-band control. Only below-first help pays for this lookup.
+    panels: Vec<(AnchorBounds, AnchorBounds)>,
     side: Rc<Cell<TooltipSide>>,
     /// The shown tooltip's record of the painted ring, cleared at each prepaint so a frame that paints none (the
     /// fallback, once a resting hover's window narrows) does not keep reporting the last one.
@@ -374,38 +383,77 @@ impl PlacedBeside {
                 notches: [notch(fill, border, false), notch(fill, border, true)],
                 ring,
             },
+            below_first: false,
+            panels: Vec::new(),
             side: shown.side.clone(),
             painted: shown.ring.clone(),
             card: card.into_any_element(),
         }
     }
 
-    /// The card of `shown`, help keyboard focus owns, placed against the control whose focus stop is `focus` by the
-    /// old ordinary rule ([`around_target`]: centered above it, else below), as the old app placed help shown on
-    /// focus. Placed as each frame is laid out, it follows the control through a scroll or a reflow.
-    pub(super) fn around(shown: &ShownTooltip, focus: FocusHandle, card: gpui::Div) -> Self {
+    /// Place vertical help against the keyboard focus stop. It follows the stop through scrolling or reflow.
+    pub(super) fn around(
+        shown: &ShownTooltip,
+        focus: FocusHandle,
+        card: gpui::Div,
+        panels: Vec<(AnchorBounds, AnchorBounds)>,
+    ) -> Self {
         PlacedBeside {
             against: Against::Focused(focus),
+            below_first: shown.placement == HelpPlacement::Below,
+            panels,
             side: shown.side.clone(),
             painted: shown.ring.clone(),
             card: card.into_any_element(),
         }
     }
 
-    /// The card of `shown`, ordinary help, placed against its control by the old ordinary rule ([`around_target`]), as
-    /// the old app placed it; or, for help whose control has no recorded bounds (a test's or golden's probe, or a
-    /// control in a cached view), at the pointer where it began ([`ShownTooltip::at`], [`at_pointer`]). Help that asks
-    /// for beside placement comes here too while no sidebar edge is drawn.
-    pub(super) fn ordinary(shown: &ShownTooltip, card: gpui::Div) -> Self {
+    /// Place pointer help above or below its drawn control. With no recorded bounds, place it at the pointer
+    /// where the help began ([`ShownTooltip::at`], [`at_pointer`]).
+    pub(super) fn ordinary(
+        shown: &ShownTooltip,
+        card: gpui::Div,
+        panels: Vec<(AnchorBounds, AnchorBounds)>,
+    ) -> Self {
         PlacedBeside {
             against: Against::Ordinary {
                 control: shown.target.clone(),
                 at: shown.at,
             },
+            below_first: shown.placement == HelpPlacement::Below,
+            panels,
             side: shown.side.clone(),
             painted: shown.ring.clone(),
             card: card.into_any_element(),
         }
+    }
+
+    /// A popover that opened under a toggle takes the lower space, even though the toggle can still show help.
+    /// An answer within its own question considers the room in that question usable.
+    fn vertical(
+        &self,
+        target: Bounds<Pixels>,
+        size: Size<Pixels>,
+        area: Bounds<Pixels>,
+    ) -> Option<Placed> {
+        let preferred = around_target(target, size, area, self.below_first);
+        let clear = |placed: Placed| {
+            let card = Bounds::new(placed.origin, size);
+            self.panels.iter().all(|(anchor, surface)| {
+                let center = target.center();
+                surface.get().is_none_or(|panel| {
+                    let inside = panel.contains(&center);
+                    // A clamped popover can cross its own trigger without making the trigger part of the panel.
+                    let trigger = anchor.get().is_some_and(|bounds| bounds.contains(&center));
+                    (inside && !trigger) || !panel.intersects(&card)
+                })
+            })
+        };
+        if clear(preferred) {
+            return Some(preferred);
+        }
+        let above = around_target(target, size, area, false);
+        (above.side == TooltipSide::Above && clear(above)).then_some(above)
     }
 }
 
@@ -486,7 +534,7 @@ impl Element for PlacedBeside {
                     let Some(bounds) = crate::focus::control_bounds(focus, window, cx) else {
                         return Painting::Nothing;
                     };
-                    (around_target(bounds, size, area), None)
+                    (around_target(bounds, size, area, false), None)
                 } else {
                     (at_pointer(*at, size, area), None)
                 }
@@ -495,10 +543,18 @@ impl Element for PlacedBeside {
                 let Some(target) = crate::focus::control_bounds(focus, window, cx) else {
                     return Painting::Nothing;
                 };
-                (around_target(target, size, area), None)
+                let Some(placed) = self.vertical(target, size, area) else {
+                    return Painting::Nothing;
+                };
+                (placed, None)
             }
             Against::Ordinary { control, at } => match control.drawn() {
-                Some(control) => (around_target(control.bounds, size, area), None),
+                Some(control) => {
+                    let Some(placed) = self.vertical(control.bounds, size, area) else {
+                        return Painting::Nothing;
+                    };
+                    (placed, None)
+                }
                 None => (at_pointer(*at, size, area), None),
             },
         };

@@ -221,7 +221,7 @@ pub(crate) fn draw(
                 button_id,
                 icon,
                 label,
-                HoverHelp::tooltip(help),
+                HoverHelp::tooltip(help).below(),
                 Role::Button,
             )
             // A compositor's title buttons never take focus, so a click on one leaves the terminal typed into.

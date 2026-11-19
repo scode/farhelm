@@ -114,6 +114,48 @@ fn checked(cx: &mut VisualTestContext) -> Order {
     checked[0]
 }
 
+/// The Sort toggle can still be hovered while its menu is open. Below-first help must give the menu its space,
+/// even after the user moves the pointer away and back to start a fresh hover.
+#[gpui::test]
+fn the_open_sort_menu_keeps_its_space_when_its_toggle_is_hovered(cx: &mut TestAppContext) {
+    let (_fake, main, cx) = open(cx);
+    click(cx, TITLE_ID);
+    assert!(menu_open(&main, cx));
+    let nodes = frame(cx);
+    let toggle = node(&nodes, TITLE_ID)
+        .expect("the toggle stays drawn")
+        .bounds;
+    let menu = node(&nodes, "session-order-items")
+        .expect("the open menu is drawn")
+        .bounds;
+    assert!(menu.bottom() > toggle.bottom() + gpui::px(28.));
+    assert!(
+        menu.left() <= toggle.center().x && toggle.center().x < menu.right(),
+        "the menu is beneath the toggle"
+    );
+
+    cx.simulate_mouse_move(
+        gpui::point(gpui::px(0.), gpui::px(0.)),
+        None,
+        gpui::Modifiers::none(),
+    );
+    test_support::check(cx);
+    cx.simulate_mouse_move(toggle.center(), None, gpui::Modifiers::none());
+    test_support::check(cx);
+    test_support::advance(cx, layers::HOVER_DELAY);
+    assert!(menu_open(&main, cx));
+    cx.update(|window, cx| {
+        let help = layers::shown_tooltip(window, cx).expect("the hover reached the Sort toggle");
+        assert_eq!(help.text.as_ref(), super::TITLE_HELP);
+    });
+    if let Some(card) = cx.debug_bounds("tooltip-card") {
+        assert!(
+            !menu.intersects(&card),
+            "a painted card leaves the open menu clear"
+        );
+    }
+}
+
 // ---- The title -----------------------------------------------------------------------------------------------------
 
 /// The title is the only place the window says which order the list is in, and its name and help are what a screen

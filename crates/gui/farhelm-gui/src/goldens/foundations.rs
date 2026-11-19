@@ -271,6 +271,11 @@ pub(super) fn kept_line_breaks(state: &SceneState, _: &mut Window, _: &mut App) 
         .into_any_element()
 }
 
+/// Cancel's help belongs outside the dialog footer so the deletion consequences above it remain visible.
+pub(super) fn dialog_footer_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    rest_pointer_on_control(state, "cancel", window, cx);
+}
+
 /// The dialog frame with a title, a summary, the header Close, a short body and a pinned Cancel/Delete pair.
 pub(super) fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     DialogFrame::new(

@@ -95,7 +95,7 @@ pub(super) fn header(
                             StatusMark::new(
                                 "app-version",
                                 BUILD_VERSION,
-                                HoverHelp::tooltip(version_help(BUILD_VERSION)),
+                                HoverHelp::tooltip(version_help(BUILD_VERSION)).below(),
                                 Role::Label,
                                 BUILD_VERSION,
                             )

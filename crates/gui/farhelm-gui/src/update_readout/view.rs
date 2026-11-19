@@ -627,7 +627,7 @@ pub(crate) fn check_help(tooltip: &str) -> String {
 /// command the user is asked to run, and the cut could hide it; the maintainer chose the wider help on 2026-11-16 so it
 /// shows. The words are the updater's own, so they go in as one paragraph of the app's text.
 fn readout_help(text: String) -> HoverHelp {
-    HoverHelp::paragraphs([HostSentence::new("app-version-help").text(text)])
+    HoverHelp::paragraphs([HostSentence::new("app-version-help").text(text)]).below()
 }
 
 #[cfg(test)]

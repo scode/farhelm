@@ -699,7 +699,7 @@ impl SessionList {
                 MENU_TOGGLE_ID,
                 Icon::More,
                 MENU_NAME,
-                HoverHelp::tooltip("Actions for marked sessions"),
+                HoverHelp::tooltip("Actions for marked sessions").below(),
                 Role::Button,
             )
             .tier(Tier::Ghost)
@@ -723,7 +723,7 @@ impl SessionList {
             CLEAR_ID,
             Icon::Close,
             "Clear marked sessions",
-            HoverHelp::tooltip("Clear marked sessions (Escape in the list)"),
+            HoverHelp::tooltip("Clear marked sessions (Escape in the list)").below(),
             Role::Button,
         )
         .tier(Tier::Ghost)

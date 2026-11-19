@@ -633,7 +633,7 @@ impl Editor {
                 Button::new(
                     DELETE,
                     "Delete",
-                    HoverHelp::tooltip("Delete this recipe"),
+                    HoverHelp::tooltip("Delete this recipe").below(),
                     Role::Button,
                 )
                 .tier(Tier::Neutral)
@@ -648,7 +648,7 @@ impl Editor {
                 Button::new(
                     "recipe-cancel",
                     "Cancel",
-                    HoverHelp::tooltip("Go back without saving; unsaved changes ask first"),
+                    HoverHelp::tooltip("Go back without saving; unsaved changes ask first").below(),
                     Role::Button,
                 )
                 .tier(Tier::Neutral)
@@ -662,7 +662,7 @@ impl Editor {
                 Button::new(
                     SAVE,
                     if this.saving { "Saving…" } else { "Save" },
-                    HoverHelp::tooltip("Save this recipe"),
+                    HoverHelp::tooltip("Save this recipe").below(),
                     Role::Button,
                 )
                 .accessible_name("Save")

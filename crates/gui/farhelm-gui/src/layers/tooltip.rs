@@ -275,6 +275,8 @@ pub struct BesideCues {
 pub(crate) enum HelpPlacement {
     #[default]
     Ordinary,
+    /// Prefer the space below a top control or dialog answer.
+    Below,
     Beside(BesideCues),
     /// The rail's own edge. A popover opened there keeps its choices clear of the rail button's help.
     Rail(BesideCues),
@@ -379,10 +381,9 @@ pub enum TooltipSide {
     Beside,
     /// Beside the left edge of a menu panel.
     BesideLeft,
-    /// Centered above its control: ordinary help, help keyboard focus owns, and beside placement's fallback in a
-    /// window too narrow for it, wherever there is room above.
+    /// Centered above its control, normally the first choice for ordinary help.
     Above,
-    /// Below its control: the same, with no room above.
+    /// Centered below its control, first choice for top-band controls and dialog answers.
     Below,
 }
 
@@ -722,8 +723,8 @@ impl ByFocus {
 /// tooltip rule, which [`crate::components::with_hover_help`] wires on every control that can hold focus. Focus
 /// landing on that stop while the user's last press was a key and the pointer did not put it there
 /// ([`crate::focus::focus_came_by_keyboard`]) shows its help as the pointer resting on it would: after [`HOVER_DELAY`],
-/// or at once in the warm grace, placed against the control by the old ordinary rule (centered above it, else below:
-/// [`super::beside`]). A click does not, and nor does a later key press on a control a click focused: only the landing
+/// or at once in the warm grace, with that control's placement preference ([`super::beside`]).
+/// A click does not, and nor does a later key press on a control a click focused: only the landing
 /// counts, as the old app scheduled help on `focusin` alone. Focus leaving the stop takes it down ([`ByFocus`]).
 ///
 /// Pointer and focus help share the one tooltip, and the latest wins: focus landing on a control replaces the

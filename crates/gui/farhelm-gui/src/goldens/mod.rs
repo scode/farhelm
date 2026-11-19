@@ -470,6 +470,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "dialog-footer-tooltip",
+        size: (540., 340.),
+        draw: dialog,
+        setup: dialog_footer_help_setup,
+    },
+    Scene {
         name: "dialog-notices-stop",
         size: (540., 340.),
         draw: dialog_notices_stop,
