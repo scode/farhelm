@@ -6,6 +6,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `gui-ux-wording.md` — Comment, spec and docs corrections from the 2026-11-18 GUI UX triage, two spec acceptances and the user's-own-configuration principle
 - [in-flight f768ad] `gui-ux-desktop-fixes.md` — Header question anchors, Close all after navigation, selected-template contrast, host text in tooltips and refusals, wrong action names, approval keyboard tab stops
 - [in-flight 84005f] `gui-ux-backend-fixes.md` — Bounded shell-tab requests, Tensorlake suspension attribution, late approval answers, tunnels for retired sessions, the Mac update wait, endpoint @ paths, braced command display
-- [complete] `gui-ux-enter-and-focus.md` — Presses after the user's own action count as moving on; the half-second fence is for Escape only; Confirm-first for trash deletion; focus home after bulk actions
+- [landing 977fbe] `gui-ux-enter-and-focus.md` — Presses after the user's own action count as moving on; the half-second fence is for Escape only; Confirm-first for trash deletion; focus home after bulk actions
 - [pending] `antigravity-support.md` — Support Google Antigravity (agy): structured launches, sidebar mark, user-installed hook conversation tracking, and docs (protocol bump)
 - [complete] `settings-app-version.md` — Settings → App shows the running version with a Check for updates button that shows a running check
