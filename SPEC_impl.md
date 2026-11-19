@@ -707,7 +707,11 @@ Kit's.
 
 ### Overlays: the layer manager
 
-Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill slots and tooltips.
+Owner: the layer manager. It owns the dialog slot, the popover stack, the approval region, the pill slots, attention
+cues and tooltips. A cue paints above the page and below every layer. Its canvas reads current clipped anchor bounds
+after page prepaint. A fully clipped target gives the cue no place to land, and the canvas registers no hitbox. On the
+frame a target leaves the tree, GPUI can still paint at its last bounds before releasing the anchor and its cue, as with
+the other anchored overlays.
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
@@ -1353,6 +1357,10 @@ scale from 96% needs a GPUI patch, and animating the text size instead would re-
 each in-between size to the glyph atlas, which never evicts. The terminal scrollbar's old fade (in over 100 ms, out over
 800 ms) is not an entrance but a show and hide that can reverse midway, from wherever the fade has got to, which a
 one-shot transition cannot express; it stays a recorded deviation.
+
+An attention cue uses the same one-shot owner to paint its flight and fade at display rate. When the setting calls for
+reduced motion, the layer stack shows a stationary flash and removes it through the ticker's one-shot deadline. A cue
+that arrives while its window is inactive waits for activation while its target still exists.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
 `BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker, the

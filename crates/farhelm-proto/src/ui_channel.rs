@@ -1171,7 +1171,7 @@ pub enum ConnectionStage {
 }
 
 /// The desktop uses distinct wording for the two shared connections.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum SshConnectionPurpose {
     Sessions,

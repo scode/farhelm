@@ -2791,6 +2791,12 @@ complete when a step count is available and otherwise left empty and static, whi
 action button. A connection interruption during that work does not replace its progress with a problem. Problems appear
 first, then working hosts, then updates, in rail order within each group.
 
+An attention row keeps an amber left edge while SSH needs an answer or retry, a setup or update failure needs attention,
+or a host has an identity or ownership problem. When one of these conditions first appears in a visible row, a small
+amber light travels from the center of the window and flashes the row on arrival. It lasts about a second and takes no
+focus or pointer input. Reduced motion shows a brief stationary flash. Ordinary connection retries get neither cue nor
+edge. Existing problems in the first snapshot do not replay the cue on reconnecting the app.
+
 Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a
 environment resume or tunnel failure, or an unacknowledged setup or Update warning. That last case reads **Setup or
