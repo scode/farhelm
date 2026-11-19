@@ -136,6 +136,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   `shellcheck scripts/boat/sandbox/*.sh` (the boat harness's own checks, including the shard configuration preserving
   the scoped Podman payload setup while removing the local fixture build). Run the harness only on the maintainer's
   request, per `.agents/boat.md`.
+- `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
+  `python3 -m py_compile scripts/test-worker/remote/prune.py` (the SSH test worker harness's own checks). Run the
+  harness only on the maintainer's request, per `.agents/test-worker.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
   `python3 -B scripts/test-install-pinned-cargo-about.py`

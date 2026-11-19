@@ -1126,6 +1126,10 @@ systemd or SSH substrate ran.
   setup, how an exec's output frames are read (an exec without its exit frame is never trusted), how a docs run's pages
   spread over its members, and the default sandbox name prefix. Run them when the harness changes; seconds, no sandbox.
   Using the harness itself is described in `.agents/boat.md`.
+- `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
+  `python3 -m py_compile scripts/test-worker/remote/prune.py` — the SSH test worker harness's own checks (the driver,
+  the worker's bootstrap, runners, lock and stop, and the sync's prune). Run them when the harness changes; seconds, no
+  worker. Using the harness itself is described in `.agents/test-worker.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,

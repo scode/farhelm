@@ -1,0 +1,75 @@
+# Slow tests on an SSH test worker
+
+NOTE: This is not the default way to test. Use it only when the maintainer asks for the test worker in the task at hand
+(the landing monitor records a standing request in its log). Without that, run checks locally as `.agents/validation.md`
+describes. Boat sandboxes (`.agents/boat.md`) are the other remote option; which one a flow uses is the maintainer's
+choice, and both stay supported.
+
+The test worker is a Linux machine the maintainer runs, reached over plain ssh or `tailscale ssh`, that builds and tests
+the working copy itself. Unlike a boat sandbox, it does not run binaries built on the development machine, so it takes
+the builds off that machine too, and its architecture can differ from it (the first one is an arm64 Ubuntu VM).
+`scripts/test-worker/test-worker.sh` drives it; its header is the command reference.
+
+## The worker's name stays out of the repository
+
+The worker is named in `~/.farhelm-test-worker` on the development machine, never in a file in the repository, a log
+that lands, a report or a PR: host names are private (`AGENTS.md`). The file holds `key=value` lines:
+
+```
+destination=user@host
+transport=tailscale
+```
+
+`transport` is `tailscale` (the wrapper verifies the host key against the tailnet's) or `ssh` (the default, with the
+ordinary `known_hosts` check). A missing file means there is no worker; say so rather than guessing one.
+
+## What it may do on the worker
+
+The worker follows the `scode-ssh-delegate` skill's trust rules: source is pushed from the local checkout (the working
+copy's tracked files only), nothing on the worker gets GitHub, cloud or registry credentials or contacts a private
+remote, and only summaries, console logs and a failed run's retained recorder directories come back. It keeps one tree
+per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental, and a
+lock so two runs never share a tree; a second run fails at once and names the holder.
+
+`bootstrap` prepares the worker once (and converges again after a change to `scripts/test-worker/remote/bootstrap.sh`):
+the packages the Rust suite and the GPUI app need, rootless Podman with the exact production base image, tmux, Mutter,
+Mesa's software renderer, an OpenSSH server and passwordless self-ssh for the second-host tests, lingering for the
+account's systemd user manager, and rustup (the toolchain follows `rust-toolchain.toml` on first use). It needs Ubuntu
+24.04 or newer and passwordless sudo.
+
+## Running
+
+- The Rust workspace suite: `scripts/test-worker/test-worker.sh rust --out <dir> [-- <nextest arguments>]`. It syncs the
+  working copy and runs `cargo nextest run --workspace --exclude farhelm-desktop` there through the recorder's nextest
+  mode, with four slots, so the selection and evidence match a local run.
+- The GPUI app's end-to-end suites: `test-worker.sh gui --out <dir> [smoke] [lifecycle]`, which builds the app there.
+- Anything else from the synced tree: `test-worker.sh run --out <dir> -- <command...>`, for a clippy run, a narrow test
+  selection through the recorder, or the vendored crates' tests.
+- `test-worker.sh stop` ends the run holding the lock. Interrupting the script locally does not end the remote run,
+  which keeps building and holding the lock until it finishes.
+
+A full build of the workspace with the GUI and its tests takes about 55 GB of `target/` on the worker, and incremental
+builds only add to it, so a run that finds less than 15 GB free cleans `target/` first and says so in its summary.
+
+Read each `summary.txt` like a recorded run: the substrate lines (architecture, the systemd user manager, Podman, tmux,
+self-ssh), the summary and failures, and the runtime `SKIPPED` count from the retained output. A failed run's recorder
+directories come back as `runs.tar.gz`; keep them as evidence. Report the worker's runs by their recorder run ids and
+say they ran on the test worker, with its architecture.
+
+## When the worker cannot be used
+
+An unattended flow never waits on the worker. When it is unreachable, its lock is held by something else, bootstrap
+fails, or its setup is broken in a way the maintainer can likely fix quickly (a stopped VM, a full disk, a lost tailnet
+login), notify the maintainer with the problem in one line (`plans/AGENTS.md`, "Notifications"). If nothing changes
+within 10 minutes, run that round's suites the other way (boats, when the maintainer has allowed them, or locally) and
+say so in the round's notes; this is the maintainer's choice of 2026-11-19, so that a flow is never stuck on the worker.
+A test that fails on the worker is a finding like any other, not a reason to switch.
+
+## What it does not cover
+
+- The GPUI goldens stay local: they compare pixels with references fetched through the maintainer's GitHub access, which
+  the worker never gets, and the references were rendered on x86_64.
+- A worker on another architecture than the release's x86_64 Linux gate tests that architecture only. x86_64-only
+  breakage then shows first at the release gate; say so when it matters to the change.
+- The macro compile-contract test resolves crates from the worker's own cargo cache, so it can run there.
+- Anything on a Mac.
