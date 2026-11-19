@@ -36,3 +36,6 @@ unicode-width = "0.2"
 # Byte-wise against chunked feeding, and the delegation check, over generated
 # terminal output.
 proptest = "1"
+# Reads a private recording's `events.jsonl` in the round-trip test as JSON, so spacing or field order in a recorder's
+# output cannot change the sizes it replays.
+serde_json.workspace = true

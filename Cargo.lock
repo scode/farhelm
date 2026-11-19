@@ -2164,6 +2164,7 @@ version = "0.0.0-unreleased"
 dependencies = [
  "alacritty_terminal",
  "proptest",
+ "serde_json",
  "unicode-width",
 ]
 

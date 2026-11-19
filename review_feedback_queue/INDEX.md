@@ -1128,10 +1128,6 @@ consequences.
 - [`snapshot-comparison-ignores-link-grouping.md`](snapshot-comparison-ignores-link-grouping.md) — Snapshot regression
   checks can pass after terminal hyperlink identities or boundaries change.
 
-- [`recording-loader-rejects-valid-json-field-spacing.md`](recording-loader-rejects-valid-json-field-spacing.md) — A
-  developer can provide a private terminal recording in the documented JSON-lines format and have the snapshot test
-  reject it before checking the recording.
-
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.
