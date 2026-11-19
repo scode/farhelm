@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing ddd9d4] `covered-link-refusal.md` — A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
 - [pending] `exited-session-no-terminal.md` — An exited session whose terminal is gone shows Restart and Replace instead of reconnecting forever (protocol bump)
 - [complete] `shift-drag-marking.md` — Shift+drag across the session list marks the rows it sweeps (after `session-group-follow-ups.md`)
-- [complete] `demo-video-capture.md` — The README demo video's capture runs on the desktop app again (mechanism only)
+- [landing 0e9d16] `demo-video-capture.md` — The README demo video's capture runs on the desktop app again (mechanism only)
 - [complete] `replace-with-checkout-hint.md` — Replace with on a managed checkout says the replacement keeps its checkout, and warns before a fresh clone
 - [in-flight 7e75ca] `one-helm-per-supervisor.md` — Each host records its owning helm, refuses others, and is taken over only on request (protocol bump)
 - [complete] `model-family-shorthand.md` — Typing a model family word in the launcher picks that family's latest model (after `model-families.md`)
