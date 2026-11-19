@@ -795,7 +795,7 @@ fn sandbox(recipe: &str) -> LaunchTarget {
 /// [`window_with`] with `selected` open, where host11's sandbox is described as the helm describes an environment's
 /// host (`HostView::environment`), made from `recipe` on the Tensorlake account, and the pushed recipe catalog holds
 /// `web` alone. host1's Podman is usable, so New container is offered too.
-fn environment_window<'a>(
+pub(super) fn environment_window<'a>(
     cx: &'a mut TestAppContext,
     selected: &str,
     recipe: &str,

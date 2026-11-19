@@ -267,7 +267,13 @@ back to an ordinary directory.
 **Clone** on a session in a managed checkout starts a managed checkout of the same repository, even if the session runs
 in a subdirectory. The name starts as the source's name plus `-clone`, then `-clone-2`, `-clone-3`, and so on when
 taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **Folder**
-restores the source's directory and name; for a new sandbox or container it stays at the home directory. **Replace with** and **Replace** keep the existing directory.
+restores the source's directory and name; for a new sandbox or container it stays at the home directory.
+
+**Replace with** starts on **Folder** at the source session's directory. If the session uses a managed checkout, keeping
+that directory keeps your changes, and the launcher names the checkout. Choose **Managed checkout** to start from a fresh
+clone without those changes; the warning under **Where** then says what happens to the old checkout: when you replace
+the last session using it, it moves to the host's trash. In a sandbox or container, that trash stays inside and is
+deleted with the sandbox or container. **Replace** keeps the existing directory.
 
 When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything

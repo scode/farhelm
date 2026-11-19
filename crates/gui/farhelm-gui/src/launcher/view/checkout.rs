@@ -60,7 +60,7 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::session_requests::{
     GithubCheckoutPreviewBody, GithubRepositoriesBody, GithubRepositoriesReply,
 };
-use farhelm_proto::ui_channel::{HostStateView, HostView};
+use farhelm_proto::ui_channel::{HostStateView, HostView, SessionRow};
 use farhelm_proto::{AcceptedGithubPreview, GithubRepo, parse_github_repo};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, Entity,
@@ -964,6 +964,19 @@ impl Launcher {
         Some(row("launcher-where-row", "Where", group, palette).into_any_element())
     }
 
+    /// Use the live source row, as the Replace with footer does. Its current
+    /// checkout membership matters here, regardless of how it first launched.
+    fn replacement_checkout_source<'a>(
+        &self,
+        collections: &'a farhelm_helm_client::Collections,
+    ) -> Option<(&'a SessionRow, SessionCheckout)> {
+        let Mode::ReplaceWith { source } = &self.draft.mode else {
+            return None;
+        };
+        let row = collections.get::<SessionRow>(source)?;
+        Some((row, SessionCheckout::of(row, collections)?))
+    }
+
     /// A Replace with keeps the source's checkout when the folder is still the
     /// source's working directory. The check can confirm a spelling that
     /// resolves to that directory or show that a symlink now leads elsewhere.
@@ -972,11 +985,8 @@ impl Launcher {
         palette: &theme::Palette,
         cx: &App,
     ) -> Option<Div> {
-        let Mode::ReplaceWith { source } = &self.draft.mode else {
-            return None;
-        };
         let collections = self.store.read(cx).collections();
-        let row = collections.get::<farhelm_proto::ui_channel::SessionRow>(source)?;
+        let (row, checkout) = self.replacement_checkout_source(collections)?;
         if self.draft.checkout.is_some() {
             return None;
         }
@@ -992,7 +1002,6 @@ impl Launcher {
         if !same_directory {
             return None;
         }
-        let checkout = SessionCheckout::of(row, collections)?;
         let sentence = HostSentence::new("launcher-replacement-checkout-folder")
             .text("This session's managed checkout of ")
             .host(&checkout.repo)
@@ -1007,6 +1016,34 @@ impl Launcher {
                     checkout,
                     palette,
                 ))
+                .child(sentence),
+        )
+    }
+
+    /// Explain the source checkout's fate beside Where when making a fresh
+    /// clone. The selected repository belongs to the replacement, so it
+    /// cannot say which checkout the source can leave behind.
+    pub(super) fn replacement_checkout_warning(
+        &self,
+        palette: &theme::Palette,
+        cx: &App,
+    ) -> Option<Div> {
+        self.draft.checkout.as_ref()?;
+        let (_, checkout) = self.replacement_checkout_source(self.store.read(cx).collections())?;
+        let ending = if checkout.in_environment {
+            " If this replaces its last session, the old checkout moves to the trash inside the sandbox or container. \
+              Deleting the sandbox or container also deletes its trash."
+        } else {
+            " If this replaces its last session, the old checkout moves to the trash."
+        };
+        let sentence = HostSentence::new("launcher-replacement-checkout-warning")
+            .text("Starts from a fresh clone without the changes in this session's checkout of ")
+            .host(&checkout.repo)
+            .text(".")
+            .text(ending);
+        Some(
+            help_line_container(palette)
+                .text_color(theme::color(palette.warn_bright))
                 .child(sentence),
         )
     }

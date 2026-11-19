@@ -103,13 +103,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the pictures live so a release can reach them (a read token for the release runners, a public store, another home, or
   back in the repository), and add them to the release workflow next to the end-to-end GUI smoke.
 
-- **Replace with on a managed-checkout session starts on Folder.** Using Replace with on an agent session that runs in a
-  managed checkout opens the launcher with Where set to Folder at the session's own folder, not Managed checkout of its
-  repository. This is the specified behavior (SPEC.md "Managed checkouts": Replace with and plain Replace start from the
-  source's actual directory, while Clone starts on a managed checkout) and the current release does the same, but it
-  confuses users. Look into how to make it not confusing. Unrelated to the GPUI migration. Plan:
-  `plans/queue/replace-with-checkout-hint.md`.
-
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
   and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
   Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
