@@ -1486,14 +1486,19 @@ fn row(
 /// would otherwise never hear it. Its id is its words: no two help lines of one launcher say the same thing.
 fn help_line(text: impl Into<SharedString>, palette: &theme::Palette) -> Stateful<Div> {
     let text: SharedString = text.into();
-    div()
+    help_line_container(palette)
         .id(ElementId::Name(text.clone()))
         .role(Role::Label)
         .aria_label(text.clone())
+        .child(text)
+}
+
+/// Align help with its control and inherit the same styling for host-supplied text.
+fn help_line_container(palette: &theme::Palette) -> Div {
+    div()
         .pl(px(LABEL_COLUMN + LABEL_GAP))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.fg_1))
-        .child(text)
 }
 
 /// A section's heading (`.launch-composer-section-label`). Elsewhere the old app drew a rule after it, but the
@@ -2341,6 +2346,7 @@ impl Render for Launcher {
             .children(installation_moved)
             .children(checkout_rows)
             .child(row("launcher-folder-row", "Folder", folder, palette))
+            .children(self.replacement_folder_hint(palette, cx))
             .children(environment_note)
             .children(self.registration_note(palette))
             .children(self.folder_problem_line(palette, cx))
