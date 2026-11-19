@@ -2766,8 +2766,9 @@ session, such as a reboot and what restart would do.
 Protocol version 54 adds helm-only raw TCP relay channels for the Mac app's localhost tunnels. `BeginTcpRelay` fixes a
 nonzero channel's bidirectional byte meaning; `TcpRelayStarted` correlates admission, while `TcpRelayAck`,
 `CloseTcpRelay` and `TcpRelayEnded` belong to the channel. Older peers cannot decode these tagged variants, so remote
-hosts require updating. The supervisor checks session existence and confines the target to literal loopback, or tries
-IPv4 then IPv6 loopback for named-localhost and wildcard targets; it performs no DNS lookup.
+hosts require updating. The supervisor refuses missing sessions and retired containerized sessions before dialing. It
+confines the target to literal loopback, or tries IPv4 then IPv6 loopback for named-localhost and wildcard targets,
+without DNS.
 
 Both directions use the attachment chunk cap and byte window, with cumulative acknowledgements only after the target
 socket accepts the bytes. TCP reads are forwarded immediately, including short reads: waiting to fill a file-sized frame

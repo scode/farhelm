@@ -2279,10 +2279,6 @@ consequences.
   — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-retired-session-tcp-relay-cache-only-admission.md`](trailing-retired-session-tcp-relay-cache-only-admission.md)
-  — Bounded refutation of ordinary retired-session TCP cache bypass. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md)
   — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

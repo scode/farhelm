@@ -5222,8 +5222,8 @@ pub(crate) fn refuse_retired_source(source: &farhelm_proto::SessionInfo) -> anyh
 }
 
 /// Withdraw conveniences for a known retired row without adding supervisor
-/// requests to ordinary terminal/file admission. This cache is only a negative
-/// fence: the supervisor still checks its actual stored launch on dispatch.
+/// requests to terminal, file and tunnel admission. The supervisor checks its
+/// own session record at dispatch even when the helm cannot read a cached row.
 pub(crate) async fn route_active_session(
     state: &AppState,
     key: &store::SessionKey,
