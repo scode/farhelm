@@ -5,13 +5,62 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    Background, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    TestAppContext, VisualTestContext, canvas, div, px,
+    Background, Hsla, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _,
+    Styled as _, TestAppContext, VisualTestContext, canvas, div, px,
 };
 
+use super::wait_hover_delay;
 use crate::components::{Button, HoverHelp, OptionRow, Role, TextInput, TextInputState};
-use crate::test_support::{bounds, click, frame, keys, open};
+use crate::layers::{self, TooltipSide};
+use crate::test_support::{bounds, center, check, click, frame, keys, open};
 use crate::theme;
+
+/// A selected option points past the whole list and keeps its own inverse ink in the ring.
+/// Its neighbor stays readable while the user's pointer rests on the selected row.
+#[gpui::test]
+fn selected_option_help_uses_the_list_edge_and_inverse_ring(cx: &mut TestAppContext) {
+    let cx = open(cx, |window, cx| {
+        div()
+            .relative()
+            .w(px(220.))
+            .flex()
+            .flex_col()
+            .child(layers::beside_edge("options-help-edge", window, cx))
+            .child(
+                OptionRow::new(
+                    "picked",
+                    "First",
+                    HoverHelp::tooltip("Open the first result"),
+                    Role::ListBoxOption,
+                )
+                .selected(true)
+                .child(div().child("First")),
+            )
+            .child(
+                OptionRow::new(
+                    "second",
+                    "Second",
+                    HoverHelp::tooltip("Open the second result"),
+                    Role::ListBoxOption,
+                )
+                .child(div().child("Second")),
+            )
+            .into_any_element()
+    });
+    let at = center(cx, "picked");
+    assert!(bounds(cx, "second").top() > at.y);
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    check(cx);
+    wait_hover_delay(cx);
+    cx.update(|window, cx| {
+        let tooltip = layers::shown_tooltip(window, cx).expect("selected option help");
+        assert_eq!(tooltip.text.as_ref(), "Open the first result");
+        assert_eq!(tooltip.side(), TooltipSide::Beside);
+        let ring = tooltip.ring().expect("list help rings the row");
+        assert_eq!(ring.color, theme::color(theme::palette(cx).on_fill));
+        assert!(ring.bounds.contains(&at));
+    });
+}
 
 /// Why this matters: the quick switcher keeps focus in its search field while the user picks a row, as the old one
 /// did with `tabindex="-1"` rows, so typing never stops going to the field. A row that took focus on a click, or that

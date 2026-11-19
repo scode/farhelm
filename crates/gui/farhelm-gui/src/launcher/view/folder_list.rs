@@ -348,6 +348,7 @@ fn draw_folder_rows(
         let weak = weak.clone();
         children.push(
             OptionRow::new(id, label, help, Role::ListBoxOption)
+                .in_popover()
                 .selected(selected)
                 .child(content)
                 .on_click(move |_, window, cx| {

@@ -888,6 +888,13 @@ impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let (_, _, edge, text) = self.colors(palette);
+        let radius = match self.tier {
+            Tier::ColorChoice => px(COLOR_CHOICE_SIZE / 2.),
+            Tier::Waiting => metrics::RADIUS_MD,
+            Tier::RecentSetup => px(0.),
+            _ => metrics::RADIUS_SM,
+        };
+        let bordered = !matches!(self.tier, Tier::Link | Tier::Readout { .. });
         let focus = self.focus.clone().unwrap_or_else(|| {
             focus::control_handle(
                 ElementId::Name(format!("{}-focus", self.id).into()),
@@ -1064,11 +1071,7 @@ impl RenderOnce for Button {
                     Toggled::False
                 })
             })
-            .rounded(match self.tier {
-                Tier::ColorChoice => px(COLOR_CHOICE_SIZE / 2.),
-                Tier::Waiting => metrics::RADIUS_MD,
-                _ => metrics::RADIUS_SM,
-            })
+            .rounded(radius)
             // Where a split button's two parts meet, their corners are square.
             .when(self.split == Some(SplitPart::Main), |button| {
                 button.rounded_tr(px(0.)).rounded_br(px(0.))
@@ -1079,10 +1082,7 @@ impl RenderOnce for Button {
             )
             // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
             // words around them; every other tier keeps the 1-pixel edge.
-            .when(
-                !matches!(self.tier, Tier::Link | Tier::Readout { .. }),
-                |button| button.border_1(),
-            )
+            .when(bordered, |button| button.border_1())
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
             .line_height(px(LINE))
@@ -1138,7 +1138,6 @@ impl RenderOnce for Button {
                     .min_w_0()
                     .h(px(RECENT_SETUP_HEIGHT))
                     .justify_start()
-                    .rounded_none()
                     .text_size(metrics::TEXT_MD)
             })
             .when(self.tier == Tier::BrowseRow, |button| {
@@ -1286,14 +1285,19 @@ impl RenderOnce for Button {
                 on_secondary(event, window, cx);
             });
         }
-        // Rail controls share their column's narrower help edge even when the labels are expanded. Use inverse
-        // ink for the tooltip ring only when the button itself uses it on an accent fill.
-        let help = if self.tier == Tier::Rail {
-            let mut help = self.help.ring_radius(metrics::RADIUS_SM - px(1.));
+        // Rail and list help rings sit just inside these buttons' borders. A selected button uses the same
+        // inverse ink for its ring as for its words so both remain visible against the accent fill.
+        let list_help = matches!(
+            self.help.placement,
+            crate::layers::HelpPlacement::List { .. }
+        );
+        let help = if self.tier == Tier::Rail || list_help {
+            let inset = if bordered { px(1.) } else { px(0.) };
+            let mut help = self.help.ring_radius((radius - inset).max(px(0.)));
             if text == palette.on_fill {
                 help = help.ring_on_fill();
             }
-            help.beside_rail()
+            if list_help { help } else { help.beside_rail() }
         } else {
             self.help
         };

@@ -217,7 +217,7 @@ impl HoverHelp {
         HoverHelp::of(Help::card_with(width, build, text))
     }
 
-    /// Use the enclosing help edge for sidebar and rail controls. The card sits 6 pixels to its right
+    /// Use the enclosing help edge for sidebar and list controls. The card sits 6 pixels to its right
     /// with a notch and a ring inside the control's bounds. Ordinary placement takes over if the edge or the room
     /// beside it is missing. The ring takes the accent and square corners by default.
     pub fn beside(mut self) -> Self {
@@ -245,15 +245,25 @@ impl HoverHelp {
         self
     }
 
+    /// List help gives open menus priority. Launcher suggestions use the popover edge even when it covers a list.
+    pub(crate) fn beside_list(mut self, in_popover: bool) -> Self {
+        self.placement = HelpPlacement::List {
+            cues: *self.beside_cues(),
+            in_popover,
+        };
+        self
+    }
+
     /// Applying a ring cue opts the control into beside placement and preserves any cue set earlier.
     fn beside_cues(&mut self) -> &mut BesideCues {
-        if !matches!(self.placement, HelpPlacement::Beside(_)) {
-            self.placement = HelpPlacement::Beside(BesideCues::default());
+        match self.placement {
+            HelpPlacement::Beside(_) | HelpPlacement::List { .. } => {}
+            _ => self.placement = HelpPlacement::Beside(BesideCues::default()),
         }
-        let HelpPlacement::Beside(cues) = &mut self.placement else {
-            unreachable!()
-        };
-        cues
+        match &mut self.placement {
+            HelpPlacement::Beside(cues) | HelpPlacement::List { cues, .. } => cues,
+            _ => unreachable!(),
+        }
     }
 
     /// Beside help ([`HoverHelp::beside`], which this implies) whose ring takes the on-fill color: for a control in a

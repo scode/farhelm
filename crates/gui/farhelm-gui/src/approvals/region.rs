@@ -415,7 +415,12 @@ impl Region {
 
     /// The other waiting requests, as headers that open their card (`.approval-waiting-list`): about three show, and
     /// the list scrolls within itself beyond that.
-    fn waiting_list(&mut self, others: &[&PendingApproval], cx: &mut Context<Self>) -> AnyElement {
+    fn waiting_list(
+        &mut self,
+        others: &[&PendingApproval],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let region = cx.weak_entity();
         let list = div()
             .id("approval-waiting-list")
@@ -437,7 +442,19 @@ impl Region {
                 })
             }))
             .child(height_tracker(self.pinned.list.clone()));
-        crate::focus::scroll_region(list, &self.list_scroll).into_any_element()
+        // The help edge sits on a wrapper that does not scroll. GPUI moves a scrolling element's children by its
+        // scroll offset, so an edge drawn inside the list would follow its content upward, and a header's help
+        // would fall back to covering the header above it once the list scrolled.
+        div()
+            .relative()
+            .flex_none()
+            .child(layers::beside_edge(
+                "approval-waiting-help-edge",
+                window,
+                cx,
+            ))
+            .child(crate::focus::scroll_region(list, &self.list_scroll))
+            .into_any_element()
     }
 }
 
@@ -495,7 +512,7 @@ impl Render for Region {
         );
         let notice = late.map(|notice| late_notice(notice, self.pinned.notice.clone(), cx));
         let card = expanded.map(|approval| self.card(&approval, waiting.len(), place.width, cx));
-        let list = (!others.is_empty()).then(|| self.waiting_list(&others, cx));
+        let list = (!others.is_empty()).then(|| self.waiting_list(&others, window, cx));
         let region = div()
             .id("approval-region")
             .debug_selector(|| "approval-region".into())
@@ -551,7 +568,8 @@ fn waiting_header(approval: &PendingApproval, cx: &App) -> Button {
     Button::new(
         SharedString::from(format!("approval-{}-waiting", approval.id)),
         name,
-        HoverHelp::tooltip("Show this request: open its card in place of the one shown"),
+        HoverHelp::tooltip("Show this request: open its card in place of the one shown")
+            .beside_list(false),
         Role::Button,
     )
     .tier(Tier::Waiting)

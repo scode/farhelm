@@ -28,6 +28,8 @@ linux/dialog-footer-tooltip--dark.png 34bed3c29d6ab7b70089d72090430e2a79b697ee
 linux/dialog-footer-tooltip--light.png 910508abafdd4029293a5d76d7f34dcf38adaef6
 linux/dialog-launcher-frame--dark.png 9cec830fd28d10d0e1354b01394f248cd0c695c3
 linux/dialog-launcher-frame--light.png b2dc9866d515f22e3ed86fa64b23dde10e6c8398
+linux/dialog-list-tooltip--dark.png b1ad44993aebc6a579323d122578af994d1a216b
+linux/dialog-list-tooltip--light.png fe0e46bb42b19cfae4ad09b9321cdc05d91101bb
 linux/dialog-notices-stop--dark.png 3d96a1a657383461d64a04e7026ecf218b2bc920
 linux/dialog-notices-stop--light.png af3822d922d34fcd23893903bdf5c7483b71ffa8
 linux/feedback-dialog--dark.png ba488c69dfa3a6b7b6ecaa6ef3b0d62524e59da2

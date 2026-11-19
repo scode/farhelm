@@ -93,12 +93,20 @@ impl OptionRow {
         OptionRow {
             id: id.into(),
             label: label.into(),
-            help,
+            help: help
+                .beside_list(false)
+                .ring_radius(metrics::RADIUS_SM - px(1.)),
             role,
             selected: false,
             children: Vec::new(),
             on_click: None,
         }
+    }
+
+    /// Use the enclosing popover's edge for launcher suggestions. Inline lists register their own edge.
+    pub(crate) fn in_popover(mut self) -> Self {
+        self.help = self.help.beside_list(true);
+        self
     }
 
     /// Whether this is the selected row: drawn in the accent fill with the fill's ink as the content's text color, and
@@ -168,7 +176,12 @@ impl RenderOnce for OptionRow {
             // is drawn.
             .on_any_mouse_down(|_, window, _| window.prevent_default())
             .children(self.children);
-        let row = super::with_hover_help(row, &self.id, &self.help, true, None, window, cx);
+        let help = if self.selected {
+            self.help.ring_on_fill()
+        } else {
+            self.help
+        };
+        let row = super::with_hover_help(row, &self.id, &help, true, None, window, cx);
         row.when_some(self.on_click, |row, handler| {
             row.on_click(move |event, window, cx| handler(event, window, cx))
         })

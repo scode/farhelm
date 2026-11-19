@@ -1025,6 +1025,7 @@ impl Render for QuickSwitcher {
         // scroll. Only the matches give up height when the card is capped.
         let options = div()
             .id("quick-switcher-options")
+            .relative()
             .role(Role::ListBox)
             .aria_label(if in_templates {
                 "Templates"
@@ -1035,6 +1036,7 @@ impl Render for QuickSwitcher {
             .flex_col()
             .flex_shrink_1()
             .min_h(px(0.))
+            .child(layers::beside_edge("quick-switcher-help-edge", window, cx))
             .child(results)
             .children(new_row)
             .children(quick_row);

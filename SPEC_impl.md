@@ -920,6 +920,13 @@ Pointer and focus help use the same preference. An open popover keeps its space.
 try above, and hide the card for that frame if the popover still needs the space. An answer inside an anchored question
 can use space in that question's panel.
 
+The quick switcher, Templates, Trash, recent setups, browsed folders, queued approvals and Settings navigation, recipe
+and credential lists register in-tree help edges. In-tree rows find their own edge even when a popover crosses it.
+Launcher suggestions use their popover surface. List help shares the sidebar's notch and ring. It uses the right side
+and falls back to ordinary placement when the edge or room beside it is missing. Open menus can displace the card to the
+fallback or hide it. Launcher and quick switcher option rows keep keyboard focus on their field or picker button as the
+selection moves.
+
 Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
 with the control's center and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar and
 rail help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the

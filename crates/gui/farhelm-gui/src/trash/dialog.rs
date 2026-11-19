@@ -388,7 +388,7 @@ impl Handles {
 }
 
 impl Render for TrashDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snapshot = match self.button.upgrade() {
             Some(button) => button.update(cx, |button, cx| button.snapshot(cx)),
             None => Snapshot::default(),
@@ -415,9 +415,11 @@ impl Render for TrashDialog {
         let (bytes, partial) = snapshot.total();
 
         let mut body = div()
+            .relative()
             .flex()
             .flex_col()
             .line_height(px(LINE))
+            .child(layers::beside_edge("trash-help-edge", window, cx))
             .child(div().child(
                 "Folders of managed checkouts whose last session was deleted. Before cleanup starts, you can copy work \
                  out of the folder shown under its host. Once cleanup is accepted, files may already be partly \
@@ -631,7 +633,8 @@ fn host_section(
         "Delete all on",
         HoverHelp::tooltip(
             "Delete all on this host: after you confirm, remove every archived checkout listed here for good",
-        ),
+        )
+        .beside_list(false),
         Role::Button,
     )
     .tier(Tier::DangerOutline)
@@ -848,7 +851,7 @@ fn entry(
     let action = Button::new(
         format!("trash-entry-delete-{key}"),
         label,
-        HoverHelp::tooltip(help),
+        HoverHelp::tooltip(help).beside_list(false),
         Role::Button,
     )
     .tier(Tier::DangerOutline)

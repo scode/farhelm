@@ -518,6 +518,7 @@ impl Render for HostRows {
                 HoverHelp::tooltip("Run the session on this host"),
                 Role::ListBoxOption,
             )
+            .in_popover()
             .selected(selected)
             .child(content)
             .on_click(move |_, window, cx| {

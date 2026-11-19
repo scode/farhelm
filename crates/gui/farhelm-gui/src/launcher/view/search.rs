@@ -609,6 +609,7 @@ fn draw_search_rows(
             };
             children.push(
                 OptionRow::new(id, label, help, Role::ListBoxOption)
+                    .in_popover()
                     .selected(index == active)
                     .child(content)
                     .on_click(move |_, window, cx| {
