@@ -325,6 +325,14 @@ class DocsShots(unittest.TestCase):
         self.assertEqual(bridge.box("id:absent"), {"x": 20, "y": 30, "w": 10, "h": 10})
         self.assertEqual(sum(args == ["tree"] for args in harness.calls), 1)
 
+    def test_a_cap_never_cuts_an_annotation(self):
+        """A cap is for a region that runs to the window's foot; a callout placed below the capped part must still be
+        whole in the picture, as the spec promises, or the shot ships half a sentence."""
+        boxes = [{"x": 10, "y": 10, "w": 100, "h": 900}]
+        callout = [{"x": 20, "y": 400, "w": 50, "h": 40}]
+        window = {"width": 200, "height": 1000, "scale": 1}
+        self.assertEqual(engine.crop_rect(boxes, window, max_height=300, keep=callout), (0, 0, 126, 456))
+
     def test_max_width_keeps_the_left_edge(self):
         """A wide region capped by max_width keeps its left edge and loses the right, as the old maxWidth did."""
         boxes = [{"x": 10, "y": 10, "w": 900, "h": 20}]
