@@ -831,6 +831,53 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
     wait_for(&mut holder_rx, &mut holder_seen, "survived-the-tab", 15).await;
 }
 
+/// A zero in either dimension is a request error before terminal takeover.
+/// The incumbent must still be able to type and keep its existing geometry.
+#[farhelm_testtrace::test]
+async fn attaching_at_zero_size_leaves_the_incumbent_and_its_size() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let (channel, mut seen, mut stream) = h
+        .client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach the incumbent at a valid size");
+    wait_for_after(&mut stream, &mut seen, "FAKE-AGENT READY", ">", 20).await;
+    wait_for_geometry(&h, &session.id, "100x30").await;
+
+    let other = h.second_client().await;
+    for (target, cols, rows) in [
+        (session.id.as_str(), 0, 24),
+        (session.id.as_str(), 80, 0),
+        (session.id.as_str(), 0, 0),
+        ("no-such-session", 0, 24),
+    ] {
+        let error = other
+            .attach_at_boundary(target, cols, rows)
+            .await
+            .expect_err("an attach at zero size must be refused");
+        let error = error.downcast_ref::<SupervisorError>().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidRequest);
+        assert!(
+            error.message().contains("at least one column and one row")
+                && error.message().contains(&format!("{cols}x{rows}")),
+            "{error:#}"
+        );
+    }
+
+    h.client
+        .send_keys(channel, b"after-size-refusals\r".to_vec())
+        .await;
+    wait_for_after(&mut stream, &mut seen, "echo:", "after-size-refusals", 20).await;
+    assert_geometry_stays(
+        &h,
+        &session.id,
+        "100x30",
+        "a refused attach must not resize",
+    )
+    .await;
+}
+
 /// Attachment channels are connection-local routing keys, so zero and
 /// reuse are protocol errors rather than harmless client choices.
 ///
