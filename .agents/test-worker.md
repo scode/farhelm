@@ -31,11 +31,14 @@ remote, and only summaries, console logs and a failed run's retained recorder di
 per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental, and a
 lock so two runs never share a tree; a second run fails at once and names the holder.
 
-`bootstrap` prepares the worker once (and converges again after a change to `scripts/test-worker/remote/bootstrap.sh`):
-the packages the Rust suite and the GPUI app need, rootless Podman with the exact production base image, tmux, Mutter,
-Mesa's software renderer, an OpenSSH server and passwordless self-ssh for the second-host tests, lingering for the
-account's systemd user manager, and rustup (the toolchain follows `rust-toolchain.toml` on first use). It needs Ubuntu
-24.04 or newer and passwordless sudo.
+Assume the worker can be reset to a fresh image at any time. Nothing on it is precious: every run syncs the working copy
+again, and a lost `target/` only makes the next build cold. Before each run the driver checks a marker the bootstrap
+writes last, holding a hash of `scripts/test-worker/remote/bootstrap.sh`; when it is missing (a fresh worker) or names
+another version of the script, the run bootstraps first, which takes a few minutes. `bootstrap` also runs on its own. It
+installs the packages the Rust suite and the GPUI app need, rootless Podman with the exact production base image, tmux,
+Mutter, Mesa's software renderer, Bun, a static BusyBox, an OpenSSH server and passwordless self-ssh for the second-host
+tests, lingering for the account's systemd user manager, and rustup (the toolchain follows `rust-toolchain.toml` on
+first use). It needs Ubuntu 24.04 or newer and passwordless sudo.
 
 ## Running
 
