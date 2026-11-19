@@ -122,7 +122,7 @@ const ACTIONS_GAP: f32 = 8.;
 const ACTIONS_MARGIN: f32 = 4.;
 
 /// The section's help, the old words.
-const HELP: &str = "A recipe describes a new sandbox or container: its software, credentials and tunnels back to your \
+pub(super) const HELP: &str = "A recipe describes a new sandbox or container: its software, credentials and tunnels back to your \
                     side. The base determines which providers can run it. Size applies to Tensorlake sandboxes.";
 
 /// The note beside an unavailable build button. The old app's said "Save an API key above to build snapshots.", which

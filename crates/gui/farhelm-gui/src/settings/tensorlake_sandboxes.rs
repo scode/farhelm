@@ -65,14 +65,14 @@ use crate::ticker;
 
 /// The list's element id; its parts are `-refresh`, `-status`, `-error` and `-delete-error` after it, and row `<n>`'s
 /// `tensorlake-sandbox-<n>`, with `-delete` and `-cleanup-error` after that.
-const ID: &str = "tensorlake-sandboxes";
+pub(super) const ID: &str = "tensorlake-sandboxes";
 const STATUS_ID: &str = "tensorlake-sandboxes-status";
 const ERROR_ID: &str = "tensorlake-sandboxes-error";
 const DELETE_ERROR_ID: &str = "tensorlake-sandboxes-delete-error";
 
 /// The old words.
-const HEADING: &str = "Sandboxes not on this helm";
-const HELP: &str = "These Farhelm sandboxes have no host or snapshot build on this helm. Nothing is deleted automatically.";
+pub(super) const HEADING: &str = "Sandboxes not on this helm";
+pub(super) const HELP: &str = "These Farhelm sandboxes have no host or snapshot build on this helm. Nothing is deleted automatically.";
 
 /// The section's gap and the room above its heading under the rule, as the section's other parts.
 const PART_GAP: f32 = 14.;

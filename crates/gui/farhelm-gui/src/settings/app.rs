@@ -36,36 +36,40 @@ pub(super) const ERROR_ID: &str = "settings-app-automatic-updates-error";
 pub(super) const VERSION_ID: &str = "settings-app-version";
 /// The Settings check button's id, distinct from the other update controls.
 pub(super) const CHECK_ID: &str = "settings-app-check-for-updates";
+pub(super) const CHECK_LABEL: &str = "Check for updates";
+pub(super) const CHECK_HELP: &str = "Check for and install a newer Farhelm release. The version at the top of the sidebar shows the result.";
 
 /// The note at the start of the section explains which app these controls apply to. The updater
 /// runs only in the installed Mac app, so "this Mac" holds wherever the section is drawn.
 const NOTE: &str = "This one belongs to this Farhelm app on this Mac.";
 
-const LABEL: &str = "Install updates automatically";
+pub(super) const LABEL: &str = "Install updates automatically";
 
 /// The hover help, the old row's `data-tooltip`.
-const TOOLTIP: &str = "Install updates automatically: check for a new Farhelm release when the app starts and about \
+pub(super) const TOOLTIP: &str = "Install updates automatically: check for a new Farhelm release when the app starts and about \
                        once a day, and install it in the background";
 
 /// The help under the switch while it is on.
-const HELP_ON: &str = "Farhelm checks for a new release when it starts and about once a day, and installs it in the \
+pub(super) const HELP_ON: &str = "Farhelm checks for a new release when it starts and about once a day, and installs it in the \
                        background. Restarting Farhelm finishes the update.";
 
 /// The help under the switch while it is off: the on-demand routes that still install a release.
-const HELP_OFF: &str = "Farhelm installs a new release only when you check for updates (above, from the version in \
+pub(super) const HELP_OFF: &str = "Farhelm installs a new release only when you check for updates (above, from the version in \
                         the sidebar, the ? menu or this machine's update item) or run the installer yourself.";
 
 /// What the open dialog keeps for the section: the switch's focus handle, so it stays the same control while the
 /// section is hidden and shown again, and the reason the last press was not saved, until the next press.
 pub(super) struct AppUpdates {
     pub(super) focus: FocusHandle,
+    pub(super) check_focus: FocusHandle,
     failure: Option<SharedString>,
 }
 
 impl AppUpdates {
-    pub(super) fn new(focus: FocusHandle) -> Self {
+    pub(super) fn new(cx: &mut App) -> Self {
         AppUpdates {
-            focus,
+            focus: cx.focus_handle().tab_stop(true),
+            check_focus: cx.focus_handle().tab_stop(true),
             failure: None,
         }
     }
@@ -87,7 +91,7 @@ fn busy_status(cx: &App) -> Option<InlineStatus> {
 
 /// Match the geometry of a Settings switch row. Keep the check button's focus through progress so a second keypress
 /// cannot land on the automatic-updates switch.
-fn version_group(cx: &App) -> Div {
+fn version_group(focus: &FocusHandle, cx: &App) -> Div {
     let busy = busy_status(cx);
     let help = "The Farhelm release this app is running.";
     let version = StatusMark::new(
@@ -100,11 +104,12 @@ fn version_group(cx: &App) -> Div {
     .monospace();
     let check = Button::new(
         CHECK_ID,
-        busy.map_or("Check for updates", InlineStatus::text),
-        HoverHelp::tooltip("Check for and install a newer Farhelm release. The version at the top of the sidebar shows the result."),
+        busy.map_or(CHECK_LABEL, InlineStatus::text),
+        HoverHelp::tooltip(CHECK_HELP),
         Role::Button,
     )
     .tier(Tier::Neutral)
+    .focus(focus)
     .busy(busy.is_some())
     .on_click(|_, _, cx| {
         // An update started elsewhere can reach the updater before Settings draws the disabled button.
@@ -169,5 +174,9 @@ pub(super) fn section(
                 .clone()
                 .map(|reason| choices::failure_line(ERROR_ID.to_owned(), reason, cx)),
         );
-    Some([choices::help(NOTE, cx), version_group(cx), group])
+    Some([
+        choices::help(NOTE, cx),
+        version_group(&state.check_focus, cx),
+        group,
+    ])
 }

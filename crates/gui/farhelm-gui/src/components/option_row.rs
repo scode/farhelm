@@ -49,15 +49,16 @@ const PAD: (f32, f32) = (9., 10.);
 /// Label a run of options without becoming an option. This keeps the heading out of keyboard selection.
 pub(crate) fn option_heading(
     id: impl Into<ElementId>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     palette: &theme::Palette,
 ) -> AnyElement {
     let id = id.into();
+    let label = label.into();
     div()
         .id(id.clone())
         .debug_selector(|| id.to_string())
         .role(Role::Label)
-        .aria_label(label)
+        .aria_label(label.clone())
         .pt(px(4.))
         .px(px(6.))
         .pb(px(1.))

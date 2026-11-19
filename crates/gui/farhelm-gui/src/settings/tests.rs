@@ -2444,7 +2444,7 @@ const CHECKOUT_READS: [&str; 3] = [
 ];
 
 /// Open Settings, show Checkouts and answer its three reads with `root`, `command` and `spare`.
-fn show_checkouts(
+pub(super) fn show_checkouts(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
     root: Value,

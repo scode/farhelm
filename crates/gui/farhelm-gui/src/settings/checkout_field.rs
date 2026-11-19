@@ -56,7 +56,7 @@ const FIELD_GAP: f32 = 8.;
 const COMMAND_ROWS: usize = 4;
 
 /// The old post-clone field's note.
-const COMMAND_NOTE: &str = "Runs in each new managed checkout, on its host, after cloning and before the agent starts. \
+pub(super) const COMMAND_NOTE: &str = "Runs in each new managed checkout, on its host, after cloning and before the agent starts. \
                             Changes affect future checkouts only. A host given its own command from the command line \
                             keeps it. Save an empty field to remove the all-hosts command.";
 
@@ -80,15 +80,15 @@ enum Target {
 }
 
 /// What one kind of field says and is found by: everything per field that is a fixed string.
-struct Words {
+pub(super) struct Words {
     /// The prefix of every element id, which tests and the test bridge find the parts by: `<id>` is the field,
     /// `<id>-save`, `<id>-retry` and `<id>-use-default` its buttons, `<id>-error` and `<id>-saved` its lines.
-    id: &'static str,
+    pub(super) id: &'static str,
     /// The words above the field, which are also its accessible name.
-    label: &'static str,
+    pub(super) label: &'static str,
     /// The field's hover help. The old fields had none (the component layer requires one); these say what the value is
     /// for, in SPEC.md's terms.
-    help: &'static str,
+    pub(super) help: &'static str,
     save_help: &'static str,
     retry_help: &'static str,
     /// The line after a done save.
@@ -97,7 +97,7 @@ struct Words {
     shown: &'static str,
 }
 
-const DEFAULT_FOLDER: Words = Words {
+pub(super) const DEFAULT_FOLDER: Words = Words {
     id: "checkout-folder",
     label: "Default checkout folder",
     help: "The folder new managed checkouts go in on hosts without their own folder",
@@ -117,7 +117,7 @@ const HOST_FOLDER: Words = Words {
     shown: "/api/hosts/[host]/checkout-root",
 };
 
-const POST_CLONE: Words = Words {
+pub(super) const POST_CLONE: Words = Words {
     id: "checkout-post-clone",
     label: "Post-clone command",
     help: "A command run in each new managed checkout after cloning and before the agent starts",
@@ -475,6 +475,11 @@ impl CheckoutField {
     #[cfg(test)]
     pub(crate) fn focused(&self, window: &Window, cx: &App) -> bool {
         self.input.input().focus_handle(cx).is_focused(window)
+    }
+
+    /// The field is drawn and focusable while its read holds it read-only.
+    pub(super) fn search_focus(&self, cx: &App) -> gpui::FocusHandle {
+        self.input.input().focus_handle(cx)
     }
 
     /// A line under the field: the note, the saved line or a failure, at the note's size and line, as wide as the field

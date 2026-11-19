@@ -28,6 +28,8 @@ use crate::{agent_startup, session};
 
 /// The radio group's element id; each option is drawn under `settings-appearance-<its label>`.
 pub(super) const ID: &str = "settings-appearance";
+pub(super) const LABEL: &str = "Color theme";
+pub(super) const TOOLTIP: &str = "The interface colors for this helm";
 
 /// The failure line's element id.
 pub(super) const ERROR_ID: &str = "settings-appearance-error";
@@ -40,14 +42,14 @@ const LEGEND_TEXT: f32 = 13.;
 const LEGEND_GAP: f32 = 8.;
 
 /// The help above the group: the old line, reworded for a choice the helm holds (see the module docs).
-const HELP: &str = "Choose the interface colors. This choice applies to this helm; changes from the command line or an \
+pub(super) const HELP: &str = "Choose the interface colors. This choice applies to this helm; changes from the command line or an \
                     agent show here right away. System follows each device's own appearance. The terminal stays dark.";
 
 /// The line under the group after the helm refused a save.
 const FAILURE: &str = "Could not save the color theme. Try again.";
 
 /// The three choices in the old order, each with its label and hover help.
-const CHOICES: [(Preference, &str, &str); 3] = [
+pub(super) const CHOICES: [(Preference, &str, &str); 3] = [
     (
         Preference::System,
         "System",
@@ -139,13 +141,8 @@ pub(super) fn section(
 ) -> Div {
     let palette = theme::palette(cx);
     let group = CHOICES.iter().fold(
-        RadioGroup::new(
-            ID,
-            "Color theme",
-            HoverHelp::tooltip("The interface colors for this helm"),
-            Role::RadioGroup,
-        )
-        .chosen(Some(shown(draft, preferences))),
+        RadioGroup::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::RadioGroup)
+            .chosen(Some(shown(draft, preferences))),
         |group, &(value, label, help)| {
             group.option(RadioOption::new(label, HoverHelp::tooltip(help), value))
         },
@@ -168,7 +165,7 @@ pub(super) fn section(
                         .text_size(px(LEGEND_TEXT))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::color(palette.fg_0))
-                        .child("Color theme"),
+                        .child(LABEL),
                 )
                 .child(group.on_change(on_change))
                 .children(

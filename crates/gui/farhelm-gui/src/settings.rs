@@ -105,6 +105,7 @@ pub(crate) use recipes::{
     Departed as RecipeDeparted, Departure as RecipeDeparture, Editor as RecipeEditor,
 };
 mod refused;
+mod search;
 mod tensorlake;
 mod tensorlake_key;
 #[cfg(test)]
@@ -125,7 +126,8 @@ use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use crate::assets::Icon;
@@ -140,6 +142,7 @@ use crate::theme::{self, Preference};
 use agent_trust::Trust;
 use choices::{Choice, Switch};
 use configured::Configured;
+use search::{Search, Target};
 use tensorlake_key::{Place, TensorlakeAccount, TensorlakeKey};
 
 /// What the session view's trust hint band says for an agent, kept with the rest of that agent's trust vocabulary.
@@ -164,6 +167,8 @@ const WIDTH: f32 = 760.;
 const HEIGHT: f32 = 780.;
 /// `.app-settings-navigation`'s column: 168 pixels, its 12-pixel right padding and its edge included.
 const NAV_WIDTH: f32 = 168.;
+/// The search shortcut is scoped to the Settings frame, including its header and footer.
+pub(crate) const SEARCH_CONTEXT: &str = "Settings";
 /// `.app-settings-panel > h3`: the shown section's heading size.
 const HEADING_TEXT: f32 = 18.;
 /// The heading's line: `line-height: normal` at 18 pixels; GPUI's default line is taller.
@@ -192,6 +197,13 @@ const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tenso
 /// Both controls use the recipe editor's leave question when it guards a close.
 const CLOSE_HELP: &str =
     "Close: asks first about unsaved recipe edits and discards other unsaved fields";
+
+const HOST_CHOICES_HELP: &str = "The host choices apply to every host on this helm. Changes from the command line or \
+                                 an agent show here right away.";
+const SOUNDS_ID: &str = "settings-sounds";
+const SOUNDS_LABEL: &str = "Sounds";
+const SOUNDS_HELP: &str = "These choices apply to this helm; changes from the command line or an agent show here \
+                           right away. The session open in an active window stays quiet.";
 
 /// Open Settings at Sessions with focus on its first switch, on top of everything else in `window`: the gear's entry
 /// point (SPEC.md: "The gear always opens sessions and focuses its first switch").
@@ -238,13 +250,13 @@ fn open_dialog(
     if focus::has_moved_on(mark, cx) {
         return None;
     }
-    let dialog = cx.new(|cx| SettingsDialog::new(section, cx));
+    let dialog = cx.new(|cx| SettingsDialog::new(section, window, cx));
     let container = cx.focus_handle();
     let start = dialog
         .read(cx)
         .start(section, cx)
         .unwrap_or_else(|| container.clone());
-    let layer = layers::open_dialog(
+    let layer = layers::open_dialog_with_shortcut(
         Dialog {
             view: dialog.clone().into(),
             container: container.clone(),
@@ -271,6 +283,14 @@ fn open_dialog(
             placement: layers::DialogPlacement::Centered,
             dismiss_on_outside_press: false,
         },
+        SEARCH_CONTEXT,
+        crate::actions::SearchSettings,
+        Rc::new({
+            let dialog = dialog.downgrade();
+            move |window, cx| {
+                let _ = dialog.update(cx, |dialog, cx| dialog.search.focus(window, cx));
+            }
+        }),
         mark,
         window,
         cx,
@@ -325,7 +345,7 @@ pub fn open_at_agent_trust(
     let (layer, dialog) = open_dialog(Section::AgentTrust, opener, mark, window, cx)?;
     // A fresh dialog has just sent its reads, so the switch is not available yet: focus waits for the answer.
     let handover = Handover {
-        agent,
+        target: Target::Trust(agent),
         mark: *mark,
         window: window.window_handle(),
     };
@@ -386,6 +406,18 @@ pub(crate) fn decide_tunnels_for_opened(platform: Platform, cx: &mut App) {
         Some(dialog) => dialog.update(cx, |dialog, cx| dialog.decide_tunnels_for(platform, cx)),
         None => panic!("no Settings dialog is open to decide its tunnel switch for"),
     }
+}
+
+/// Show a settled search in a golden without waiting for synthetic keyboard events before the first paint.
+#[cfg(test)]
+pub(crate) fn search_for_opened(query: &str, window: &mut Window, cx: &mut App) {
+    let dialog =
+        layers::last_opened::<SettingsDialog>(cx).expect("Settings is open for its golden");
+    dialog.update(cx, |dialog, cx| {
+        dialog.search.set_query(query, window, cx);
+        dialog.search.focus(window, cx);
+        cx.notify();
+    });
 }
 
 /// Open a new recipe's editor in the open Settings dialog's Recipes section, as New recipe does, for the golden that
@@ -556,6 +588,8 @@ impl Section {
 pub(crate) struct SettingsDialog {
     /// The section drawn beside the list; the others keep their state undrawn.
     shown: Section,
+    /// The field lives with the dialog. Searching temporarily replaces the right pane and keeps its section state.
+    search: Search,
     /// One per [`Choice`], in [`Choice::ALL`]'s order, whichever section draws it.
     switches: Vec<Switch>,
     /// Appearance's radio group: like a switch's draft, it holds the value being saved and the last refusal, and its
@@ -576,6 +610,7 @@ pub(crate) struct SettingsDialog {
     checkout_fields: Option<CheckoutFields>,
     /// Checkouts' spare switch. Its read is sent with the fields', so `checkout_fields` also says whether it was sent.
     spare: Configured,
+    spare_focus: FocusHandle,
     /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
     /// reads the helm's settings (the pattern Agent trust follows).
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
@@ -600,8 +635,7 @@ pub(crate) struct SettingsDialog {
     /// The Recipes section, made the first time it is shown in this opening. Its rows are the pushed catalog; whether
     /// a key is saved comes from the shared account above, read then if no section has yet ([`recipes`]).
     recipes: Option<Entity<recipes::Recipes>>,
-    /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
-    /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
+    /// The result or trust hint waiting for a control to become available.
     focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
@@ -623,11 +657,10 @@ struct CheckoutFields {
     post_clone: Entity<CheckoutField>,
 }
 
-/// What a trust hint's entry point asks of the dialog ([`open_at_agent_trust`]): once `agent`'s read answers, focus
-/// moves to that agent's switch in `window`, unless the user has moved on since `mark`, the hint's click. The window is
-/// kept because the read's answer reaches the dialog without one, and the focus move needs it.
+/// A focus request that outlives the input event because its target still needs to load. The mark limits it to the
+/// initiating input, and the window lets a read that answers outside the draw pass hand focus over.
 struct Handover {
-    agent: TrustAgent,
+    target: Target,
     mark: Mark,
     window: AnyWindowHandle,
 }
@@ -639,6 +672,7 @@ impl SettingsDialog {
     #[cfg(test)]
     pub(crate) fn decide_tunnels_for(&mut self, platform: Platform, cx: &mut Context<Self>) {
         self.platform = platform;
+        self.search.set_platform(platform, cx);
         if let Some(field) = &self.file_types {
             field.update(cx, |field, cx| field.set_platform(platform, cx));
         }
@@ -646,7 +680,7 @@ impl SettingsDialog {
     }
 
     /// A dialog showing `shown`, with no save of its own yet.
-    fn new(shown: Section, cx: &mut Context<Self>) -> Self {
+    fn new(shown: Section, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let switches = Choice::ALL
             .iter()
             .map(|&choice| Switch {
@@ -659,6 +693,7 @@ impl SettingsDialog {
             .collect();
         SettingsDialog {
             shown,
+            search: Search::new(crate::actions::THIS_PLATFORM, window, cx),
             switches,
             appearance: Draft::load(Preference::System),
             link_click: Draft::load(LinkClick::Intercept),
@@ -674,10 +709,11 @@ impl SettingsDialog {
             trust_read: false,
             checkout_fields: None,
             spare: Configured::new(),
+            spare_focus: cx.focus_handle().tab_stop(true),
             ntfy: None,
             file_types: None,
             containers: None,
-            app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
+            app: app::AppUpdates::new(cx),
             _updater: crate::desktop::updates::entity(cx)
                 .map(|updater| cx.observe(&updater, |_, _, cx| cx.notify())),
             credentials: None,
@@ -724,6 +760,7 @@ impl SettingsDialog {
     /// ([`tensorlake_ssh_key`]); showing Recipes makes it the first time, over the same account, read then if no
     /// section has yet.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_on = None;
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
             self.containers = Some(cx.new(containers::Containers::new));
@@ -733,7 +770,10 @@ impl SettingsDialog {
             self.file_types = Some(cx.new(|cx| file_types::FileTypes::new(platform, window, cx)));
         }
         if section == Section::Notifications && self.ntfy.is_none() {
-            self.ntfy = Some(cx.new(|cx| ntfy::NtfyAlerts::new(window, cx)));
+            let form = cx.new(|cx| ntfy::NtfyAlerts::new(window, cx));
+            cx.observe(&form, |dialog, _, cx| dialog.finish_handover(cx))
+                .detach();
+            self.ntfy = Some(form);
         }
         if section == Section::Credentials {
             match &self.credentials {
@@ -763,8 +803,10 @@ impl SettingsDialog {
                     let key = cx.new(|cx| {
                         TensorlakeKey::new(account.clone(), Place::Tensorlake, window, cx)
                     });
-                    self.tensorlake_section =
-                        Some(cx.new(|cx| tensorlake::Tensorlake::new(account, key, window, cx)));
+                    let view = cx.new(|cx| tensorlake::Tensorlake::new(account, key, window, cx));
+                    cx.observe(&view, |dialog, _, cx| dialog.finish_handover(cx))
+                        .detach();
+                    self.tensorlake_section = Some(view);
                 }
             }
         }
@@ -793,6 +835,7 @@ impl SettingsDialog {
             checkouts::read_spare(cx, move |answer, cx| {
                 let _ = dialog.update(cx, |dialog, cx| {
                     dialog.spare.read_answered(answer);
+                    dialog.finish_handover(cx);
                     cx.notify();
                 });
             });
@@ -820,8 +863,14 @@ impl SettingsDialog {
         else {
             return Dismissal::Close;
         };
-        if self.shown != Section::Recipes && editor.read(cx).asks_before_leaving(cx) {
-            self.show(Section::Recipes, window, cx);
+        if editor.read(cx).asks_before_leaving(cx) {
+            if self.shown != Section::Recipes {
+                self.show(Section::Recipes, window, cx);
+            }
+            if self.search.active() {
+                self.search.clear(window, cx);
+                cx.notify();
+            }
         }
         editor.update(cx, |editor, cx| editor.dismissal(window, cx))
     }
@@ -834,27 +883,127 @@ impl SettingsDialog {
         answer: Result<bool, crate::host_text::HostText>,
         cx: &mut Context<Self>,
     ) {
-        let trust = &mut self.trust[agent.index()];
-        trust.state.read_answered(answer);
-        // The move is asked for here, when the read answers, and not when the dialog opens. Until now the switch was
-        // drawn unavailable, and an unavailable switch is not focus-tracked, so no frame reports it drawn: a move asked
-        // at opening would sit as the window's pending move for the whole read, and after a failed read until some
-        // other focus move dropped it, which is the unnoticed wait `focus_in_layer`'s contract rules out for a target
-        // not drawn yet. Its docs name this caller: a result that arrives after the user's action. From here the
-        // switch is drawn available, and so tracked, by the frame this update's notify asks for; the coordinator keeps
-        // the move until that frame draws it and then makes it and scrolls it into view, so nothing here schedules
-        // anything. The call also checks the hint's mark (a click that leaves focus on the dialog still counts as
-        // moving on) and refuses once focus has left the dialog.
-        if trust.state.available()
-            && let Some(handover) = self.focus_on.take_if(|handover| handover.agent == agent)
+        self.trust[agent.index()].state.read_answered(answer);
+        self.finish_handover(cx);
+        cx.notify();
+    }
+
+    /// Unavailable switches are untracked. Let their ordinary read unlock them before asking the focus coordinator
+    /// to wait for the frame that draws the available switch. A later key or click ends the handover.
+    fn finish_handover(&mut self, cx: &mut Context<Self>) {
+        let Some(handover) = &self.focus_on else {
+            return;
+        };
+        if focus::has_moved_on(&handover.mark, cx) {
+            self.focus_on = None;
+        } else if let Some(handle) = self.search_target(handover.target, cx)
+            && let Some(handover) = self.focus_on.take()
         {
-            let to = trust.focus.clone();
-            // A window that has closed meanwhile has nothing to focus, so its error is ignored.
             let _ = handover.window.update(cx, |_, window, cx| {
-                focus::focus_in_layer(&to, &handover.mark, window, cx)
+                focus::focus_in_layer(&handle, &handover.mark, window, cx);
             });
         }
+    }
+
+    /// Resolve a handle from the section's current state. Read-only fields are still drawn as focusable. Disabled
+    /// switches and controls that this build or a section's current editor hides have no position.
+    fn search_target(&self, target: Target, cx: &App) -> Option<FocusHandle> {
+        match target {
+            Target::Top => None,
+            Target::Choice(choice) => Some(self.switches[Self::index(choice)].focus.clone()),
+            Target::Trust(agent) => {
+                let trust = &self.trust[agent.index()];
+                trust.state.available().then(|| trust.focus.clone())
+            }
+            Target::AppUpdates => self.start(Section::App, cx),
+            Target::AppCheck => Section::App
+                .listed(cx)
+                .then(|| self.app.check_focus.clone()),
+            Target::Tunnels => {
+                terminal::shown_on(self.platform).then(|| self.tunnels.focus.clone())
+            }
+            Target::FileTypes => Some(self.file_types.as_ref()?.read(cx).search_focus(cx)),
+            Target::CheckoutFolder => Some(
+                self.checkout_fields
+                    .as_ref()?
+                    .folder
+                    .read(cx)
+                    .search_focus(cx),
+            ),
+            Target::PostClone => Some(
+                self.checkout_fields
+                    .as_ref()?
+                    .post_clone
+                    .read(cx)
+                    .search_focus(cx),
+            ),
+            Target::SpareCheckout => self.spare.available().then(|| self.spare_focus.clone()),
+            Target::NtfyField(field) => {
+                Some(field.input(self.ntfy.as_ref()?.read(cx)).focus_handle(cx))
+            }
+            Target::NtfySwitch(switch) => self.ntfy.as_ref()?.read(cx).search_focus(switch),
+            Target::TensorlakeKey(Place::Tensorlake) => {
+                let section = self.tensorlake_section.as_ref()?.read(cx);
+                Some(section.key().read(cx).search_focus(cx))
+            }
+            Target::TensorlakeKey(Place::Credentials) => {
+                let section = self.credentials.as_ref()?.read(cx);
+                section.key_focus(cx)
+            }
+            Target::TensorlakeAsk => self.tensorlake_section.as_ref()?.read(cx).search_focus(cx),
+        }
+    }
+
+    /// A search temporarily undraws Recipes, just like changing sections does. Keep its draft and release its clocks.
+    fn search_edited(&mut self, cx: &mut Context<Self>) {
+        self.search.edited(cx);
+        if self.search.active()
+            && self.shown == Section::Recipes
+            && let Some(recipes) = &self.recipes
+        {
+            recipes.update(cx, |recipes, _| recipes.hidden());
+        }
         cx.notify();
+    }
+
+    fn open_search_result(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((section, target)) = self.search.chosen() {
+            // The next pane may focus a multiline field. The Enter that picked this result must not type into it.
+            focus::note_closing(true, window, cx);
+            self.open_search_target(section, target, window, cx);
+        }
+    }
+
+    /// Clear the query before showing the result's section. While an unavailable switch loads or an entry has no
+    /// target, reveal the top of the selected section by moving to the field alongside it.
+    fn open_search_target(
+        &mut self,
+        section: Section,
+        target: Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.search.clear(window, cx);
+        let mark = Mark::take(cx);
+        self.show(section, window, cx);
+        if let Some(handle) = self.search_target(target, cx) {
+            focus::focus_in_layer(&handle, &mark, window, cx);
+        } else {
+            self.search.focus(window, cx);
+            if matches!(
+                target,
+                Target::Trust(_)
+                    | Target::SpareCheckout
+                    | Target::NtfySwitch(_)
+                    | Target::TensorlakeAsk
+            ) {
+                self.focus_on = Some(Handover {
+                    target,
+                    mark,
+                    window: window.window_handle(),
+                });
+            }
+        }
     }
 
     /// The user turned a switch over helm configuration to `on` (an agent's trust, Checkouts' spare switch): save it
@@ -1090,9 +1239,9 @@ impl SettingsDialog {
     fn sounds(&self, preferences: Option<&Preferences>, cx: &Context<Self>) -> AnyElement {
         let palette = theme::palette(cx);
         div()
-            .id("settings-sounds")
+            .id(SOUNDS_ID)
             .role(Role::Region)
-            .aria_label("Sounds")
+            .aria_label(SOUNDS_LABEL)
             .flex()
             .flex_col()
             .gap(px(SECTION_GAP))
@@ -1101,18 +1250,14 @@ impl SettingsDialog {
                 div()
                     .id("settings-sounds-heading")
                     .role(Role::Heading)
-                    .aria_label("Sounds")
+                    .aria_label(SOUNDS_LABEL)
                     .text_size(px(choices::LABEL_TEXT))
                     .line_height(px(choices::LABEL_LINE_HEIGHT))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(palette.fg_0))
-                    .child("Sounds"),
+                    .child(SOUNDS_LABEL),
             )
-            .child(choices::help(
-                "These choices apply to this helm; changes from the command line or an agent show here right away. \
-                 The session open in an active window stays quiet.",
-                cx,
-            ))
+            .child(choices::help(SOUNDS_HELP, cx))
             .child(self.switch(Choice::SoundWaiting, preferences, cx))
             .child(self.switch(Choice::SoundApproval, preferences, cx))
             .child(self.switch(Choice::SoundTurnFinished, preferences, cx))
@@ -1151,12 +1296,7 @@ impl SettingsDialog {
             }
             Section::Hosts => vec![
                 self.switch(Choice::AutoUpdateRemoteHosts, preferences, cx),
-                choices::help(
-                    "The host choices apply to every host on this helm. Changes from the command line or an agent show \
-                     here right away.",
-                    cx,
-                )
-                .into_any_element(),
+                choices::help(HOST_CHOICES_HELP, cx).into_any_element(),
                 self.switch(Choice::SkipHostSetupConfirmation, preferences, cx),
                 self.switch(Choice::SkipHostRemoveConfirmation, preferences, cx),
             ],
@@ -1191,6 +1331,7 @@ impl SettingsDialog {
                 let weak = cx.weak_entity();
                 let spare = checkouts::spare(
                     &self.spare,
+                    &self.spare_focus,
                     &self.refused,
                     move |on, _, cx| {
                         let _ = weak.update(cx, |dialog, cx| {
@@ -1258,6 +1399,12 @@ impl SettingsDialog {
                     .collect()
             }
             Section::App => {
+                if !section.listed(cx) {
+                    return vec![
+                        choices::help("App updates are unavailable in this build.", cx)
+                            .into_any_element(),
+                    ];
+                }
                 let weak = cx.weak_entity();
                 app::section(
                     &self.app,
@@ -1318,6 +1465,7 @@ impl Render for SettingsDialog {
 
         let help_edge =
             layers::beside_edge("settings-navigation-help-edge", window, cx).into_any_element();
+        let searching = self.search.active();
         let listed = Section::ALL
             .iter()
             .copied()
@@ -1337,6 +1485,7 @@ impl Render for SettingsDialog {
             .border_r_1()
             .border_color(theme::color(palette.border_dialog))
             .child(help_edge)
+            .child(self.search.field(cx))
             .children(listed.map(|section| {
                 let weak = weak.clone();
                 Button::new(
@@ -1350,34 +1499,43 @@ impl Render for SettingsDialog {
                 .icon(section.icon())
                 .pressed(section == self.shown)
                 .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |dialog, cx| dialog.show(section, window, cx));
+                    let _ = weak.update(cx, |dialog, cx| {
+                        dialog.search.clear(window, cx);
+                        dialog.show(section, window, cx);
+                    });
                 })
             }));
         // `.app-settings-panel`: the shown section under its heading.
-        let shown = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(SECTION_GAP))
-            .child(
-                div()
-                    .id("settings-heading")
-                    .debug_selector(|| "settings-heading".into())
-                    .role(Role::Heading)
-                    .aria_label(self.shown.label())
-                    .text_size(px(HEADING_TEXT))
-                    .line_height(px(HEADING_LINE_HEIGHT))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(self.shown.label()),
-            )
-            .children(self.body(self.shown, preferences.as_ref(), cx));
+        let shown = if searching {
+            self.search.pane(window, cx)
+        } else {
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(SECTION_GAP))
+                .child(
+                    div()
+                        .id("settings-heading")
+                        .debug_selector(|| "settings-heading".into())
+                        .role(Role::Heading)
+                        .aria_label(self.shown.label())
+                        .text_size(px(HEADING_TEXT))
+                        .line_height(px(HEADING_LINE_HEIGHT))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(theme::color(palette.fg_0))
+                        .child(self.shown.label()),
+                )
+                .children(self.body(self.shown, preferences.as_ref(), cx))
+                .into_any_element()
+        };
         let body = div()
             .flex()
             .items_start()
             .gap(px(20.))
             .text_color(theme::color(palette.fg_0))
+            .when(searching, |body| body.h_full())
             .child(navigation)
             .child(shown);
 
@@ -1394,7 +1552,7 @@ impl Render for SettingsDialog {
         let recipe_actions = self
             .recipes
             .as_ref()
-            .filter(|_| self.shown == Section::Recipes)
+            .filter(|_| self.shown == Section::Recipes && !searching)
             .and_then(|recipes| recipes.read(cx).editor())
             .map(|editor| recipes::Editor::actions(&editor, cx));
         let frame = DialogFrame::new("settings", "Settings", body, vec![close]);
