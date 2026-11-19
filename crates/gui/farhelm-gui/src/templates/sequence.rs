@@ -141,7 +141,7 @@ impl Sequence {
         match input {
             Input::Character(c) => self.word.push(c),
             Input::Digit { key, text } => {
-                // SPEC.md: "a name beginning with a digit is reachable only by its number key or the launcher".
+                // A digit typed with Shift alone arrives as Character, so it can start a name.
                 if self.word.is_empty() {
                     self.entries.push(Entry::Number(key));
                 } else {
