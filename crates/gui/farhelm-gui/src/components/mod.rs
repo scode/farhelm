@@ -355,18 +355,19 @@ pub(crate) type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 /// focus landed on when the key came up, which SPEC.md rules out ("Repeated or composing Enter cannot answer the new
 /// question").
 ///
-/// Only the keyboard click is dropped. A screen reader's activation and the test bridge's `click` both arrive as a
-/// pointer press and release at the control, so they still run `handler`; do not narrow the filter further to catch
-/// them.
+/// A screen reader's activation and the test bridge's `click` arrive as pointer presses and releases and still run
+/// `handler`; do not narrow the filter further to catch them. A mouse click whose release had its default prevented is
+/// dropped too: only the session list's Shift sweep (`session_list::pin_drag`) does that, so a press the sweep began
+/// cannot fire as a click on the row it ends on; nothing else should prevent a release's default.
 pub(crate) fn activate_on_click<E: StatefulInteractiveElement>(
     element: E,
     handler: Option<Handler>,
 ) -> E {
     match handler {
-        Some(handler) => element.on_click(move |event, window, cx| {
-            if !event.is_keyboard() {
-                handler(event, window, cx);
-            }
+        Some(handler) => element.on_click(move |event, window, cx| match event {
+            ClickEvent::Keyboard(_) => {}
+            ClickEvent::Mouse(_) if window.default_prevented() => {}
+            _ => handler(event, window, cx),
         }),
         None => element,
     }

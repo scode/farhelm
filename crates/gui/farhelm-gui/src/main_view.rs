@@ -231,7 +231,7 @@ impl Render for MainView {
         } else {
             inert(&state, cx)
         };
-        let ground = div()
+        let ground = session_list::pin_drag::catch_sweep_escape(div(), &self.session_list)
             // The open session's header Delete, with its ordinary question (SPEC.md, "Desktop window chrome"), unless a
             // dialog, menu or question keeps the keyboard (a popover that never takes focus, such as a terminal link's
             // destination display, does not). Taken whatever the header does with it, as a once-per-press

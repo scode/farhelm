@@ -8,10 +8,9 @@
 //! - **Taken by the pointer.** Any pointer activity over the rows (entering them, moving, a press of any button, a
 //!   wheel scroll, which moves the rows under a still pointer) takes the hold when none is on, snapshotting the order
 //!   on screen and which of those rows were pinned. The heading and the segments above the rows are not part of it.
-//! - **Released by leaving or by stillness, never under a row's menu.** The hold ends once the pointer has left the
-//!   rows, or has been completely still over them for 5 seconds ([`STILLNESS`]); but while a row's menu or a question
-//!   one of its commands asked is open it stays, whatever the pointer did, since releasing it would move the very row
-//!   the menu belongs to. The rule is checked against the facts as they are ([`Hold::release_if_due`]), every time the
+//! - **Released by leaving or by stillness.** The hold ends once the pointer has left the rows or has been still
+//!   over them for 5 seconds ([`STILLNESS`]). A row's menu, its question or an active marking sweep keeps the hold,
+//!   since releasing it could move the row under the pointer. The rule is checked ([`Hold::release_if_due`]) every time the
 //!   list draws, so a leave or a stillness that happened under an open menu takes effect on the first frame after it
 //!   closes. Pointer movement starts the 5 seconds over, also while a menu is open.
 //! - **A menu closing is judged by where the pointer is.** A row's menu opens below its button and covers part of the
@@ -174,10 +173,9 @@ impl Hold {
         closed
     }
 
-    /// End the hold now if the release rule says so: never while a row's menu or its question is open (`menu_open`),
-    /// and otherwise once the pointer is not over the rows or has been still over them for [`STILLNESS`].
-    pub(super) fn release_if_due(&mut self, menu_open: bool) {
-        if !menu_open && (!self.pointer_over || self.still) {
+    /// End the hold after a leave or [`STILLNESS`], unless a row's menu, its question or a sweep still needs it.
+    pub(super) fn release_if_due(&mut self, keeps_order: bool) {
+        if !keeps_order && (!self.pointer_over || self.still) {
             self.held = None;
         }
     }
@@ -185,6 +183,12 @@ impl Hold {
     /// The original pins while the hold is on, which the Move items read ([`pins::neighbors`]); `None` with no hold.
     pub(super) fn original_pins(&self) -> Option<&HashSet<String>> {
         self.held.as_ref().map(|held| &held.original_pins)
+    }
+
+    /// A captured row may still occupy an earlier band. A release consults that band when fresh collapse state
+    /// arrives before the next frame updates the list.
+    pub(super) fn band_of(&self, key: &str) -> Option<Band> {
+        self.held.as_ref()?.bands.get(key).copied()
     }
 
     /// Refresh the last frame's snapshot only while there is no hold. The
