@@ -22,7 +22,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels,
     RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
@@ -38,6 +38,7 @@ pub struct ListRow {
     help: HoverHelp,
     role: Role,
     selected: bool,
+    content_indent: Pixels,
     lines: Vec<AnyElement>,
     on_click: Option<Handler>,
 }
@@ -58,6 +59,7 @@ impl ListRow {
             help,
             role,
             selected: false,
+            content_indent: px(0.),
             lines: Vec::new(),
             on_click: None,
         }
@@ -67,6 +69,12 @@ impl ListRow {
     /// rings under keyboard focus in the on-fill ink rather than the accent (the module docs say why).
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Inset the lines while keeping the open control's hit area and focus ring on the whole row.
+    pub fn content_indent(mut self, indent: Pixels) -> Self {
+        self.content_indent = indent;
         self
     }
 
@@ -118,7 +126,7 @@ impl RenderOnce for ListRow {
             .gap(px(2.))
             .pt(pad_y)
             .pb(pad_y)
-            .pl(pad_left)
+            .pl(pad_left + self.content_indent)
             .cursor_pointer()
             .hover(move |style| style.bg(theme::color(hover_fill)))
             .children(self.lines);

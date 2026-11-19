@@ -124,7 +124,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
 }
 
 impl Fixture {
-    pub(super) fn grouped(mut self, group: i64) -> Self {
+    pub(crate) fn grouped(mut self, group: i64) -> Self {
         self.group = Some(group);
         self
     }

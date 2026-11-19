@@ -55,7 +55,7 @@ use super::{SessionList, groups};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, MenuItem, StatusMark};
 use crate::operations::{Command, OpKey, Work};
-use crate::theme::{self, Palette, Token};
+use crate::theme::{self, Palette, Token, metrics};
 
 // ---- The display order -----------------------------------------------------------------------------------------------
 
@@ -537,21 +537,34 @@ pub(super) fn separator(kind: Separator, palette: &Palette) -> impl IntoElement 
         ),
         Separator::Groups => ("session-groups-separator".to_owned(), "Session groups"),
     };
-    let (weight, gap) = if matches!(kind, Separator::GroupPins(_)) {
-        (1., 3.)
-    } else {
-        (2., 6.)
-    };
-    div()
+    let grouped = matches!(kind, Separator::GroupPins(_));
+    let (weight, gap) = if grouped { (1., 3.) } else { (2., 6.) };
+    let separator = div()
         .id(SharedString::from(id.clone()))
         // Tests find it by this; it records nothing outside test builds.
         .debug_selector(move || id.clone())
         .role(Role::Splitter)
         .aria_label(label)
-        .w_full()
-        .border_t(px(weight))
-        .border_color(theme::color(palette.border_row))
-        .mb(px(gap))
+        .w_full();
+    let stroke = theme::color(palette.border_row);
+    if grouped {
+        // Continue the guide through the divider between a group's last pin and its first unpinned member.
+        separator
+            .relative()
+            .pb(px(gap))
+            .child(
+                div()
+                    .ml(metrics::ROW_PAD.1 + super::groups::MEMBER_INDENT)
+                    .border_t(px(weight))
+                    .border_color(stroke),
+            )
+            .child(super::groups::member_guide(palette))
+    } else {
+        separator
+            .border_t(px(weight))
+            .border_color(stroke)
+            .mb(px(gap))
+    }
 }
 
 #[cfg(test)]

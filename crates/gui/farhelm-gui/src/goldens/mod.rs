@@ -259,9 +259,20 @@ fn session_list_scene_preferring(
     extra: Vec<CollectionState>,
     cx: &mut App,
 ) {
+    let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    session_list_scene_with_listing(state, listing(&order, rows), preferences, extra, cx);
+}
+
+/// Draw the sidebar with a prepared listing when its collection metadata is part of the scene, as with a group roster.
+fn session_list_scene_with_listing(
+    state: &SceneState,
+    sessions: CollectionState,
+    preferences: CollectionState,
+    extra: Vec<CollectionState>,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
     let mut registry = hosts(&[
         local(),
         remote(2, "deploy@buildbox.example.invalid"),
@@ -272,7 +283,7 @@ fn session_list_scene_preferring(
         "cause": "transport-failure",
         "last_error": "timed out",
     });
-    let mut snapshot = vec![listing(&order, rows), preferences, registry];
+    let mut snapshot = vec![sessions, preferences, registry];
     snapshot.extend(extra);
     helm.connect(snapshot);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
@@ -661,6 +672,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_pinned_setup,
+    },
+    Scene {
+        name: "session-list-groups",
+        size: (420., 450.),
+        draw: session_lists,
+        setup: session_list_groups_setup,
     },
     Scene {
         name: "host-rail-status",

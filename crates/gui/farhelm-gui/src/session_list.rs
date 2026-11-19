@@ -822,6 +822,7 @@ impl Render for SessionList {
         let (
             keys,
             headers,
+            member_groups,
             separators,
             projection,
             any_pulse,
@@ -859,6 +860,7 @@ impl Render for SessionList {
             let groups::Frame {
                 keys,
                 headers,
+                member_groups,
                 separators,
                 moves,
                 rows: listed,
@@ -906,6 +908,7 @@ impl Render for SessionList {
             (
                 keys,
                 headers,
+                member_groups,
                 separators,
                 projection,
                 any_pulse,
@@ -1095,8 +1098,17 @@ impl Render for SessionList {
                             let selected = selected.as_deref() == Some(key.as_str());
                             let marked = marked.iter().any(|shown| shown == key);
                             draw_row(
-                                &shared, &pin_drag, &weak, key, focus, selected, marked, steps,
-                                window, cx,
+                                &shared,
+                                &pin_drag,
+                                &weak,
+                                key,
+                                focus,
+                                selected,
+                                marked,
+                                member_groups.contains_key(key),
+                                steps,
+                                window,
+                                cx,
                             )
                         };
                         if let Some(separator) = separators.get(key) {
@@ -1144,6 +1156,7 @@ fn draw_row(
     focus: &FocusHandle,
     selected: bool,
     marked: bool,
+    grouped: bool,
     steps: row::Steps,
     window: &mut Window,
     cx: &mut App,
@@ -1181,6 +1194,7 @@ fn draw_row(
         collections,
         selected,
         marked,
+        grouped,
         steps,
         menu,
         bell,

@@ -15,6 +15,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, ListCounts, Preferences,
+    SessionGroup,
 };
 use gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement, Pixels, Styled, Window,
@@ -23,7 +24,8 @@ use gpui::{
 
 use super::{
     AfterDrawn, SceneState, defer_after, fleet, rest_pointer_at, session_list_scene,
-    session_list_scene_opening, session_list_scene_preferring, session_list_then, session_lists_at,
+    session_list_scene_opening, session_list_scene_preferring, session_list_scene_with_listing,
+    session_list_then, session_lists_at,
 };
 
 /// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
@@ -169,6 +171,45 @@ pub(super) fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: 
             .pinned(1),
     ];
     session_list_scene_opening(state, &rows, Some("p"), cx);
+}
+
+/// Show the guide across a group's pin divider and down to its last member, with an ordinary row on either side.
+pub(super) fn session_list_groups_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let row = |key, title, cwd, ago| {
+        session(key)
+            .title(title)
+            .cwd(cwd)
+            .status(serde_json::json!({ "state": "idle" }))
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let rows = [
+        row("a", "Refactor the API client", "/home/user/src/api", 120).pinned(1),
+        row("b", "Review the install docs", "/home/user/src/docs", 300)
+            .grouped(10)
+            .pinned(2),
+        row("c", "Update the examples", "/home/user/src/docs", 420).grouped(10),
+        row("d", "Fix the flaky upload test", "/srv/ci/uploads", 840).grouped(20),
+        row("e", "Benchmark the cache", "/home/user/bench", 3 * 3_600),
+    ];
+    let mut sessions = listing(&["a", "b", "c", "d", "e"], &rows);
+    sessions.meta.session_groups = vec![
+        SessionGroup {
+            id: 10,
+            name: "Documentation".to_owned(),
+            position: 1,
+            collapsed: false,
+            members: 2,
+        },
+        SessionGroup {
+            id: 20,
+            name: "CI".to_owned(),
+            position: 2,
+            collapsed: true,
+            members: 1,
+        },
+    ];
+    session_list_scene_with_listing(state, sessions, preferences(&["b"], None), Vec::new(), cx);
 }
 
 /// The fleet with two rows marked as a Cmd-click marks them: the open row, which keeps its accent fill under a marker

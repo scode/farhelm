@@ -2464,9 +2464,11 @@ destination in the body.
 The sidebar shows the global pins first, then the session groups in their manual order, then ungrouped unpinned
 sessions. Within a group, its pins appear in their manual order before its other members. The list's chosen sort orders
 unpinned sessions within their group or within the ungrouped part of the list. Activity can move a session within that
-part, and membership and group order stay fixed. The helm stores group names, order, membership, collapse and pin
-positions so every client shares them. The quick switcher keeps its existing order and does not arrange rows by pins or
-groups.
+part, and membership and group order stay fixed. An expanded group's rows indent their content under the header in
+either density, with a thin guide running from the first member to the last. The group's pin separator sits inside the
+indent. Selection and marked fills, the row's hairline, its mark stripe and its grip keep the full row's edges. The helm
+stores group names, order, membership, collapse and pin positions so every client shares them. The quick switcher keeps
+its existing order and does not arrange rows by pins or groups.
 
 The session row menu and the marked-rows metadata menu share a **Move to group** submenu. **New group…** opens a naming
 dialog and creates one group containing the targeted sessions. When creating or renaming a group, the helm trims the
