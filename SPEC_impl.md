@@ -2600,12 +2600,13 @@ The ssh child's stderr is piped and relayed as bounded, control-escaped tracing 
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
 remote party a direct, unbounded write channel to the operator's own terminal, escape sequences included. The relay
 drains continuously (a full stderr pipe would wedge the child), caps each line, stops logging after a per-connection
-budget while still draining, and Debug-escapes what it does log. All peer-supplied text is normalized the same way
-wherever the helm logs or retains it, including identifiers and successful-attachment trace fields, not only errors.
-Host-manager diagnostics may be noisy and may repeat indefinitely: every failed attempt and refresh remains in the
-stderr trail, including a peer that returns the same error on every refresh. A collision check still emits one summary
-event for that refresh, rather than one event per colliding row. The SSH stderr relay's separate per-connection budget
-still bounds which child lines it logs while it continues draining the pipe.
+budget while still draining, and Debug-escapes what it does log. The helm bounds and escapes diagnostic copies of peer
+text in the host manager, including identities in host connection traces, and tab identifiers in successful attachment
+traces. Identity checks and protocol operations use the original values. Host-manager diagnostics may be noisy and may
+repeat indefinitely: every failed attempt and refresh remains in the stderr trail, including a peer that returns the
+same error on every refresh. A collision check still emits one summary event for that refresh, rather than one event per
+colliding row. The SSH stderr relay's separate per-connection budget still bounds which child lines it logs while it
+continues draining the pipe.
 
 For failed connection attempts the relay also retains the newest two diagnostic lines, each capped at 512 raw bytes,
 including a current unterminated segment. It continues observing markers and the tail after the logging budget is spent;
