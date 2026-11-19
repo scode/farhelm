@@ -3197,10 +3197,9 @@ fn an_answer_after_a_reword_acts_on_the_new_value_once_it_is_shown(cx: &mut Test
     );
     let reworded = cx.update(|window, cx| open.reword(bulk(&["alpha"], 1, &built), window, cx));
     assert!(reworded, "the premise: the question was reworded");
-    // `keys` dispatches in an update of its own after the reword's, as a real key arrives after the reword: the new words
-    // are drawn by then (test GPUI draws a dirty window at the end of each update, where the app's key dispatch draws it
-    // before handling the key), but no frame has shown them.
-    keys(cx, "enter");
+    // The new wording has drawn but still has to be presented. Raw input preserves that gap.
+    cx.simulate_keystrokes("enter");
+    crate::test_support::check(cx);
     assert!(
         confirmed.borrow().is_empty(),
         "an Enter before the new words were shown ran nothing: {:?}",

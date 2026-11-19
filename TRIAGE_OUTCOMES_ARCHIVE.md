@@ -22790,3 +22790,32 @@ prior terminal output" (rebased revision)
 - Decision: matches the review filter named in the Assessment; removed without asking (2026-11-18 GUI UX triage).
 - Completion criteria: Remove the feedback file and its index entry immediately; no code or spec change.
 - Execution: complete; removed during the 2026-11-18 GUI UX triage.
+
+## header-actions-follow-unseen-session.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): confirmed. The open session's header
+  (Stop, Restart, Replace, Delete, environment Suspend/Resume) and the interrupted-session card's Replace look up the
+  open session and its state when the click is handled (session_pane/header.rs open_key and menu::actionable;
+  session_pane/card.rs), while GPUI dispatches the click to the previous frame's handlers. So when the open session
+  changes from A to B (the command line deletes A and the window selects B), a click on A's header in that frame acts on
+  B, immediately with Skip session confirmations on. The sub-second race filter does not apply (it excludes acting on
+  the wrong session). SPEC.md "Lifecycle operations" says the click authorizes only the state the screen showed;
+  applying that to the targeted session is a reading, not its words. Bucket: highest.
+- Decision: the user picked "Yes for the target and the drop point; spec note for paste order" (2026-11-18
+  highest-bucket triage page, Q3), in their words: "But this must not be done in a random ad hoc way for the two places.
+  We need to establish a clear pattern that all components can use that have this problem. I don't want this to turn
+  into a whack-a-mole. We need to set the standard, spec it, and have an implementation that implements the key
+  mechanisms that get reused whenever this problem arises." Principle: a user action in the desktop app acts only on
+  what the frame it landed in showed (which session, its state, where a drop landed), and this is one specified standard
+  with one reusable mechanism, not per-site fixes.
+- Completion criteria: SPEC.md (and SPEC_impl.md for the mechanism) state the standard that an action acts on what the
+  clicked frame showed: its target and the state its consent or precondition is taken from. The desktop app gets one
+  reusable mechanism for capturing what a control drew and acting on that, and the header controls and the card's
+  Replace use it. The mechanism is what `session-actions-use-unseen-liveness.md` and
+  `trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md` (both already `fix code`) are fixed
+  with too, so they are planned together rather than as separate ad hoc fixes. Tests show a stale-frame click acting on
+  the drawn session or being refused. Expect this to exceed a single small PR; plan it as such. Remove the feedback file
+  and its index entry in the same change.
+- Execution: change `suuvxrpspvwq`, bookmark `plan/drawn-frame-actions/01-shown-state-standard-and-header`,
+  https://github.com/scode/farhelm/pull/4176/changes.

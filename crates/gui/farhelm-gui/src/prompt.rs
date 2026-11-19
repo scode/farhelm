@@ -147,6 +147,7 @@
 //! summary is frozen, so the centered question draws a failed attempt's reason below its body in the inline question's
 //! amber instead.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
@@ -1137,13 +1138,77 @@ impl<T: Clone + 'static> Render for Prompt<T> {
 
 /// Run `shown` at the next frame GPUI shows: by then the frame drawn now is on screen, or, when it was drawn early to
 /// handle a key, it goes up right after the callback, with no input dispatched in between. A pending callback asks for
-/// that frame. Used by the prompt's old-answer guard and by menu keyboard activation after pointer focus moves.
+/// that frame. This is the presentation signal for questions, menu focus changes and action snapshots.
 #[allow(
     clippy::disallowed_methods,
     reason = "a one-shot visibility check for user input, with no redraws scheduled over time"
 )]
 pub(crate) fn when_shown(window: &Window, shown: impl FnOnce(&mut App) + 'static) {
     window.on_next_frame(move |_, cx| shown(cx));
+}
+
+/// A control's action data for one render. GPUI can draw a dirty window just to dispatch a key, so a handler may
+/// already be installed before anyone sees what it authorizes. Keep the snapshot with the handler and use it only
+/// once the window has had a chance to present it.
+pub(crate) struct ShownAction<T>(Rc<ActionData<T>>);
+
+struct ActionData<T> {
+    value: T,
+    shown: Cell<bool>,
+}
+
+impl<T> Clone for ShownAction<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> ShownAction<T> {
+    /// The action data after presentation. A rejected press is never replayed when the frame appears.
+    pub(crate) fn shown(&self) -> Option<&T> {
+        self.0.shown.get().then_some(&self.0.value)
+    }
+}
+
+/// Keep a single action snapshot per drawing site. Using the same data across unrelated redraws avoids an extra
+/// frame request and keeps a key pressed during such a redraw eligible to act.
+pub(crate) struct ActionFrame<T, Offer = ()>(Option<(ShownAction<T>, Offer)>);
+
+impl<T, Offer> Default for ActionFrame<T, Offer> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T: PartialEq + 'static, Offer: PartialEq> ActionFrame<T, Offer> {
+    /// Supply the snapshot to this frame's handlers. The site's commands must also have the same offer before an
+    /// already shown snapshot can be reused. A command that was unavailable may become ready on a keyboard redraw.
+    pub(crate) fn capture(&mut self, data: T, offer: Offer, window: &Window) -> ShownAction<T> {
+        if let Some((last, offered)) = &self.0
+            && last.0.value == data
+            && *offered == offer
+        {
+            return last.clone();
+        }
+        let action = ShownAction(Rc::new(ActionData {
+            value: data,
+            shown: Cell::new(false),
+        }));
+        let drawn = action.clone();
+        when_shown(window, move |_| drawn.0.shown.set(true));
+        self.0 = Some((action.clone(), offer));
+        action
+    }
+
+    /// A shortcut with no element of its own can use the current control's snapshot if it has been presented.
+    pub(crate) fn current(&self) -> Option<ShownAction<T>> {
+        self.0.as_ref().map(|(action, _)| action.clone())
+    }
+
+    /// The site draws no actions. Clear the snapshot so a shortcut has nothing to activate.
+    pub(crate) fn clear(&mut self) {
+        self.0 = None;
+    }
 }
 
 /// An inline question, as [`ask_inline`] draws it: the title, the summary and the lines, its link if it has one

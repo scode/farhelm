@@ -18,9 +18,8 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Background, Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
-    PlatformInput, Point, Role, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point,
-    px, size,
+    Background, Bounds, Modifiers, Pixels, Role, ScrollDelta, ScrollEvent, TestAppContext,
+    VisualTestContext, point, px, size,
 };
 use serde_json::{Value, json};
 
@@ -152,25 +151,7 @@ fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
     test_support::settle(cx);
 }
 
-/// A left click at `at`, delivered inside the caller's window update, so several can land with no frame drawn between
-/// them.
-pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
-    [
-        PlatformInput::MouseDown(MouseDownEvent {
-            button: MouseButton::Left,
-            position: at,
-            modifiers: Modifiers::none(),
-            click_count: 1,
-            first_mouse: false,
-        }),
-        PlatformInput::MouseUp(MouseUpEvent {
-            button: MouseButton::Left,
-            position: at,
-            modifiers: Modifiers::none(),
-            click_count: 1,
-        }),
-    ]
-}
+pub(super) use crate::test_support::click_at;
 
 /// The menu items painted with a fill inside the element drawn under `menu`, by id, from a fresh frame's painted quads:
 /// the menu's one highlight, which [`crate::components::MenuItem`] paints from focus alone and only on an available
@@ -368,9 +349,10 @@ fn hovering_switches_submenus_and_preserves_the_expanded_parent_highlight(cx: &m
     assert_eq!(lit(cx, "session-menu"), ["session-menu-mute"]);
     // The test window has drawn the highlight but has not presented a frame. Enter during that gap
     // must not send the command the pointer just moved onto.
-    test_support::keys(cx, "tab");
+    cx.simulate_keystrokes("tab");
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-mute-morning"));
-    test_support::keys(cx, "enter");
+    cx.simulate_keystrokes("enter");
+    test_support::check(cx);
     assert!(sent(&mut fake).is_empty());
     assert!(drawn(cx, "session-menu-mute-morning"));
 

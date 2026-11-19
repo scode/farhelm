@@ -930,7 +930,8 @@ fn replace_the_open_session_from_bs_button(cx: &mut TestAppContext, confirm: Con
 
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
-        list.update(cx, |list, cx| list.replace("a", &mark, window, cx));
+        let target = super::menu::actionable("a", cx).expect("the row offers Replace");
+        list.update(cx, |list, cx| list.replace(&target, &mark, window, cx));
     });
     test_support::settle(cx);
     assert_eq!(

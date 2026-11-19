@@ -218,6 +218,7 @@ pub(super) fn session_interrupted_cards(
         let drawn = crate::session_pane::card::Drawn {
             key: "a",
             row: &row,
+            action: None,
             focus: &state.ring,
             question: None,
             launcher_wait: None,

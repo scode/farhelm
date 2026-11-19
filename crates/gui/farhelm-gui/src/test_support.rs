@@ -232,9 +232,10 @@ pub fn redraw(cx: &mut VisualTestContext) {
     settle(cx);
 }
 
-/// Press keys, as the platform would deliver them (GPUI's keystroke syntax, space-separated: `"tab shift-tab"`), and
-/// check.
+/// Press keys against the presented UI and check (GPUI's keystroke syntax, space-separated: `"tab shift-tab"`).
+/// Use raw input to model a key that beats the next frame.
 pub fn keys(cx: &mut VisualTestContext, keystrokes: &str) {
+    show_next_frame(cx);
     cx.simulate_keystrokes(keystrokes);
     check(cx);
 }
@@ -247,8 +248,10 @@ pub fn advance(cx: &mut VisualTestContext, duration: Duration) {
     check(cx);
 }
 
-/// Click the center of the element drawn under `selector`, and check. Panics if nothing was drawn under it.
+/// Click the center of the presented element under `selector` and check. Panics if it was absent. Use raw input to
+/// model a click against a frame superseded in the store.
 pub fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    show_next_frame(cx);
     let at = center(cx, selector);
     cx.simulate_click(at, Modifiers::none());
     check(cx);
@@ -727,6 +730,35 @@ pub(crate) fn show_next_frame(cx: &mut VisualTestContext) {
     settle(cx);
 }
 
+/// Dispatch a full click without advancing the frame. Use within the same update as a fixture's store change when
+/// testing a press that reaches the old listeners.
+pub(crate) fn click_before_redraw(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    for event in click_at(position) {
+        window.dispatch_event(event, cx);
+    }
+}
+
+/// The pair of platform events for a left click. Tests can put several of these in the same frame.
+pub(crate) fn click_at(position: Point<Pixels>) -> [gpui::PlatformInput; 2] {
+    use gpui::{MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput};
+
+    [
+        PlatformInput::MouseDown(MouseDownEvent {
+            position,
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        }),
+        PlatformInput::MouseUp(MouseUpEvent {
+            position,
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+        }),
+    ]
+}
+
 /// A rectangle from its left, top, width and height, in pixels: how placement tests write anchors, areas and the
 /// bounds they expect.
 pub(crate) fn rect(left: f32, top: f32, width: f32, height: f32) -> Bounds<Pixels> {
@@ -1092,7 +1124,8 @@ mod shared_helper_tests {
         );
         let reworded = cx.update(|window, cx| asked.reword(question("beta"), window, cx));
         assert!(reworded, "the premise: the question was reworded");
-        keys(cx, "enter");
+        cx.simulate_keystrokes("enter");
+        super::check(cx);
         assert!(
             ran.borrow().is_empty(),
             "before the frame was shown, Enter did nothing: {:?}",

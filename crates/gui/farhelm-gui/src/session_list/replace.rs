@@ -203,19 +203,16 @@ pub(crate) fn command(
 // ---- Starting a Replace ----------------------------------------------------------------------------------------------
 
 impl SessionList {
-    /// The user asked to replace `key` (its row's Replace) at `mark`: ask, beside the row's menu button while the row is
-    /// drawn and centered when it is not, or replace at once when confirmations are skipped. Nothing happens for a
-    /// session the store holds no row for, or that has any request in flight.
+    /// Replace `target`'s row at `mark`: place the question beside its menu button if the row is drawn, or center it.
+    /// Skipped confirmation sends the request at once. The menu checks whether the live session accepts a new action.
     pub(crate) fn replace(
         &mut self,
-        key: &str,
+        target: &menu::Actionable,
         mark: &Mark,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = menu::actionable(key, cx) else {
-            return;
-        };
+        let key = &target.key;
         if let Some(ask) = begin(
             key,
             &target.row,
