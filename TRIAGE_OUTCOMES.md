@@ -1924,20 +1924,6 @@
   discard and say so in the execution record. Either way, remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-ux-gui-test-gaps.md`
 
-## recording-loader-rejects-valid-json-field-spacing.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Private-recording
-  loader rejects JSON with a space before the colon. Maintainer-only ignored test; legal JSON panics. Confirmed. Bucket:
-  other.
-- Decision: the user picked "Apply the rule as listed" (2026-11-18 GUI UX triage page, QA), reapplying the 2026-10-26
-  Q4/Q5 rule: fix a test gap only when one obvious shape of about 30 lines or less with no new test mechanism fixes it,
-  otherwise discard.
-- Completion criteria: fix: skip whitespace before the colon (~5). At execution, fix the test only if the fix is obvious
-  and trivial (one clear shape, about 30 lines or less, no new test mechanism); otherwise treat this as a discard and
-  say so in the execution record. Either way, remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-ux-backend-test-gaps.md`
-
 ## trailing-converted-old-session-warning-retention-assertion-vacuous-all.md
 
 - Outcome: `fix code`.

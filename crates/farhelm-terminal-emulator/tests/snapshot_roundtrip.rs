@@ -190,30 +190,25 @@ fn private_recordings_round_trip() {
 fn load(dir: &Path) -> Recording {
     let output = std::fs::read(dir.join("raw.bin")).expect("raw.bin");
     let events = std::fs::read_to_string(dir.join("events.jsonl")).expect("events.jsonl");
-    let field = |line: &str, name: &str| -> usize {
-        let key = format!("\"{name}\":");
-        let start = line
-            .find(&key)
-            .unwrap_or_else(|| panic!("no {name} in {line}"))
-            + key.len();
-        let digits: String = line[start..]
-            .trim_start()
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect();
-        digits
-            .parse()
-            .unwrap_or_else(|_| panic!("bad {name} in {line}"))
-    };
     let sizes = events
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let size = Size {
-                columns: field(line, "cols") as u16,
-                lines: field(line, "rows") as u16,
+            // Decode the object so spacing or quoted field names in unrelated values cannot change the resize.
+            let event: serde_json::Value = serde_json::from_str(line).expect("a JSON size event");
+            let field = |name: &str| {
+                event[name]
+                    .as_u64()
+                    .unwrap_or_else(|| panic!("bad {name} in {line}"))
             };
-            (field(line, "offset"), size)
+            let size = Size {
+                columns: u16::try_from(field("cols")).expect("columns fit in u16"),
+                lines: u16::try_from(field("rows")).expect("rows fit in u16"),
+            };
+            (
+                usize::try_from(field("offset")).expect("offset fits in usize"),
+                size,
+            )
         })
         .collect::<Vec<_>>();
     assert_eq!(
