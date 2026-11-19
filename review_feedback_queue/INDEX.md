@@ -17,10 +17,6 @@ consequences.
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md`](trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md)
-  — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`wayland-file-drop-uses-entry-position.md`](wayland-file-drop-uses-entry-position.md) — Dragging across a terminal
   and releasing on the sidebar can upload the file to the session host if Wayland is still reading the drag's file list
   when the pointer moves.

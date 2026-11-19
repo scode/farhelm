@@ -1736,26 +1736,6 @@
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: `pending`.
 
-## trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main 7a7899dff (code reading, not run): partly correct. The route it established
-  used the removed webview app's display delay, but the GPUI port has the same design: "Stop and suspend" on a sandbox
-  or container session builds its two guards (agent running again, tabs opened) from the session in the live store at
-  the click (session_list/environment.rs, menu.rs, stop.rs), and GPUI dispatches a click to the previous frame's
-  handlers (established for session-actions-use-unseen-liveness.md). SPEC.md "Lifecycle operations": "a Stop whose click
-  showed an ended agent is refused if the agent is alive again or cannot be confirmed ended, before stopping anything".
-  The same bug was fixed for the old app in #3337. Bucket: high until the GPUI route is shown end to end, highest once
-  it is.
-- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 highest-bucket triage).
-- Completion criteria: The environment Stop and suspend in the row menu and the header carries guards and verb from the
-  state the clicked frame drew, with a test. Uses the shared standard and mechanism the user required on 2026-11-18 (Q3;
-  see header-actions-follow-unseen-session.md), not an ad hoc per-site fix; the mechanism itself counts against that
-  item, not this gate. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the
-  queue removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
-  feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/drawn-frame-actions.md`
-
 ## wayland-file-drop-uses-entry-position.md
 
 - Outcome: `fix code`.

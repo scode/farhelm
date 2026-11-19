@@ -418,6 +418,7 @@ impl SessionList {
         let list = cx.weak_entity();
         let view = cx.new(|_| RowMenu {
             action_frame: Default::default(),
+            environment_frame: Default::default(),
             key: key.to_owned(),
             list,
             rename_focus,
@@ -831,6 +832,8 @@ fn actions_label(title: &str) -> String {
 pub(super) struct RowMenu {
     /// The menu's drawn row and command availability, kept through click or keyboard dispatch.
     action_frame: crate::prompt::ActionFrame<Actionable, [bool; 3]>,
+    /// The environment actions use the row, provider phase and availability that this menu showed.
+    environment_frame: crate::prompt::ActionFrame<Actionable, bool>,
     key: String,
     list: WeakEntity<SessionList>,
     /// The Rename command's focus handle: the menu's first command, where a click or Down opens it and Home goes.
@@ -878,11 +881,13 @@ impl RowMenu {
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
+            self.environment_frame.clear();
             return panel;
         };
         // A session gone from the store takes its row, and so the menu's anchor, with it; until that frame there is
         // nothing to show.
         let Some(row) = store.read(cx).collections().get::<SessionRow>(&self.key) else {
+            self.environment_frame.clear();
             return panel;
         };
         let title = HostText::from_host(row.info.title.as_str());
@@ -912,9 +917,16 @@ impl RowMenu {
         let captured =
             self.action_frame
                 .capture(target, [busy, frozen, launch_wait.is_some()], window);
-        let environment_items = environment
-            .map(|environment| self.environment_items(environment, cx))
-            .unwrap_or_default();
+        let environment_items = if let Some(environment) = environment
+            && let Some(target) = Actionable::drawn(&self.key, row.clone(), cx)
+        {
+            let unavailable = environment::unavailable(&self.key, environment, cx);
+            let captured = self.environment_frame.capture(target, unavailable, window);
+            self.environment_items(environment, unavailable, &captured)
+        } else {
+            self.environment_frame.clear();
+            Vec::new()
+        };
         // While the environment is being deleted, Clone and Delete say why everything is unavailable (the module docs).
         let deleting = environment
             .and_then(Environment::deleting)
@@ -1260,19 +1272,26 @@ impl RowMenu {
 
     /// An environment session's own commands, at the head of the Clone group (the module docs): Suspend or Resume, as
     /// the phase reads now, with the old items' words, then Stop and suspend unless the environment is to be resumed.
-    /// Each closes the menu and goes on as [`environment::begin`] decides, a question opening beside the row's button.
-    fn environment_items(&self, environment: Environment, cx: &App) -> Vec<MenuItem> {
-        let unavailable = environment::unavailable(&self.key, environment, cx);
+    /// Each closes the menu and uses its shown verb and guards in [`environment::begin_shown`].
+    fn environment_items(
+        &self,
+        environment: Environment,
+        unavailable: bool,
+        captured: &crate::prompt::ShownAction<Actionable>,
+    ) -> Vec<MenuItem> {
         let resume = environment.resumable();
         let stopped = environment.stopped();
         let item = |stop: bool| {
-            let (list, key) = (self.list.clone(), self.key.clone());
+            let (list, captured) = (self.list.clone(), captured.clone());
             move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                let Some(target) = captured.shown() else {
+                    return;
+                };
                 let mark = Mark::take(cx);
-                let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
+                let _ = list.update(cx, |list, cx| list.close_menu(&target.key, window, cx));
                 let asking = list.clone();
-                environment::begin(
-                    &key,
+                environment::begin_shown(
+                    target,
                     stop,
                     window.window_handle(),
                     cx,

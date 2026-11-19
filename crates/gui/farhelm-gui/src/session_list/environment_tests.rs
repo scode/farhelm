@@ -17,7 +17,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
-    RefreshView,
+    RefreshView, SessionRow,
 };
 use farhelm_proto::{EnvironmentHostView, LaunchTarget, Place, SessionStatus};
 use gpui::{Role, TestAppContext, VisualTestContext};
@@ -652,6 +652,39 @@ fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
 }
 
 // ---- Stop and suspend ----------------------------------------------------------------------------------------------
+
+/// Stop and suspend uses the shown ended agent and tab count if a listing arrives before its click. The activity
+/// read can ask a broader question, but a quiet environment sends exactly the guarded Stop and suspend.
+#[gpui::test]
+fn stop_and_suspend_keeps_its_verb_and_guards_across_a_push(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Container, connected());
+    let (mut fake, cx) = open(cx, &[(super::menu_tests::ended("a"), 0)], true, &host);
+    pending(&mut fake);
+    test_support::click(cx, "session-menu-a");
+    test_support::show_next_frame(cx);
+    let at = test_support::center(cx, "session-menu-stop-and-suspend");
+    let idle = session("a").status(json!({"state": "idle"}));
+    let mut change = super::tests::change(super::tests::listing_meta(&["a"], 1, false), &[], &[]);
+    change.upsert.push(super::menu_tests::entry(&idle, 1));
+    let change = farhelm_helm_client::collections::decode_changes(change).unwrap();
+    cx.update(|window, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let shown = store.read(cx).collections().get::<SessionRow>("a").unwrap();
+        assert!(shown.info.status.has_ended() && shown.info.tabs.is_empty());
+        store.update(cx, |store, cx| store.apply(&change, cx));
+        let row = store.read(cx).collections().get::<SessionRow>("a").unwrap();
+        assert!(!row.info.status.has_ended() && row.info.tabs.len() == 1);
+        test_support::click_before_redraw(at, window, cx);
+    });
+    let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
+    fake.reply(read, 200, Some(listing(&[idle], false)));
+    test_support::settle(cx);
+    let (_, body) = one(&mut fake, Method::Post, "/api/sessions/a/stop-and-suspend");
+    assert_eq!(
+        body,
+        json!({"refuse_if_tabs_open": true, "refuse_if_agent_running": true})
+    );
+}
 
 /// SPEC.md: "The row menu always offers Stop and suspend, so it remains reachable when ordinary confirmations are
 /// skipped", and it keeps "the host-wide activity confirmation"; its request carries the Stop guards its click saw,
