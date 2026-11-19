@@ -1757,20 +1757,6 @@
   feedback file and its index entry in the same change.
 - Execution: `pending`.
 
-## trailing-status-documentation-probe-versus-processed-exit-evidence.md
-
-- Outcome: `fix code`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Status comments say
-  a terminal can look dead before its exit is processed. The code reads evidence that stays live until the exit record
-  is processed. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix comments (~6)). Size gate: about 100 lines of diff (code, tests and
-  docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that, execution blocks and
-  brings the item back to the user. Remove the feedback file and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## bash-source-admission-retains-literal-splitter.md
 
 - Outcome: `fix spec`.

@@ -138,9 +138,8 @@ fn terminal_evidence(terminal: Option<&HostTerminal>) -> TerminalEvidence {
 ///
 /// ## Classification precedence (PLAN_M3.md items 2 and 3)
 ///
-/// As of M3 the live probe is no longer the only input: the session's
-/// durable last-known outcome answers the questions a vanished terminal
-/// cannot. The order below is the precedence, and it is deliberate:
+/// The session's durable last-known outcome supplements terminal evidence
+/// when the terminal vanishes or has incomplete exit information.
 ///
 /// 1. A recorded **error** — the launch shim's exec-failure sentinel —
 ///    outranks every inference, because "the agent never started" is a
@@ -174,14 +173,12 @@ fn terminal_evidence(terminal: Option<&HostTerminal>) -> TerminalEvidence {
 ///
 /// ## Which live status (PLAN_M6_75.md item 2)
 ///
-/// Rule 2 above says a live terminal wins; [`live_status`] says which of
-/// the three live statuses it wins WITH. That split is deliberate and is
-/// where the milestone's whole heuristic lives: liveness is observed (the
-/// host's child has not exited — a fact), while running-versus-waiting-versus-idle is
-/// inferred from sampled screens (a guess, cosmetic by SPEC.md's own
-/// status rule). Nothing in the precedence above depends on which one it
-/// is, so a wrong guess can never promote or demote a session across the
-/// boundary that actually matters.
+/// Rule 2 gives terminal evidence precedence for a live reading. The runtime
+/// can still report live evidence after the child exits, until it processes
+/// the exit record that follows the child's drained output. [`live_status`]
+/// only picks running, waiting or idle from sampled screens. Nothing above
+/// depends on which, so a wrong guess never moves a session across the
+/// live/exited boundary.
 ///
 /// The annotation returned alongside the status is SPEC.md's user-legible
 /// qualifier ("stopped by user"), which lives with the recorded outcome
@@ -212,8 +209,8 @@ pub(crate) fn session_status(entry: &SessionEntry) -> (SessionStatus, Option<Str
             },
             None,
         ),
-        // A live terminal, and no annotation with it: an annotation describes
-        // how a run ENDED, and this one has not.
+        // A live reading takes precedence over any exit annotation. The
+        // annotation describes an ended run.
         (_, Some(state)) if !state.dead => (live_status(entry), None),
         (LastOutcome::Launching, Some(state)) if state.dead => (SessionStatus::Unknown, None),
         (recorded, Some(state)) => {
@@ -428,11 +425,10 @@ pub(crate) fn entry_info(entry: &SessionEntry) -> SessionInfo {
 /// there is nothing worth telling the store.
 ///
 /// Only the OBSERVATION is decided here; whether it changes anything is
-/// [`Transition::apply`]'s call, inside the transaction. Two cases produce
-/// nothing at all: a session whose outcome is already terminal (no probe
-/// can add to `Interrupted`, `Error`, or an exit that already has its
-/// code), and a `Launching` row with no terminal — see `session_status`'s
-/// point 4 for why absence of side effects is not evidence of an exit.
+/// [`Transition::apply`]'s call, inside the transaction. Terminal evidence
+/// adds nothing to `Interrupted`, `Error`, or an exit with a known code.
+/// A `Launching` row with no terminal offers no transition either, since
+/// the row still needs evidence that its launch ran.
 pub(crate) fn observation(
     recorded: &LastOutcome,
     live: Option<OwnedTerminal>,
@@ -915,7 +911,7 @@ mod tests {
     }
 
     /// The classification precedence PLAN_M3.md items 2 and 3 define, in
-    /// one place: what a live probe says, what the durable record says,
+    /// one place: what the terminal evidence says, what the durable record says,
     /// and which wins where. Table-driven because the RELATIONSHIPS are
     /// the contract — each case in isolation looks obvious, and only side
     /// by side do the two inversions stand out (a live pane beating a
@@ -1021,19 +1017,14 @@ mod tests {
         );
     }
 
-    /// What each observation OFFERS the store, which is the half
-    /// `session_status` does not decide. Two silences matter more than the
-    /// writes: a terminal outcome is not re-observed at all (nothing a
-    /// probe can see adds to it), and a `Launching` row with no pane
-    /// offers nothing — "no side effects found" is not evidence the agent
-    /// ran, and recording an exit for it would claim exactly that
-    /// (PLAN_M3.md item 2 sends that row to item 3/6 instead).
+    /// Observations offer the store new information about a run. An
+    /// ambiguous launch stays unsettled even with a dead terminal, whose
+    /// evidence may belong to a previous run. An interrupted outcome is
+    /// already settled.
     ///
-    /// The enrichment case is the one a naive "already terminal, skip it"
-    /// rule gets wrong: a death can be seen before its code is (a host
-    /// terminal's probe says dead before its exit record arrives), so the
-    /// observation that first sees the death can have no code while the
-    /// next one does.
+    /// A completed Stop can record an exit before its code is available.
+    /// The synthetic evidence checks that a later observation can fill in
+    /// that missing code and that a known code survives an incomplete reading.
     #[farhelm_testtrace::test]
     fn observations_offered_to_the_store_cover_silence_and_enrichment() {
         let dead_with_code = OwnedTerminal {
