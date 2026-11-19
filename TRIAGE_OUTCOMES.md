@@ -1757,36 +1757,6 @@
   feedback file and its index entry in the same change.
 - Execution: `pending`.
 
-## checkout-refusal-conflicts-with-failed-save-rule.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: General "failed save
-  is discarded" rule ignores the checkout-folder exception. Code keeps the refused draft as SPEC.md:1700 says; the
-  general rule doesn't name its exceptions. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix spec: general rule names its exceptions (~2-5, shared with the next
-  item)). Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal
-  or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the feedback file
-  and its index entry in the same change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
-## failed-template-save-retains-attempted-draft.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: Template editor
-  keeps a failed draft, against the general rule. SPEC.md now says the editor keeps it (#3597); same unacknowledged
-  conflict as above. Bucket: other.
-- Decision: the user picked "Smallest truthful correction for each" (2026-11-18 GUI UX triage page, QB), as for wording
-  on 2026-10-26 (Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code (fix spec, together with the item above). Size gate: about 100 lines of
-  diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue removal or the changelog fragment); over that,
-  execution blocks and brings the item back to the user. Remove the feedback file and its index entry in the same
-  change.
-- Execution: planned in `plans/queue/gui-ux-wording.md`
-
 ## layout-preference-save-failures-are-silent.md
 
 - Outcome: `fix spec`.

@@ -794,9 +794,6 @@ consequences.
 - [`uuid-hold-intercepts-terminal-lease.md`](uuid-hold-intercepts-terminal-lease.md) — The destination-authority test's
   global UUID hold can catch late terminal startup instead of the intended launch key.
 
-- [`checkout-refusal-conflicts-with-failed-save-rule.md`](checkout-refusal-conflicts-with-failed-save-rule.md) — The
-  general failed-Save discard rule does not explain the explicit checkout-refusal exception that retains the draft.
-
 - [`recent-setup-description-omits-wrapper-prefix.md`](recent-setup-description-omits-wrapper-prefix.md) — Different
   saved setups can look identical even though Enter restores and launches different wrapper prefixes.
 
@@ -946,9 +943,6 @@ consequences.
 - [`muse-capability-docstring-denies-reporting-and-resume.md`](muse-capability-docstring-denies-reporting-and-resume.md)
   — A capability docstring still says Muse lacks reporting and Resume command support although the current integration
   provides both.
-
-- [`failed-template-save-retains-attempted-draft.md`](failed-template-save-retains-attempted-draft.md) — A failed
-  template Save leaves the attempted draft reusable even though the general GUI rule says failed saves discard it.
 
 - [`automatic-update-mutates-unadopted-skewed-installation.md`](automatic-update-mutates-unadopted-skewed-installation.md)
   — Automatic Update can change a replacement installation at the saved SSH destination before discovering its new
