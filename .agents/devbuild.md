@@ -36,13 +36,14 @@ change before handing out the line.
 The build runs as a separate desktop app with its own state in `~/.local/state/farhelm-devbuild`: its own helm, host
 list, databases and local supervisor, never the installed app's. It can run beside the installed app, and remote hosts
 have to be added to it once. Remote hosts are still shared: Update from the devbuild puts the target's build on that
-host for the installed app too, which then shows the host as an older version and offers to update it back. This holds
-for a target whose own `devbuild-mac.sh` predates the devbuild state, too: `devbuild-github.sh` is always fetched from
-main and names that directory for the target's script. That way back is refused when the target migrated the host's
-supervisor database past what the installed app's supervisor opens, provided the updating helm contains the refusal
-check and the host's supervisor reports its database version; the host then needs a build at least that new. An older
-installed app, or a target built before schema reporting was added, still lets that Update strand the host until the
-newer build is put back.
+host for the installed app too, which then shows the host as an older version and offers to update it back. It never
+does that by itself: automatic updates skip a host running a development build. This holds for a target whose own
+`devbuild-mac.sh` predates the devbuild state, too: `devbuild-github.sh` is always fetched from main and names that
+directory for the target's script. That way back is refused when the target migrated the host's supervisor database past
+what the installed app's supervisor opens, provided the updating helm contains the refusal check and the host's
+supervisor reports its database version; the host then needs a build at least that new. An older installed app, or a
+target built before schema reporting was added, still lets that Update strand the host until the newer build is put
+back.
 
 On its own state, a devbuild starts with **Update remote hosts automatically** off unless a choice is already saved.
 This protects shared hosts from receiving an unreleased protocol upgrade as soon as the devbuild starts. To enable
