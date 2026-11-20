@@ -350,13 +350,13 @@ impl Uploaded {
     }
 }
 
-/// The lines a terminal that went away left behind, by session, until the session's agent terminal takes them.
+/// Upload results left by a retired terminal, kept by session until its next visible terminal takes them.
 ///
 /// The old app kept a pane's messages on its status element, which outlived the terminal a reconnect or a restart
 /// remounted into it (SPEC.md: an attachment must never disappear silently). Here a terminal goes away whole when its
 /// session is closed, its tab closes or the window's connection resets, so what it showed, and a line for each upload
-/// it cut off, waits here. The session's agent terminal takes them, at once if one is up and otherwise when one is next
-/// made: it is the one terminal every open session has, so a closed tab's lines land where the user is.
+/// it cut off, waits here. Its terminal set gives them to the terminal it shows, so an interrupted upload is visible
+/// when the window restores a shell tab. An agent terminal created without a set takes its own session's lines.
 ///
 /// The lines of a session that is gone go too ([`prune_carried`]), so a deleted session's lines do not stay for the life
 /// of the app: whenever the current UI session's store changes (a new snapshot after a reset included), every
@@ -365,7 +365,7 @@ impl Uploaded {
 /// for a complete one. With no terminal open nothing watches, and the lines wait for the next terminal, which prunes as
 /// it is made.
 #[derive(Default)]
-struct Carried(HashMap<String, Vec<HostSentence>>);
+pub(super) struct Carried(HashMap<String, Vec<HostSentence>>);
 
 impl Global for Carried {}
 
@@ -403,9 +403,6 @@ fn prune_carried(cx: &mut App) {
 pub(crate) struct Attachments {
     /// The session's served id, which the upload goes to.
     session: String,
-    /// Whether this is the session's agent terminal, which takes the lines other terminals of the session left
-    /// ([`Carried`]).
-    agent: bool,
     /// Where uploads go: the UI session's transfers, `None` only without a helm client ([`NO_HELM_CLIENT`]).
     transfers: Option<Transfers>,
     /// The number the next pasted image's generated name takes.
@@ -464,18 +461,16 @@ enum Outcome {
 impl EventEmitter<Uploaded> for Attachments {}
 
 impl Attachments {
-    /// The attachments of a terminal of session `session` (its agent terminal when `tab` is `None`), uploading through
-    /// `transfers`. An agent terminal takes the lines its session's terminals left as it is made, once the lines of
-    /// sessions already gone are pruned.
+    /// The attachments of a terminal of session `session`, uploading through `transfers`. The terminal can take the
+    /// session's carried lines itself when a terminal set does not choose a recipient for them.
     pub(crate) fn new(
         session: String,
-        tab: Option<&str>,
+        takes_carried: bool,
         transfers: Option<Transfers>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let agent = tab.is_none();
         let mut carry = vec![cx.on_release(|attachments, cx| attachments.hand_over(cx))];
-        if agent {
+        if takes_carried {
             carry
                 .push(cx.observe_global::<Carried>(|attachments, cx| attachments.take_carried(cx)));
         }
@@ -483,7 +478,6 @@ impl Attachments {
         prune_carried(cx);
         let mut attachments = Attachments {
             session,
-            agent,
             transfers,
             pasted: 0,
             queue: VecDeque::new(),
@@ -493,7 +487,9 @@ impl Attachments {
             _carry: carry,
             _prune: prune,
         };
-        attachments.take_carried(cx);
+        if takes_carried {
+            attachments.take_carried(cx);
+        }
         attachments
     }
 
@@ -664,7 +660,7 @@ impl Attachments {
 
     /// The terminal is going away (retired with its window's connection, or dropped): stop the running upload, which
     /// abandons its request, and leave what the strip showed, with a line for the running and every waiting upload,
-    /// for the session's agent terminal to show ([`Carried`]). The refusal stays behind: it was about this terminal.
+    /// for the next shown terminal to show ([`Carried`]). The refusal stays behind: it was about this terminal.
     /// Once only; nothing starts afterwards.
     pub(crate) fn hand_over(&mut self, cx: &mut App) {
         if std::mem::replace(&mut self.retired, true) {
@@ -694,13 +690,13 @@ impl Attachments {
         }
     }
 
-    /// An agent terminal takes the lines its session's terminals left. Read first without writing, because writing the
-    /// global notifies its observers, this one included.
-    fn take_carried(&mut self, cx: &mut Context<Self>) {
+    /// Take only this session's pending lines. The owner calls this once it knows which terminal will show them.
+    /// Read first because updating the global notifies its observers.
+    pub(super) fn take_carried(&mut self, cx: &mut Context<Self>) {
         let waiting = cx
             .try_global::<Carried>()
             .is_some_and(|carried| carried.0.contains_key(&self.session));
-        if !self.agent || self.retired || !waiting {
+        if self.retired || !waiting {
             return;
         }
         let taken = cx.default_global::<Carried>().0.remove(&self.session);

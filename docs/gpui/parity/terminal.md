@@ -903,6 +903,15 @@ islands.
   `every_tab_attaches_under_the_views_lease_at_the_shown_terminals_size` (hidden tabs attached) and
   `a_tabs_replay_is_staged_on_its_own_and_shown_at_the_bottom`; a reload's counterpart, the window's connection reset,
   by crates/gui/farhelm-gui/src/session_pane/tests.rs `a_reset_reattaches_the_surviving_selection`.
+- The desktop app remembers the tab the user chose for each session. Set tests cover switching back to a waiting agent's
+  session, sending input to the restored tab, clearing the choice with Agent, and falling back when a tab is absent or
+  past the attach cap (`reopening_a_session_focuses_the_remembered_tab_until_agent_is_chosen`,
+  `a_missing_tab_falls_back_to_agent_without_erasing_the_choice`, and
+  `tabs_past_the_bound_are_listed_but_not_attached`). Pane test `a_reset_restores_the_chosen_tab_on_its_new_stream`
+  checks the same focus and input path after a helm reconnect.
+- Set test `a_restored_tab_shows_the_upload_notice_left_by_its_old_view` checks an upload interrupted by switching away.
+  The quick switcher tests `a_hidden_picks_first_row_restores_the_remembered_tab` and
+  `a_hidden_picks_late_row_keeps_agent_after_the_user_types` cover a pick whose row arrives after the pane opens.
 - "closing a tab confirms in-page, then kills its shell and drops it from the session" by
   `closing_a_tab_asks_first_then_sends_one_delete` and e2e terminal_tabs.rs
   `closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else`.

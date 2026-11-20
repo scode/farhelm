@@ -626,18 +626,21 @@ impl AttachedTerminal {
         open: OpenStream,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::sharing(session, target, metrics, open, None, cx)
+        let takes_carried = target.tab.is_none();
+        Self::sharing(session, target, metrics, open, None, takes_carried, cx)
     }
 
     /// [`AttachedTerminal::new`], reading and opening tunnels through `tunnels` when given: the session's terminal set
     /// hands its tabs the agent terminal's, since tunnels belong to the session, so a tunnel a tab opens shows in the
     /// top row's pill and a remote session's tabs read the list once between them rather than once each.
+    /// `takes_carried` lets a terminal created outside a set receive the lines left by the previous view.
     pub(crate) fn sharing(
         session: &Entity<UiSession>,
         target: TerminalTarget,
         metrics: CellMetrics,
         open: OpenStream,
         tunnels: Option<Entity<Tunnels>>,
+        takes_carried: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         let retired = session.read(cx).is_retired();
@@ -664,12 +667,7 @@ impl AttachedTerminal {
             owner.file_status_shown(cx)
         });
         let attachments = cx.new(|cx| {
-            Attachments::new(
-                target.session.clone(),
-                target.tab.as_deref(),
-                transfers.clone(),
-                cx,
-            )
+            Attachments::new(target.session.clone(), takes_carried, transfers.clone(), cx)
         });
         let attachment_watch = [
             cx.observe(&attachments, |_, _, cx| cx.notify()),
@@ -3019,8 +3017,7 @@ impl AttachedTerminal {
         &self.tunnels
     }
 
-    /// The terminal's attachments, for tests: they read the lines shown.
-    #[cfg(test)]
+    /// The attachment strip's owner. The terminal set routes messages left by an earlier view here.
     pub(crate) fn attachments(&self) -> &Entity<Attachments> {
         &self.attachments
     }

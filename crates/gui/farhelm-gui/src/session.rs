@@ -20,8 +20,10 @@
 //! reset retired cannot attach anything afterwards. The streams themselves stay with their owners, which close them
 //! when they see the session retire.
 //!
-//! The one thing besides the helm's own state that survives a reset, the selected session's id, lives outside the
-//! session ([`crate::local_state`]); the connection drops it only when a complete snapshot no longer has that session.
+//! The selected session's id lives outside the UI session ([`crate::local_state`]). The connection drops it only
+//! when a complete snapshot no longer has that session. The app also keeps the last chosen tab per session in
+//! `terminal::set` and the lines left by interrupted uploads in `terminal::attachments`. Fresh terminal sets
+//! use those values when they are built after a reset.
 //!
 //! A view that must act on pushed state as it changes, not only draw it (apply a stored preference, settle a rule),
 //! follows the current session with [`observe_current`]. That is the one place that knows a reset replaces the store

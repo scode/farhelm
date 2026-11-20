@@ -42,9 +42,15 @@
 //!   switch skips "terminal-tab Close"). A refused close shows under the strip on that tab alone ("Close tab: " and the
 //!   helm's words) until its next close.
 //!
-//! NOTE: Selection is not kept across a change of session: reopening a session shows its agent terminal, as the old
-//! app's view did after a reload. The close question names the tab as it was named when it opened (the old one renamed
-//! itself as tabs before it closed); it acts on the tab's id either way.
+//! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the last shell tab the
+//!   user chose if that tab still has a terminal in the set. Choosing Agent clears the choice. Falling back to Agent
+//!   while a tab is unavailable leaves the choice intact, so a short tab list does not erase it.
+//!   Opening a session the sidebar filters hid can precede its first row. If the user is still waiting when that row
+//!   comes in, it supplies the initial tab list. The terminal shown after restoration receives upload notices left by
+//!   the old view.
+//!
+//! The close question names the tab as it was named when it opened (the old one renamed itself as tabs before it
+//! closed). It acts on the tab's id either way.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -55,9 +61,9 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, EntityId,
-    FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Role,
-    ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window,
-    div, prelude::FluentBuilder as _, px,
+    FocusHandle, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
+    Role, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 
 #[cfg(test)]
@@ -65,6 +71,7 @@ mod tests;
 
 use super::CellMetrics;
 use super::attached::{AttachedTerminal, Hold, NoticeHold, TerminalTarget};
+use super::attachments::Carried;
 use super::tunnels::Tunnels;
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, IconButton, Tier};
@@ -268,6 +275,14 @@ enum StripControl {
     Add,
 }
 
+/// The last shell tab explicitly chosen in each session. The app owns these choices so they survive both pane
+/// remounts and helm resets. Tab ids are never reused, so an absent tab can stay remembered without selecting a
+/// different tab later.
+#[derive(Default)]
+struct ShownTerminals(HashMap<String, String>);
+
+impl Global for ShownTerminals {}
+
 /// The open session's terminals. See the module docs.
 pub struct TerminalSet {
     /// The UI session the terminals were made under, whose opener each new one takes.
@@ -282,6 +297,9 @@ pub struct TerminalSet {
     tabs: Vec<Tab>,
     /// The chosen tab's id, `None` for the agent terminal. Only ever a listed tab's.
     chosen: Option<String>,
+    /// An opening with a remembered tab can wait for the first row. Once the user moves on it must leave the
+    /// terminal they have started using in place.
+    restore: Option<Mark>,
     /// The hold every terminal's notices answer to.
     hold: SharedHold,
     /// The Agent tab's focus handle in the strip.
@@ -301,11 +319,14 @@ pub struct TerminalSet {
     opened: Option<(String, Mark, AnyWindowHandle)>,
     /// Follows the pushed row's tab list.
     _tabs_follow: session::ObservingCurrent,
+    /// Routes upload notices left by retired terminals, including a tab closed in this set.
+    _carried: Subscription,
 }
 
 impl TerminalSet {
     /// The terminals of the session filed under `key`, made for `session`: the agent terminal at `metrics`, and the
-    /// session's tabs as the store lists them. Every terminal holds back as much of its notices as `hold` says.
+    /// session's tabs as the store lists them. Restore the remembered tab only after its terminal is available to
+    /// draw and focus. Every terminal holds back as much of its notices as `hold` says.
     pub fn new(
         session: &Entity<UiSession>,
         key: String,
@@ -316,6 +337,11 @@ impl TerminalSet {
         let lease = AttachmentLease::new();
         let agent = Self::make(session, &key, None, &lease, metrics, &hold, false, None, cx);
         let tabs_follow = session::observe_current(cx, |set: &mut Self, cx| set.follow_tabs(cx));
+        let carried = cx.observe_global::<Carried>(|set, cx| set.take_carried(cx));
+        let restore = cx
+            .try_global::<ShownTerminals>()
+            .is_some_and(|shown| shown.0.contains_key(&key))
+            .then(|| Mark::take(cx));
         let mut set = TerminalSet {
             session: session.downgrade(),
             key,
@@ -323,6 +349,7 @@ impl TerminalSet {
             agent,
             tabs: Vec::new(),
             chosen: None,
+            restore,
             hold,
             agent_focus: cx.focus_handle().tab_stop(true),
             add_focus: cx.focus_handle().tab_stop(true),
@@ -331,8 +358,10 @@ impl TerminalSet {
             inert: false,
             opened: None,
             _tabs_follow: tabs_follow,
+            _carried: carried,
         };
         set.follow_tabs(cx);
+        set.take_carried(cx);
         set
     }
 
@@ -366,7 +395,7 @@ impl TerminalSet {
         let hold = hold.clone();
         cx.new(|cx| {
             let mut terminal =
-                AttachedTerminal::sharing(session, target, metrics, open, tunnels, cx);
+                AttachedTerminal::sharing(session, target, metrics, open, tunnels, false, cx);
             let notices: NoticeHold = Box::new(move |cx| match hold(cx) {
                 Hold::ReconnectCard if !agent => Hold::Nothing,
                 held => held,
@@ -441,6 +470,7 @@ impl TerminalSet {
 
     /// Show tab `id`'s terminal (`None` for the agent's) and focus it, with `mark` taken at the press that chose it,
     /// through the focus coordinator, which also makes it home. A tab that is not listed changes nothing.
+    /// An explicit Agent choice clears the memory even when Agent is already shown as a fallback.
     pub fn choose(
         &mut self,
         id: Option<String>,
@@ -453,10 +483,21 @@ impl TerminalSet {
         {
             return;
         }
+        self.restore = None;
+        let shown = cx.default_global::<ShownTerminals>();
+        match &id {
+            Some(id) => {
+                shown.0.insert(self.key.clone(), id.clone());
+            }
+            None => {
+                shown.0.remove(&self.key);
+            }
+        }
         if self.chosen != id {
             self.chosen = id;
             cx.notify();
         }
+        self.take_carried(cx);
         match self.home(cx) {
             Some(home) => focus::choose_terminal(&home, mark, window, cx),
             None => focus::set_home(None, window, cx),
@@ -483,20 +524,24 @@ impl TerminalSet {
     /// Bring the tabs in line with the pushed row: keep the terminals of tabs still listed, make terminals for new
     /// ones, drop those no longer listed, and fall back to the agent terminal when the chosen tab went.
     fn follow_tabs(&mut self, cx: &mut Context<Self>) {
-        let listed: Vec<String> = session::current_store(cx)
-            .and_then(|store| {
-                store
-                    .read(cx)
-                    .collections()
-                    .get::<SessionRow>(&self.key)
-                    .map(|row| row.info.tabs.iter().map(|tab| tab.id.clone()).collect())
-            })
-            .unwrap_or_default();
+        let listed: Option<Vec<String>> = session::current_store(cx).and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(&self.key)
+                .map(|row| row.info.tabs.iter().map(|tab| tab.id.clone()).collect())
+        });
+        // A missing row is still waiting for its first list. An empty list from a real row settles the choice.
+        let restore = listed.as_ref().and_then(|_| self.restore.take());
+        let listed = listed.unwrap_or_default();
         // Most pushes change something else about the row (its activity, its status): nothing to do then. A tab whose
         // terminal could not be made (the font did not measure) is tried again at the next change of the list.
         let unchanged = listed.len() == self.tabs.len()
             && listed.iter().zip(&self.tabs).all(|(id, tab)| *id == tab.id);
         if unchanged {
+            if restore.is_some() {
+                self.take_carried(cx);
+            }
             return;
         }
         let Some(session) = self.session.upgrade() else {
@@ -542,6 +587,21 @@ impl TerminalSet {
         {
             self.chosen = None;
         }
+        if let Some(mark) = restore
+            && !focus::has_moved_on(&mark, cx)
+        {
+            self.chosen = cx
+                .try_global::<ShownTerminals>()
+                .and_then(|shown| shown.0.get(&self.key))
+                .filter(|wanted| {
+                    self.tabs
+                        .iter()
+                        .take(MAX_ATTACHED_TABS)
+                        .any(|tab| &tab.id == *wanted && tab.terminal.is_some())
+                })
+                .cloned();
+        }
+        self.take_carried(cx);
         // The requested tab can be chosen after this update releases the set.
         if let Some((id, _, _)) = &self.opened
             && self.tabs.iter().any(|tab| &tab.id == id)
@@ -551,6 +611,21 @@ impl TerminalSet {
             cx.defer(move |cx| choose_in(&set, id, mark, window, cx));
         }
         cx.notify();
+    }
+
+    /// Deliver old upload results to the terminal that can show them. If the first row is still pending, wait for it
+    /// to settle the restore so the messages do not land in a terminal the view is about to hide.
+    fn take_carried(&mut self, cx: &mut Context<Self>) {
+        if self.restore.is_some() {
+            return;
+        }
+        let attachments = self
+            .shown()
+            .unwrap_or(&self.agent)
+            .read(cx)
+            .attachments()
+            .clone();
+        attachments.update(cx, |attachments, cx| attachments.take_carried(cx));
     }
 
     /// The shown terminal `shown` measured its pane, as it does after every frame it is drawn in: fit every other
