@@ -152,7 +152,13 @@ pub(super) async fn change_tensorlake(
                 Some(if transitioned {
                     now_ms()
                 } else {
-                    binding.suspended_at.unwrap_or_else(now_ms)
+                    // The hold gives us Running evidence that can be newer
+                    // than the registry row we read before parking the actor.
+                    let running_seen_at = manager.running_seen_at(host);
+                    binding
+                        .suspended_at
+                        .filter(|&stamp| running_seen_at.is_none_or(|seen| stamp >= seen))
+                        .unwrap_or_else(now_ms)
                 })
             };
             if !manager
@@ -178,8 +184,7 @@ pub(super) async fn change_tensorlake(
 /// Reconcile conflicts with the actual status rather than guessing what a
 /// vendor 409 means. The deadline includes each request, so a slow final GET
 /// cannot extend the advertised wait indefinitely.
-/// Returns whether a mutation was needed: repeated Suspend preserves its
-/// original timestamp, while a sandbox resumed outside Farhelm gets a new one.
+/// Returns whether a mutation was needed. A new pause earns its own stamp.
 async fn transition(
     service: &super::Tensorlake,
     key: &ApiKey,

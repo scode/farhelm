@@ -1137,11 +1137,22 @@ async fn a_tensorlake_host_decodes_with_its_binding() {
     let binding = row(&store, host).await.tensorlake.unwrap();
     assert_eq!(binding.sandbox_id.as_deref(), Some("sbx-7"));
     assert_eq!(binding.suspended_at, Some(1_700_000_000_000));
-    assert!(store.set_tensorlake_suspended_at(host, None).await.unwrap());
-    assert_eq!(
-        row(&store, host).await.tensorlake.unwrap().suspended_at,
-        None
-    );
+    // A delayed Running observation can clear an earlier episode, but a
+    // Suspend that has since finished owns its timestamp, including ties.
+    let stamp = 1_700_000_000_000;
+    for (seen, expected) in [
+        (stamp - 1, Some(stamp)),
+        (stamp, Some(stamp)),
+        (stamp + 1, None),
+        (stamp + 1, None),
+    ] {
+        store
+            .clear_suspend_attribution_before(host, seen)
+            .await
+            .unwrap();
+        let binding = row(&store, host).await.tensorlake.unwrap();
+        assert_eq!(binding.suspended_at, expected);
+    }
     let local = store.list_hosts().await.unwrap()[0].id;
     assert!(
         !store
@@ -1766,6 +1777,8 @@ async fn lifecycle_host_with_headers(
 /// Suspend must withdraw routing without losing the registered machine. Resume
 /// must preserve the host/session identity while earning a fresh connection.
 /// Repeating either verb is safe and does not issue a second vendor mutation.
+/// Suspend on an externally paused sandbox must record a new time if the
+/// actor saw the earlier episode end, even if its stamp remains in storage.
 #[farhelm_testtrace::test]
 async fn lifecycle_suspend_resume_preserves_the_host_and_is_idempotent() {
     let api = FakeApi::default().with_sandbox(
@@ -1820,6 +1833,14 @@ async fn lifecycle_suspend_resume_preserves_the_host_and_is_idempotent() {
             .count(),
         1
     );
+    // The actor only clears an older stamp, so Resume itself must clear this one.
+    let store = &harness.store;
+    assert!(
+        store
+            .set_tensorlake_suspended_at(host, Some(i64::MAX))
+            .await
+            .unwrap()
+    );
     let mut resumed_incarnation = None;
     for _ in 0..2 {
         let (status, body) = lifecycle_host(&harness, host, "resume").await;
@@ -1851,6 +1872,30 @@ async fn lifecycle_suspend_resume_preserves_the_host_and_is_idempotent() {
         api.calls()
             .iter()
             .filter(|call| call.starts_with("resume "))
+            .count(),
+        1
+    );
+    let manager = &harness.state.manager;
+    let seen = manager.running_seen_at(host).unwrap();
+    store
+        .set_tensorlake_suspended_at(host, Some(seen - 1))
+        .await
+        .unwrap();
+    api.0.lock().unwrap().sandboxes[0].2 = SandboxStatus::Suspended;
+
+    let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let binding = row(store, host).await.tensorlake.unwrap();
+    let saved = binding.suspended_at.unwrap();
+    assert!(saved >= seen, "this Suspend must replace the old stamp");
+    assert!(matches!(manager.state(host), Some(HostState::Suspended {
+        suspended_by_farhelm_at: Some(at), ..
+    }) if at == saved));
+    let calls = api.calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("suspend "))
             .count(),
         1
     );
