@@ -122,7 +122,7 @@ def required_operations(check, pass_id, update_path):
         'continuity-before': {'continuity_before'}, 'preserved-state': {'inspect_state'},
         'window-drag': {'prior_receipts', 'window_frame'},
         'codex-resume': {'inspect_state'},
-        'remote-update': {'remote_version', 'continuity_remote_before', 'continuity_remote_after'},
+        'remote-update': {'remote_version', 'continuity_remote_after'},
         'reopen': {'launch', 'versions', 'remote_version', 'continuity_reopen_before', 'continuity_reopen_after'}}
     result = set(requirements.get(check, {'prior_receipts'}))
     if check == 'native-preflight' and not pass_id.startswith('p0-'):
@@ -228,7 +228,8 @@ leaves it running when it quits, and the candidate replaces it on first launch,
 so a brief connecting state is the handover: wait for the connected candidate
 local supervisor, never stop one yourself. Never manually launch or use getApp to rescue a
 missing restart. Call versions after the candidate returns. Capture the final
-native acceptance state. Remote upgrade belongs to its later checkpoint.'''
+native acceptance state. The candidate may update the remote supervisor during
+relaunch. Its later checkpoint verifies the outcome.'''
     if check == 'update-discovery':
         if update_path == 'manual':
             raise ValueError('manual installation cannot satisfy updater discovery')

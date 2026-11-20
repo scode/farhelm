@@ -644,25 +644,55 @@ record, bundle and CLI must independently agree on the candidate already.
                 with self.assertRaisesRegex(TesterError, 'installation-version'):
                     managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Unverified UI claim'})
 
-    def test_remote_update_contract_accepts_direct_action_without_inventing_a_dialog(self):
-        """A product's direct Update now path must satisfy the same upgrade contract.
+    def test_remote_update_contract_observes_the_upgrade_on_relaunch(self):
+        """A fast automatic update can finish before either remote checkpoint starts.
 
 P0 still needs a real remote agent response and independent service evidence;
-bonus upgrades still need original-process continuity. A confirmation dialog
-is conditional product UI, not an additional acceptance state to manufacture.
+bonus upgrades still need original-process continuity from before the relaunch.
 """
         for check, pass_id in (('remote-supervisor-agent', 'p0-updater-upgrade'),
                                ('remote-update', 'upgrade-v0.29.0')):
             with self.subTest(check=check):
                 text = managed_instructions(check, pass_id, 'override')
-                self.assertIn('Update now when offered', text)
-                self.assertIn('confirmation if offered', text)
-                self.assertIn('do not require an extra', text.lower())
-                self.assertIn('absence of a confirmation is not', text.lower())
-                self.assertIn('repeat a completed update', text)
+                self.assertIn("candidate's automatic remote update", text)
+                self.assertIn('manual Update actions untouched', text)
                 self.assertIn('remote_version', required_operations(check, pass_id, 'override'))
         self.assertIn('actual\nanswer 42', managed_instructions('remote-supervisor-agent', 'p0-updater-upgrade', 'override'))
         self.assertIn('continuity_remote_after', required_operations('remote-update', 'upgrade-v0.29.0', 'override'))
+        self.assertNotIn('continuity_remote_before',
+                         available_operations('remote-update', 'upgrade-v0.29.0', 'override'))
+
+    def test_remote_update_continuity_uses_the_pre_relaunch_receipt(self):
+        """An already completed upgrade cannot pass by sampling both sides after it."""
+        identity = {'pid': 103, 'start_ticks': 200, 'boot_id': '8503c7ff-c9c5-4d1c-9d14-bc7abe52671e'}
+        before = dict(identity, counter=5)
+        after = dict(identity, counter=12)
+        self.value.update(check_id='continuity-before', pass_id='upgrade-v0.29.0')
+        self.operations().receipt('continuity-before', {'before': dict(identity, counter=4), 'after': before})
+
+        later = dict(self.value, check_id='remote-update')
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps(after).encode(), b''))
+        output = self.pass_dir / 'later-attempt/output'
+        (output / 'work').mkdir(parents=True)
+        operations = self.operations(later, output, runner)
+        pending = operations.dispatch('continuity_remote_after')
+        self.assertEqual(pending['status'], 'not-ready')
+        self.assertNotIn('continuity_remote_after', operations.completed)
+        runner.assert_not_called()
+        operations.completed.add('remote_version')
+        evidence = operations.dispatch('continuity_remote_after')['observation']
+        self.assertEqual(evidence, {'before': before, 'after': after})
+        runner.assert_called_once()
+
+    def test_remote_update_continuity_requires_a_pre_relaunch_receipt(self):
+        """Missing pre-relaunch evidence cannot fall back to the current live process."""
+        self.value.update(check_id='remote-update', pass_id='upgrade-v0.29.0')
+        runner = mock.Mock()
+        operations = self.operations(runner=runner)
+        operations.completed.add('remote_version')
+        with self.assertRaisesRegex(RuntimeError, 'continuity-before retained no continuity-before receipt'):
+            operations.dispatch('continuity_remote_after')
+        runner.assert_not_called()
 
     def test_native_failure_record_omits_image_payload(self):
         """The latch remains small even when a provider returns a screenshot beside its error."""

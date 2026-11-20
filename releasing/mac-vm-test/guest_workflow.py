@@ -341,7 +341,8 @@ sentence. Require separate actual answer 42 with sensible explanation, terminal
 responsiveness and idle/completion. Retain native image and candidate running
 version evidence. Leave the old session untouched. No settings/template
 prerequisites.''',
-        'remote-supervisor-agent': '''Use native Farhelm remote Update. Require the formerly old remote supervisor
+        'remote-supervisor-agent': '''Observe the candidate's automatic remote update without clicking Update.
+Require the formerly old remote supervisor
 connected at candidate, independently verify its running systemd user service
 over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
 host with the configured model at low effort and yolo/trust true where supported. Send: What is 17 +
@@ -450,11 +451,9 @@ model at low effort, YOLO and per-run trust where offered. Send: What is 17 + 25
 in one short sentence. Require a separate actual answer 42, sensible explanation,
 responsive terminal and completion. Call versions. Leave the old session from
 old-fixture untouched. Retain actual native images.''',
-        'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update, including Update now when offered.
-Handle an ordinary product confirmation if offered; do not require an extra
-dialog. Update now can complete directly, and absence of a confirmation is not
-a failure. Do not change confirmation preferences or repeat a completed update
-to obtain a dialog.
+        'remote-supervisor-agent': '''Observe the candidate's automatic remote update. It may already have finished
+during relaunch or the local checks. Keep the settings as they are and leave
+the manual Update actions untouched.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session with the configured model at low effort, YOLO and per-run trust where offered.
 Leave the launcher's optional Initial prompt blank. Launch first, then enter the
@@ -507,12 +506,11 @@ compare with the seed receipt. Capture the real resumed answer and session.''',
         'continuity-before': '''Call continuity_command and start its exact command as a Farhelm plain-command
 session on the pinned Linux host, with agent type none. Call continuity_before
 to establish original identity and advancing counters independently over SSH.''',
-        'remote-update': '''Call continuity_remote_before. Use remote Update through native GUI, including
-Update now when offered. Handle an ordinary product confirmation if offered;
-do not require an extra dialog. Absence of a confirmation is not a failure.
-Do not change confirmation preferences or repeat a completed update to obtain
-a dialog. Require candidate remote connected. Call remote_version and
-continuity_remote_after. Both must establish the original process survived.''',
+        'remote-update': '''Observe that the candidate's automatic remote update completed. It may have
+finished during relaunch. Leave the manual Update actions untouched. Require
+candidate remote connected and call remote_version. Call continuity_remote_after
+to compare the live original process with the retained sample from before
+candidate relaunch.''',
         'reopen': '''Call continuity_reopen_before. Quit the candidate normally through native UI,
 then call launch. Require usable candidate, both connected hosts, retained
 sessions and responsiveness. Call versions, remote_version, inspect_state and

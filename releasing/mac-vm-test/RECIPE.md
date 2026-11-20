@@ -125,14 +125,15 @@ not successful agent execution.
    compares with the survival comparison.
 
    Keep version, GUI and command evidence. Preference preservation and other bonus conversations stay bonus checks.
-5. **Remote supervisor upgrade, one successful agent and the old session.** On that same fixture, use the app's remote
-   **Update** action. Require the formerly old remote supervisor to return connected at the candidate version and
-   independently verify its running service. Launch one genuine authenticated agent through Farhelm on that remote host,
-   send a small prompt, require a meaningful reply and responsive terminal, and leave that session running for steps 6
-   and 7 (`remote-supervisor-agent`). A plain shell command does not count as an agent. Then check the old remote
-   session from step 3 as in step 4 (`remote-old-session`); it runs after the remote Update, so that the session
-   survives the upgrade of its own host's supervisor. Save version, service and GUI/command evidence. The counter
-   workload's process survival and final quit/reopen belong to bonus coverage.
+5. **Remote supervisor upgrade, one successful agent and the old session.** Observe the candidate's automatic remote
+   update on that same fixture. It can finish during relaunch or the local checks. Require the formerly old remote
+   supervisor to return connected at the candidate version and independently verify its running service. Launch one
+   genuine authenticated agent through Farhelm on that remote host, send a small prompt, require a meaningful reply and
+   responsive terminal, and leave that session running for steps 6 and 7 (`remote-supervisor-agent`). A plain shell
+   command does not count as an agent. Then check the old remote session from step 3 as in step 4
+   (`remote-old-session`). Compare with the old fixture's identities, sampled before relaunch, to prove survival across
+   the automatic update. Save version, service and GUI/command evidence. The counter workload's process survival and
+   final quit/reopen belong to bonus coverage.
 
 6. **Remove and re-add the remote host.** Keep both remote sessions from step 5 alive and record their identities. Call
    `remote_host_before`, then select the remote host menu's **Remove**, handling its ordinary confirmation if offered.
@@ -286,10 +287,10 @@ together. Historical manifests with no declared P1 check report it as not planne
 6. Confirm sessions, template and chosen setting remain accessible as their documented contracts require. Prove each
    existing agent session responds; verify its captured conversation can be restarted and resumed through Farhelm and
    that the resumed agent retains the conversation. Keep the remote continuity command running while doing this.
-7. Confirm the remote host offers Update (it may first show a version/protocol mismatch). Perform the update in the app,
-   require a connected host with candidate supervisor version, and prove the original remote command remained alive and
-   advanced across the update with the same process identity. A new command with the same text is a failure of
-   continuity. Capture supervisor/service logs if the host fails to return.
+7. Observe the candidate's automatic remote update. Require a connected host with the candidate supervisor version.
+   Compare with the last counter sample from step 3, before candidate relaunch, and prove the original remote command
+   remained alive and advanced across the update with the same process identity. A new command with the same text is a
+   failure of continuity. Capture supervisor/service logs if the host fails to return.
 8. Quit and reopen the app through the normal verified launch path. Recheck candidate version, connected local and
    remote hosts, existing sessions and responsiveness. Recheck the remote process's continuity. Run the addendum,
    collect evidence, and delete only this pass's owned clones after evidence is safe.

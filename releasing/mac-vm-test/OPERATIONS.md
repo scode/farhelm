@@ -134,9 +134,9 @@ installed record, bundle and CLI must all name the candidate, while the old proc
 separate restart checkpoint. An image of the brief installing state is optional: a fast update can finish between native
 observations, so missing that progress image does not invalidate completed installation evidence.
 
-Remote Update may ask for an ordinary product confirmation or complete directly from Update now. Handle a confirmation
-when the app offers one; never repeat an already completed update to manufacture a dialog. Acceptance still requires the
-connected candidate host, independent service/version evidence and the checkpoint's agent response or continuity.
+The candidate may finish updating the remote host before the remote checkpoint starts. Observe the connected candidate
+host, retain independent service and version evidence, and run the checkpoint's agent response or continuity check.
+Leave the manual Update actions untouched so the result establishes the automatic path.
 
 P0's final remote menu checks run after the genuine remote-agent reply and before feedback. `remote_host_before` and
 `remote_host_after` are fixed read-only probes over the pinned SSH connection, independent of Farhelm's registration.
@@ -383,9 +383,9 @@ python3 /path/to/continuity.py observe /path/to/private-counter-directory --befo
 ```
 
 Save stdout as each observation receipt. `--before` requires unchanged PID, kernel start ticks and Linux boot ID plus a
-larger counter. Prove advancement before upgrading, after the app update, after remote supervisor update and after final
-reopen. A terminal replay alone is insufficient; stopped/replaced-process tests exercise the oracle's refusal paths. Do
-not reboot the guest or restart the workload during this check.
+larger counter. Compare the connected candidate remote supervisor's sample with the last sample before the app relaunch,
+then take another pair across quit and reopen. A terminal replay alone is insufficient. Stopped and replaced process
+tests exercise the oracle's refusal paths. Keep the guest and workload running throughout the check.
 
 ## Signed inputs, evidence and cleanup
 

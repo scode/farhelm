@@ -250,7 +250,7 @@ Continuity checkpoints require independent before/after receipts as well.
         # sessions survive the upgrade and resume after Restart: each
         # old-session check follows its host's new-session check, which
         # establishes that host's candidate supervisor, so the remote one
-        # follows the remote Update that upgrades that host.
+        # follows observation of the candidate's automatic update on that host.
         items = ({'artifact-verification': False, 'fixture-clean': False,
                   'install': False, 'app-start': True} if pass_id == 'p0-fresh' else
                  {'artifact-verification': False, 'old-fixture': True,

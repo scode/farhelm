@@ -1141,14 +1141,15 @@ systemd or SSH substrate ran.
   actions, native restart readiness after manual installation, durable completed-update evidence without transient
   progress images, exact native update-channel readouts without mandatory tooltip images, normal Finder readiness with
   verified menu dismissal, conditional product confirmations, terminal-host-only old-session survival and Restart,
-  remote menu Remove/re-add and Uninstall sequencing, independent resource-preservation/removal receipts, restart
-  process handoffs, calibrated window measurements, gesture-trace and bonus gesture-readiness gates, failure gates and
-  evidence import with fictional fixtures, including continuation after an expected RC or dev discovery skip, stable
-  discovery failure, explicit scope restoration with feedback consent, and remote launcher visibility guidance. Use a
-  substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness
-  contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own
-  private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation
-  in an owned disposable guest; the portable suite does not exercise that OS API.
+  automatic remote upgrade with continuity bound to the pre-relaunch receipt, remote menu Remove/re-add and Uninstall
+  sequencing, independent resource-preservation/removal receipts, restart process handoffs, calibrated window
+  measurements, gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional
+  fixtures, including continuation after an expected RC or dev discovery skip, stable discovery failure, explicit scope
+  restoration with feedback consent, and remote launcher visibility guidance. Use a substrate that permits process-group
+  inspection; Linux continuity cases skip on macOS. These tests prove harness contracts, not native GUI behavior or a
+  release pass. Actual native fixture probes and release checks retain their own private evidence. The guest-only Swift
+  geometry helper needs separate SDK type-check and read-only runtime validation in an owned disposable guest; the
+  portable suite does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
   one-time notes policy section and the folded full list's frame, synthetic git histories for the fragment sweep and for
