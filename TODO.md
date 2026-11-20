@@ -286,6 +286,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to restart farhelm. open templates, pick one template, scroll to the bottom. now hitting esc just changes some scroll
   state, and hitting esc again changes it back, so hitting esc esc esc esc just toggle back and forth and never exits
   the menu. clicking the "X" at the top right also doesn't exit the kmenu and i'm hard stuck and have to restart farhelm
+  Plan: `plans/queue/templates-dialog-close.md`.
 
 - **Make the model family names consistent.** Every model in the launcher's model list belongs to a family (Sol, Fable,
   GLM and so on), and the families are named in three different styles: Sol, Astra, Luna and Terra by a plain word
