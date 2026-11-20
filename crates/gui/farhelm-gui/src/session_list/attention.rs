@@ -8,7 +8,8 @@
 //! `list/view.rs` (dismissal, Details, the menu-retirement key, the placement) and the stylesheet's `.host-attention-*`
 //! rules, at reference commit `24bc0580`. Here's the TLDR of its rules:
 //!
-//! - **One row per host, one reason each** ([`classify`]): work going on (a setup, Update or uninstall run, or its
+//! - **One row per host, one reason each** ([`classify`]): SSH sign-in takes precedence so the user can answer a
+//!   pending question even while setup is under way. Otherwise work going on (a setup, Update or uninstall run, or its
 //!   requests out) over a problem, over an update, so a host whose Update loses its connection stays one working row.
 //!   Rows are grouped problems, then working hosts, then updates, each group in the registry's order (the rail's order;
 //!   a host a session owns has no avatar but keeps its row, as SPEC.md has "the attention area retain ordinary
@@ -108,8 +109,8 @@ use crate::hosts::identity::{host_mark, phase, short_name};
 use crate::hosts::offers::runs_newer_version;
 use crate::hosts::status::{self, HostStatus, Steps, Urgency, host_status};
 use crate::hosts::{progress_card, update};
-use crate::session;
 use crate::theme::{self, Palette, metrics};
+use crate::{session, sign_in};
 
 /// `.host-attention-list`'s `max-height: min(280px, 45%)`: the list's cap, in pixels and as a share of the column.
 const MAX_HEIGHT: f32 = 280.;
@@ -145,12 +146,14 @@ const REQUIRED: &str = "Sessions stay unreachable until this host is updated.";
 
 // ---- Which hosts need attention -------------------------------------------------------------------------------------
 
-/// Why a host has a row; each host has at most one, by [`classify`]'s precedence.
+/// Why a host has a row. A pending SSH question is actionable regardless of the host's ordinary phase. See [`classify`]'s precedence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
     /// Something is wrong that Details shows (the phase's own trouble, an environment's undelivered credentials or
     /// failed forwards, or an unacknowledged setup or Update warning).
     Problem,
+    /// An SSH question or a sign-in that needs an explicit retry.
+    SignIn(sign_in::Status),
     /// A setup, Update or uninstall is going on, or the host's sandbox or container is being destroyed.
     Working,
     /// The host has an update by the rail badge's test; `required` when its sessions cannot be reached until then.
@@ -161,7 +164,7 @@ impl Kind {
     /// The group's place in the list: problems, then working hosts, then updates.
     fn group(self) -> u8 {
         match self {
-            Kind::Problem => 0,
+            Kind::SignIn(_) | Kind::Problem => 0,
             Kind::Working => 1,
             Kind::Update { .. } => 2,
         }
@@ -193,7 +196,9 @@ pub(super) fn classify<'a>(
     let mut rows: Vec<Row> = hosts
         .into_iter()
         .filter_map(|(host, status)| {
-            let (kind, words, steps) = if let Some(live) = &status.live {
+            let (kind, words, steps) = if let Some(sign_in) = status.sign_in {
+                (Kind::SignIn(sign_in), sign_in.words().to_owned(), None)
+            } else if let Some(live) = &status.live {
                 (
                     Kind::Working,
                     live.activity.verb().to_owned(),
@@ -779,7 +784,16 @@ fn row_element(
                 }),
             )
         }
-        Kind::Working => None,
+        Kind::Working | Kind::SignIn(_) => None,
+    };
+    let sign_in = match row.kind {
+        Kind::SignIn(state) => Some(sign_in::action(
+            &row.host,
+            state,
+            format!("host-attention-sign-in-{id}"),
+            true,
+        )),
+        Kind::Problem | Kind::Working | Kind::Update { .. } => None,
     };
     div()
         .id(SharedString::from(format!("host-attention-row-{id}")))
@@ -791,6 +805,7 @@ fn row_element(
         .border_color(theme::color(palette.border_nested))
         .child(div().flex_1().min_w_0().child(control))
         .children(action.map(|action| div().flex_none().pr(px(ROW_PAD_RIGHT)).child(action)))
+        .children(sign_in.map(|action| div().flex_none().pr(px(ROW_PAD_RIGHT)).child(action)))
         .into_any_element()
 }
 
@@ -798,7 +813,7 @@ fn row_element(
 /// row's verb, cut short to fit) and a required update's consequence, which may wrap.
 fn identity_line(row: &Row, current: Option<&HostText>, palette: &Palette) -> AnyElement {
     let state_ink = match row.kind {
-        Kind::Problem => palette.warn_bright,
+        Kind::Problem | Kind::SignIn(_) => palette.warn_bright,
         Kind::Working | Kind::Update { .. } => palette.fg_1,
     };
     let state = div()

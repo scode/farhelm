@@ -102,6 +102,8 @@ pub struct MainView {
     /// The owner of the window-start dialogs (the Welcome card and the first batch of announcements), kept for the
     /// window's life; it starts over by itself with each UI session.
     _start_dialogs: Entity<welcome::StartDialogs>,
+    /// Owns the layer and the input marks for SSH questions in this window.
+    _sign_in: Entity<crate::sign_in::SignIn>,
     /// The owner of the status sounds, kept for the window's life; it starts over by itself with each UI session.
     _sounds: Entity<sounds::StatusSounds>,
     /// The main pane's anchor as last drawn, which the sequence pill is centered over (the module docs); `None` before
@@ -140,6 +142,7 @@ impl MainView {
             session_pane: cx.new(|cx| SessionPane::new(new, window, cx)),
             // After the session pane, whose first sync is deferred the same way and so runs first.
             _start_dialogs: cx.new(|cx| welcome::StartDialogs::new(window, cx)),
+            _sign_in: crate::sign_in::SignIn::attach(window, cx),
             _sounds: status_sounds,
             pane_anchor: None,
         }

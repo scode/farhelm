@@ -204,8 +204,8 @@ linux/settings-credentials--dark.png 5529a93fae80d1f01062d402bc76bd37755b9a18
 linux/settings-credentials--light.png 64a84eb5ba879357408e8f799fceb862c60382a9
 linux/settings-hosts--dark.png 278a3c4abd117a60522fb8c41064ea71169ea030
 linux/settings-hosts--light.png 380428595169cec1276f1e14d04e9b60cced21d4
-linux/settings-notifications--dark.png bcee44c7ba2056ed7423e0b15afc69de96fc282b
-linux/settings-notifications--light.png 5a5988da19e41f64b9b40de5d04d28df03804891
+linux/settings-notifications--dark.png 6fe56f99f6ccc2d6d25c06cfbd3f1cecbcbf012f
+linux/settings-notifications--light.png 87ea07f49d3d70033f30ff53f1b15cebea5a4222
 linux/settings-recipe-editor--dark.png c165f893a54c472f8253f9a14e9e29cd97c9fc85
 linux/settings-recipe-editor--light.png 2bb4b6e097dc29520eea5c7c3e3856574511be75
 linux/settings-recipes--dark.png 8865abf380a70da07c059021031924f480676418
@@ -226,6 +226,16 @@ linux/settings-tensorlake-sandboxes--dark.png b235ef4c1c466dd4e7f050c3114ce8fdf7
 linux/settings-tensorlake-sandboxes--light.png fa4596f4d1d54b6271a241b916d4b3bdce9c2cea
 linux/settings-terminal--dark.png 4e943b31767b14cf2cce58e069719de37399cca8
 linux/settings-terminal--light.png 58a659894b4e43efbc407171da9e2746a2243974
+linux/ssh-sign-in-code--dark.png daabf40f8e81f4f8b3ad81cad63d8076583fb454
+linux/ssh-sign-in-code--light.png 2d74fabd3092ce71424feda71b362bd08a6854d6
+linux/ssh-sign-in-duo--dark.png f87dfad360b5dd788d43600ce3ab6a5481902ccf
+linux/ssh-sign-in-duo--light.png 18499b3614c9597bc1b1f6ccd0db76b5f3b9d292
+linux/ssh-sign-in-host-key--dark.png f6ba35e27b65d18adffba4150aba4c130573fc51
+linux/ssh-sign-in-host-key--light.png 41871a267ec21136a6b28530f7d2609294bfe9e0
+linux/ssh-sign-in-needed--dark.png c1d5db8a148f0c61f50b9dc051c03715366dcdb2
+linux/ssh-sign-in-needed--light.png 08a0667e8a7fb460bb4f3d7b385342b51b88e562
+linux/ssh-sign-in-notice--dark.png 6cd5df4429b7ba7af216ad665990ae878c9559e7
+linux/ssh-sign-in-notice--light.png 9db5bb5525f0e6cc15ecf1307e51d7a7c0441daa
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e

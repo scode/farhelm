@@ -3124,6 +3124,66 @@
       "golden": "hosts-panel-uninstall-notice",
       "title": "The Hosts panel after an uninstall this window confirmed: the one-line removal notice with Copy and the dismiss control above the remaining hosts (no reference shows it)",
       "reference": null
+    },
+    {
+      "golden": "dialog-footer-tooltip",
+      "title": "Tooltip anchored to a dialog's footer control",
+      "reference": null
+    },
+    {
+      "golden": "dialog-list-tooltip",
+      "title": "Tooltip anchored to a row inside a dialog",
+      "reference": null
+    },
+    {
+      "golden": "help-menu-announcements-hover",
+      "title": "Help menu with the Announcements tooltip",
+      "reference": null
+    },
+    {
+      "golden": "host-rail-hover-beside",
+      "title": "Host tooltip beside the rail",
+      "reference": null
+    },
+    {
+      "golden": "scroll-box-pointer-help",
+      "title": "Pointer help beside a control in a scroll box",
+      "reference": null
+    },
+    {
+      "golden": "settings-search",
+      "title": "Settings search with a matching section",
+      "reference": null
+    },
+    {
+      "golden": "settings-search-empty",
+      "title": "Settings search with no matches",
+      "reference": null
+    },
+    {
+      "golden": "ssh-sign-in-code",
+      "title": "SSH verification code with the masked answer field focused",
+      "reference": null
+    },
+    {
+      "golden": "ssh-sign-in-duo",
+      "title": "Multi-line Duo question with its numbered choices",
+      "reference": null
+    },
+    {
+      "golden": "ssh-sign-in-host-key",
+      "title": "First-time SSH host-key confirmation with its fingerprint",
+      "reference": null
+    },
+    {
+      "golden": "ssh-sign-in-needed",
+      "title": "Unavailable session and attention row with Sign in",
+      "reference": null
+    },
+    {
+      "golden": "ssh-sign-in-notice",
+      "title": "SSH security-key touch notice with Cancel",
+      "reference": null
     }
   ],
   "reference_scenes": [

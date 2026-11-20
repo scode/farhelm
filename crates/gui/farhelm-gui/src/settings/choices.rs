@@ -82,6 +82,8 @@ pub(super) enum Choice {
     SoundApproval,
     /// Notifications, Sounds: Turn finished, off by default.
     SoundTurnFinished,
+    /// Notifications, Sounds: SSH sign-in, on by default.
+    SoundSshSignIn,
 }
 
 impl Choice {
@@ -99,6 +101,7 @@ impl Choice {
         Choice::SoundWaiting,
         Choice::SoundApproval,
         Choice::SoundTurnFinished,
+        Choice::SoundSshSignIn,
     ];
 
     /// Search groups these preferences in the section that owns each control.
@@ -114,9 +117,10 @@ impl Choice {
             Self::ShowClaudeTrustHint | Self::ShowCodexTrustHint | Self::ShowMuseTrustHint => {
                 Section::AgentTrust
             }
-            Self::SoundWaiting | Self::SoundApproval | Self::SoundTurnFinished => {
-                Section::Notifications
-            }
+            Self::SoundWaiting
+            | Self::SoundApproval
+            | Self::SoundTurnFinished
+            | Self::SoundSshSignIn => Section::Notifications,
         }
     }
 
@@ -135,6 +139,7 @@ impl Choice {
             Choice::SoundWaiting => "sound_waiting",
             Choice::SoundApproval => "sound_approval",
             Choice::SoundTurnFinished => "sound_turn_finished",
+            Choice::SoundSshSignIn => "sound_ssh_sign_in",
         }
     }
 
@@ -157,12 +162,16 @@ impl Choice {
             Choice::ShowClaudeTrustHint => preferences.claude_trust_hint_dismissed,
             Choice::ShowCodexTrustHint => preferences.codex_trust_hint_dismissed,
             Choice::ShowMuseTrustHint => preferences.muse_trust_hint_dismissed,
-            Choice::SoundWaiting | Choice::SoundApproval | Choice::SoundTurnFinished => None,
+            Choice::SoundWaiting
+            | Choice::SoundApproval
+            | Choice::SoundTurnFinished
+            | Choice::SoundSshSignIn => None,
         });
         match self {
             Choice::SoundWaiting => sound(Sound::Waiting),
             Choice::SoundApproval => sound(Sound::Approval),
             Choice::SoundTurnFinished => sound(Sound::TurnFinished),
+            Choice::SoundSshSignIn => sound(Sound::SshSignIn),
             Choice::NameSessionsOnQuickLaunch => field != Some(false),
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
@@ -190,7 +199,8 @@ impl Choice {
             | Choice::SkipHostRemoveConfirmation
             | Choice::SoundWaiting
             | Choice::SoundApproval
-            | Choice::SoundTurnFinished => on,
+            | Choice::SoundTurnFinished
+            | Choice::SoundSshSignIn => on,
         };
         patch(self.field(), serde_json::Value::Bool(stored))
     }
@@ -210,6 +220,7 @@ impl Choice {
             Choice::SoundWaiting => "settings-sound-waiting",
             Choice::SoundApproval => "settings-sound-approval",
             Choice::SoundTurnFinished => "settings-sound-turn-finished",
+            Choice::SoundSshSignIn => "settings-sound-ssh-sign-in",
         }
     }
 
@@ -234,6 +245,7 @@ impl Choice {
             Choice::SoundWaiting => "Session waiting",
             Choice::SoundApproval => "Approval request",
             Choice::SoundTurnFinished => "Turn finished",
+            Choice::SoundSshSignIn => "SSH sign-in",
         }
     }
 
@@ -273,6 +285,7 @@ impl Choice {
             Choice::SoundTurnFinished => {
                 "Play a soft pluck when an agent goes from running to idle"
             }
+            Choice::SoundSshSignIn => "Play a chime when an SSH host needs you to sign in",
         }
     }
 
@@ -317,7 +330,8 @@ impl Choice {
             | Choice::ShowMuseTrustHint
             | Choice::SoundWaiting
             | Choice::SoundApproval
-            | Choice::SoundTurnFinished => "",
+            | Choice::SoundTurnFinished
+            | Choice::SoundSshSignIn => "",
         }
     }
 
@@ -364,6 +378,9 @@ impl Choice {
             }
             Choice::SoundTurnFinished => {
                 "Could not save whether to play the turn finished sound. Try again."
+            }
+            Choice::SoundSshSignIn => {
+                "Could not save whether to play the SSH sign-in sound. Try again."
             }
         }
     }

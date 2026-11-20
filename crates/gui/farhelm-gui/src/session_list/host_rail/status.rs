@@ -31,6 +31,7 @@ use gpui::{
     AnyElement, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled, div, px,
 };
 
+use crate::assets::Icon;
 use crate::hosts::identity::phase;
 use crate::hosts::offers::runs_newer_version;
 use crate::hosts::status::{HostStatus, Urgency};
@@ -64,7 +65,10 @@ const ICON_BOX: f32 = 40.;
 /// host running a newer Farhelm; the last-read wording after a failed registry refresh (`last_read`); and the
 /// warning's explanation. The rail joins it to the host's identity as "<identity>: <words>".
 pub(super) fn state_words(host: &HostView, status: &HostStatus, last_read: bool) -> String {
-    let mut words = phase::words(&host.state).to_owned();
+    let mut words = status
+        .sign_in
+        .map_or_else(|| phase::words(&host.state), |state| state.words())
+        .to_owned();
     match (&status.live, status.update) {
         // One sentence: the verb is capitalized where it stands alone (the attention list's working rows), not here.
         (Some(live), _) => {
@@ -188,6 +192,21 @@ fn avatar_marks(
                 .debug_selector(|| format!("host-rail-dot-{id}"))
                 .right(px(CORNER_MARK_INSET)),
         )
+        // The upper left is free even when the host also has an update or an unacknowledged setup failure.
+        .when(status.sign_in.is_some(), |marks| {
+            marks.child(
+                badge_base(palette.warn, palette)
+                    .left_0()
+                    .p(px(2.))
+                    .debug_selector(|| format!("host-rail-sign-in-{id}"))
+                    .child(
+                        gpui::svg()
+                            .path(Icon::Key.path())
+                            .size(px(12.))
+                            .text_color(theme::color(palette.warn)),
+                    ),
+            )
+        })
         .when(status.update.is_some(), |marks| {
             marks.child(
                 badge(palette.warn, palette).debug_selector(|| format!("host-rail-update-{id}")),
@@ -221,16 +240,21 @@ fn corner_dot(ink: theme::Token, palette: &Palette) -> gpui::Div {
 
 /// The `↑` badge at the box's upper right, in `ink` on the raised background.
 fn badge(ink: theme::Token, palette: &Palette) -> gpui::Div {
+    badge_base(ink, palette)
+        .right_0()
+        .px(px(BADGE_PAD_X))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child("↑")
+}
+
+/// The raised backing shared by badges at either top corner of the avatar.
+fn badge_base(ink: theme::Token, palette: &Palette) -> gpui::Div {
     div()
         .absolute()
         .top(px(BADGE_TOP))
-        .right_0()
-        .px(px(BADGE_PAD_X))
         .rounded(metrics::RADIUS_MD)
         .bg(theme::color(palette.bg_2))
         .text_color(theme::color(ink))
-        .font_weight(FontWeight::SEMIBOLD)
-        .child("↑")
 }
 
 // ---- The Hosts control -----------------------------------------------------------------------------------------------

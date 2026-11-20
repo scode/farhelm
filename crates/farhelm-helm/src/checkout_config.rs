@@ -3495,6 +3495,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN sound_waiting;
                  ALTER TABLE preferences DROP COLUMN sound_approval;
                  ALTER TABLE preferences DROP COLUMN sound_turn_finished;
+                 -- A missing value still requires dropping the later sign-in sound column.
+                 ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
                  ALTER TABLE preferences DROP COLUMN terminal_text_size;
                  ALTER TABLE preferences DROP COLUMN last_container_host;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;

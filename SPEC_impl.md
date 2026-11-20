@@ -4966,6 +4966,11 @@ leaves every column unset and copies nothing from the old app's per-device stora
 route refuses an unknown appearance word and a width or size outside its range rather than clamping; only the booleans
 carry a CHECK, and a stored word or number the route would refuse reads back as unset. Older helms refuse this schema.
 
+The SSH question sound has a separate nullable `sound_ssh_sign_in` boolean. Unset means on. The desktop keeps question
+ids it has already seen for the life of its current UI session. Host-level sign-in does not inherit the selected
+session's mute. The answer form lives for the lifetime of one question id and is dropped when that id leaves the pending
+list. The UI uses the window's existing input marks and layer stack to decide and place an automatic open.
+
 ### Composer history
 
 `POST /api/browse-directory` accepts a default-false `membership_only` flag. When set, the helm uses the existing

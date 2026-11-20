@@ -1898,6 +1898,7 @@ async fn ssh_answers_reach_only_the_waiting_attempt() {
     questions.publish_to(Arc::clone(harness.state.manager.events()));
     let question = SshQuestion {
         id: "test-ssh-question".into(),
+        attempt: "test-ssh-attempt".into(),
         host: 42,
         purpose: SshConnectionPurpose::Sessions,
         startup: false,

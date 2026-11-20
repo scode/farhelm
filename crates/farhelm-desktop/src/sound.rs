@@ -208,6 +208,7 @@ mod linux {
     /// Where `sound`'s file is in the player's directory `dir`.
     fn sound_path(dir: &Path, sound: Sound) -> PathBuf {
         dir.join(match sound {
+            Sound::SshSignIn => "ssh-sign-in.wav",
             Sound::Approval => "approval.wav",
             Sound::Waiting => "waiting.wav",
             Sound::TurnFinished => "turn-finished.wav",

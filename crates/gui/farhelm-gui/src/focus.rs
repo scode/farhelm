@@ -279,17 +279,11 @@ impl Mark {
         Mark(installed::<MovedOn>(cx).map_or(0, |moved| moved.count))
     }
 
-    /// The user's input as of a new UI session's start, for the one kind of layer that opens without the user acting:
-    /// SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements when nothing is open
-    /// ahead of it). Take it when the dialog's owner first sees the new UI session, before its first snapshot is drawn.
-    /// The layer manager's rule says when the open is refused and what happens then ([`layers`], "Things the user did
-    /// not start never open a layer").
+    /// The input mark used by the window-start exceptions. Welcome and the first announcement batch take it when
+    /// they first see the UI session. SSH sign-in takes it when the window is made, before the initial snapshot can
+    /// arrive. A key or click after the mark prevents an automatic open.
     ///
-    /// It is [`Mark::take`] under another name. The name is the point: every other open's mark comes from the user's
-    /// action, so this exception has to be one review can find. Use it for nothing else. A batch of announcements that
-    /// waits behind the Welcome card (or its Send feedback now handoff) does not use it: SPEC.md has it wait for those
-    /// to close, each close always follows a key press or a click, and a mark from the session's start would refuse it
-    /// every time.
+    /// Like [`Mark::take`], this captures the current input count. Its name makes the exceptions easy to find.
     pub fn at_ui_session_start(cx: &App) -> Self {
         Self::take(cx)
     }
@@ -1211,7 +1205,15 @@ impl Element for ScrollRegion {
 /// Asks for a frame when it scrolls, since nothing else may: a focus move already on the focused control redraws
 /// nothing. From the focus-lost listener that request is ignored, and the listener asks for its own frame.
 fn reveal_focused(window: &mut Window, cx: &mut App) {
-    let (Some(focused), Some(state)) = (window.focused(cx), state(window, cx)) else {
+    if let Some(focused) = window.focused(cx) {
+        reveal_control(&focused, window, cx);
+    }
+}
+
+/// Bring a drawn control into its scrolling regions without changing focus. This also prepares a popover whose
+/// anchor is clipped, so it can open beside its own control in the next frame.
+pub(crate) fn reveal_control(target: &FocusHandle, window: &mut Window, cx: &mut App) {
+    let Some(state) = state(window, cx) else {
         return;
     };
     let state = state.read(cx);
@@ -1219,14 +1221,14 @@ fn reveal_focused(window: &mut Window, cx: &mut App) {
     if !state
         .root
         .upgrade()
-        .is_some_and(|root| root.contains(&focused, window))
+        .is_some_and(|root| root.contains(target, window))
     {
         return;
     }
     let Some(entry) = state
         .controls
         .iter()
-        .find(|entry| entry.control.upgrade().as_ref() == Some(&focused))
+        .find(|entry| entry.control.upgrade().as_ref() == Some(target))
     else {
         return;
     };

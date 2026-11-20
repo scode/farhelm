@@ -60,6 +60,7 @@ mod other_dialogs;
 mod session_list;
 mod session_pane;
 mod settings;
+mod sign_in;
 mod templates;
 mod terminal;
 
@@ -92,6 +93,7 @@ use other_dialogs::*;
 use session_list::*;
 use session_pane::*;
 use settings::*;
+use sign_in::*;
 use templates::*;
 use terminal::*;
 
@@ -648,6 +650,36 @@ static SCENES: &[Scene] = &[
         size: (1036., 348.),
         draw: session_unavailable_cards,
         setup: no_setup,
+    },
+    Scene {
+        name: "ssh-sign-in-code",
+        size: (970., 522.),
+        draw: sign_in_surfaces,
+        setup: sign_in_code,
+    },
+    Scene {
+        name: "ssh-sign-in-duo",
+        size: (970., 522.),
+        draw: sign_in_surfaces,
+        setup: sign_in_duo,
+    },
+    Scene {
+        name: "ssh-sign-in-host-key",
+        size: (970., 522.),
+        draw: sign_in_surfaces,
+        setup: sign_in_host_key,
+    },
+    Scene {
+        name: "ssh-sign-in-notice",
+        size: (970., 522.),
+        draw: sign_in_surfaces,
+        setup: sign_in_notice,
+    },
+    Scene {
+        name: "ssh-sign-in-needed",
+        size: (970., 522.),
+        draw: sign_in_surfaces,
+        setup: sign_in_needed,
     },
     Scene {
         name: "session-details-bar",

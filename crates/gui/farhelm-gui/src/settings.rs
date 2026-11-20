@@ -1261,6 +1261,7 @@ impl SettingsDialog {
             .child(self.switch(Choice::SoundWaiting, preferences, cx))
             .child(self.switch(Choice::SoundApproval, preferences, cx))
             .child(self.switch(Choice::SoundTurnFinished, preferences, cx))
+            .child(self.switch(Choice::SoundSshSignIn, preferences, cx))
             .into_any_element()
     }
 

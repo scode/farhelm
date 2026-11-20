@@ -500,6 +500,7 @@ fn the_hosts_control_acknowledges_the_warning_and_failures_while_it_shows_warn_n
     assert_eq!(
         cx.update(|_, cx| host_status(&listed()[1], cx)),
         HostStatus {
+            sign_in: None,
             update: Some(Urgency::Optional),
             live: None,
             warned: true,
@@ -722,6 +723,7 @@ fn always_update_requests_the_hosts_then_saves_and_a_failed_save_waits_for_try_a
     assert_eq!(
         cx.update(|_, cx| host_status(&listed()[1], cx)),
         HostStatus {
+            sign_in: None,
             update: None,
             live: Some(Live {
                 activity: Activity::Update,

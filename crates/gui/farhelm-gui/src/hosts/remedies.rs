@@ -177,12 +177,12 @@ impl Remedy {
 /// The host menu's Retry for `host`, pressed with `mark` taken in its handler: a connection retry, or on a host whose
 /// machine's deletion failed, that deletion again ([`deletes_again`]). While a session launch is in flight it sends
 /// nothing and the Hosts panel's line says why.
-pub(super) fn retry(host: i64, mark: Mark, window: &mut Window, cx: &mut App) {
+pub(crate) fn retry(host: i64, mark: Mark, window: &mut Window, cx: &mut App) -> bool {
     let remedy = match listed(host, cx) {
         Some(view) if deletes_again(&view.state) => Remedy::DeleteAgain,
         Some(_) | None => Remedy::Retry,
     };
-    send(host, remedy, mark, window.window_handle(), cx);
+    send(host, remedy, mark, window.window_handle(), cx)
 }
 
 /// Whether Retry on a host in `state` deletes its machine again rather than retrying its connection: the host shows a
@@ -222,8 +222,9 @@ pub(super) fn take_over(
 
 /// Send `remedy` for `host` under the host's key (the module docs), unless a session launch is in flight, when the
 /// Hosts panel's line says it was not started. A press that meets other work on the key sends and records nothing: the
-/// menu offers both only on an idle host, so only a press racing a frame gets there.
-fn send(host: i64, remedy: Remedy, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
+/// menu offers both only on an idle host, so only a press racing a frame gets there. True means the request was
+/// queued, so a caller may wait for this host's sign-in question.
+fn send(host: i64, remedy: Remedy, mark: Mark, window: AnyWindowHandle, cx: &mut App) -> bool {
     if super::launch_in_flight(cx) {
         if let Some(view) = listed(host, cx) {
             let line = HostSentence::new(remedy.line_id())
@@ -232,16 +233,16 @@ fn send(host: i64, remedy: Remedy, mark: Mark, window: AnyWindowHandle, cx: &mut
                 .text(format!(": {}", super::LAUNCH_IN_FLIGHT));
             super::setup::remedy_not_started(remedy.kind(), line, cx);
         }
-        return;
+        return false;
     }
     let Some(operations) = session::current_operations(cx) else {
-        return;
+        return false;
     };
     let command = match remedy.command(host) {
         Ok(command) => command,
         Err(error) => {
             tracing::debug!(?error, "host remedy not built");
-            return;
+            return false;
         }
     };
     let key = OpKey::host(&HostView::key(host));
@@ -264,7 +265,13 @@ fn send(host: i64, remedy: Remedy, mark: Mark, window: AnyWindowHandle, cx: &mut
     });
     match started {
         // A line saying this remedy was not started is over now that one has; the other remedy's line stays.
-        Ok(()) => super::setup::forget_remedy_not_started(kind, cx),
-        Err(not_started) => tracing::debug!(?not_started, "host remedy not sent"),
+        Ok(()) => {
+            super::setup::forget_remedy_not_started(kind, cx);
+            true
+        }
+        Err(not_started) => {
+            tracing::debug!(?not_started, "host remedy not sent");
+            false
+        }
     }
 }

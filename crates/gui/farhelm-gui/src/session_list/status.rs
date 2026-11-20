@@ -523,8 +523,13 @@ pub(crate) fn cause(lookup: HostLookup<'_>) -> &'static str {
 
 /// The cause `row` shows, or `None` for a row whose host is connected and current (not stale), which shows none.
 pub(crate) fn stale_cause(row: &SessionRow, collections: &Collections) -> Option<&'static str> {
-    row.stale
-        .then(|| cause(HostLookup::of(collections, row.host)))
+    row.stale.then(|| {
+        if crate::sign_in::pending_on(collections, row.host).is_some() {
+            crate::sign_in::Status::Waiting.words()
+        } else {
+            cause(HostLookup::of(collections, row.host))
+        }
+    })
 }
 
 /// The cause's hover help: what the mark means for the row beside it (the old capsule's `data-tooltip`).

@@ -1031,11 +1031,12 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
 
 // ---- Notifications: Sounds ----------------------------------------------------------------------------------------
 
-/// The three status sound switches, in the order the Sounds sub-heading draws them.
-const SOUNDS: [Choice; 3] = [
+/// The status sound switches, in the order the Sounds sub-heading draws them.
+const SOUNDS: [Choice; 4] = [
     Choice::SoundWaiting,
     Choice::SoundApproval,
     Choice::SoundTurnFinished,
+    Choice::SoundSshSignIn,
 ];
 
 /// The Sounds sub-heading is how the user turns each status sound on or off, and each switch must write only its own
@@ -1044,7 +1045,7 @@ const SOUNDS: [Choice; 3] = [
 /// names and defaults; a choice surviving a reopen is the helm's row here, not the device's storage. The defaults come
 /// from the same reading of unset fields the sounds' owner uses (`sounds::rules`'s
 /// `the_preference_row_reads_unset_fields_as_the_defaults`). Specified: Notifications shows the heading "Sounds" above
-/// ntfy alerts and the three switches by name, waiting and approval on and turn finished off with no stored choice; a
+/// ntfy alerts and the four switches by name, SSH sign-in, waiting and approval on and turn finished off by default. A
 /// click on each sends `PUT /api/preferences` with only its field, set to the opposite of what it showed, under the
 /// preference row's key; once the helm pushes the row and answers, the switch shows the stored value.
 #[gpui::test]
@@ -1071,13 +1072,23 @@ fn each_sound_switch_saves_its_own_preference_field(cx: &mut TestAppContext) {
         [
             Some("Session waiting".to_string()),
             Some("Approval request".to_string()),
-            Some("Turn finished".to_string())
+            Some("Turn finished".to_string()),
+            Some("SSH sign-in".to_string())
         ]
     );
 
     let mut row = Preferences::default();
-    let fields = ["sound_waiting", "sound_approval", "sound_turn_finished"];
-    for ((choice, field), shown) in SOUNDS.into_iter().zip(fields).zip([true, true, false]) {
+    let fields = [
+        "sound_waiting",
+        "sound_approval",
+        "sound_turn_finished",
+        "sound_ssh_sign_in",
+    ];
+    for ((choice, field), shown) in SOUNDS
+        .into_iter()
+        .zip(fields)
+        .zip([true, true, false, true])
+    {
         assert_eq!(
             switch_on(cx, choice.id()),
             Some(shown),

@@ -112,6 +112,8 @@ pub mod session_pane;
 pub mod settings;
 pub mod shortcuts;
 pub mod sidebar;
+mod sign_in;
+mod sign_in_form;
 pub mod sounds;
 pub mod store;
 pub mod templates;

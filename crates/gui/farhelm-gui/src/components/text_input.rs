@@ -319,6 +319,13 @@ impl TextInputState {
         self.1.replace(self.text(cx));
     }
 
+    /// Switch a single-line secret field between masked and readable without replacing its text or focus handle.
+    pub(crate) fn set_masked(&self, masked: bool, window: &mut Window, cx: &mut App) {
+        if let Field::Line(input) = &self.0 {
+            input.update(cx, |state, cx| state.set_masked(masked, window, cx));
+        }
+    }
+
     /// Select the whole text, as Kit's own select-all does, so the next key the user types replaces it: for a dialog
     /// that opens on a value the user is likely to replace rather than edit (the Rename editor's naming mode, which
     /// SPEC.md has open with "The actual created name ... focused and fully selected"). Not an edit: no change event.

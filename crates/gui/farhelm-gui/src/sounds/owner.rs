@@ -1,6 +1,6 @@
 //! The status sounds' owner: it watches what the helm pushes and decides, once per change, whether a sound plays.
 //!
-//! SPEC.md, "Status" (the sounds paragraph); SPEC_impl.md, "Notices: the notice center" (the three sounds are this
+//! SPEC.md, "Status" (the sounds paragraph); SPEC_impl.md, "Notices: the notice center" (the sounds are this
 //! owner's, with no notice-center step, as the migration's orchestrator decided on 2026-11-14). Ported from the old
 //! app's `SessionSounds` component (`crates/farhelm-ui/src/sounds.rs` at reference commit `24bc0580`) and the
 //! `observe` it called in `assets/sounds.js`. Here's the TLDR of what it does:
@@ -12,8 +12,8 @@
 //!   session the helm carries outside that order is not among them), every pending approval, the switches from the
 //!   shared preference row, and the quiet session. The rules ([`SoundRules`]) compare it with the previous one and
 //!   name at most one sound, which goes to the installed player ([`super::play`]).
-//! - **Silent baselines.** The first observation of a UI session (the snapshot a window start or a reset brings) plays
-//!   nothing: the rules live in a [`PerSession`], so a reset starts them over, seen approval ids included.
+//! - **Startup baseline.** A fresh UI session records existing sessions and approvals silently. A new SSH question
+//!   can ring in that first snapshot because its answer is still due. A reset starts the history over.
 //! - **An unreadable listing is an unknown view.** While the helm reports the sessions collection unavailable, and
 //!   once more when it is readable again, observations record statuses without judging them
 //!   ([`StatusSounds::listing`]).
@@ -36,7 +36,7 @@ mod tests;
 
 use farhelm_proto::approvals::PendingApproval;
 use farhelm_proto::ui_channel::{
-    Availability, Collection, PREFERENCES_KEY, Preferences, SessionRow,
+    Availability, Collection, PREFERENCES_KEY, Preferences, SessionRow, SshQuestion,
 };
 use gpui::{AnyWindowHandle, Context, Entity, Subscription, WeakEntity, Window};
 
@@ -156,6 +156,11 @@ impl StatusSounds {
             view: heard.view,
             statuses,
             approvals,
+            ssh_questions: collections
+                .ordered::<SshQuestion>()
+                .into_iter()
+                .map(|question| question.id.clone())
+                .collect(),
             quiet,
             muted,
             switches,

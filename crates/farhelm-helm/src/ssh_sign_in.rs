@@ -323,6 +323,7 @@ impl InteractiveChild {
         mut deadline: Instant,
         on_question: &mut (dyn FnMut(bool) + Send),
     ) -> anyhow::Result<ExitStatus> {
+        let attempt = Uuid::new_v4().to_string();
         loop {
             let (stream, _) = tokio::select! {
                 biased;
@@ -353,6 +354,7 @@ impl InteractiveChild {
             let mut question = questions.open(
                 SshQuestion {
                     id: Uuid::new_v4().to_string(),
+                    attempt: attempt.clone(),
                     host,
                     purpose: SshConnectionPurpose::Sessions,
                     startup,
