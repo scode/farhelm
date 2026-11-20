@@ -33,8 +33,9 @@ agents Farhelm can resume, and a command you run yourself needs an agent and a r
 [Custom commands](/docs/agents/custom-commands/). These rules also apply inside
 [container sessions](/docs/agents/containerized-sessions/).
 
-Antigravity can report a subagent's conversation as well as its main one. See the
-[Antigravity guide](/docs/agents/antigravity/#gotchas-and-quirks) for how to open the main conversation by ID.
+Farhelm checks [Antigravity's conversation log](/docs/agents/antigravity/#gotchas-and-quirks) when it decides whether
+to use a newly reported conversation for **Restart**. See how to [find an Antigravity conversation ID](/docs/agents/antigravity/#find-a-conversation-id)
+if you want to open it directly.
 
 **Restart with…**, in the menu beside **Restart**, resumes the conversation the same way, with different settings. It opens the
 [session launcher](/docs/using/start-a-session/) filled in with this session's choices, where you can change the model,
@@ -51,8 +52,8 @@ For Codex, Muse and Pi in a managed checkout, **Replace with** and **Clone** use
 Plain **Restart** and **Replace** keep the trust carried by the saved launch.
 
 The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
-Farhelm keeps the previous conversation until the agent reports the new one. Codex, Muse and Antigravity report at your first prompt, so
-Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
+Farhelm keeps the previous conversation until it accepts the agent's report of the new one. Codex, Muse and Antigravity
+report at your first prompt. Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
 hooks are turned off with `FARHELM_AGENT_HOOKS`. The Grok and Antigravity hooks you install are independent of that setting.
 

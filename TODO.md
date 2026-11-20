@@ -26,13 +26,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit accepting subagent reports for Antigravity's conversation tracking.** Decided on the maintainer's behalf by
-  the landing monitor on 2026-11-19, when antigravity-support blocked: in Antigravity CLI 1.5.12 a read-only subagent
-  sends SessionStart and Stop with its own conversation ID from the same process, so Restart can resume the subagent's
-  conversation. The plan keeps automatic tracking and plain Restart and accepts that risk as the Goose and Pi exceptions
-  do, documented on the Antigravity docs page. The alternative was shipping launch support and explicit conversation
-  selection only, with automatic tracking and plain Restart unavailable until Farhelm can tell the main conversation
-  from a subagent's. Plan: `plans/queue/antigravity-subagent-check.md`.
 - **Revisit taking the Tensorlake pause attribution fix out of gui-ux-backend-fixes.** Decided on the maintainer's
   behalf by the landing monitor on 2026-11-19, when gui-ux-backend-fixes blocked twice on that one outcome (a later
   Tensorlake pause can show the earlier "Suspended from Farhelm" label and time in Hosts): the plan delivers its six
