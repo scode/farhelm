@@ -267,6 +267,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
   settings or a periodic maintenance step as they grow.
 
+- **Harness behavior drift tests.** A suite, run semi-regularly rather than in every check run, that starts each real
+  agent harness Farhelm supports (Claude, Codex, Antigravity and the rest), as currently installed, and checks the
+  behavior Farhelm depends on: launch flags, conversation reports through the hook, the report checks Farhelm applies to
+  them, Restart and resume. The point is to notice when an upstream update breaks Farhelm, before a user does. Today
+  nothing does this: the tests drive stand-in agents and recorded transcripts, `scripts/agent-tui.py` is a manual tool,
+  and re-capturing agent screens (`docs/agent-screen-fixtures.md`) is a manual job that only covers status reading. It
+  spends real vendor turns, so it needs logins and a budget, and stays out of the default test run.
+
 ### Trivial
 
 - **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
@@ -278,6 +286,59 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to restart farhelm. open templates, pick one template, scroll to the bottom. now hitting esc just changes some scroll
   state, and hitting esc again changes it back, so hitting esc esc esc esc just toggle back and forth and never exits
   the menu. clicking the "X" at the top right also doesn't exit the kmenu and i'm hard stuck and have to restart farhelm
+
+- **Make the model family names consistent.** Every model in the launcher's model list belongs to a family (Sol, Fable,
+  GLM and so on), and the families are named in three different styles: Sol, Astra, Luna and Terra by a plain word
+  (`sol`), Claude and Muse by a full model ID (`claude-fable-5`, `muse-spark-1.3-contributor`), and GLM and Grok with a
+  version in the name (`glm-5.3`, `grok-4.5`). A name with a version stops fitting once a successor ships, and the words
+  you can type in the launcher to get a family's newest model (`fable`, `spark`, `glm`, ...) need a separate lookup
+  table to map onto these names (`FAMILY_WORDS` in `crates/farhelm-proto/src/launcher.rs`). Pick one style, most likely
+  the typed word itself, rename the families, and drop the lookup table if it becomes redundant. Raised by the
+  model-families landing, 2026-11-19.
+
+- **Shorter refusal for a model family word typed with the wrong agent.** With Claude chosen in the launcher, typing
+  `sol` in the model field and pressing Enter says "sol is offered by Codex or Goose or Pi or OMP or OpenCode; choose
+  Codex or Goose or Pi or OMP or OpenCode to use it". It is accurate but long and clumsy, no test covers it, and SPEC.md
+  does not describe it. Something like "Claude has no sol model; choose an agent that offers it." would do; add a test
+  and a SPEC.md line. In the same change, drop the family word that the helm sends to the app with every model: both are
+  the same build and already have the word table, so that protocol field and its roughly 35 test lines add nothing; let
+  the app work out the word itself. Raised by the model-family-shorthand landing, 2026-11-19.
+
+- **An agent asking to add a host another Farhelm owns is told to do something impossible.** An agent running in a
+  session can ask Farhelm to add a remote host (you approve it). Since a host now belongs to exactly one Farhelm
+  installation, adding a host that another one already manages (another machine's Farhelm, or the installed app when the
+  request goes to a devbuild) is refused with "Another Farhelm (...) manages this host. Use Take over in Hosts first."
+  But Take over is an action on the host's row in Hosts, and this host has no row there, because adding it is exactly
+  what was refused. The message should say what works instead: add the host yourself with Add host, which asks whether
+  to take it over from the other Farhelm. Raised by the one-helm-per-supervisor landing, 2026-11-19.
+
+- **Decide whether saving a launch template checks where its command's placeholders stand.** A custom command launch can
+  use placeholders such as `{cwd}`, which Farhelm fills in. Each must stand alone as an unquoted word: `"{cwd}"` or
+  `--dir={cwd}` is refused, and SPEC.md says it is refused "on save". But saving a launch template only checks the
+  template's shape, so a template can store such a command, and the launcher refuses it only when you launch from that
+  template. Decide whether the template editor should refuse it at save as well, or SPEC.md should say only the launcher
+  refuses it. A complication: a template can hold just part of a launch setup (a command without its agent type, say),
+  so some checks cannot run on a template alone, but the quoting and joining check can. The review item
+  `review_feedback_queue/template-save-placeholder-validation-contract-conflict.md` is the same question; settle both
+  together. Raised by the gui-ux-wording plan, 2026-11-19.
+
+- **Decide whether automatic host updates may install a devbuild's unsigned host builds.** A desktop app built from a
+  working copy (a devbuild) has no signed release to download host builds from, so `scripts/devbuild-mac.sh` stages
+  Linux builds in a local folder and the app installs those on remote hosts, without a signature check, when you click
+  Update. "Update remote hosts automatically" is now on by default. Devbuilds start with it off, but nothing stops you
+  turning it on in one, and then Farhelm would install those unsigned local builds on every remote host with no click at
+  all. Decide whether automatic updates should skip a staged folder and leave it to Update clicks. The review item
+  `review_feedback_queue/staged-payloads-and-automatic-host-updates.md` is the same question. Raised by the
+  auto-update-hosts-default plan, 2026-11-20.
+
+- **Test that a real Antigravity still gets its conversation reports accepted.** To keep Restart on the main
+  conversation rather than a subagent's, Farhelm now accepts a conversation report from Antigravity only when the
+  conversation's log starts the way a main conversation's did in Antigravity CLI 1.5.13 on Linux. Every test of that
+  check uses recorded logs, so if a later Antigravity writes its logs differently, Farhelm silently ignores every new
+  report and Restart keeps opening an old conversation, and no test notices. Add a test that runs the installed
+  Antigravity CLI, sends a short prompt, and checks that Farhelm accepts the report; it spends a real turn, so it
+  belongs with the harness drift tests (Near term) rather than in the default run. Raised by the
+  antigravity-subagent-check plan, 2026-11-20.
 
 ## Mid term
 
