@@ -132,6 +132,8 @@ const CONNECTION_OVERRIDES: [&str; 6] = [
 // end so the next connection attempt can reconnect about a minute after a silent drop.
 const SHARED_ALIVE_INTERVAL: &str = "ServerAliveInterval=15";
 const SHARED_ALIVE_COUNT: &str = "ServerAliveCountMax=3";
+/// The sign-in client and each jump SSH use the same limit. Ordinary clients keep their batch argv.
+pub(crate) const SSH_ONE_PASSWORD_PROMPT: &str = "NumberOfPasswordPrompts=1";
 
 /// `CONNECTION_OVERRIDES` as `-o` argument pairs, followed by `options` as
 /// further pairs, ready to precede the option terminator.
@@ -208,6 +210,14 @@ impl SshAccessKind {
     /// For `skip_serializing_if`: the default needs no mention in a plan.
     pub(crate) fn is_user_config(&self) -> bool {
         *self == SshAccessKind::UserConfig
+    }
+
+    /// Tensorlake supplies its own key and never forwards authentication questions to the desktop.
+    pub(crate) fn asks_user(self) -> bool {
+        match self {
+            Self::UserConfig => true,
+            Self::Tensorlake => false,
+        }
     }
 }
 
@@ -288,6 +298,35 @@ pub(crate) fn ssh_base_args(
     connection: SharedConnection,
     access: &SshAccess,
 ) -> anyhow::Result<Vec<String>> {
+    ssh_args(dest, control_dir, connection, access, &["BatchMode=yes"])
+}
+
+/// Build the one interactive SSH invocation. It needs a real shared socket so ordinary clients can reuse it.
+pub(crate) fn ssh_sign_in_args(
+    dest: &str,
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+) -> anyhow::Result<Vec<String>> {
+    anyhow::ensure!(
+        control_socket(control_dir, connection).is_some(),
+        "SSH sign-in needs a shared socket"
+    );
+    ssh_args(
+        dest,
+        control_dir,
+        connection,
+        &SshAccess::UserConfig,
+        &["BatchMode=no", SSH_ONE_PASSWORD_PROMPT],
+    )
+}
+
+fn ssh_args(
+    dest: &str,
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+    access: &SshAccess,
+    authentication: &[&str],
+) -> anyhow::Result<Vec<String>> {
     let control_socket = control_socket(control_dir, connection);
     let access_options = access
         .options(control_socket.is_some())?
@@ -331,12 +370,10 @@ pub(crate) fn ssh_base_args(
         )
     })?;
     let control_path = ssh_control_path_option(control_path_str);
-    let mut args = options_with_overrides(&[
-        "BatchMode=yes",
-        "ControlMaster=auto",
-        &control_path,
-        "ControlPersist=60",
-    ]);
+    let options = ["ControlMaster=auto", &control_path, "ControlPersist=60"];
+    let mut shared = authentication.to_vec();
+    shared.extend(options);
+    let mut args = options_with_overrides(&shared);
     args.extend(access_options);
     // See this function's own docs: the terminator precedes the destination
     // so an option-shaped destination can never be read as an option.

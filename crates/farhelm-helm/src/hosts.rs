@@ -125,6 +125,7 @@ impl From<&HostState> for HostStateView {
                 recorded: recorded.clone(),
                 reported: reported.clone(),
             },
+            HostState::SignInNeeded => HostStateView::SignInNeeded,
             HostState::OwnedElsewhere {
                 host_identity,
                 owner,
@@ -1721,6 +1722,7 @@ mod tests {
                 recorded: "a".to_string(),
                 reported: "b".to_string(),
             },
+            HostStateView::SignInNeeded,
             HostStateView::OwnedElsewhere {
                 host_identity: "a".into(),
                 owner: farhelm_proto::HelmOwnerRefusal {

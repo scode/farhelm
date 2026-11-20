@@ -5548,18 +5548,17 @@ helm's machine and on every host, including wherever Farhelm places sockets or o
 in length. Beyond 20 characters, failures caused by those system limits are acceptable, but should say what limit was
 hit rather than reporting an unrelated error.
 
-Confirmed 2026-10-05: hosts that need an interactive approval (a second factor, say) for every new SSH login are
-supported on a best-effort basis only, as an exception to the passwordless-SSH requirement, including when their SSH
-server also allows only one session per connection. The helm keeps its supervisor connection and provisioning on two
-separate shared SSH connections per host, so the two never compete for one connection's sessions, and such a host works
-when the user starts both of the helm's shared-connection sockets for it by hand, for the same destination the host was
-registered with, using the commands in **? → SSH needs 2FA?**, and the username is short enough for both sockets to fit
-(the provisioning socket's limit is one character below the supervisor connection's). Only provisioning steps that run
-one at a time are promised to work there. Restarting those connections when they drop is the user's job, and port
-forwards set up by a connection the user started are theirs. Farhelm need not add complexity for such hosts. The
-separate provisioning connection applies to every host: on an ordinary host it means one more SSH login when
-provisioning starts with no provisioning connection open, which a user whose key needs a hardware touch or an agent
-confirmation per login sees as one more prompt.
+Farhelm supports an OpenSSH client at least as new as Ubuntu 24.04 LTS or the previous major macOS version ships.
+Farhelm uses two shared connections to an SSH host, one for sessions and one for setup and updates, so the two can each
+work on a server that only allows one session per connection. An existing shared connection is reused, including one the
+user started by hand. The shared socket's path must fit the operating system limit.
+
+Signing in for sessions can ask for a verification code, a password, a key passphrase, or an unknown host key's
+confirmation through OpenSSH's askpass. A security-key presence notice can appear when OpenSSH can show it. Tensorlake
+uses Farhelm's key without prompting. After a question is cancelled, expires in two minutes or sign-in fails, the host
+shows **Sign-in needed** and waits for an explicit retry. A connection that drops after a successful sign-in can ask
+again on reconnect. A failure before any question still retries automatically. Answers are sent to SSH without storing
+or logging them. Setup and updates can still use a connection opened using **? → SSH needs 2FA?**.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to

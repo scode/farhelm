@@ -1053,6 +1053,9 @@ fn refusal_text(
     state: &manager::HostState,
 ) -> String {
     let detail = match state {
+        manager::HostState::SignInNeeded => {
+            "SSH sign-in needed. Retry the host to sign in again".into()
+        }
         manager::HostState::Connecting { last_error, .. } => last_error
             .clone()
             .unwrap_or_else(|| "the first connection attempt has not finished yet".to_string()),

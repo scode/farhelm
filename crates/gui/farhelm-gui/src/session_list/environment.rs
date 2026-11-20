@@ -174,6 +174,7 @@ impl<'a> Environment<'a> {
             HostStateView::Connecting { .. }
             | HostStateView::Connected { .. }
             | HostStateView::Unreachable { .. }
+            | HostStateView::SignInNeeded
             | HostStateView::VersionSkew { .. }
             | HostStateView::IdentityMismatch { .. }
             | HostStateView::OwnedElsewhere { .. }

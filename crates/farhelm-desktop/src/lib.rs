@@ -434,16 +434,15 @@ fn init_tracing() {
 
 const CLIENT_HANDSHAKE_LOG: &str = "tungstenite::handshake::client";
 
-/// The handshake client logs sensitive request details. Exclude that target independently of user-selected log
-/// levels, before the log bridge forwards records to the formatter. Other targets use the usual build default or
-/// `RUST_LOG` filter.
+/// The handshake client logs sensitive request details. Tungstenite's protocol targets log frame bodies, including
+/// SSH answers on the UI channel. Exclude these targets before formatting at every user-selected log level.
 fn desktop_log_filter(
     rust_log: Option<&str>,
 ) -> impl tracing_subscriber::Layer<tracing_subscriber::Registry> {
     use tracing_subscriber::{EnvFilter, Layer, filter::filter_fn};
 
     // Build-sensitive default: debug builds (the development flow's default) keep debug-level events, release stays at
-    // info. `RUST_LOG` overrides both; the handshake target is excluded whatever the level.
+    // info. `RUST_LOG` overrides both defaults.
     let default_level = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -452,7 +451,13 @@ fn desktop_log_filter(
     let env_filter = rust_log
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new(default_level));
-    filter_fn(|metadata| metadata.target() != CLIENT_HANDSHAKE_LOG).and_then(env_filter)
+    filter_fn(|metadata| {
+        let target = metadata.target();
+        target != CLIENT_HANDSHAKE_LOG
+            && target != "tungstenite::protocol"
+            && !target.starts_with("tungstenite::protocol::")
+    })
+    .and_then(env_filter)
 }
 
 /// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port, the payload directory a
@@ -461,7 +466,11 @@ fn desktop_log_filter(
 /// `ensure_hosts` is `None` in every build but an agent build given `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`
 /// (`agent::ENSURE_HOSTS_ENV`), so an installed app never registers a host the user did not add. Split out of
 /// [`DesktopBootstrap::start`] so a test can start a helm from exactly the arguments the app passes.
-fn embedded_helm_args(state_dir: PathBuf, ensure_hosts: Option<PathBuf>) -> farhelm_helm::HelmArgs {
+fn embedded_helm_args(
+    state_dir: PathBuf,
+    ensure_hosts: Option<PathBuf>,
+    ssh_askpass_program: Option<PathBuf>,
+) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         // The embedded helm is an internal implementation detail of this
         // process. Port 0 lets the kernel choose a fresh loopback port for
@@ -469,6 +478,7 @@ fn embedded_helm_args(state_dir: PathBuf, ensure_hosts: Option<PathBuf>) -> farh
         // stable endpoint before the desktop starts.
         port: 0,
         state_dir,
+        ssh_askpass_program,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
         backstop_refresh_secs: None,
@@ -634,7 +644,7 @@ impl DesktopBootstrap {
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
                 farhelm_helm::run_embedded(
-                    embedded_helm_args(helm_state, ensure_hosts),
+                    embedded_helm_args(helm_state, ensure_hosts, Some(farhelm)),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
                     })),
@@ -1718,16 +1728,16 @@ mod tests {
     use std::net::TcpListener;
     use std::time::Instant;
 
-    /// The application logger excludes the sensitive handshake target even under an explicit trace setting. An error
-    /// event also exercises the target exclusion under the default filter, which would suppress any trace event.
+    /// The same process owns both WebSocket ends. Their frame dumps can contain an SSH answer, and the client's
+    /// handshake includes a device credential. Exclude both even when the operator explicitly enables trace.
     #[test]
-    fn desktop_filter_excludes_handshake_diagnostics() {
+    fn desktop_filter_excludes_sensitive_websocket_diagnostics() {
         use tracing_subscriber::prelude::*;
 
         for rust_log in [
             None,
             Some("trace"),
-            Some("trace,tungstenite::handshake::client=trace"),
+            Some("trace,tungstenite::handshake::client=trace,tungstenite::protocol=trace"),
         ] {
             let subscriber = tracing_subscriber::registry()
                 .with(desktop_log_filter(rust_log))
@@ -1738,6 +1748,12 @@ mod tests {
                 );
                 assert!(
                     !tracing::event_enabled!(target: CLIENT_HANDSHAKE_LOG, tracing::Level::ERROR)
+                );
+                assert!(
+                    !tracing::event_enabled!(target: "tungstenite::protocol", tracing::Level::TRACE)
+                );
+                assert!(
+                    !tracing::event_enabled!(target: "tungstenite::protocol::frame", tracing::Level::ERROR)
                 );
                 assert!(tracing::event_enabled!(
                     target: "tungstenite::handshake::server", tracing::Level::ERROR
@@ -1776,7 +1792,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(dir.path().join("state"), Some(file));
+        let args = embedded_helm_args(dir.path().join("state"), Some(file), None);
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

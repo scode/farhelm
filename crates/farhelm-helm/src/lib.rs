@@ -115,8 +115,10 @@ pub mod agent_requests;
 /// An agent's create request (templates, then flags) resolved into a launch.
 mod agent_launch;
 
+mod askpass;
 /// Device-secret enforcement for the in-process credentials the helm mints.
 mod auth;
+pub use askpass::{ASKPASS_JUMP_PROGRAM_NAME, ASKPASS_PROGRAM_NAME, run_askpass, run_askpass_jump};
 
 mod browser;
 pub use browser::LinkOpener;
@@ -247,6 +249,7 @@ mod yolo_guard;
 /// The ssh argv the remote transport is built out of, and the handshake
 /// failure only that transport can explain.
 mod ssh;
+mod ssh_sign_in;
 
 pub mod store;
 
@@ -307,6 +310,8 @@ pub struct HelmArgs {
     /// arrangement — the local supervisor's socket the reserved local host
     /// row is reached through.
     pub state_dir: PathBuf,
+    /// The version-matched Farhelm CLI that OpenSSH runs as the local helper. Test helms can omit interactive SSH.
+    pub ssh_askpass_program: Option<PathBuf>,
 
     /// JSON5 file of hosts to guarantee are registered at startup:
     /// `{ hosts: [ { ssh, remote_farhelm?, remote_state_dir? } ] }`.
@@ -415,6 +420,8 @@ struct AppState {
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
     approvals: approvals::Approvals,
+    /// Questions for this helm only, shared with the connection attempts that own their replies.
+    ssh_questions: Arc<askpass::Questions>,
 }
 
 impl AppState {
@@ -496,6 +503,7 @@ impl AppState {
             #[cfg(test)]
             feedback: feedback::FeedbackForwarder::offline(),
             approvals: approvals::Approvals::new(farhelm_proto::approvals::APPROVAL_WAIT),
+            ssh_questions: Arc::default(),
         }
     }
 }
@@ -842,6 +850,14 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/ssh-connections",
             axum::routing::post(ssh_help::commands)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        .route("/api/ssh-questions", get(askpass::list))
+        // After the bounded body is read, validation and the one-shot reply run in one poll. The SSH attempt
+        // owns forwarding or cancellation, so the route has no suspended mutation to hand to an owned task.
+        .route(
+            "/api/ssh-questions/{id}",
+            axum::routing::post(askpass::reply)
                 .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
         // Tabs issue one host request with no local follow-through; #1404
@@ -1408,12 +1424,17 @@ async fn serve_with_ready(
         sources.environment_preparer(&state_dir),
     ));
     let providers = environment::Providers::new(Arc::new(tensorlake.clone()), podman.clone());
+    let ssh_questions = Arc::new(askpass::Questions::default());
+    let sign_in = args
+        .ssh_askpass_program
+        .map(|cli| ssh_sign_in::SignIn::new(state_dir.clone(), cli, Arc::clone(&ssh_questions)));
     let manager = manager::ConnectionManager::start_with_providers(
         store.clone(),
         Arc::new(manager::SystemTransport::with_store(
             &state_dir,
             store.clone(),
             sources.delivery.places(),
+            sign_in,
         )),
         manager::Cadence {
             refresh: args
@@ -1425,6 +1446,7 @@ async fn serve_with_ready(
     )
     .await?;
 
+    ssh_questions.publish_to(Arc::clone(manager.events()));
     let mut app = AppState::new(
         manager,
         store,
@@ -1433,6 +1455,7 @@ async fn serve_with_ready(
         state_dir.clone(),
         sources,
     )?;
+    app.ssh_questions = ssh_questions;
     app.link_opener = link_opener;
     if let Some(downloads) = downloads {
         app.downloads_dir = Some(downloads.directory);
@@ -1823,6 +1846,7 @@ mod tests {
         crate::HelmArgs {
             port: 0,
             state_dir: std::path::PathBuf::from("/nonexistent/helm-state"),
+            ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
             backstop_refresh_secs: None,

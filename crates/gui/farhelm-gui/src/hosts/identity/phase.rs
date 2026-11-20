@@ -44,6 +44,11 @@ pub(crate) fn words(state: &HostStateView) -> &'static str {
         return "Too new";
     }
     match state {
+        HostStateView::Connecting {
+            stage: ConnectionStage::WaitingForSignIn,
+            ..
+        } => "Waiting for sign-in",
+        HostStateView::SignInNeeded => "Sign-in needed",
         HostStateView::Connecting { .. } => "Connecting",
         HostStateView::Unreachable { .. } => "Unreachable, retrying",
         HostStateView::Connected {
@@ -126,7 +131,12 @@ pub(crate) fn tone(state: &HostStateView) -> Tone {
         | HostStateView::Connected {
             old_version: true, ..
         }
-        | HostStateView::Unreachable { .. } => Tone::Advisory,
+        | HostStateView::Unreachable { .. }
+        | HostStateView::SignInNeeded
+        | HostStateView::Connecting {
+            stage: ConnectionStage::WaitingForSignIn,
+            ..
+        } => Tone::Advisory,
         HostStateView::Connected { .. } => Tone::Connected,
         HostStateView::Connecting { .. }
         | HostStateView::TensorlakeChanging { .. }
@@ -449,6 +459,7 @@ pub(crate) fn evidence(
             let progress = match stage {
                 ConnectionStage::WaitingToConnect => "waiting for the next connection attempt…",
                 ConnectionStage::ConnectingToHost => "connecting to the host…",
+                ConnectionStage::WaitingForSignIn => "waiting for sign-in…",
                 ConnectionStage::ConnectingToSupervisor => "connecting to the local supervisor…",
                 ConnectionStage::WaitingForHello => "waiting for the supervisor to answer…",
                 ConnectionStage::SettingUp => "finishing connection setup…",
@@ -553,6 +564,7 @@ pub(crate) fn evidence(
                 line.host(&pushed(reason))
             }
         }
+        HostStateView::SignInNeeded => line.text("SSH sign-in ended while the host was asking for an answer"),
         // A host with a provider gets its provider's words ([`host_evidence`]); these are the old app's words without
         // one, for the unavailable session card, which words its host's phase from the state alone.
         HostStateView::Deleting { failure: None } => {
@@ -628,6 +640,9 @@ pub(crate) fn remedy(
     twin: &impl Fn(i64) -> Option<HostText>,
 ) -> Option<HostSentence> {
     match state {
+        HostStateView::Connecting { stage: ConnectionStage::WaitingForSignIn, .. } => {
+            Some(line.text("The host is waiting for an answer to its SSH sign-in question"))
+        }
         HostStateView::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
             Some(line.text("Quit Farhelm and open it again; it starts this machine's supervisor when it opens"))
         }
@@ -663,6 +678,7 @@ pub(crate) fn remedy(
         HostStateView::Retired { .. } => {
             Some(line.text("Retry to start a fresh connection actor for this entry"))
         }
+        HostStateView::SignInNeeded => Some(line.text("Retry in Hosts to start another SSH sign-in")),
         HostStateView::Deleting { failure: Some(_) } => Some(line.text("Retry to delete it again")),
     }
 }
