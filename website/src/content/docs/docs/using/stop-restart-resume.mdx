@@ -102,7 +102,10 @@ Resume and Stop and suspend controls act on that environment. The earlier experi
 With shell tabs open, **Stop** asks you to confirm closing them. A tab Farhelm cannot close is named in a notice; the
 other tabs still close.
 Jobs you run under your own tmux inside a session can keep running afterwards, as they would outside Farhelm; the tmux
-server itself ends.
+server itself ends. On a Linux host, Podman containers the agent or a tab started are stopped too: Podman removes those
+started with `--rm` and keeps the others stopped. If Farhelm cannot confirm that a container stopped, the session's
+[bell](/docs/using/session-list/#when-a-row-shows-a-bell) names it. Docker containers, and ones started with
+`sudo podman`, are left running.
 **Restart** leaves shell tabs running, as does an agent exiting on its own. You can open another tab after Stop.
 
 To act on several sessions, [mark them in the session list](/docs/using/session-list/#mark-several-sessions) and use
@@ -138,6 +141,10 @@ which directory was left behind; Farhelm no longer manages it.
 When a host reboots, every session still running on it ends and shows as interrupted, and its terminal contents are
 gone. Farhelm does not start them again by itself; opening one shows a card in place of its terminal, with **Restart**
 when Farhelm can resume its conversation, and **Replace**, which starts the session over.
+
+The same kind of card appears when a session's terminal is gone for another reason: it ended outside Farhelm, for
+example when its container was stopped, or it never started. While the card shows, the session's shell tabs are hidden.
+
 [What survives what](/docs/how-it-works/what-survives-what/) has what else a reboot, or restarting Farhelm itself, does
 and does not keep.
 

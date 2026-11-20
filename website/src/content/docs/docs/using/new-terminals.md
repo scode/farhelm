@@ -24,8 +24,9 @@ everything that still ran in them:
   **Restart** starts the agent again in a new terminal and resumes its conversation; if Restart is unavailable for the
   session, **Replace** starts it anew. The new terminal starts empty: the old terminal's scrollback and its last screen
   are gone.
-- A session whose agent had already stopped or exited keeps its status and gets no notification, but its terminal no
-  longer shows the agent's last screen, which lived in the old terminal. Restart starts it in a new terminal as usual.
+- A session whose agent had already stopped or exited keeps its status and gets no notification. Its last screen lived
+  in the old terminal, so opening the session shows a card in its place, with **Restart** where Farhelm can resume its
+  conversation and **Replace** to start it over.
 - Old shell tabs are closed. Open new ones where you need them.
 
 Programs that old agents and tabs had left running in the background are stopped too, wherever Farhelm can tell which

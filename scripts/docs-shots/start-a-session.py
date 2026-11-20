@@ -183,8 +183,9 @@ SHOTS = [
             # The whole row rather than the field, which ends mid-column: from the field the box would land on the
             # launcher's own controls.
             Callout("id:launcher-model-row",
-                    "Which model. Harness default leaves it to the agent's own setting; type a name to use one the "
-                    "list doesn't show.", side="right", dx=60, dy=50),
+                    "Which model. Harness default leaves it to the agent's own setting. Type a family such as sol "
+                    "and press Enter for its latest model, or any model ID the list doesn't show.",
+                    side="right", dx=60, dy=50),
         ],
     ),
     Shot(

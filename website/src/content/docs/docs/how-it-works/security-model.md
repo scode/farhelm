@@ -25,10 +25,14 @@ host, including a copy's source; it grants no authority over other hosts or temp
 to be open, because the helm, the program that shows your hosts' sessions and serves the UI, runs inside the app
 ([The pieces](/docs/how-it-works/the-pieces/)). Host changes (adding, editing or removing a host) always need your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
-[Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
-setting up or updating a host, including the automatic remote host updates that are on by default, downloads Farhelm's
-release files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a
-feedback service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
+[Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover
+[SSH sign-in](/docs/using/manage-hosts/#sign-in-to-a-host): answers you type go straight to SSH and are never stored or
+logged. That a host's memory of which Farhelm manages it guards against connecting two Farhelms by accident, not against
+your own programs on that machine. And that Farhelm trusts your own configuration, such as your `PATH`, your SSH
+destinations and the flags in your custom commands. It will also cover the connections that leave your machines: setting
+up or updating a host, including the automatic remote host updates that are on by default, downloads Farhelm's release
+files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback
+service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
 get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to

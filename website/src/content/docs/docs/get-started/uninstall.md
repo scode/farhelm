@@ -50,7 +50,8 @@ To remove your data as well, delete `~/.local/state/farhelm` once the uninstall 
 delete Tensorlake resources or stop their charges.** It loses the host records, recipes, API key and SSH key Farhelm
 needs to manage them. [Podman containers](/docs/agents/containerized-sessions/) and their images also remain. Delete
 environments you no longer need through Farhelm before removing its state. Keep the state if you are keeping those
-resources.
+resources. If you install Farhelm again later, adding your remote hosts again asks you to
+[take each one over](/docs/using/manage-hosts/#take-over-a-host-from-another-farhelm).
 
 ## From a remote host
 

@@ -72,7 +72,8 @@ prefixes. An agent that creates or edits a template so that it carries a wrapper
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
 request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
 or expires. Then the oldest remaining request opens. A long request keeps its answer buttons in view: its details scroll
-inside the card, and long commands and prompts scroll in their own boxes, with nothing cut off.
+inside the card, and long commands and prompts scroll in their own boxes, with nothing cut off. A one-line detail too
+long for the card, such as a long directory, is a Tab stop that the arrow keys scroll.
 
 The rest of Farhelm stays usable while requests wait, and several can wait at once, up to four from one host. While four
 are waiting, that host's agents are turned away until you answer one. Cards stay clickable even over an open dialog.
@@ -133,10 +134,11 @@ For edit and remove, use the host's name from `farhelm agent hosts`. Both offer 
 An add request waits as a card and never opens anything over what you are doing. Choose **Open add dialog** on the card
 to open the ordinary **Add host** dialog, with the destination and alias filled in and the asking session and host
 shown. You can change either field before choosing **Add** to approve, or **Cancel** to decline. Approval starts the
-ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm needs to be
-installed on the host, it still asks you to confirm setup, even with **Set up new hosts without asking** turned on. The
-settings that skip setup or removal questions apply to actions you start in the UI; they do not approve an agent's
-request.
+ordinary [add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If another Farhelm manages
+that host, the dialog says so and does not offer to take it over; to do that, add the host yourself from **Add host**.
+If Farhelm needs to be installed on the host, it still asks you to confirm setup, even with **Set up new hosts without
+asking** turned on. The settings that skip setup or removal questions apply to actions you start in the UI; they do not
+approve an agent's request.
 
 The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
 or that the host is ready: adding can still fail, need setup, or be cancelled at the setup question. The agent must run

@@ -99,6 +99,11 @@ same notice without making it unread again. Your [helm](/docs/how-it-works/the-p
 your hosts' sessions, keeps that history and which items you have read across restarts. An unreachable host keeps its last known notices. Session warnings still use
 [the bell on their row](/docs/using/session-list/#when-a-row-shows-a-bell).
 
+The bell also tells you when the session list hits Farhelm's limit of 500 sessions: for a host with more than 500, the
+list shows only its newest 500, and across all your hosts it shows at most 500. Farhelm is built for tens of sessions;
+**Send feedback** in the notice opens the [feedback dialog](/docs/using/send-feedback/) if you need that many or think a
+bug caused it. The notice says **Resolved** once the list fits again.
+
 ## What the statuses mean
 
 <Screenshot
@@ -174,7 +179,10 @@ part of the filter.
 
 ### Mark several sessions
 
-Shift-click a row to mark every session from the one you have open to that row, in the order shown. Cmd-click on a Mac,
+Shift-click a row to mark every session from the one you have open to that row, in the order shown. To mark a range
+without the open session, hold Shift and drag from one row across the others; drag back to shrink the range, and hold
+the pointer near the top or bottom of the list to scroll it further. Letting go keeps the marks without opening a
+session, and Escape puts back the marks you had before. Cmd-click on a Mac,
 or Ctrl-click on Linux, adds or removes a single mark without opening the session. Marked rows have a side marker and
 tint; the session you have open keeps its blue highlight.
 
@@ -240,8 +248,9 @@ row. Saving or cancelling returns you to its terminal.
 
 The same menu offers **Pin to top** / **Unpin**. Pinned sessions show a pin before their name and stay in the order you
 choose: above every group when the session is in none, or at the top of its own group when it is in one. New pins go at
-the bottom of those pins. Hover a pinned row and drag its grip to move it among them, or into the pins above every group
-or those of an expanded group; or choose **Move up** / **Move down** after **Unpin**. Escape or releasing anywhere else
+the bottom of those pins. Hover a pinned row and drag the grip at its left edge to move it among them, or into the pins
+above every group or those of an expanded group; dropping it on another group's unpinned sessions makes it that group's
+last pin. You can also choose **Move up** / **Move down** after **Unpin**. Escape or releasing anywhere else
 cancels a drag. Your sort choice applies to unpinned rows; host and status choices still apply to both.
 
 Rows normally wait to move until you leave the list or keep the pointer still for five seconds with the menu closed.
@@ -258,10 +267,18 @@ of your groups; the other choices move them into an existing group, or out of on
 pinned session in a group that choice is called **Global pins**: the session leaves the group and stays pinned above
 every group. A session is in at most one group, and a group can hold sessions from several hosts.
 
+You can also drag a session there: hover its row and drag the grip at its left edge onto a group's header or any of its
+sessions to move it in, even into a collapsed group, or onto a session outside every group to take it out. When no
+ungrouped sessions are shown, a **Drop here to remove from group** strip appears below the groups while you drag.
+Dragging a [marked](#mark-several-sessions) session brings the other marked sessions shown along, and the row shows
+**+N** for how many; pinned sessions stay pinned. Hold the drag near the top or bottom of the list to scroll it.
+
 The list shows pinned sessions that are in no group first, then your groups in the order you choose, then everything
 else. A group's header shows its name and how many sessions it holds, or `2 of 5` when a host or status choice hides
-some. Click the header's toggle to collapse or expand the group. A collapsed group shows the dot of its most urgent
-session, waiting first, then finished since you last looked, then running; hover the dot to see which session it is.
+some, and the sessions in an expanded group are indented under it. Click the header's toggle to collapse or expand the
+group. A collapsed group shows the dot of its most urgent session, waiting first, then finished since you last looked,
+then running; hover the dot to see which session it is. When a collapsed group holds the session you have open, a blue
+stripe runs down the left edge of its header.
 Drag a header by its grip, or use **Move up** and **Move down** in its ⋯ menu, to reorder groups. The same menu has
 **Rename** and **Ungroup**, which removes the group but keeps its sessions, and their pins, in the list. A group goes
 away when its last session leaves it or is deleted.
@@ -292,7 +309,9 @@ The slashed bell in place of a status dot, and the small bell after a waiting se
 on. Most are about following the agent's conversation, which is what lets **Restart** pick that conversation up again
 later. For example, the agent has been working for a while and never told Farhelm which conversation it is in, so
 **Restart** cannot pick it up. Each notification says what happened and what you can do about it, such as starting the
-session over with **Replace with**, or, when nothing can be done, what you lose. The other kind tells you that the
+session over with **Replace with**, or, when nothing can be done, what you lose. On a Linux host, another kind says
+Farhelm could not confirm that Podman stopped containers the agent or a shell tab started, names them, and says how to
+check them. Another kind tells you that the
 session's agent ran in an old terminal, which Farhelm ended when it updated, and how to start it again
 ([New terminals](/docs/using/new-terminals/) explains). Releases before the one that ended old terminals warned instead that something in the
 session still ran in an old terminal; those warnings now show as resolved. A link to a Farhelm docs page in a

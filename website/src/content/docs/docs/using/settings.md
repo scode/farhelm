@@ -10,8 +10,11 @@ sidebar, opens Settings at **Sessions**. Choose a section in its list to see its
 you change them. Fields you have not saved keep what you typed while you switch sections; closing Settings discards
 them, except that an edited recipe asks whether to save, discard or keep editing.
 
-Type part of a name or description in **Search** to look across Settings. Click a result to jump to it, or use the arrow
-keys and Enter from the search field. Cmd+F on Mac or Ctrl+F on Linux gets you to the field from a Settings switch.
+Type part of a section's name, a setting's name or its description in **Search** to look across Settings. While you
+search, the section list keeps only the sections with matches and shows how many each has. Click a result to jump to it,
+or use the arrow keys and Enter from the search field. Escape clears the search before it closes Settings. Cmd+F on a
+Mac, or Ctrl+F on Linux, gets you to the field from anywhere in Settings, except that in a Linux text field Ctrl+F moves
+the cursor instead.
 
 This page is a map: each section below says what it holds and links the page that explains it.
 
@@ -34,7 +37,8 @@ way.
 **Update remote hosts automatically** starts on and updates your remote hosts while Farhelm is open
 ([Update a host](/docs/using/manage-hosts/#update-a-host)). **Set up new hosts without asking** and **Remove hosts
 without asking** skip those two questions for SSH hosts when you add or remove one yourself. Turn them off to be asked
-again. [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval.
+again. Taking over a host that another Farhelm manages always asks.
+[Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval.
 
 ## Recipes
 
@@ -81,10 +85,12 @@ shows when an agent asks ([Trust in managed checkouts](/docs/using/start-a-sessi
 
 ## App
 
-When Farhelm can update itself, the **Version** row in **App** shows the release you're running. Use **Check for
-updates** beside it to [check for an update now](/docs/using/update-and-uninstall/#check-for-an-update-now).
+**App** appears only in the installed Farhelm app on your Mac, the one that updates itself. Its **Version** row shows
+the release you're running, and **Check for updates** beside it
+[checks for an update now](/docs/using/update-and-uninstall/#check-for-an-update-now); the answer appears beside the
+version number at the top of the sidebar.
 
-In the installed Farhelm app on your Mac, **Install updates automatically** is about updating Farhelm itself
+**Install updates automatically** is about updating Farhelm itself
 ([Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off)).
 
 ## Next

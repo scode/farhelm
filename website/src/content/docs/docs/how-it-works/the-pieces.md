@@ -18,4 +18,5 @@ The mental model in one diagram and a paragraph per piece: the Farhelm app, on a
 installer covers Macs only so far), whose window is what you look at and which runs the helm (the one control plane)
 inside it; a supervisor on each host (the owner of that host's sessions); and the hosts themselves, the computer the app
 runs on and the machines you add. Also where each one runs, and that the supervisor on your Mac keeps running after you
-quit Farhelm.
+quit Farhelm. Also that one Farhelm manages each host at a time, and how
+[taking a host over](/docs/using/manage-hosts/#take-over-a-host-from-another-farhelm) moves it.

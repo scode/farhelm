@@ -9,7 +9,8 @@ import Screenshot from '../../../../components/Screenshot.astro';
 
 The navigation rail, the column of icons down the left edge of the sidebar, shows your ordinary session hosts. It shows
 your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name, and a
-dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
+dot that says whether Farhelm can reach that host right now. An amber key on a host's mark means it is waiting for you
+to sign in. Point at a host's mark to see its full name. To keep every
 name in view, select **»** (Expand navigation rail) at the very bottom of the rail: the rail widens beside the session
 list, and **«** **Collapse** narrows it again. Farhelm remembers which you chose. Choosing a host
 there shows only its sessions, and **All** shows every host's again ([Read the session list](/docs/using/session-list/)).
@@ -28,6 +29,11 @@ while you work. While a setup, update or uninstall runs, its row names the curre
 see every step and the reason for any problem. Select a row or its **Details** button to open the host list at that
 host. The list disappears when nothing needs attention and while the full host list is open.
 
+A host waiting for you to [sign in](#sign-in-to-a-host) shows **Waiting for sign-in** with **Answer**, or **Sign-in
+needed** with **Sign in** once a question expired, was cancelled or failed. A row that needs you, such as a sign-in, a failed setup or update, or
+a host Farhelm cannot confirm, keeps an amber edge, and when it first appears a short amber flash draws your eye to it
+without taking your keyboard focus.
+
 ## The host menu
 
 <Screenshot
@@ -37,7 +43,8 @@ host. The list disappears when nothing needs attention and while the full host l
 
 Open it from a host's `⋯` in the host list, or right-click the host's mark on the navigation rail. **Update** installs
 your Mac's version of Farhelm on the host; [Update a host](#update-a-host) has more. Other items appear only when a host needs attention, such as setting
-Farhelm up on a host that does not have it yet. Your Mac's own row has no **Uninstall** or **Remove**. In the Farhelm
+Farhelm up on a host that does not have it yet, or **Take over** on a host another Farhelm manages
+([Take over a host from another Farhelm](#take-over-a-host-from-another-farhelm)). Your Mac's own row has no **Uninstall** or **Remove**. In the Farhelm
 app installed on your Mac, its **Update** checks for a new release of Farhelm and installs it, as
 [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In the Linux app, or in a copy of Farhelm
 that is not installed in `~/Applications`, it is greyed out instead. If **Retry** or **Adopt** fails, a dialog shows
@@ -106,6 +113,40 @@ In Settings, **Color terminal frames by host** under **Sessions** adds a thin fr
 color. It starts off. The terminal background and text colors stay the same. The switch is kept by the
 [helm](/docs/how-it-works/the-pieces/) and takes effect at once.
 
+## Sign in to a host
+
+A host can ask you to sign in when Farhelm connects to it: for a verification code, a password, a key passphrase, or to
+confirm a host key it has not seen before. This happens when Farhelm opens, when it reconnects after a dropped
+connection, when you add the host, and before **Update**, **Uninstall** or **Re-run** start. Farhelm keeps two
+connections to each host, one for sessions and one for setup and updates, so a new host can ask twice; the question says
+which one it is for, **For sessions** or **For setup and updates**.
+
+Questions wait in the row above your sessions, with an amber key on the host's mark on the navigation rail, so they never
+take your keyboard while you are typing elsewhere. Choose **Answer** to open the question beside its row. A question
+from the first connection after you open Farhelm can open by itself, ready for your answer, as long as you have not
+started typing or clicking yet. Your answer is hidden until you choose **Show**. **Send** or Enter answers, and
+**Cancel** stops that connection attempt. When the host wants a security key touched and SSH says so, Farhelm shows that
+instead of a field. Your answers go straight to SSH; Farhelm never stores or logs them.
+
+A question you do not answer within two minutes expires. After that, or after you cancel or signing in fails, the row
+reads **Sign-in needed** and Farhelm waits for you to choose **Sign in** to try again. Unavailable sessions on that host
+say so on their card, with **Sign in** there too. To hear a chime when a host asks, keep **SSH sign-in** turned on under
+**Settings → Notifications**.
+
+## Take over a host from another Farhelm
+
+Each host remembers which Farhelm manages it. A host nobody manages yet goes to the first Farhelm that connects to it.
+If you add a host that another Farhelm manages, such as one on another computer, the **Add host** dialog asks whether to
+**Take over host** and names the other Farhelm and when it last connected. A host already in your list reads
+**Managed by another Farhelm** instead, and its menu offers **Take over**.
+
+Taking over makes this Farhelm the host's manager. The host's sessions keep running, and the other Farhelm loses access
+to them until it takes the host back. Until you take a host over, Farhelm refuses to set it up, update it or uninstall
+Farhelm from it. This is also how you get your hosts back if you lost your list of hosts, for example after deleting
+Farhelm's data: add each host again and confirm **Take over**. Farhelm always asks before taking over, even with **Set
+up new hosts without asking** turned on, and an agent's [request to add a host](/docs/using/approve-agent-requests/#host-changes)
+cannot take one over.
+
 ## Update a host
 
 When a host has an update, its mark on the navigation rail and the **Hosts** button at the rail's foot show an
@@ -124,7 +165,8 @@ top of the full host list updates every remote host whose Update action is avail
 Updating a host does not interrupt its sessions: they keep running through the update. This includes remote Macs;
 **Update**, **Update all** and automatic updates use the same flow for them. A remote Mac with the Farhelm desktop app
 installed cannot be updated this way, even though you can use Farhelm already running there; update Farhelm from the desktop app on that Mac instead.
-If Farhelm cannot plan an update, a dialog shows the reason before anything changes. While the update runs, its progress
+If Farhelm cannot plan an update, a dialog shows the reason before anything changes. If the host asks you to
+[sign in](#sign-in-to-a-host) first, its row above your sessions offers **Answer**. While the update runs, its progress
 appears above your sessions; hover over that row to see each step. A failed update appears there with **Details**, and the host's mark on the rail shows a
 warning until you open the host list, where its row shows what happened.
 
@@ -151,7 +193,7 @@ its status is not known yet), or still has a terminal tab open, it says which on
 first; Stop also closes their terminal tabs, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
 to be connected to the host so it can check. If its row shows **Unreachable, retrying**, **Needs update**, **Too new**,
-**Identity mismatch**, **Identity unverified** or **Duplicate**, fix that first: the refusal says how, and so do the
+**Identity mismatch**, **Identity unverified**, **Duplicate** or **Managed by another Farhelm**, fix that first: the refusal says how, and so do the
 host's [details](#see-more-about-each-host). **Remove** still works. A few less common setups are
 refused too, with the reason shown in a dialog: a remote Mac with the Farhelm desktop app installed, one whose Farhelm
 runs from somewhere unexpected (such as a Linux host set up with an earlier release's `farhelm helm setup`), and

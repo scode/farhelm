@@ -135,7 +135,9 @@ does not forward browser-login callbacks automatically. When an agent asks to op
 If Farhelm loses its connection to the session, a card over the dimmed last screen explains what it is waiting for,
 with details below. The view reattaches by itself when the connection is back. The **Reconnect now** button tries again straight
 away when the connection from your window dropped; when the host itself is unavailable, the card instead shows any
-steps needed to reach it again. What keeps running during an outage is covered in
+steps needed to reach it again. If the host is asking you to sign in, the card says so and offers **Sign in**. If the
+host reports that the session's terminal is gone, a card offers **Restart** or **Replace** instead; see
+[After a reboot](/docs/using/stop-restart-resume/#after-a-reboot). What keeps running during an outage is covered in
 [What survives what](/docs/how-it-works/what-survives-what/).
 
 A terminal that stops and will not come back by itself, because your window fell too far behind its output or the

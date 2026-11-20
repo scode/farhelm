@@ -52,7 +52,10 @@ again for sessions. The second question can appear after **Add host** closes. A 
 when SSH reports it. Keys held by your SSH agent can require a touch without a notice in Farhelm.
 
 If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
-closes. Otherwise Farhelm asks first, listing each step setup would take on the host with the paths it uses. **Copy
+closes. If another Farhelm manages it, such as one on another computer, Farhelm first asks whether to **Take over**
+the host, even with **Set up new hosts without asking** turned on. Taking over leaves the host's sessions running, and
+the other Farhelm loses access to them until it takes the host back
+([Take over a host from another Farhelm](/docs/using/manage-hosts/#take-over-a-host-from-another-farhelm)). Otherwise Farhelm asks first, listing each step setup would take on the host with the paths it uses. **Copy
 plan** copies that list, and **Cancel** changes nothing on the host.
 
 <Screenshot
@@ -90,9 +93,11 @@ settings behind the gear at the foot of the navigation rail; [Manage hosts](/doc
 
 ## If something goes wrong
 
-- If a connection drops, an amber key on the navigation rail and a row above your sessions tell you when the host is
-  asking you to sign in. Choose **Answer** to see the question. If it expired or you cancelled it, choose **Sign in**
-  to try again. To silence the chime, turn off **SSH sign-in** under **Settings → Notifications**.
+- When a host asks you to sign in, when Farhelm opens or after a connection drops, an amber key on its mark on the
+  navigation rail and a row above your sessions tell you. Choose **Answer** to see the question. If it expired, you
+  cancelled it, or signing in failed, choose **Sign in** to try again. **Update**, **Uninstall** and **Re-run** can ask
+  the same way before they start ([Sign in to a host](/docs/using/manage-hosts/#sign-in-to-a-host)). To silence the
+  chime, turn off **SSH sign-in** under **Settings → Notifications**.
 - When Farhelm cannot reach the host, check that `ssh <destination> true` works in a terminal.
 - A Linux host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
 - A Mac with the Farhelm desktop app installed cannot be set up, updated or uninstalled over SSH. If Farhelm is already
