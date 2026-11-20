@@ -10,7 +10,6 @@ use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
-use farhelm_proto::DeleteGuard;
 use gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement, Styled, Window, div, px,
 };
@@ -420,11 +419,7 @@ pub(super) fn terminal_delete_scrim(
         .overflow_hidden()
         .bg(theme::color(theme::TERMINAL.background))
         .children(state.terminals.borrow().iter().cloned())
-        .child(crate::session_pane::delete_scrim(
-            DeleteGuard::Unconditional,
-            0,
-            cx,
-        ))
+        .child(crate::session_pane::delete_scrim("Stopping agent…", 0, cx))
         .into_any_element()
 }
 

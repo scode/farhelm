@@ -423,8 +423,8 @@ pub(crate) fn row(
         // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
         // keep the title as their accessible names.
         .child(match delete::in_flight(session.key, cx) {
-            Some(guard) => {
-                delete::progress(session.key, guard, steps.spinner, selected, cx).into_any_element()
+            Some(label) => {
+                delete::progress(session.key, label, steps.spinner, selected, cx).into_any_element()
             }
             None => title_element(
                 &title,

@@ -689,10 +689,24 @@ impl TerminalSet {
                 })
                 .into_any_element()
         };
+        // A shell session's main terminal runs the shell itself, and its row already says "No agent", so its tab names
+        // the shell rather than an agent that is not there. A row not listed yet keeps the agent wording.
+        let shell = session::current_store(cx).is_some_and(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(&key)
+                .is_some_and(|row| row.info.launch.is_shell())
+        });
+        let (main_label, main_help) = if shell {
+            ("Shell", "Shell: show the session's shell")
+        } else {
+            ("Agent", "Agent: show the session's agent terminal")
+        };
         let mut items = vec![tab(
             AGENT_TAB_ID.to_owned(),
-            "Agent".to_owned(),
-            "Agent: show the session's agent terminal".to_owned(),
+            main_label.to_owned(),
+            main_help.to_owned(),
             None,
             &agent_focus,
         )];

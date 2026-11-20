@@ -2100,18 +2100,18 @@ submission and focus-return behavior.
   below). A source that has more alive by then, such as one restarted while the launcher was open, is kept: the new
   session is still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist
   error.
-- **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
-  confirmation that says so when anything is still alive, unless session confirmations are skipped (below). Deletion may
-  make partial progress before failing, including removing attachment files while retaining the session row for retry.
-  There is no rollback guarantee. Report the failure visibly and allow a later Delete to finish cleanup; a retained row
-  does not mean previously removed state has been restored. Stopping a live agent can take a few seconds, since it gets
-  its own chance to exit first, and a session's row stays until the supervisor confirms the whole process tree is gone.
-  From the moment a delete is committed until that answer arrives, the client that started the delete shows it
-  prominently, as an expected wait rather than an error: the row shows a spinner and what is happening in place of its
-  title (stopping the agent, stopping its terminal tabs when only those are alive, or, when nothing was alive,
-  deleting), the open session's header shows the same in place of its actions, and a scrim over its terminal says it
-  again. The terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile; if the delete
-  fails, the row and header come back with the refusal shown, and a held notice appears.
+- **Delete** removes the session and its stored state, in any state, terminating the agent or shell and its tabs if
+  running — with confirmation that says so when anything is still alive, unless session confirmations are skipped
+  (below). Deletion may make partial progress before failing, including removing attachment files while retaining the
+  session row for retry. There is no rollback guarantee. Report the failure visibly and allow a later Delete to finish
+  cleanup; a retained row does not mean previously removed state has been restored. Stopping a live agent or shell can
+  take a few seconds, since it gets its own chance to exit first, and a session's row stays until the supervisor
+  confirms the whole process tree is gone. From the moment a delete is committed until that answer arrives, the client
+  that started the delete shows it prominently, as an expected wait rather than an error: the row shows a spinner and
+  what is happening in place of its title (stopping the agent or shell, stopping its terminal tabs when only those are
+  alive, or, when nothing was alive, deleting), the open session's header shows the same in place of its actions, and a
+  scrim over its terminal says it again. The terminal's own "Detached" notice, which the delete itself causes, is held
+  back meanwhile; if the delete fails, the row and header come back with the refusal shown, and a held notice appears.
 
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
 row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
@@ -5565,8 +5565,10 @@ The conversation-tracking limits under Durability and resume apply to every harn
 accept is not the lost user work this allowance excludes. They include the session's Resume target being replaced by a
 Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter, or withdrawn by such a Pi.
 
-Bash and Zsh are first-class shell sessions. They use the generic activity reader, which reports Idle at a quiet prompt
-and Running while the screen changes. Shell sessions have no agent Waiting state or conversation tracking.
+Bash and Zsh shell sessions have basic activity reporting from the generic reader. It reports Running while the screen
+changes and Idle after the screen has been still for a few seconds, whether or not a prompt is visible. A program that
+keeps redrawing, such as `top`, reads Running as long as it does so. A command that prints nothing for a while reads
+Idle. Shell sessions have no agent Waiting state or conversation tracking.
 
 ### Supported user environments
 

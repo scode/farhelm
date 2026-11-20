@@ -1139,6 +1139,34 @@ fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &m
     assert_eq!(fleet.painted_count(STOPPING), 0);
 }
 
+/// Delete asks about the shell, so its progress must keep naming the shell after the user confirms. The row,
+/// the header in place of its actions, and the scrim over the live Bash terminal each show "Stopping shell…".
+#[gpui::test]
+fn a_pending_shell_delete_names_the_shell_on_all_three_surfaces(cx: &mut TestAppContext) {
+    let bash = session("a").launch(serde_json::json!({
+        "kind": "agent",
+        "selection": {"harness": "bash", "permissions": null},
+        "start": ["bash", "{farhelm_args}"],
+        "resume": null,
+    }));
+    let mut fleet = open_main(
+        cx,
+        vec![listing(&["a"], &[bash]), preferences(&["a"], None)],
+    );
+    fleet.go_live(0);
+    let shell = fleet.agent().expect("the shell terminal is mounted");
+    assert!(
+        fleet.cx.update(|_, cx| shell.read(cx).is_live()),
+        "the premise: the shell has finished replaying"
+    );
+    assert!(!fleet.drawn("terminal-delete-scrim"), "the premise");
+
+    fleet.delete_open_session();
+    assert!(fleet.drawn("terminal-delete-scrim"));
+    assert_eq!(fleet.painted_count("Stopping shell…"), 3);
+    assert_eq!(fleet.painted_count(STOPPING), 0);
+}
+
 /// SPEC.md: "The terminal's own 'Detached' notice, which the delete itself causes, is held back meanwhile". The Delete
 /// kills the agent and detaches the viewer, and both would otherwise show as failures (an exit line, the "Session
 /// unavailable" reconnect card) under a Delete that is going exactly as asked. Specified: with a's Delete in flight,

@@ -22,9 +22,9 @@
 //!   component layer's stepped one ([`Spinner`](crate::components::Spinner)), turned by one handle the list holds
 //!   while a Delete shows and its window is active.
 //!
-//! While the open session's Delete is in flight, the main pane says the same over its terminal and holds back the
-//! terminal's own notices (`session_pane.rs`), reading the same [`in_flight`] and [`progress_label`] the row does and
-//! turning its own [`Spinner`](crate::components::Spinner).
+//! While Delete is in flight, the header and terminal scrim use the same label from [`in_flight`] as the row.
+//! The pane holds back the terminal's own notices (`session_pane.rs`) and turns its own
+//! [`Spinner`](crate::components::Spinner).
 //!
 //! A success's own report outlives the row it was about: a notice the helm's reply carries (a checkout that could not
 //! be archived, which SPEC.md says is never silent) goes to the list's Delete notice band ([`super::delete_notice`]),
@@ -98,26 +98,29 @@ pub(super) fn guard(row: &SessionRow) -> DeleteGuard {
     }
 }
 
-/// The question's consequence: what happens to the session's terminal tabs, when it has any, then what happens to its
-/// agent. The three live statuses share one wording on purpose (the agent's whole process tree dies whatever it was
-/// doing), an unknown status says only that the agent may be running, and an ended one never claims a kill. The ended
-/// wordings are reached when the question is about open tabs of an ended agent.
+/// The question names what Delete will do to the session's terminal tabs and its agent or shell. The three live
+/// statuses share one wording because Delete kills the whole process tree in each case. Unknown status says the
+/// program may still be running. The ended wordings apply when the question is about remaining terminal tabs.
 pub(super) fn consequence(row: &SessionRow) -> String {
     use farhelm_proto::SessionStatus;
+    // A shell session runs a shell where others run an agent; Stop and Replace name it the same way.
+    let program = super::stop::program_word(row);
     let agent = match &row.info.status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
-            "still running — deleting kills the agent:"
+            format!("still running — deleting kills the {program}:")
         }
         SessionStatus::Unknown => {
-            "status unknown — the agent may still be running and will be killed:"
+            format!("status unknown — the {program} may still be running and will be killed:")
         }
-        SessionStatus::Exited { .. } => "delete anyway:",
-        SessionStatus::Interrupted => {
-            "interrupted by a host reboot or a Farhelm update, which ended the agent; deleting discards the session:"
+        SessionStatus::Exited { .. } => "delete anyway:".to_owned(),
+        SessionStatus::Interrupted => format!(
+            "interrupted by a host reboot or a Farhelm update, which ended the {program}; deleting discards the session:"
+        ),
+        SessionStatus::Error { .. } => {
+            format!("the {program} never started; deleting discards the session:")
         }
-        SessionStatus::Error { .. } => "the agent never started; deleting discards the session:",
     };
-    with_tabs("deleting", row.info.tabs.len(), agent)
+    with_tabs("deleting", row.info.tabs.len(), &agent)
 }
 
 /// A destructive question's consequence for a session with `tabs` terminal tabs: the tab clause first, saying that
@@ -436,49 +439,42 @@ pub(crate) fn busy(key: &str, cx: &App) -> bool {
     })
 }
 
-/// The guard of `key`'s Delete while it is in flight, as the request carries it, or while it is held for a bulk Delete
-/// not sent yet, as the request will carry it; `None` when no Delete is. For the row's progress, and for the open
-/// session's pane once it draws the Delete over its terminal.
+/// The row, header and terminal scrim all describe the same pending Delete. The guard says which processes the
+/// request is allowed to stop, even while a bulk Delete is held before sending. The session's launch names the
+/// program the unconditional Delete stops. A filtered or truncated listing can omit an open session, so the
+/// pending label uses "Stopping…" if the program is unavailable.
 ///
-/// An environment Delete in flight counts too. It carries no guard, so the words come from the guard the session's row
-/// shows now ([`guard`]), as the old app chose its progress words from the status it drew; with no row, it reads as
-/// having nothing alive ("Deleting…").
-pub(crate) fn in_flight(key: &str, cx: &App) -> Option<DeleteGuard> {
+/// Environment Delete has no request guard, so its label follows the current session row, or says "Deleting…"
+/// when that row is gone.
+pub(crate) fn in_flight(key: &str, cx: &App) -> Option<&'static str> {
     let operations = session::current_operations(cx)?;
-    match operations.read(cx).in_flight(&OpKey::session(key))? {
-        Work::Delete(guard) => Some(guard),
-        Work::EnvironmentDelete => Some(
-            session::current_store(cx)
-                .and_then(|store| {
-                    store
-                        .read(cx)
-                        .collections()
-                        .get::<SessionRow>(key)
-                        .map(guard)
-                })
-                .unwrap_or(DeleteGuard::NothingAlive),
-        ),
-        _ => None,
-    }
-}
-
-/// What a pending Delete says it is doing, from the guard it was sent with: stopping the agent, stopping only the
-/// terminal tabs of an agent that has ended, or, with nothing alive, removing the session's state. It never claims to
-/// stop what the question did not show running. The row and the main pane's scrim say the same words.
-pub(crate) fn progress_label(guard: DeleteGuard) -> &'static str {
-    match guard {
-        DeleteGuard::Unconditional => "Stopping agent…",
+    let work = operations.read(cx).in_flight(&OpKey::session(key))?;
+    let store = session::current_store(cx);
+    let row = store
+        .as_ref()
+        .and_then(|store| store.read(cx).collections().get::<SessionRow>(key));
+    let guard = match work {
+        Work::Delete(guard) => guard,
+        Work::EnvironmentDelete => row.map(guard).unwrap_or(DeleteGuard::NothingAlive),
+        _ => return None,
+    };
+    Some(match guard {
+        DeleteGuard::Unconditional => match row {
+            Some(row) if row.info.launch.is_shell() => "Stopping shell…",
+            Some(_) => "Stopping agent…",
+            None => "Stopping…",
+        },
         DeleteGuard::AgentEnded => "Stopping tabs…",
         DeleteGuard::NothingAlive => "Deleting…",
-    }
+    })
 }
 
-/// The row's in-progress mark for `key`'s pending Delete, sent with `guard`: the spinner at `step` and
-/// [`progress_label`], drawn where the title would be. In the accent, or in the fill's ink on the selected row
+/// The row's in-progress mark for `key`'s pending Delete: the spinner at `step` and the label from [`in_flight`],
+/// drawn where the title would be. In the accent, or in the fill's ink on the selected row
 /// (`.session-row.selected .delete-progress`), where the accent would vanish into the accent fill.
 pub(super) fn progress(
     key: &str,
-    guard: DeleteGuard,
+    label: &'static str,
     step: u8,
     selected: bool,
     cx: &App,
@@ -495,7 +491,7 @@ pub(super) fn progress(
         ))
         .debug_selector(|| "session-delete-progress".into())
         .role(Role::Status)
-        .aria_label(progress_label(guard))
+        .aria_label(label)
         .flex()
         .flex_row()
         .flex_1()
@@ -507,12 +503,51 @@ pub(super) fn progress(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
         .child(spinner_icon(step, px(12.), ink))
-        .child(progress_label(guard))
+        .child(label)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_list::tests::session;
+    use serde_json::json;
+
+    /// Delete's question must agree with the session row about what is running. A running, unknown or never-started
+    /// Bash session names the shell in the consequence. A running agent session still names the agent.
+    #[test]
+    fn a_shell_sessions_delete_question_names_the_shell() {
+        let bash = json!({
+            "kind": "agent",
+            "selection": {"harness": "bash", "permissions": null},
+            "start": ["bash", "{farhelm_args}"],
+            "resume": null,
+        });
+        let shell = session("a").launch(bash.clone()).row();
+        assert_eq!(
+            consequence(&shell),
+            "Still running — deleting kills the shell:"
+        );
+        let unknown = session("a")
+            .launch(bash.clone())
+            .status(json!({"state": "unknown"}))
+            .row();
+        assert_eq!(
+            consequence(&unknown),
+            "Status unknown — the shell may still be running and will be killed:"
+        );
+        let failed = session("a")
+            .launch(bash)
+            .status(json!({"state": "error", "detail": "no such program"}))
+            .row();
+        assert_eq!(
+            consequence(&failed),
+            "The shell never started; deleting discards the session:"
+        );
+        assert_eq!(
+            consequence(&session("a").row()),
+            "Still running — deleting kills the agent:"
+        );
+    }
 
     /// A Delete must ask for exactly the precondition its confirmation showed, or a session that became more alive
     /// since would be killed instead of refused (the old app's `api::delete_url`). Specified: an unconditional Delete
