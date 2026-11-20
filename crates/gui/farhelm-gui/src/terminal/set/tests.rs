@@ -350,6 +350,34 @@ fn the_agent_terminals_tab_has_no_close_control(cx: &mut TestAppContext) {
     );
 }
 
+/// A shell session's main terminal runs the shell itself, and its row reads "Bash shell · No agent"; a tab called Agent
+/// beside that would name something the session does not have. Specified: with the open session launched as Bash and
+/// one tab listed, the strip paints "Shell" then "Terminal 1", and session b, an agent session, still paints "Agent".
+#[gpui::test]
+fn a_shell_sessions_main_tab_names_the_shell(cx: &mut TestAppContext) {
+    let mut shell = session("a")
+        .launch(json!({
+            "kind": "agent",
+            "selection": {"harness": "bash", "permissions": null},
+            "start": ["bash", "{farhelm_args}"],
+            "resume": null,
+        }))
+        .entry();
+    shell.value["tabs"] = json!([{ "id": "t1" }]);
+    let snapshot = vec![
+        CollectionState {
+            collection: Collection::Sessions,
+            meta: listing_meta(&["a", "b"], 2, false),
+            entries: vec![shell, row("b", &[])],
+        },
+        preferences(&["a"], None),
+    ];
+    let mut window = open(cx, snapshot);
+    assert_eq!(window.strip_labels(), ["Shell", "Terminal 1"]);
+    click(window.cx, "session-row-b");
+    assert_eq!(window.strip_labels(), ["Agent"]);
+}
+
 /// Choosing a tab shows its terminal and puts focus there, so typing reaches its shell without a click on the pane
 /// (the old spec's "selecting a terminal focuses it"); it attaches nothing new, since the tab was attached all along.
 /// Specified: with the agent terminal and t1 live and the agent terminal focused, a click on Terminal 1 chooses t1,

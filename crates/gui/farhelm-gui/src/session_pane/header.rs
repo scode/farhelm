@@ -602,7 +602,7 @@ impl SessionPane {
             .as_ref()
             .filter(|row| !retired::is(row))
             .and_then(|row| EnvironmentShown::of(key, row, collections, cx));
-        if let Some(guard) = delete::in_flight(key, cx) {
+        if let Some(label) = delete::in_flight(key, cx) {
             self.header.clear_action();
             self.header.anchors.clear();
             self.header.carets.clear();
@@ -610,7 +610,7 @@ impl SessionPane {
                 .child(left.build(None))
                 // Text in the title band keeps its presses: it must not move the window (`desktop::title_band`).
                 .child(title_band::claims_presses(
-                    div().child(delete_progress(key, guard, step, cx)),
+                    div().child(delete_progress(key, label, step, cx)),
                 ))
                 .into_any_element();
         }
@@ -1562,16 +1562,10 @@ fn tab_out(pane: &WeakEntity<SessionPane>, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// What takes the actions' place while the session's Delete, sent with `guard`, is in flight: the spinner at `step` and
-/// the row's own words for it ([`delete::progress_label`]), in the accent, as the old `.header-delete-progress` was.
-fn delete_progress(
-    key: &str,
-    guard: farhelm_proto::DeleteGuard,
-    step: u8,
-    cx: &App,
-) -> impl IntoElement {
+/// While Delete is pending, the spinner and the same label the row draws ([`delete::in_flight`]) replace the
+/// header actions.
+fn delete_progress(key: &str, label: &'static str, step: u8, cx: &App) -> impl IntoElement {
     let ink = theme::color(theme::palette(cx).accent);
-    let label = delete::progress_label(guard);
     div()
         .id(SharedString::from(format!(
             "session-header-delete-progress-{key}"

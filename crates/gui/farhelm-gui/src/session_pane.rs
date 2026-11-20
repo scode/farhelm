@@ -131,7 +131,6 @@ mod trust_band_tests;
 mod unavailable_tests;
 
 use farhelm_helm_client::Collections;
-use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Global,
@@ -710,7 +709,7 @@ impl Render for SessionPane {
                     .min_h_0()
                     .children(area)
                     .children(over)
-                    .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
+                    .children(deleting.map(|label| delete_scrim(label, step, cx)))
                     // The approval region starts its cards below this box's top, clear of the tabs and the lines
                     // above the terminal, as the old cards started below `.terminal-panes`.
                     .child(crate::approvals::region::track_terminal_area(window, cx)),
@@ -756,11 +755,9 @@ impl SessionPane {
     }
 }
 
-/// The scrim over the open session's terminal while its Delete is in flight with `guard`, its spinner at `step`: the
-/// old `.terminal-delete-overlay`, a black veil over the whole terminal with the row's words beside a 16-pixel spinner,
-/// centered on the floating accent card ([`status_card`]). Visible to the crate for the screenshot goldens.
-pub(crate) fn delete_scrim(guard: DeleteGuard, step: u8, cx: &App) -> Stateful<Div> {
-    let label = delete::progress_label(guard);
+/// The scrim repeats the row's Delete progress over the open terminal. The words and spinner sit on the floating
+/// accent card ([`status_card`]). Visible to the crate for the screenshot goldens.
+pub(crate) fn delete_scrim(label: &'static str, step: u8, cx: &App) -> Stateful<Div> {
     // The component layer's status card, which the terminal's reconnect card shares, as the old stylesheet's two
     // cards shared one look.
     let card = status_card(cx).child(status_heading(step, label, cx));
