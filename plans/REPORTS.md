@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`retire-old-terminal-announcement`](reports/retire-old-terminal-announcement.report.md) landed 2026-11-19 in #4140: Remove the stale 0.37.0 old-terminal in-app announcement
 - [`update-survival-wording`](reports/update-survival-wording.report.md) landed 2026-11-19 in #4145: General survival statements stay general: SPEC.md records the principle and the old-terminal update note
 - [`quick-switcher-shot-paths`](reports/quick-switcher-shot-paths.report.md) landed 2026-11-19 in #4138: Quick switcher shows staged folders in agent builds, so its screenshots pass the privacy check
 - [`session-group-follow-ups`](reports/session-group-follow-ups.report.md) landed 2026-11-19 in #4135, #4143, #4144, #4146, #4147: Session groups: indent members, mark a collapsed group holding the open session, drag sessions into and out of groups
