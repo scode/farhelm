@@ -33,6 +33,8 @@ agents Farhelm can resume, and a command you run yourself needs an agent and a r
 [Custom commands](/docs/agents/custom-commands/). These rules also apply inside
 [container sessions](/docs/agents/containerized-sessions/).
 
+[Bash and Zsh sessions](/docs/agents/shells/) have no conversation to resume, so **Restart** and **Restart with** are unavailable.
+
 Farhelm checks [Antigravity's conversation log](/docs/agents/antigravity/#gotchas-and-quirks) when it decides whether
 to use a newly reported conversation for **Restart**. See how to [find an Antigravity conversation ID](/docs/agents/antigravity/#find-a-conversation-id)
 if you want to open it directly.
@@ -57,7 +59,8 @@ report at your first prompt. Restart before then still opens the previous conver
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
 hooks are turned off with `FARHELM_AGENT_HOOKS`. The Grok and Antigravity hooks you install are independent of that setting.
 
-**Replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
+**Replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. For a Bash
+or Zsh session it starts a fresh shell. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
 confirm first; press Enter to go ahead. **Replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
 choices; change anything but the host, and the new session takes this one's place. **Clone** opens the launcher the same

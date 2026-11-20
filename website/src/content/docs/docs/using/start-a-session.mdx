@@ -95,15 +95,15 @@ choosing an agent. If choosing an agent replaces a permission you chose with a r
 offers **Undo**, including on your first agent choice. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
 [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
-of these agents, switch the launcher to its **Command**
-tab, covered in [Custom commands](/docs/agents/custom-commands/).
+of these agents, start [Bash or Zsh under **Shells**](/docs/agents/shells/) or use the **Command**
+tab for a [custom command](/docs/agents/custom-commands/).
 
 To start a known agent through another command, enter a **Wrapper prefix** on the **Agent** tab. Farhelm places it
 before the command it builds for that agent; [Agent wrappers](/docs/agents/agent-wrappers/) explains what the wrapper
 must pass through and when to use a custom command instead.
 
-NOTE: The launcher remembers the permissions of your last launch from its **Agent** tab and the last wrapper prefix
-used with each agent. After you launch with **YOLO** chosen for an agent whose default is not YOLO, the next launcher
+NOTE: The launcher remembers permissions from your last agent launch, and the last wrapper prefix separately for each
+agent or shell. After you launch with **YOLO** chosen for an agent whose default is not YOLO, the next launcher
 opens on **YOLO** too;
 **Custom** flags are never remembered this way. Launches
 your agents start, custom commands, and plain **Replace** do not change what it remembers.
