@@ -271,6 +271,21 @@ consequences.
 - [`linux-ctrl-f-leaves-settings-field-at-end.md`](linux-ctrl-f-leaves-settings-field-at-end.md) — Ctrl+F at the end of
   a Linux Settings field can focus Search and send the next keystroke there.
 
+- [`automatic-update-misses-development-builds.md`](automatic-update-misses-development-builds.md) — A released Farhelm
+  can overwrite a remote development supervisor if it speaks an older protocol. An update already in progress can also
+  miss a development build installed before the final check.
+
+- [`automatic-update-counts-busy-as-failure.md`](automatic-update-counts-busy-as-failure.md) — An outdated host can miss
+  automatic updates until it reconnects or Farhelm reopens if a manual operation takes the host first and leaves it
+  outdated.
+
+- [`automatic-update-charges-obsolete-plan-failure.md`](automatic-update-charges-obsolete-plan-failure.md) — A host can
+  miss automatic updates after you change its destination if the earlier destination’s update check fails just as the
+  new host becomes available.
+
+- [`provisioning-waits-use-fleet-slots.md`](provisioning-waits-use-fleet-slots.md) — If four host operations are waiting
+  for user input, another accepted operation can sit idle until one of those prompts is answered or cancelled.
+
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
@@ -899,8 +914,8 @@ consequences.
 - [`completed-followup-leaves-old-update-tracked-busy.md`](completed-followup-leaves-old-update-tracked-busy.md) — If
   the GUI misses a successor's Running state and first sees Completed, an earlier tracked Update can remain busy.
 
-- [`automatic-update-planning-serializes-hosts.md`](automatic-update-planning-serializes-hosts.md) — One slow host's
-  planning can delay automatic updates for later hosts even though each individual wait is bounded.
+- [`automatic-update-planning-serializes-hosts.md`](automatic-update-planning-serializes-hosts.md) — One host's planning
+  or wait for its provisioning lock can delay automatic updates for later hosts.
 
 - [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
   completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
@@ -2876,3 +2891,119 @@ consequences.
 
 - [`tunnel-pill-can-show-previous-session-mapping.md`](tunnel-pill-can-show-previous-session-mapping.md) — Tunnel hover
   help can show the previous session's ports after the open session changes.
+
+- [`rendered-sign-in-action-reads-live-state.md`](rendered-sign-in-action-reads-live-state.md) — A visible Answer button
+  can open a later question or start a new retry if the displayed question ends before the click is handled.
+
+- [`add-host-close-reads-live-sign-in.md`](add-host-close-reads-live-sign-in.md) — Clicking Cancel SSH sign-in can
+  cancel a later question or close Add Host and discard the destination and alias you typed.
+
+- [`sign-in-visibility-label-inverts.md`](sign-in-visibility-label-inverts.md) — The visibility button can do the
+  opposite of its displayed label when the form state changes before the screen updates.
+
+- [`session-sign-in-suppresses-connection-diagnosis.md`](session-sign-in-suppresses-connection-diagnosis.md) — A session
+  can say to answer a sign-in question to reconnect even when the host still needs an update or another Farhelm manages
+  it.
+
+- [`auto-sign-in-uses-session-anchor.md`](auto-sign-in-uses-session-anchor.md) — If the sidebar Answer button is below
+  the fold, an automatic sign-in popover can open beside the selected session’s card instead.
+
+- [`sidebar-sign-in-hides-launch-refusal.md`](sidebar-sign-in-hides-launch-refusal.md) — Sign in from the sidebar or the
+  session card can appear to do nothing while a launch is pending. The reason shows only inside Hosts.
+
+- [`new-host-attention-cue-can-be-lost.md`](new-host-attention-cue-can-be-lost.md) — A new reason to sign in can lose
+  its visual cue when the host already has a cue pending or playing.
+
+- [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
+  desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
+  flash.
+
+- [`ssh-chime-first-preference-read-failure.md`](ssh-chime-first-preference-read-failure.md) — Farhelm may play the
+  sign-in chime despite a saved opt-out if its first preference read fails while a question is pending.
+
+- [`settings-spec-sound-switch-count.md`](settings-spec-sound-switch-count.md) — The Settings specification says the
+  Sounds group has three switches. The detailed sound specification and the desktop show four.
+
+- [`devbuild-state-comparison-uses-wrong-path.md`](devbuild-state-comparison-uses-wrong-path.md) — Equivalent paths can
+  apply different automatic-update defaults in a devbuild. This can save an opt-out in the installed app’s state, or
+  leave updates on in separate development state.
+
+- [`devbuild-startup-test-misses-first-scan.md`](devbuild-startup-test-misses-first-scan.md) — The startup test can pass
+  if a devbuild starts its first automatic update scan before saving the opt-out. It also starts from a database that
+  has already migrated.
+
+- [`automatic-update-wake-test-accepts-host-refresh.md`](automatic-update-wake-test-accepts-host-refresh.md) — The test
+  can miss that turning on automatic updates failed to wake the helm, because a delayed first host refresh can wake it
+  instead.
+
+- [`dialog-scroll-focus-loses-regression-check.md`](dialog-scroll-focus-loses-regression-check.md) — A test no longer
+  checks that keyboard focus moves to a remaining control when a dialog’s focused scroll region stops being a tab stop.
+  Trash still uses that handoff.
+
+- [`attention-cue-tests-miss-witnesses.md`](attention-cue-tests-miss-witnesses.md) — The cue tests can pass without
+  showing that an initially offscreen cue is refused, a visible cue plays when the window becomes active, or reduced
+  motion paints a flash.
+
+- [`attention-baseline-test-never-cues.md`](attention-baseline-test-never-cues.md) — The test can pass if a reconnect
+  incorrectly animates existing warnings. Its first snapshot contains a host state that never produces a cue.
+
+- [`sign-in-reveal-test-misses-first-frame.md`](sign-in-reveal-test-misses-first-frame.md) — The test can pass if the
+  popover opens before its sidebar button scrolls into view.
+
+- [`sign-in-focus-test-accepts-either-host.md`](sign-in-focus-test-accepts-either-host.md) — The explicit sign-in test
+  can pass if the focused popover belongs to the other host in the fixture.
+
+- [`sign-in-handoff-test-uses-connected-fixtures.md`](sign-in-handoff-test-uses-connected-fixtures.md) — The startup
+  handoff test can pass without checking that focus moves to a host actually waiting for sign-in.
+
+- [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
+  can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
+
+- [`docs-shot-cleanup-hides-primary-error.md`](docs-shot-cleanup-hides-primary-error.md) — If a capture and its cleanup
+  both fail, the screenshot report can show only the cleanup error and carry the unrestored fixture into the next shot.
+
+- [`docs-shot-guard-ends-before-cleanup.md`](docs-shot-guard-ends-before-cleanup.md) — A screenshot can be accepted
+  without checking whether its cleanup changed the staged sessions that the next shot will use.
+
+- [`docs-group-shot-lacks-drawn-membership-check.md`](docs-group-shot-lacks-drawn-membership-check.md) — The release
+  screenshot can pass its checks without confirming that the moved session was drawn under its new group.
+
+- [`docs-group-shot-wait-exceeds-budget.md`](docs-group-shot-wait-exceeds-budget.md) — If the staged helm stalls, the
+  group screenshot’s ten-second membership wait can spend about a minute on one request.
+
+- [`test-summary-ledger-boundary-crosses-files.md`](test-summary-ledger-boundary-crosses-files.md) — A malformed heading
+  in one selected flake ledger can invalidate the final cause tag in a different ledger.
+
+- [`test-summary-archive-test-bypasses-cli.md`](test-summary-archive-test-bypasses-cli.md) — The reporting test can pass
+  if the command stops loading the closed-flake archive by default or ignores a repeated `--flakes` option.
+
+- [`failed-create-test-accepts-other-io-error.md`](failed-create-test-accepts-other-io-error.md) — The replay fixture
+  can accept an unrelated working-directory I/O error without testing the launch-spec write refusal it claims to replay.
+
+- [`brick-test-deferral-reuses-continuity-files.md`](brick-test-deferral-reuses-continuity-files.md) — The release test
+  can turn a failed or unavailable remote update into a harness failure when it carries forward receipt filenames from a
+  different checkpoint.
+
+- [`test-summary-asserts-total-instead-of-flake-classes.md`](test-summary-asserts-total-instead-of-flake-classes.md) —
+  The test can pass if the summary counts both fixture flakes in the same class.
+
+- [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
+  the switch still shows its draft choice, even if it never starts following the saved setting.
+
+- [`sign-in-notice-test-omits-unrelated-focus-case.md`](sign-in-notice-test-omits-unrelated-focus-case.md) — The tests
+  can pass if a question from a different sign-in takes focus when an open notice ends.
+
+- [`systemd-isolation-comments-point-to-active-ledger.md`](systemd-isolation-comments-point-to-active-ledger.md) — The
+  new test comments send maintainers to the active flake ledger for evidence that has moved to the archive.
+
+- [`attention-cue-expiry-can-precede-landing-flash.md`](attention-cue-expiry-can-precede-landing-flash.md) — If a
+  visible cue’s first frame is delayed long enough, its expiry timer can remove it before the landing flash.
+
+- [`attention-cue-accepts-empty-visible-clip.md`](attention-cue-accepts-empty-visible-clip.md) — A moving attention cue
+  could travel toward an invisible row if its scroll area collapses inside the row.
+
+- [`test-summary-partial-test-ignores-usable-run-count.md`](test-summary-partial-test-ignores-usable-run-count.md) — The
+  partial-report test can pass if an unavailable flake ledger causes the summary to lose valid test-run counts.
+
+- [`working-attention-row-hides-warning-edge.md`](working-attention-row-hides-warning-edge.md) — Starting work on a host
+  can remove its attention row’s amber warning edge before an earlier setup or update warning is acknowledged.
