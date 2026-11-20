@@ -175,16 +175,18 @@ Update action does not itself mean the host needs an update: the rail's update b
 rows require a compatible older build or a lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings starts on for new and upgraded installations, including installations
-that turned it off before this change. Turning it off after upgrading saves a persistent opt-out. While on, the helm
-starts that same authorized Update for each host with an update by the badge's test, including required protocol
-updates, while Farhelm is open, even with its window in the background. Enabling it also considers hosts that already
-need an update. The local host, busy hosts and newer builds are excluded; busy hosts are reconsidered when their work
-finishes. Progress and failure are the ordinary Update progress and failure in Hosts. A failed automatic attempt is not
-retried until that host's connection incarnation changes after failure or the helm restarts; switching the preference
-off and on does not clear this memory. A planning refusal starts no run: the helm logs the reason and remembers that
-failed attempt under the same no-retry rule. The badge remains, and a manual Update from the host menu can show the
-refusal. There is no separate automatic failure surface. Turning the switch off prevents new automatic starts, including
-planning still in flight; it does not cancel an accepted run.
+that turned it off in a release before automatic updates became the default. Turning it off after upgrading saves a
+persistent opt-out. While on, the helm starts that same authorized Update for each host with an update by the badge's
+test, including required protocol updates, while Farhelm is open, even with its window in the background. Enabling it
+also considers hosts that already need an update. The local host, busy hosts, newer builds and hosts running a
+development build are excluded (a devbuild under test put that build there, and the user's own Update can still put a
+release back); busy hosts are reconsidered when their work finishes. Progress and failure are the ordinary Update
+progress and failure in Hosts. A failed automatic attempt is not retried until that host's connection incarnation
+changes after failure or the helm restarts; switching the preference off and on does not clear this memory. A planning
+refusal starts no run: the helm logs the reason and remembers that failed attempt under the same no-retry rule. The
+badge remains, and a manual Update from the host menu can show the refusal. There is no separate automatic failure
+surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not cancel an
+accepted run.
 
 V1 provisioning targets Linux hosts with a usable systemd user manager on x86_64 or aarch64, and Apple-silicon Macs over
 SSH. An Intel Mac has no payload and cannot be set up this way. On Linux the distribution is not a requirement — nothing

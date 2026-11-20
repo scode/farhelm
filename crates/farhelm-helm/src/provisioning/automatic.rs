@@ -74,13 +74,19 @@ impl AutomaticUpdates {
 /// Match the rail's update badge, rather than Update all's broader idle-host list.
 /// Development or unparseable builds have unknown age; only a lower protocol
 /// then proves an update is needed. Newer peers are never automatic targets.
+/// That holds for a development build on the host's side too: SemVer sorts
+/// `0.0.0-unreleased` below every release, but a host running one was most
+/// likely updated by a devbuild under test, and putting the release back
+/// underneath it without asking would break that test. Manual Update still
+/// offers the way back.
 fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> bool {
     if !kind.panel_updates() || busy {
         return false;
     }
     match state {
         HostState::Connected { build_version, .. } => {
-            crate::hosts::build_is_older(build_version, helm_build)
+            !farhelm_proto::is_development_build(build_version)
+                && crate::hosts::build_is_older(build_version, helm_build)
         }
         HostState::VersionSkew {
             peer_protocol,
@@ -168,6 +174,9 @@ mod tests {
 
     /// Automatic targets must agree with the update badge, including release
     /// ordering, protocol urgency, busy exclusion and the reserved local row.
+    /// One exception to the badge: a host a devbuild updated (development
+    /// build, same protocol) is never an automatic target, or the installed
+    /// app would undo the devbuild under test by itself.
     #[farhelm_testtrace::test]
     fn eligibility_uses_age_and_protocol_without_downgrading() {
         let connected = |build: &str| HostState::Connected {
@@ -183,7 +192,7 @@ mod tests {
             "2.0.0"
         ));
         assert!(!eligible(HostKind::Ssh, &connected("1.0.0"), true, "2.0.0"));
-        for peer in ["2.0.0", "3.0.0", "unknown"] {
+        for peer in ["2.0.0", "3.0.0", "unknown", "0.0.0-unreleased"] {
             assert!(!eligible(HostKind::Ssh, &connected(peer), false, "2.0.0"));
         }
         assert!(!eligible(

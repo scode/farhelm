@@ -7030,11 +7030,15 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - No command starts or installs a helm: the helm runs only inside the desktop app. `farhelm helm run` and
   `farhelm helm setup`, which ran one on its own and wrote systemd user units for it on a Linux machine, were removed
   (SPEC.md, "Topology"). What their flags set lives on as `HelmArgs` fields the app fills in: the payload directory from
-  `FARHELM_HELM_PAYLOAD_DIR` and, in agent builds only, the ensure-hosts file. The release mirror setting
-  (`--release-base-url`, `FARHELM_RELEASE_BASE_URL`) went with them, so the only download source is this build's own
-  release on get.farhelm.io (D2). The hosts panel never installs or updates a supervisor on the helm's own machine: an
-  absent one is answered by telling the user to quit Farhelm and open it again (the desktop app starts that machine's
-  supervisor when it opens), and a supervisor that ANSWERS is discovered and registered exactly as a remote one is.
+  `FARHELM_HELM_PAYLOAD_DIR`, in agent builds only the ensure-hosts file, and the devbuild flag from
+  `FARHELM_DESKTOP_DEVBUILD=1`, which only `scripts/devbuild-mac.sh` sets, for a devbuild on its own state. With it, the
+  helm saves automatic remote-host updates as off when no choice is saved yet, after migrating its database (a `false`
+  seeded before the migration would be cleared by it), so a devbuild never updates shared hosts on its own. The release
+  mirror setting (`--release-base-url`, `FARHELM_RELEASE_BASE_URL`) went with them, so the only download source is this
+  build's own release on get.farhelm.io (D2). The hosts panel never installs or updates a supervisor on the helm's own
+  machine: an absent one is answered by telling the user to quit Farhelm and open it again (the desktop app starts that
+  machine's supervisor when it opens), and a supervisor that ANSWERS is discovered and registered exactly as a remote
+  one is.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
 - `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`

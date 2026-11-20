@@ -18,9 +18,9 @@ use super::SceneState;
 /// `settings-notifications` and `settings-app`): focus on the section's first switch (on the dialog itself at
 /// Appearance, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications),
 /// naming and automatic remote-host updates on because the row stores no choice for either. Agent trust's reads of
-/// each agent's trust, sent as it opens, are answered at once with
-/// the trust off and the hint not dismissed, Checkouts' reads as the reference stack had them: no default folder, no
-/// post-clone command, and a checkout kept ready, Notifications' read of the ntfy settings with the helm's defaults
+/// each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
+/// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
+/// ready, Notifications' read of the ntfy settings with the helm's defaults
 /// (off, `https://ntfy.sh`, no topic, Default priority, no token), Credentials' and Tensorlake's reads of the account
 /// with no key saved and sandboxes created only after asking, Credentials' read with an empty catalog, Recipes' read of
 /// the Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog and no pushed

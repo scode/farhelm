@@ -1002,9 +1002,9 @@ systemd or SSH substrate ran.
   `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
   that add purpose-specific Rust targets. Target selection uses the checkout's pin even when invoked from elsewhere;
   devbuild's printed install commands name that toolchain too. The helm's
-  `devbuild_startup_only_seeds_an_unset_remote_update_choice` test drives devbuild startup on private state. It checks
-  the saved opt-out and preservation of an explicit choice or a regular launch's default. Run when either script or its
-  corresponding startup logic changes.
+  `devbuild_startup_only_seeds_an_unset_remote_update_choice` test drives the helm's startup with the devbuild flag set.
+  It checks the saved opt-out and preservation of an explicit choice or a regular launch's default. Run when either
+  script or its corresponding startup logic changes.
 - `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` — the build command of
   the release's desktop archive (`packaging/farhelm-desktop/dist.toml`). The self-test is the script's whole validation
   and builds nothing: against stand-in files it stages a good binary with the icon, and refuses a binary without
