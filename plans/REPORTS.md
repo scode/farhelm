@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`covered-link-refusal`](reports/covered-link-refusal.report.md) landed 2026-11-19 in #4175, #4180, #4186: A terminal link or file click is refused, with its reason raised above the card, when an approval card, menu or dialog covers its details panel
 - [`demo-video-capture`](reports/demo-video-capture.report.md) landed 2026-11-19 in #4178, #4184, #4185: The README demo video's capture runs on the desktop app again (mechanism only)
 - [`replace-with-checkout-hint`](reports/replace-with-checkout-hint.report.md) landed 2026-11-19 in #4177, #4179: Replace with on a managed checkout says the replacement keeps its checkout, and warns before a fresh clone
 - [`shift-drag-marking`](reports/shift-drag-marking.report.md) landed 2026-11-19 in #4199: Shift+drag across the session list marks the rows it sweeps
