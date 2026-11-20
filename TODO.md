@@ -290,6 +290,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and hit enter (like you can type claude and hit enter). it automatically means yolo. probably /usr/bin/env bash and
   /usr/bin/env zsh to remain portable. need to pick what to use for icons.
 
+- **Remember the active terminal per session.** when you're in a session and you select or start a terminal and the
+  terminal is active, it should be remembered as the active terminal fro that session instead of always switching back
+  to the main agent terminal when you switch away and then back
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
