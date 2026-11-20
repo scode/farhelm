@@ -351,7 +351,9 @@ pub fn run(
 }
 
 /// Model Antigravity's manual callback and native selector from a real pane.
-/// A typed event lets the test observe capture after the hook has returned.
+/// A typed event names the conversation and optionally the transcript the
+/// test prepared. Returning the marker after the real hook exits lets the
+/// test wait for that particular report's admission.
 fn antigravity_hook_agent() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     if let Some(id) = option_after(std::env::args(), "--conversation") {
@@ -361,11 +363,13 @@ fn antigravity_hook_agent() -> anyhow::Result<()> {
     out.flush()?;
     for line in std::io::stdin().lock().lines() {
         let line = line?;
-        let (event, id) = line
-            .trim()
-            .split_once(' ')
-            .context("expected an Antigravity event and conversation ID")?;
-        let payload = serde_json::json!({"conversationId": id, "hookEventName": event});
+        let mut words = line.trim().splitn(3, ' ');
+        let event = words.next().context("expected an Antigravity event")?;
+        let id = words.next().context("expected a conversation ID")?;
+        let mut payload = serde_json::json!({"conversationId": id, "hookEventName": event});
+        if let Some(path) = words.next() {
+            payload["transcriptPath"] = serde_json::json!(path);
+        }
         let mut child = std::process::Command::new(product_farhelm()?)
             .args(["internal", "hook", "--vendor", "antigravity", "--announce"])
             .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)

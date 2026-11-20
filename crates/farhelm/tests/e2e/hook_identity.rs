@@ -1170,9 +1170,10 @@ async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixtu
     serving.stop().await;
 }
 
-/// An Antigravity Stop can supply the first identity via the real manual hook.
-/// The fixture checks the JSON response with and without valid payloads. On
-/// Restart the replacement must consume the ID through agy's own selector.
+/// A verified Antigravity Stop can supply the first identity via the real
+/// manual hook. Reports from the same emitter need their own transcript
+/// evidence before they can replace it. Restart consumes the winning ID
+/// through agy's selector.
 #[farhelm_testtrace::test]
 async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() {
     use farhelm_proto::{LaunchHarness, RestartOffer};
@@ -1215,14 +1216,39 @@ async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() 
         15,
     )
     .await;
-    h.sup.reconcile_for_test().await;
+    assert!(
+        hook_log(&h, &session.id).contains("bad-payload unsupported-hook-event"),
+        "{}",
+        hook_log(&h, &session.id)
+    );
     assert_eq!(
         snapshot_of(&h, &session.id).await.restart_offer,
         RestartOffer::NotCaptured
     );
     let id = "019a0000-0000-7000-8000-00000000c0de";
+    let main = work.path().join("main.jsonl");
+    let child = work.path().join("child.jsonl");
+    let array = work.path().join("array.jsonl");
+    let oversized = work.path().join("oversized.jsonl");
+    let missing = work.path().join("missing.jsonl");
+    let user_header = r#"{"source":"USER_EXPLICIT","type":"USER_INPUT"}"#;
+    std::fs::write(&main, format!("{user_header}\n")).unwrap();
+    std::fs::write(&array, "[\"USER_EXPLICIT\",\"USER_INPUT\"]\n").unwrap();
+    std::fs::write(
+        &child,
+        "{\"source\":\"SYSTEM\",\"type\":\"SYSTEM_MESSAGE\"}\n",
+    )
+    .unwrap();
+    // Valid JSON before the cap would look like a complete record unless
+    // admission checked that the first line actually ended.
+    std::fs::write(
+        &oversized,
+        format!("{user_header}{}\n", " ".repeat(64 * 1024)),
+    )
+    .unwrap();
+    assert!(!missing.exists());
     h.client
-        .send_keys(chan, format!("Stop {id}\r").into_bytes())
+        .send_keys(chan, format!("Stop {id} {}\r", main.display()).into_bytes())
         .await;
     wait_for(
         &mut rx,
@@ -1235,6 +1261,69 @@ async fn antigravity_manual_hook_captures_and_restart_passes_the_conversation() 
     let before = snapshot_of(&h, &session.id).await;
     assert_eq!(before.restart_offer, RestartOffer::Resume);
     assert_eq!(before.capture_ownership_version, 0);
+
+    for (index, (rival, transcript)) in [
+        ("child-conversation", &child),
+        ("array-conversation", &array),
+        ("missing-conversation", &missing),
+        ("oversized-conversation", &oversized),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        h.client
+            .send_keys(
+                chan,
+                format!("SessionStart {rival} {}\r", transcript.display()).into_bytes(),
+            )
+            .await;
+        wait_for(
+            &mut rx,
+            &mut seen,
+            &format!("ANTIGRAVITY-REPORTED:SessionStart:{rival}"),
+            15,
+        )
+        .await;
+        wait_for_hook_log_words(h.state.path(), &session.id, "refused", index + 1).await;
+        let log = hook_log(&h, &session.id);
+        assert!(
+            log.contains(&format!(
+                "refused conflict the Antigravity transcript does not verify a main conversation {rival} -"
+            )),
+            "{log}"
+        );
+        assert_eq!(
+            snapshot_of(&h, &session.id)
+                .await
+                .captured_conversation
+                .as_deref(),
+            Some(id)
+        );
+    }
+
+    // A child Stop reaches the same check but leaves no refusal warning.
+    h.client
+        .send_keys(
+            chan,
+            format!("Stop child-conversation {}\r", child.display()).into_bytes(),
+        )
+        .await;
+    wait_for(
+        &mut rx,
+        &mut seen,
+        "ANTIGRAVITY-REPORTED:Stop:child-conversation",
+        15,
+    )
+    .await;
+    wait_for_hook_log_words(h.state.path(), &session.id, "acked", 2).await;
+    assert!(hook_log(&h, &session.id).contains("acked child-conversation -"));
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(id)
+    );
 
     h.client
         .restart_session(&session.id, true)

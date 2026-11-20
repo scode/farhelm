@@ -19,6 +19,8 @@ struct PinCase {
     resume_selector: &'static str,
     notice_kind: &'static str,
     notice_text: &'static str,
+    /// The vendor's root record, when admission verifies one as well as the pin.
+    transcript_header: Option<&'static str>,
 }
 
 const CLAUDE: PinCase = PinCase {
@@ -27,6 +29,7 @@ const CLAUDE: PinCase = PinCase {
     resume_selector: "--resume",
     notice_kind: "claude_pin_corrected",
     notice_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
+    transcript_header: None,
 };
 const MUSE: PinCase = PinCase {
     kind: AgentKind::Muse,
@@ -34,6 +37,7 @@ const MUSE: PinCase = PinCase {
     resume_selector: "resume",
     notice_kind: "muse_pin_corrected",
     notice_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
+    transcript_header: None,
 };
 const ANTIGRAVITY: PinCase = PinCase {
     kind: AgentKind::Antigravity,
@@ -41,6 +45,7 @@ const ANTIGRAVITY: PinCase = PinCase {
     resume_selector: "--conversation",
     notice_kind: "antigravity_pin_corrected",
     notice_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
+    transcript_header: Some("{\"source\":\"USER_EXPLICIT\",\"type\":\"USER_INPUT\"}\n"),
 };
 
 /// Seed a historical plain-id capture in both representations without a terminal.
@@ -243,10 +248,19 @@ async fn assert_claude_pin(
 /// Repeated reports retain earlier correction authority, and successive ancestors
 /// share one unresolved warning describing the earlier mistaken Restart target.
 async fn pin_corrects_ancestors_once_and_keeps_version_zero_resume(case: PinCase) {
-    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
-        positional_pin_report(case, conversation, processes)
-    };
     let state = StateDir::new();
+    // These emitters represent separate main conversations, including the
+    // nested process. A verified record must still obey the process pin.
+    let transcript_path = case.transcript_header.map(|header| {
+        let transcript = state.path().join("main.jsonl");
+        std::fs::write(&transcript, header).unwrap();
+        serde_json::json!(transcript)
+    });
+    let claude_pin_report = |conversation: &str, processes: &[ProcessIdentity]| {
+        let mut report = positional_pin_report(case, conversation, processes);
+        report.transcript_path = transcript_path.clone();
+        report
+    };
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .unwrap();
@@ -805,9 +819,8 @@ async fn muse_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
     pin_corrects_ancestors_once_and_keeps_version_zero_resume(MUSE).await;
 }
 
-/// Antigravity attributes distinct processes even though its callbacks cannot
-/// distinguish two conversations from the same process. Ancestor correction
-/// must name Antigravity and preserve a version-0 Restart offer.
+/// Valid main transcripts leave Antigravity's positional correction in force.
+/// The correction names Antigravity and preserves version-0 Restart.
 #[farhelm_testtrace::test]
 async fn antigravity_pin_corrects_ancestors_once_and_keeps_version_zero_resume() {
     pin_corrects_ancestors_once_and_keeps_version_zero_resume(ANTIGRAVITY).await;

@@ -607,10 +607,10 @@ fn parse_muse_payload(value: &serde_json::Value) -> Result<HookReport, &'static 
     Ok(report)
 }
 
-/// Preserve the identity and event the Antigravity CLI actually reported.
-/// Its SessionStart and Stop both name a conversation, so either event can
-/// establish the binding. Antigravity CLI 1.5.12 sends the same shape for
-/// child conversations, without a field that identifies them as children.
+/// Preserve the exact transcript path alongside the reported identity.
+/// Both lifecycle events can establish capture once the supervisor verifies
+/// that transcript's first record. Antigravity uses the same event shapes
+/// for the main conversation and for children.
 fn parse_antigravity_payload(value: &serde_json::Value) -> Result<HookReport, &'static str> {
     match value.get("vendor") {
         None | Some(serde_json::Value::Null) => {}
@@ -640,7 +640,7 @@ fn parse_antigravity_payload(value: &serde_json::Value) -> Result<HookReport, &'
         ReportVendor::Antigravity,
         conversation.clone(),
         String::new(),
-        None,
+        value.get("transcriptPath").cloned(),
         event.cloned(),
         None,
     ))
@@ -1166,18 +1166,26 @@ mod tests {
         );
     }
 
-    /// Antigravity's lifecycle events each carry a complete identity. A Stop
-    /// must work even when the initial report was missed, and other event
-    /// types must never select a conversation.
+    /// Either lifecycle event can carry the exact transcript the supervisor
+    /// needs to verify the conversation, including a Stop after a missed start.
+    /// Other events cannot select a conversation.
     #[farhelm_testtrace::test]
     fn antigravity_accepts_only_its_lifecycle_payloads() {
         for event in ["SessionStart", "Stop"] {
-            let payload = serde_json::json!({"conversationId": "conv-1", "hookEventName": event});
+            let payload = serde_json::json!({
+                "conversationId": "conv-1",
+                "hookEventName": event,
+                "transcriptPath": "/tmp/transcript_full.jsonl",
+            });
             let report = parse_payload(payload.to_string().as_bytes(), ReportVendor::Antigravity)
                 .expect("Antigravity lifecycle payload");
             assert_eq!(report.conversation, "conv-1");
             assert_eq!(report.hook_event_name, Some(serde_json::json!(event)));
             assert_eq!(report.vendor, ReportVendor::Antigravity);
+            assert_eq!(
+                report.transcript_path,
+                payload.get("transcriptPath").cloned()
+            );
         }
         for (payload, error) in [
             (

@@ -3868,11 +3868,12 @@ resume targets. Missing or changed transcript evidence refuses Resume rather tha
 a different historical conversation.
 
 Agent files on an execution host are trusted host state. Farhelm reads them only when a decision needs information the
-report does not provide: report admission, confirmation of a pending conversation, or Restart's exact-target check.
-Periodic capture passes, session lists and info, and replayed creates do not inspect admitted Codex transcripts or Grok
-record pairs. Arbitrary later file changes are noticed at Restart rather than through defensive polling. A missing file
-withdraws Resume and records its notification then; a different conversation withdraws silently. An I/O read failure
-refuses that Restart with a retry message and preserves Resume. None of these refusals launches an agent.
+report does not provide: report admission, confirmation of a pending conversation, or Restart's exact-target check. For
+Antigravity, admission reads only the first record of the transcript named by the callback. Periodic capture passes,
+session lists and info, and replayed creates do not inspect admitted Codex transcripts or Grok record pairs. Arbitrary
+later file changes are noticed at Restart rather than through defensive polling. A missing file withdraws Resume and
+records its notification then; a different conversation withdraws silently. An I/O read failure refuses that Restart
+with a retry message and preserves Resume. None of these refusals launches an agent.
 
 Claude and Muse attribution is positional: the first process above the hook's narrow shell trampolines is its emitter,
 at any depth below the session's agent terminal's root process. Farhelm does not recognize either agent by executable,
@@ -3939,11 +3940,11 @@ and a report addressed to a session of another agent type is refused before any 
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
 exception described in SPEC_impl.md. Claude, Muse and Antigravity admission require the positional attribution and pin
-checks above but no versioned proof; Claude's resume rules are unchanged. Goose and Pi retain their existing admission
-and resume rules; for them the discriminator alone adds no foreground protection. Old senders that predate the
-discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored identity, no
-offer, no pending state. Resume is never silently turned into fresh, and historical captures are never rewritten to look
-proven.
+checks above. Antigravity also verifies the reported transcript at admission. These three use version-0 captures. Goose
+and Pi retain their existing admission and resume rules; for them the discriminator alone adds no foreground protection.
+Old senders that predate the discriminator fail closed rather than reporting untagged. A refused report changes nothing:
+no stored identity, no offer, no pending state. Resume is never silently turned into fresh, and historical captures are
+never rewritten to look proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's
@@ -3951,10 +3952,14 @@ foreground conversation, so such a run can replace the session's Resume target. 
 Farhelm's reporter (passed on to it by a third-party extension, say) can replace or withdraw the session's Resume
 target.
 
-Antigravity CLI 1.5.12 is another accepted exception. `SessionStart` after the first prompt and `Stop` each report a
-conversation ID. Antigravity uses the same process pin as Claude and Muse to distinguish separate processes. A subagent
-in the same Antigravity process sends those same events with its own ID and no child marker. Its report can replace the
-main conversation's Restart target. Choosing the main conversation by ID opens it directly.
+Antigravity's `SessionStart` after the first prompt and `Stop` each report a conversation ID and transcript path.
+Antigravity uses the same process pin as Claude and Muse to distinguish separate processes. A subagent in the same
+Antigravity process uses the same events, so admission also requires the named transcript's first record to be an
+explicit user input. This was verified with Antigravity CLI 1.5.13. A missing or unreadable file, an unrecognized first
+record, or a first record exceeding the 64 KiB read limit leaves capture as it was. A later main-conversation `Stop` can
+capture the conversation once the record is readable. Unverified Stops are acknowledged quietly. If the CLI changes its
+transcript format, future reports can all be refused without a notification, leaving Restart on the last captured
+conversation or unavailable. Choosing a conversation by ID still opens it directly.
 
 Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
 environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
