@@ -2694,6 +2694,11 @@ connection to the host dropped, or `ssh -O exit` on its socket); see the `CONNEC
 real connection through a jump on localhost. JSON control frames keep the protocol debuggable by eye; binary data
 channels keep terminal and transfer throughput off the control path.
 
+On ordinary SSH hosts, both shared connections override `ServerAliveInterval` to 15 seconds and `ServerAliveCountMax`
+to 3. The master probes the host over the encrypted connection so it can exit after about a minute of silence, even
+while its local control socket still responds to checks. A master opened before this change keeps the options it was
+started with until it exits. Tensorlake keeps its own 30-second interval.
+
 ### Grid streams
 
 Grid streams are the form in which terminals reach their viewers: the terminal runs in a terminal host, the supervisor
@@ -7920,11 +7925,11 @@ the nonce temporary's digest; installation checks it again before the atomic ren
 its verified growth. The upload command reports that size on its own ssh stdout every two seconds and once at EOF; no
 second command runs while the upload is active. Local writes into ssh are not progress evidence, including while the
 last buffered bytes drain to the host. Before that file appears the upload has no deadline of its own: a slow ssh
-connection setup has no byte-progress signal to tell it from a stall, and ssh runs without a connect or keepalive
-timeout of its own, so a host that stops answering in that window holds the upload until the connection itself fails.
-SPEC.md accepts that window (same section): ordinary ssh and TCP behavior bounds it, and Farhelm adds no deadline or ssh
-timeout of its own for it. Both actions use the same staged payload snapshot, and local plans retain a single install
-action because they do not transfer over the network. Matching content also repairs installed-file mode drift.
+connection setup has no byte-progress signal to tell it from a stall. Ordinary ssh and TCP behavior bounds setup, and
+once a shared connection is established its keepalives can end it if the host stops answering. Both actions use the same
+staged payload snapshot, and local plans retain a single install action because they do not transfer over the network.
+Matching content also repairs installed-file mode drift.
+
 Provisioning may create directories with explicit modes and repair permissions on directories dedicated to Farhelm; the
 supervisor state directory is private to its user (`0700`). Existing shared directories, including a shared executable
 directory, the systemd user-unit directory or the Mac's `Library/LaunchAgents`, must retain their permissions. If those

@@ -5021,9 +5021,9 @@ it stops making progress for a while. A release is tens of megabytes, and a fixe
 connection at the same point on every retry, with nothing pointing at the link speed as the cause; a stall limit still
 catches a transfer that has stopped receiving bytes. This is a deliberate exception to [Slow hosts](#slow-hosts): a
 payload transfer is long on any link, so a fixed limit there is a failure, not a missed accommodation. The stall limit
-for a transfer to a host starts once the file being sent first exists on that host. A host that stops answering before
-then is bounded only by ordinary ssh and TCP behavior, with no time limit of Farhelm's own; that is accepted (confirmed
-2026-10-01).
+for a transfer to a host starts once the file being sent first exists on that host. Before then, the upload has no
+separate deadline. A shared SSH connection still ends when its keepalives detect a dead link. Before SSH establishes a
+connection, setup is bounded by ordinary SSH and TCP behavior.
 
 ### Partial deletion
 
