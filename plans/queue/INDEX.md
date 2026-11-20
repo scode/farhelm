@@ -3,6 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight 29e719] `shell-sessions.md` — Bash and Zsh as session types beside the agents, with no permission mode (protocol bump)
-- [pending] `remember-active-terminal.md` — Switching back to a session shows the terminal last chosen in it
+- [in-flight 75a778] `remember-active-terminal.md` — Switching back to a session shows the terminal last chosen in it
 - [pending] `antigravity-subagent-check.md` — Live-check Antigravity, then refuse subagent conversation reports so Restart follows the main conversation; docs say where to find a conversation ID
 - [pending] `tensorlake-pause-attribution.md` — A later Tensorlake pause no longer shows Farhelm's old suspend label and time
