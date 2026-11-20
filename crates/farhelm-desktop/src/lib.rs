@@ -198,7 +198,10 @@ pub unsafe fn run() -> anyhow::Result<()> {
     let shell = farhelm_supervisor::launch::resolve_shell_from(env_shell, passwd_shell);
     let session_start_path = match login_path::lookup(Path::new(&shell), login_path::TIMEOUT) {
         Ok(path) => {
-            let inherited = std::env::var_os("PATH")
+            let original = std::env::var_os("PATH");
+            // Recorded before the swap, so a relaunch can hand it on.
+            let _ = INHERITED_PATH.set(original.clone());
+            let inherited = original
                 .unwrap_or_else(|| farhelm_supervisor::service::DEFAULT_SESSION_PATH.into());
             // SAFETY: per run's contract this is still the only thread.
             // Logging, forwarding and a successful lookup start no threads
@@ -1253,6 +1256,39 @@ fn rotated_supervisor_log(state_dir: &Path, kept: File) -> File {
     }
 }
 
+/// The PATH this app instance was started with, set once by [`run`] only when
+/// startup replaced the process PATH with the login shell's. The inner `None`
+/// records a launch that had no PATH at all; an unset cell means startup kept
+/// the inherited PATH, so the process environment already holds it.
+static INHERITED_PATH: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+
+/// Start the next app instance with the PATH this one was started with.
+///
+/// Restart to update and the missing-version reopen start the next instance
+/// through `open -n`, and an app opened that way inherits the opener's
+/// environment. Without this the next instance would take the login PATH as
+/// the PATH it was started with and hand it to a supervisor it starts as the
+/// sessions' starting PATH, so sessions' login shells would run their startup
+/// files over another login shell's result (SPEC_impl.md, "Side-by-side
+/// versions inside Farhelm.app", on why that reorders PATH).
+fn restore_inherited_path(command: &mut Command) {
+    apply_inherited_path(command, INHERITED_PATH.get());
+}
+
+/// [`restore_inherited_path`] with the recorded value passed in, so tests
+/// need no process-wide state.
+fn apply_inherited_path(command: &mut Command, inherited: Option<&Option<std::ffi::OsString>>) {
+    match inherited {
+        None => {}
+        Some(Some(path)) => {
+            command.env("PATH", path);
+        }
+        Some(None) => {
+            command.env_remove("PATH");
+        }
+    }
+}
+
 /// Give an owned child its own session so it cannot take over the desktop's
 /// launching terminal or receive signals aimed at that terminal.
 fn detach_from_terminal(command: &mut Command) {
@@ -1798,6 +1834,37 @@ mod tests {
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// Restart to update and the missing-version reopen start the next app
+    /// instance with this one's environment, so both pass their command
+    /// through [`restore_inherited_path`]; otherwise the next instance would
+    /// hand the login PATH to a supervisor as the sessions' starting PATH
+    /// (SPEC_impl.md, "Side-by-side versions inside Farhelm.app"). This checks
+    /// only the mapping from the recorded value to the command's PATH, without
+    /// touching the test process's environment: a launch that kept its PATH
+    /// changes nothing, a replaced one restores the original, and a launch
+    /// that had no PATH starts the next instance without one. That the two
+    /// relaunch commands call it is not covered here.
+    #[test]
+    fn a_relaunch_gets_the_path_this_instance_was_started_with() {
+        let path_of = |command: &Command| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == "PATH")
+                .map(|(_, value)| value.map(OsStr::to_os_string))
+        };
+        let mut kept = Command::new("/bin/sh");
+        apply_inherited_path(&mut kept, None);
+        assert_eq!(path_of(&kept), None);
+
+        let mut replaced = Command::new("/bin/sh");
+        apply_inherited_path(&mut replaced, Some(&Some("/usr/bin:/bin".into())));
+        assert_eq!(path_of(&replaced), Some(Some("/usr/bin:/bin".into())));
+
+        let mut absent = Command::new("/bin/sh");
+        apply_inherited_path(&mut absent, Some(&None));
+        assert_eq!(path_of(&absent), Some(None));
+    }
 
     /// The same process owns both WebSocket ends. Their frame dumps can contain an SSH answer, and the client's
     /// handshake includes a device credential. Exclude both even when the operator explicitly enables trace.

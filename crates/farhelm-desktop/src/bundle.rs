@@ -204,8 +204,9 @@ fn missing_version_outcome(
 /// once `pid` (this app) has exited, marked with the installation `id` it
 /// means, so the reopened app neither reopens again nor starts as a
 /// different installation. `open -n` starts a new instance even if Launch
-/// Services still lists this one, and `--env` is the only way to hand the
-/// new instance a variable.
+/// Services still lists this one. The new instance inherits the opener's
+/// environment, so the PATH this app was started with is put back on it
+/// ([`crate::restore_inherited_path`]); `--env` adds the reopen marker.
 ///
 /// `seen_alive` is for tests only (the app passes `None`): the helper
 /// creates that file each time it finds `pid` still alive, which tells a
@@ -237,6 +238,9 @@ fn reopen_command(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    // As for Restart to update: the reopened app starts from this one's
+    // original PATH, not the login PATH this process switched to.
+    crate::restore_inherited_path(&mut command);
     command
 }
 
