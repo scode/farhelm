@@ -3,8 +3,9 @@
 //! bans do not reach.
 //!
 //! NOTE: This is not an animation framework. It holds the transitions areas need, each one SPEC.md asks for: the fade the
-//! quick-launch pill makes as it appears ([`entrance`]), and the launcher's permission-escalation banner sliding down
-//! ([`slide_down`]) with the permission control's red outline fading ([`outline_fade`]). A new one is added here only
+//! quick-launch pill makes as it appears ([`entrance`]), the launcher's permission-escalation banner sliding down
+//! ([`slide_down`]) with the permission control's red outline fading ([`outline_fade`]), and the attention cue's flight
+//! and landing flash ([`cue_progress`]). A new one is added here only
 //! when SPEC.md asks for it.
 //!
 //! Everything else that moves goes through the ticker, at most ten redraws a second and none in an inactive window. A
@@ -175,6 +176,24 @@ fn one_shot<E: IntoElement + 'static>(
     animator: impl Fn(E, f32) -> E + 'static,
 ) -> impl IntoElement {
     element.with_animation(id, Animation::new(duration).with_easing(easing), animator)
+}
+
+/// Feed an attention cue's paint element linear time at the display's rate for one flight and landing.
+/// The layer owner supplies a stable id and selects a stationary flash before calling this under reduced motion.
+/// The callback constructs an element. Its paint pass reads current target geometry after page layout.
+pub(crate) fn cue_progress<E: IntoElement + 'static>(
+    id: ElementId,
+    total: Duration,
+    draw: impl Fn(f32) -> E + 'static,
+) -> AnyElement {
+    one_shot(
+        id,
+        draw(0.),
+        total,
+        |t| t,
+        move |_, progress| draw(progress),
+    )
+    .into_any_element()
 }
 
 /// CSS's `ease-out` timing function, `cubic-bezier(0, 0, 0.58, 1)`: the share of the change made at `progress` (0 to

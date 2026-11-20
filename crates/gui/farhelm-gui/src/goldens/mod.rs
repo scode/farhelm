@@ -682,6 +682,18 @@ static SCENES: &[Scene] = &[
         setup: sign_in_needed,
     },
     Scene {
+        name: "attention-cue-flight",
+        size: (640., 310.),
+        draw: cue_target,
+        setup: cue_in_flight,
+    },
+    Scene {
+        name: "attention-cue-flash",
+        size: (640., 310.),
+        draw: cue_target,
+        setup: cue_flash,
+    },
+    Scene {
         name: "session-details-bar",
         size: (644., 368.),
         draw: session_details_bars,

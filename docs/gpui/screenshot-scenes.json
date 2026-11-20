@@ -3184,6 +3184,16 @@
       "golden": "ssh-sign-in-notice",
       "title": "SSH security-key touch notice with Cancel",
       "reference": null
+    },
+    {
+      "golden": "attention-cue-flight",
+      "title": "Amber light travelling to a row that needs attention",
+      "reference": null
+    },
+    {
+      "golden": "attention-cue-flash",
+      "title": "Amber flash over an attention row, the reduced-motion cue",
+      "reference": null
     }
   ],
   "reference_scenes": [

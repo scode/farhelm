@@ -150,3 +150,50 @@ pub(super) fn sign_in_surfaces(
         .child(div().relative().w(px(530.)).h(px(490.)).children(card))
         .into_any_element()
 }
+
+/// A target on the left leaves room to see the flight cross the surrounding surface before it arrives.
+pub(super) fn cue_target(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = crate::theme::palette(cx);
+    let anchor = crate::layers::Anchor::for_element("cue-golden-anchor", window, cx);
+    state.anchor.replace(Some(anchor.clone()));
+    div()
+        .relative()
+        .w(px(590.))
+        .h(px(260.))
+        .child(
+            div()
+                .absolute()
+                .left(px(30.))
+                .top(px(42.))
+                .w(px(240.))
+                .h(px(44.))
+                .bg(crate::theme::color(palette.bg_2))
+                .border_1()
+                .border_color(crate::theme::color(palette.border))
+                .rounded(px(4.))
+                .px(px(12.))
+                .flex()
+                .items_center()
+                .child("Waiting for sign-in")
+                .child(anchor.track()),
+        )
+        .into_any_element()
+}
+
+pub(super) fn cue_in_flight(state: &SceneState, window: &mut Window, cx: &mut App) {
+    cue_at(state, 0.24, window, cx);
+}
+
+pub(super) fn cue_flash(state: &SceneState, window: &mut Window, cx: &mut App) {
+    cue_at(state, 0.74, window, cx);
+}
+
+fn cue_at(state: &SceneState, t: f32, window: &mut Window, cx: &mut App) {
+    let anchor = state.anchor.borrow();
+    assert!(crate::layers::attention_cue_at(
+        anchor.as_ref().expect("the target was drawn"),
+        t,
+        window,
+        cx
+    ));
+}

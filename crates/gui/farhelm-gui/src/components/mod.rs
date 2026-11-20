@@ -97,6 +97,7 @@ pub use status_mark::StatusMark;
 pub use submenu::submenu;
 pub use tab_strip::{TabOption, TabStrip};
 pub use text_input::{EditCommand, TextInput, TextInputEvent, TextInputState, Vertical};
+pub(crate) use transition::cue_progress;
 #[cfg(feature = "agent")]
 pub(crate) use transition::recording_transition;
 pub use transition::{ENTRANCE, entrance};

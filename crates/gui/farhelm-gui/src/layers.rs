@@ -133,12 +133,13 @@
 //!
 //! The one order in which a window draws everything, bottom to top. Every other doc in this module, and SPEC_impl.md's
 //! "Overlays: the layer manager", that says what an overlay is drawn over or under points here; a new slot gets a rung
-//! here first. [`overlay`] draws rungs 2 to 9 as `deferred` elements whose priorities follow this order. Each rung
+//! here first. [`overlay`] draws the cue and rungs 2 to 9 as `deferred` elements whose priorities follow this order. Each rung
 //! gives the old app's z-index for what it ports, from the old stylesheet's z-index ladder comment at `.header-confirm`
 //! (`crates/farhelm-ui/assets/app.css` at reference commit `24bc0580`, lines 2187-2272, cited below by line), where
 //! equal values were ordered by their place in the page.
 //!
 //! 1. **The page**: the window's ordinary content, everything the root view draws before [`overlay`], its last child.
+//!    Decorative attention cues paint over it but below every layer. They have no input surfaces.
 //! 2. **The layers**, each over the one opened before it: dialogs over their veils, popovers (menus and lists) and
 //!    anchored dialogs (questions). Old: the row menus at 20 (line 2220), the header questions at 30 (line 2227) and
 //!    the modal dialogs' backdrops at 40 (line 2243). Only the layers under the lowest raised one are on this rung; it
@@ -185,11 +186,15 @@ use crate::ticker;
 mod beside;
 #[cfg(test)]
 mod beside_tests;
+mod cue;
 mod tooltip;
 #[cfg(test)]
 mod tooltip_tests;
 
 pub use beside::beside_edge;
+#[cfg(test)]
+pub(crate) use cue::for_golden as attention_cue_at;
+pub(crate) use cue::request as attention_cue;
 // The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
 pub use tooltip::{
     BesideCues, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner, TooltipSide,
@@ -218,6 +223,7 @@ impl LayerId {
 pub struct LayerStack {
     window: AnyWindowHandle,
     layers: Vec<Layer>,
+    cues: cue::Cues,
     next_id: u64,
     /// The pill showing in this window, if any ([`show_pill`]). Kept apart from `layers` so that nothing that walks the
     /// layers for focus, Escape or "is anything open" can count it.
@@ -429,6 +435,7 @@ pub fn install(cx: &mut App) {
 pub struct Attachment {
     _stack: Entity<LayerStack>,
     _observe: Subscription,
+    _activate_cues: Subscription,
 }
 
 /// Give the root view's window a layer stack, and redraw the root whenever an overlay changes. Every root view does this
@@ -439,6 +446,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
     let stack = cx.new(|_| LayerStack {
         window: handle,
         layers: Vec::new(),
+        cues: cue::Cues::default(),
         next_id: 0,
         pill: None,
         launch_pill: None,
@@ -463,9 +471,18 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         windows.0.insert(handle.window_id(), stack.downgrade());
     }
     let observe = cx.observe(&stack, |_, _, cx| cx.notify());
+    let weak = stack.downgrade();
+    let activate_cues = cx.observe_window_activation(window, move |_, window, cx| {
+        if ticker::is_active(window, cx) {
+            let _ = weak.update(cx, |stack, cx| {
+                stack.cues.activate(cx);
+            });
+        }
+    });
     Attachment {
         _stack: stack,
         _observe: observe,
+        _activate_cues: activate_cues,
     }
 }
 
@@ -527,6 +544,7 @@ impl Subject {
 pub struct Anchor {
     state: WeakEntity<AnchorState>,
     bounds: AnchorBounds,
+    visible: AnchorBounds,
     /// Where a layer opened on this anchor sits against it: [`Placement::Below`] unless the feature asked otherwise.
     placement: Placement,
     /// Whether a layer opened on this anchor is exactly as wide as it ([`Anchor::matching_width`]).
@@ -537,6 +555,7 @@ pub struct Anchor {
 /// drawn in a frame, and that release is the signal that the anchor is gone. It holds the bounds its tracker records.
 pub struct AnchorState {
     bounds: AnchorBounds,
+    visible: AnchorBounds,
 }
 
 impl Anchor {
@@ -546,9 +565,11 @@ impl Anchor {
     pub fn for_element(key: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> Anchor {
         let state = window.use_keyed_state(key, cx, |_, _| AnchorState {
             bounds: Rc::new(Cell::new(None)),
+            visible: Rc::new(Cell::new(None)),
         });
         Anchor {
             bounds: state.read(cx).bounds.clone(),
+            visible: state.read(cx).visible.clone(),
             state: state.downgrade(),
             placement: Placement::Below,
             matches_width: false,
@@ -626,13 +647,17 @@ impl Anchor {
 
     fn tracker(&self, visible: Option<Rc<Cell<bool>>>) -> impl IntoElement + use<> {
         let bounds = self.bounds.clone();
+        let clipped = self.visible.clone();
         // Pinned to the element's corner: an absolute child without insets would sit wherever it falls in the flow,
         // after the element's other children, and record the wrong place.
         canvas(
             move |at, window, _| {
                 bounds.set(Some(at));
+                let clip = window.content_mask().bounds;
+                let visible_area = at.intersects(&clip).then(|| at.intersect(&clip));
+                clipped.set(visible_area);
                 if let Some(visible) = visible {
-                    visible.set(window.content_mask().bounds.intersects(&at));
+                    visible.set(visible_area.is_some());
                 }
             },
             |_, _, _, _| {},
@@ -1606,6 +1631,7 @@ pub fn close_all(cx: &mut App) {
             if stack.pill.take().is_some()
                 | stack.launch_pill.take().is_some()
                 | stack.terminal_refusal.take().is_some()
+                | stack.cues.clear()
             {
                 cx.notify();
             }
@@ -2258,6 +2284,7 @@ impl LayerStack {
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
     let stack = stack.read(cx);
+    let cues = stack.cues.draw(cx);
     #[cfg(feature = "agent")]
     let recording = crate::demo_video::overlay(window, cx);
     #[cfg(not(feature = "agent"))]
@@ -2269,30 +2296,32 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         && stack.terminal_refusal.is_none()
         && stack.tooltip.is_none()
         && recording.is_none()
+        && cues.is_none()
     {
         return None;
     }
     // The launch pill, raised veil, approval region and terminal refusal go between ordinary layers and raised
     // layers. Keep their priorities consecutive so the same rung always wins if they overlap.
     let (raised, above) = (stack.raised_from(), stack.layers.len());
-    let (launch_depth, veil_depth, region_depth) = (raised + 1, raised + 2, raised + 3);
+    let (launch_depth, veil_depth, region_depth) = (raised + 2, raised + 3, raised + 4);
     // An open question must be readable even if it and the refusal overlap. Determine priority here, so opening
     // or closing a focus-taking layer takes effect in the same frame without a terminal redraw.
     let refusal_depth = if stack.layers.iter().any(|layer| layer.takes_focus) {
-        0
+        1
     } else {
-        raised + 4
+        raised + 5
     };
-    let (pill_depth, tooltip_depth) = (above + 5, above + 6);
+    let (pill_depth, tooltip_depth) = (above + 6, above + 7);
     let palette = theme::palette(cx);
     let mut overlay = div()
         .absolute()
         .top_0()
         .left_0()
         .size_full()
+        .children(cues.map(|content| gpui::deferred(content).with_priority(0)))
         .children(recording.map(|content| gpui::deferred(content).with_priority(usize::MAX)));
     for (index, layer) in stack.layers.iter().enumerate() {
-        let depth = if index < raised { index + 1 } else { index + 5 };
+        let depth = if index < raised { index + 2 } else { index + 6 };
         let id = layer.id;
         let main_action = layer.main_action.clone();
         let shortcut = match &layer.kind {

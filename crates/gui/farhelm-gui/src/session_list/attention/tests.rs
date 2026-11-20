@@ -21,12 +21,12 @@ use farhelm_proto::provisioning::ProvisioningOperation::Add;
 use farhelm_proto::provisioning::{ProvisioningView, RunStatus, StepStatus};
 use farhelm_proto::tensorlake::{LifecycleDirection, TunnelState, TunnelView};
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, HostStateView, HostView, Preferences,
+    Collection, CollectionChanges, HostStateView, HostView, Preferences, SshQuestion,
 };
 use gpui::{Modifiers, TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
 
-use super::{Dismissal, Kind, REQUIRED, Shown, classify, problem_words};
+use super::{Dismissal, Kind, Memory, REQUIRED, Shown, classify, problem_words};
 use crate::host_text::HostText;
 use crate::hosts::identity::tests::listed_environment;
 use crate::hosts::progress::tests::step;
@@ -43,6 +43,76 @@ use crate::session_list::tests::{Fixture, listing, open_main, preferences_state,
 use crate::test_support::{self, any_open, focused_id, frame, meta};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
+
+/// A standing problem on initial connect is the baseline. Later changes of actionable reason get one cue,
+/// and the short gap between questions in one connection cannot repeat the flight.
+#[test]
+fn cue_reasons_follow_one_sign_in_and_distinguish_retrying_from_identity_failure() {
+    let mut memory = Memory::default();
+    let reachable = remote(2, "build", connected());
+    let retrying = remote(2, "build", unreachable());
+    let needs_retry = remote(2, "build", HostStateView::SignInNeeded);
+    let identity = remote(
+        2,
+        "build",
+        HostStateView::IdentityUnverified {
+            recorded: "old-key".into(),
+        },
+    );
+    let quiet = idle();
+    let waiting = HostStatus {
+        sign_in: Some(crate::sign_in::Status::Waiting),
+        ..idle()
+    };
+    let warned = HostStatus {
+        warned: true,
+        ..idle()
+    };
+    let code = crate::sign_in::tests::question("first", 2, "Code:", false);
+    let another_code = SshQuestion {
+        id: "second".into(),
+        ..code.clone()
+    };
+    let retried = crate::sign_in::tests::question("retry", 2, "Code:", false);
+    let cue = |memory: &mut Memory,
+               host: &HostView,
+               status: &HostStatus,
+               question: Option<&SshQuestion>| {
+        memory.new_cues(
+            &classify([(host, status)], false),
+            &[(host, status.clone())],
+            |_| question,
+        )
+    };
+    assert!(cue(&mut memory, &retrying, &quiet, None).is_empty());
+    assert_eq!(
+        cue(&mut memory, &identity, &quiet, None),
+        HashSet::from([2])
+    );
+    assert_eq!(
+        cue(&mut memory, &identity, &warned, None),
+        HashSet::from([2])
+    );
+    assert!(cue(&mut memory, &reachable, &warned, None).is_empty());
+    assert_eq!(
+        cue(&mut memory, &identity, &quiet, None),
+        HashSet::from([2])
+    );
+    assert_eq!(
+        cue(&mut memory, &identity, &waiting, Some(&code)),
+        HashSet::from([2])
+    );
+    assert!(cue(&mut memory, &identity, &quiet, None).is_empty());
+    assert!(cue(&mut memory, &identity, &waiting, Some(&another_code)).is_empty());
+    assert_eq!(
+        cue(&mut memory, &needs_retry, &quiet, None),
+        HashSet::from([2])
+    );
+    assert_eq!(
+        cue(&mut memory, &retrying, &waiting, Some(&retried)),
+        HashSet::from([2])
+    );
+}
 
 /// A remote host `id` aliased `alias` at `ops@<alias>.example.invalid`, in `state`: its identity is "<alias>
 /// (ops@<alias>.example.invalid)" and its short name the alias.

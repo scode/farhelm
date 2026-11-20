@@ -88,9 +88,9 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use farhelm_proto::ui_channel::{HostStateView, HostView};
+use farhelm_proto::ui_channel::{HostStateView, HostView, SshConnectionPurpose, SshQuestion};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, FontWeight, InteractiveElement,
@@ -110,7 +110,7 @@ use crate::hosts::offers::runs_newer_version;
 use crate::hosts::status::{self, HostStatus, Steps, Urgency, host_status};
 use crate::hosts::{progress_card, update};
 use crate::theme::{self, Palette, metrics};
-use crate::{session, sign_in};
+use crate::{layers, session, sign_in};
 
 /// `.host-attention-list`'s `max-height: min(280px, 45%)`: the list's cap, in pixels and as a share of the column.
 const MAX_HEIGHT: f32 = 280.;
@@ -171,6 +171,16 @@ impl Kind {
     }
 }
 
+/// The facts that turn an attention row into a call to act. A key is independent of the row's wording, so
+/// changes in attempt detail or host naming cannot replay a cue for the same problem.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum CueReason {
+    Question,
+    RetrySignIn,
+    Identity,
+    SetupOrUpdateFailed,
+}
+
 /// One host's row as one frame draws it: a snapshot, never looked up again when a button is pressed.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Row {
@@ -181,6 +191,9 @@ pub(super) struct Row {
     pub(super) words: String,
     /// A working row's run, once a run shows; `None` while only its requests are out (an empty bar) and on other rows.
     pub(super) steps: Option<Steps>,
+    cue: Option<CueReason>,
+    /// The warning has its own life even when another problem shares the row and its amber edge.
+    warning: bool,
 }
 
 /// The rows for `hosts` (each with what [`crate::hosts::status`] reads about it, in the registry's order), grouped and
@@ -196,19 +209,28 @@ pub(super) fn classify<'a>(
     let mut rows: Vec<Row> = hosts
         .into_iter()
         .filter_map(|(host, status)| {
-            let (kind, words, steps) = if let Some(sign_in) = status.sign_in {
-                (Kind::SignIn(sign_in), sign_in.words().to_owned(), None)
+            let (kind, words, steps, cue) = if let Some(sign_in) = status.sign_in {
+                (
+                    Kind::SignIn(sign_in),
+                    sign_in.words().to_owned(),
+                    None,
+                    Some(match sign_in {
+                        sign_in::Status::Waiting => CueReason::Question,
+                        sign_in::Status::Needed => CueReason::RetrySignIn,
+                    }),
+                )
             } else if let Some(live) = &status.live {
                 (
                     Kind::Working,
                     live.activity.verb().to_owned(),
                     live.steps.clone(),
+                    None,
                 )
             } else if matches!(host.state, HostStateView::Deleting { failure: None }) {
                 // The destruction has no steps to show, so the bar stays empty, as the old row's did.
-                (Kind::Working, "Deleting".to_owned(), None)
-            } else if let Some(words) = problem_words(host, status) {
-                (Kind::Problem, words, None)
+                (Kind::Working, "Deleting".to_owned(), None, None)
+            } else if let Some((words, reason)) = problem(host, status) {
+                (Kind::Problem, words, None, reason)
             } else {
                 let required = status.update? == Urgency::Required;
                 if !required && dismissed {
@@ -219,13 +241,15 @@ pub(super) fn classify<'a>(
                 } else {
                     "Update available"
                 };
-                (Kind::Update { required }, words.to_owned(), None)
+                (Kind::Update { required }, words.to_owned(), None, None)
             };
             Some(Row {
                 host: host.clone(),
                 kind,
                 words,
                 steps,
+                cue,
+                warning: kind == Kind::Problem && status.warned,
             })
         })
         .collect();
@@ -242,40 +266,8 @@ pub(super) fn classify<'a>(
 /// unacknowledged warning, every part that applies joined by "; ". Connecting, a connected host (also one on a newer
 /// build, which is usable), a skew whose required Update is on offer (an update row says it), and an environment
 /// suspended, changing or being deleted without a failure are not problems in themselves.
-pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<String> {
-    // Exhaustive, so a new phase decides here whether it needs a row.
-    let phase = match &host.state {
-        HostStateView::Unreachable { .. }
-        | HostStateView::SignInNeeded
-        | HostStateView::IdentityMismatch { .. }
-        | HostStateView::OwnedElsewhere { .. }
-        | HostStateView::IdentityUnverified { .. }
-        | HostStateView::Duplicate { .. }
-        | HostStateView::Retired { .. }
-        | HostStateView::Stopped { .. }
-        | HostStateView::Deleting { failure: Some(_) } => Some(phase::words(&host.state)),
-        HostStateView::Suspended {
-            resume_failed: Some(_),
-            ..
-        } => Some("Resume failed"),
-        HostStateView::VersionSkew { .. } if runs_newer_version(&host.state) => {
-            Some("Too new; update the helm")
-        }
-        HostStateView::VersionSkew { .. } if status.update != Some(Urgency::Required) => {
-            Some(phase::words(&host.state))
-        }
-        HostStateView::VersionSkew { .. }
-        | HostStateView::Connecting { .. }
-        | HostStateView::Connected { .. } => None,
-        // Routine lifecycle: a suspension the user or the provider chose, a change on its way, and a destruction that
-        // `classify` has already made a working row.
-        HostStateView::TensorlakeChanging { .. }
-        | HostStateView::Suspended {
-            resume_failed: None,
-            ..
-        }
-        | HostStateView::Deleting { failure: None } => None,
-    };
+fn problem(host: &HostView, status: &HostStatus) -> Option<(String, Option<CueReason>)> {
+    let (phase, reason) = phase_problem(host, status);
     // Delivery and forwarding fail independently of the phase, so they are added to its words rather than replacing
     // them, as the old line kept a connection failure beside them.
     let credentials = phase::credential_warning(host).map(|_| "Credentials not delivered");
@@ -287,7 +279,57 @@ pub(super) fn problem_words(host: &HostView, status: &HostStatus) -> Option<Stri
         .chain(tunnels)
         .chain(warning)
         .collect();
-    (!words.is_empty()).then(|| words.join("; "))
+    (!words.is_empty()).then(|| (words.join("; "), reason))
+}
+
+/// Keep the underlying reason available when another state temporarily covers its usual row.
+fn phase_problem(
+    host: &HostView,
+    status: &HostStatus,
+) -> (Option<&'static str>, Option<CueReason>) {
+    // Exhaustive, so a new phase decides here whether it needs a row.
+    match &host.state {
+        HostStateView::SignInNeeded => (
+            Some(phase::words(&host.state)),
+            Some(CueReason::RetrySignIn),
+        ),
+        HostStateView::IdentityMismatch { .. }
+        | HostStateView::OwnedElsewhere { .. }
+        | HostStateView::IdentityUnverified { .. }
+        | HostStateView::Duplicate { .. } => {
+            (Some(phase::words(&host.state)), Some(CueReason::Identity))
+        }
+        HostStateView::Unreachable { .. }
+        | HostStateView::Retired { .. }
+        | HostStateView::Stopped { .. }
+        | HostStateView::Deleting { failure: Some(_) } => (Some(phase::words(&host.state)), None),
+        HostStateView::Suspended {
+            resume_failed: Some(_),
+            ..
+        } => (Some("Resume failed"), None),
+        HostStateView::VersionSkew { .. } if runs_newer_version(&host.state) => {
+            (Some("Too new; update the helm"), None)
+        }
+        HostStateView::VersionSkew { .. } if status.update != Some(Urgency::Required) => {
+            (Some(phase::words(&host.state)), None)
+        }
+        HostStateView::VersionSkew { .. }
+        | HostStateView::Connecting { .. }
+        | HostStateView::Connected { .. } => (None, None),
+        // Routine lifecycle: a suspension the user or the provider chose, a change on its way, and a destruction that
+        // `classify` has already made a working row.
+        HostStateView::TensorlakeChanging { .. }
+        | HostStateView::Suspended {
+            resume_failed: None,
+            ..
+        }
+        | HostStateView::Deleting { failure: None } => (None, None),
+    }
+}
+
+#[cfg(test)]
+fn problem_words(host: &HostView, status: &HostStatus) -> Option<String> {
+    problem(host, status).map(|(words, _)| words)
 }
 
 /// The optional update reminders the user closed: the hosts that had an update when they did (optional and required
@@ -319,6 +361,64 @@ pub(super) struct Memory {
     /// The hosts with an update as the last frame read them: what the close control dismisses, so a dismissal records
     /// exactly the set that [`Dismissal::ended_by`] is later compared with.
     updates: HashSet<i64>,
+    /// The first snapshot establishes the problems already present. Observe transitions even with Hosts open, so
+    /// closing it later does not replay every standing problem.
+    cue_reasons: Option<HashSet<(i64, CueReason)>>,
+    /// Each connection retains only its last prompt's attempt. There can be frames between questions while
+    /// a host is still signing in, even when its host phase remains an earlier ownership refusal.
+    question_attempts: HashMap<(i64, SshConnectionPurpose), String>,
+}
+
+impl Memory {
+    /// Cue reasons the list newly represents as actionable. Keep previously seen problems while their underlying
+    /// conditions persist, since a different reason can cover them for part of a host's sign-in.
+    fn new_cues<'a>(
+        &mut self,
+        rows: &[Row],
+        hosts: &[(&HostView, HostStatus)],
+        question: impl Fn(i64) -> Option<&'a SshQuestion>,
+    ) -> HashSet<i64> {
+        let baseline = self.cue_reasons.is_none();
+        let present: HashSet<_> = hosts
+            .iter()
+            .flat_map(|(host, status)| {
+                [
+                    phase_problem(host, status).1,
+                    status.warned.then_some(CueReason::SetupOrUpdateFailed),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|reason| (host.id, reason))
+            })
+            .collect();
+        let seen = self.cue_reasons.get_or_insert_with(HashSet::new);
+        seen.retain(|reason| present.contains(reason));
+        let listed: HashSet<_> = hosts.iter().map(|(host, _)| host.id).collect();
+        self.question_attempts
+            .retain(|(host, _), _| listed.contains(host));
+        rows.iter()
+            .filter_map(|row| {
+                let host = row.host.id;
+                let warning = row.warning && seen.insert((host, CueReason::SetupOrUpdateFailed));
+                let primary = match row.cue {
+                    None => false,
+                    Some(CueReason::Question) => question(host).is_some_and(|question| {
+                        let last = self
+                            .question_attempts
+                            .entry((host, question.purpose))
+                            .or_default();
+                        let fresh = *last != question.attempt;
+                        if fresh {
+                            last.clone_from(&question.attempt);
+                        }
+                        fresh
+                    }),
+                    Some(reason) => seen.insert((host, reason)),
+                };
+                ((primary || warning) && !baseline).then_some(host)
+            })
+            .collect()
+    }
 }
 
 /// What of the list moves the session list below it when it changes: each row's host, kind, short name and state
@@ -398,24 +498,29 @@ impl SessionList {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let shown = self.read_attention(cx).filter(|_| !hosts_shown);
-        let key = shown.as_ref().map(Shown::layout_key).unwrap_or_default();
+        let key = shown
+            .as_ref()
+            .map(|(shown, _)| shown.layout_key())
+            .unwrap_or_default();
         let memory = &mut self.current.current(cx).attention;
         if memory.layout.as_ref().is_some_and(|before| *before != key) {
             cx.defer_in(window, |list, window, cx| list.attention_moved(window, cx));
         }
         memory.layout = Some(key);
-        let shown = shown?;
+        let (shown, cues) = shown?;
         Some(list(
             &shown,
             &cx.weak_entity(),
             &self.attention_scroll,
-            theme::palette(cx),
+            &cues,
+            window,
+            cx,
         ))
     }
 
     /// The rows the current UI session's hosts call for, or `None` when there are none (or no UI session). Ends the
     /// dismissal first when a host outside it has an update now.
-    fn read_attention(&mut self, cx: &mut Context<Self>) -> Option<Shown> {
+    fn read_attention(&mut self, cx: &mut Context<Self>) -> Option<(Shown, HashSet<i64>)> {
         let store = session::current_store(cx)?;
         let collections = store.read(cx).collections();
         let hosts: Vec<(&HostView, HostStatus)> = collections
@@ -441,11 +546,17 @@ impl SessionList {
             hosts.iter().map(|(host, status)| (*host, status)),
             memory.dismissal.is_some(),
         );
-        (!rows.is_empty()).then(|| Shown {
-            rows,
-            auto_updates_on: status::auto_updates_on(cx),
-            failed: status::auto_update_failed(cx),
-            launch_pending: crate::hosts::launch_in_flight(cx),
+        let cues = memory.new_cues(&rows, &hosts, |host| sign_in::pending_on(collections, host));
+        (!rows.is_empty()).then(|| {
+            (
+                Shown {
+                    rows,
+                    auto_updates_on: status::auto_updates_on(cx),
+                    failed: status::auto_update_failed(cx),
+                    launch_pending: crate::hosts::launch_in_flight(cx),
+                },
+                cues,
+            )
         })
     }
 
@@ -495,8 +606,11 @@ fn list(
     shown: &Shown,
     list: &WeakEntity<SessionList>,
     scroll: &ScrollHandle,
-    palette: &Palette,
+    cues: &HashSet<i64>,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
+    let palette = theme::palette(cx);
     let count = shown.rows.len();
     let heading = if count == 1 {
         "1 host needs attention".to_owned()
@@ -511,12 +625,20 @@ fn list(
         .min_h_0()
         .overflow_y_scroll()
         .child(
-            div().flex().flex_col().children(
-                shown
-                    .rows
-                    .iter()
-                    .map(|row| row_element(row, shown.launch_pending, list, palette)),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .children(shown.rows.iter().map(|row| {
+                    row_element(
+                        row,
+                        shown.launch_pending,
+                        list,
+                        palette,
+                        cues.contains(&row.host.id),
+                        window,
+                        cx,
+                    )
+                })),
         );
     // Two boxes for the two caps: the outer one takes at most its share of the column, the inner one at most 280
     // pixels of that, and the rows' region shrinks to what is left under the header.
@@ -690,6 +812,9 @@ fn row_element(
     launch_pending: bool,
     list: &WeakEntity<SessionList>,
     palette: &Palette,
+    cue_now: bool,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
     let id = row.host.id;
     let current = row.steps.as_ref().and_then(|steps| steps.current.as_ref());
@@ -795,9 +920,24 @@ fn row_element(
         )),
         Kind::Problem | Kind::Working | Kind::Update { .. } => None,
     };
+    let cue_anchor = (row.cue.is_some() || row.warning).then(|| {
+        let anchor = layers::Anchor::for_element(
+            format!("attention-cue-{id}-{:?}-{}", row.cue, row.warning),
+            window,
+            cx,
+        );
+        if cue_now {
+            let anchor = anchor.clone();
+            window.defer(cx, move |window, cx| {
+                layers::attention_cue(&anchor, window, cx);
+            });
+        }
+        anchor
+    });
     div()
         .id(SharedString::from(format!("host-attention-row-{id}")))
         .debug_selector(move || format!("host-attention-row-{id}"))
+        .relative()
         .flex()
         .flex_row()
         .items_center()
@@ -806,6 +946,18 @@ fn row_element(
         .child(div().flex_1().min_w_0().child(control))
         .children(action.map(|action| div().flex_none().pr(px(ROW_PAD_RIGHT)).child(action)))
         .children(sign_in.map(|action| div().flex_none().pr(px(ROW_PAD_RIGHT)).child(action)))
+        .when_some(cue_anchor, |row, anchor| {
+            row.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(px(2.))
+                    .bg(theme::color(palette.warn_bright)),
+            )
+            .child(anchor.track())
+        })
         .into_any_element()
 }
 
