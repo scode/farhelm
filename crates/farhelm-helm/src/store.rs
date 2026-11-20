@@ -189,6 +189,8 @@ fn upsert_folder_history(
 
 /// Record the launch the user explicitly selected for `create` in
 /// `launch_history`, and remember its permission and wrapper choices.
+/// A shell launch updates its own wrapper memory and leaves the remembered
+/// agent permission in place, since the shell had no mode to choose.
 /// Returns whether the history row was new. A create with no
 /// explicit selection records nothing here and returns `false`.
 ///
@@ -274,9 +276,10 @@ fn record_launch_history(
             "INSERT INTO preferences (singleton, remembered_permissions, remembered_wrapper_prefixes) \
              VALUES (1, ?1, ?2) \
              ON CONFLICT (singleton) DO UPDATE SET \
-                 remembered_permissions = excluded.remembered_permissions, \
+                 remembered_permissions = CASE WHEN ?3 THEN excluded.remembered_permissions \
+                                               ELSE preferences.remembered_permissions END, \
                  remembered_wrapper_prefixes = excluded.remembered_wrapper_prefixes",
-            rusqlite::params![permissions_word, wrappers_json],
+            rusqlite::params![permissions_word, wrappers_json, !selection.harness.is_shell()],
         )
         .context("remembering the launched permissions choice")?;
         // Trust now comes from managed-checkout Settings. Preserve the old
@@ -11432,6 +11435,51 @@ mod tests {
                 .get(&farhelm_proto::LaunchHarness::Codex),
             Some(&vec!["with-endpoint".into(), "--".into()]),
             "only a successful explicit launch can remember its wrapper"
+        );
+
+        // A successful shell launch can join recents and remember its own
+        // wrapper without replacing the last permission selected for an agent.
+        let shell = SessionInfo {
+            cwd: "/shell".into(),
+            creation_seq: Some(4),
+            launch: crate::launches::test_agent_launch(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Bash,
+                permissions: None,
+                wrapper_prefix: Some(vec!["shell-wrapper".into(), "--".into()]),
+                ..user_origin.launch.agent_selection().unwrap().clone()
+            }),
+            ..session("shell-origin", 102)
+        };
+        store
+            .record_create_history_with_destination(
+                host,
+                "identity-a",
+                &admitted_row(host, &shell),
+                HistoryPaths {
+                    canonical_cwd: &shell.cwd,
+                    display_cwd: &shell.cwd,
+                },
+                None,
+                shell.launch.agent_selection(),
+            )
+            .await
+            .expect("record an explicitly selected shell");
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.remembered_permissions.as_deref(), Some("yolo"));
+        assert_eq!(
+            preferences
+                .remembered_wrapper_prefixes
+                .get(&farhelm_proto::LaunchHarness::Bash),
+            Some(&vec!["shell-wrapper".into(), "--".into()])
+        );
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| { entry.selection.harness == farhelm_proto::LaunchHarness::Bash }),
+            "shells still show up in recent setups"
         );
 
         let custom = SessionInfo {

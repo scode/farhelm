@@ -183,6 +183,10 @@ impl Description {
             "Launched as: "
         };
         match launch {
+            SessionLaunch::Agent { selection, .. } if selection.harness.is_shell() => {
+                paragraphs.push(said(format!("{} shell · No agent", harness::name(selection.harness))));
+                paragraphs.push(vec![Piece::Words("Launched with: ".to_owned()), command]);
+            }
             SessionLaunch::Agent { selection, .. } => {
                 let stored = selection.harness.stored_permission(selection.permissions);
                 // The launcher's help is itself paragraphs (a heading and its explanation, Guarded's flags, the
@@ -275,7 +279,7 @@ pub(super) struct RowMarks {
     /// The agent mark's drawing and ink.
     pub(super) agent: (HarnessGlyph, Token),
     /// The shield's drawing and ink.
-    pub(super) permission: (Shield, Token),
+    pub(super) permission: Option<(Shield, Token)>,
     /// The pair's shared description.
     pub(super) description: Description,
 }
@@ -336,7 +340,7 @@ impl RowMarks {
                 glyph,
                 ink(harness::ink(glyph, palette).unwrap_or(palette.fg_1)),
             ),
-            permission: (shield, ink(shield.ink(palette))),
+            permission: shield.map(|shield| (shield, ink(shield.ink(palette)))),
             description: Description::of(launch, row.info.screen_yolo),
         }
     }
@@ -510,7 +514,6 @@ pub(crate) fn deleting_mark(
 pub(super) fn agent_track(row_id: &str, marks: &RowMarks, place: HelpPlace) -> impl IntoElement {
     let id = SharedString::from(format!("{row_id}{AGENT_ID_SUFFIX}"));
     let (glyph, agent_ink) = marks.agent;
-    let (shield, shield_ink) = marks.permission;
     let name = marks.description.name();
     let help = place.place(HoverHelp::paragraphs(
         marks.description.help(&format!("{id}-help")),
@@ -521,10 +524,16 @@ pub(super) fn agent_track(row_id: &str, marks: &RowMarks, place: HelpPlace) -> i
         .items_center()
         .gap(px(AGENT_TRACK_GAP))
         .child(cell(id.clone(), harness::icon(glyph), agent_ink))
-        .child(cell(
-            SharedString::from(format!("{row_id}{PERMISSION_ID_SUFFIX}")),
-            shield.icon(),
-            shield_ink,
+        .child(marks.permission.map_or_else(
+            || div().w(px(GLYPH_WIDTH)).into_any_element(),
+            |(shield, ink)| {
+                cell(
+                    SharedString::from(format!("{row_id}{PERMISSION_ID_SUFFIX}")),
+                    shield.icon(),
+                    ink,
+                )
+                .into_any_element()
+            },
         ));
     div().flex_none().child(
         StatusMark::new(id, name.clone(), help, Role::Image, name)

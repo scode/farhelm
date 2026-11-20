@@ -203,7 +203,7 @@ fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> Asked {
     .line(line)
     .cancel_answer(Answer::new(
         "Cancel",
-        HoverHelp::tooltip(ui.suspend_cancel(false)),
+        HoverHelp::tooltip(ui.suspend_cancel(None)),
         Tier::Neutral,
     ))
     .starts_on_cancel()

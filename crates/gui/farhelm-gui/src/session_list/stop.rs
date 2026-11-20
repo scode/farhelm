@@ -49,7 +49,13 @@ use crate::session;
 use crate::theme::{self, metrics};
 
 /// The menu's Stop item's hover help (the item's description line says the same at more length).
-pub(super) const MENU_HELP: &str = "Stop: end the agent and its processes, and close terminal tabs";
+pub(super) fn menu_help(row: &SessionRow) -> &'static str {
+    if row.info.launch.is_shell() {
+        "Stop: end the shell and its processes, and close terminal tabs"
+    } else {
+        "Stop: end the agent and its processes, and close terminal tabs"
+    }
+}
 
 /// What a pending Stop says beside its spinner: on its row, and in place of the open session's header's Stop label.
 pub(crate) const PROGRESS_LABEL: &str = "Stopping…";
@@ -74,17 +80,28 @@ pub(crate) fn asks(row: &SessionRow, skipped: bool) -> bool {
     !row.info.tabs.is_empty() && !skipped
 }
 
+/// Name what Stop ends in the user's session. The existing agent wording
+/// stays with other session types.
+pub(crate) fn program_word(row: &SessionRow) -> &'static str {
+    if row.info.launch.is_shell() {
+        "shell"
+    } else {
+        "agent"
+    }
+}
+
 /// The question's one sentence: whether the agent is stopped (not when it has ended) and how many tabs close. The
 /// tabless wordings are never asked from a row (a row without tabs does not ask), but a later surface whose tab count
 /// moves while it asks can reach them.
 pub(crate) fn consequence(row: &SessionRow) -> String {
     let ended = row.info.status.has_ended();
+    let program = program_word(row);
     match (row.info.tabs.len(), ended) {
-        (0, false) => "Stop the agent?".to_owned(),
+        (0, false) => format!("Stop the {program}?"),
         (0, true) => "Stop this session?".to_owned(),
-        (1, false) => "Stop the agent and close 1 terminal tab?".to_owned(),
+        (1, false) => format!("Stop the {program} and close 1 terminal tab?"),
         (1, true) => "Close 1 terminal tab?".to_owned(),
-        (tabs, false) => format!("Stop the agent and close {tabs} terminal tabs?"),
+        (tabs, false) => format!("Stop the {program} and close {tabs} terminal tabs?"),
         (tabs, true) => format!("Close {tabs} terminal tabs?"),
     }
 }
@@ -110,15 +127,22 @@ pub(crate) fn question(
     environment: Option<(ProviderUi, i64)>,
 ) -> Question<Frozen> {
     let title = HostText::from_host(row.info.title.as_str());
+    let program = program_word(row);
     let consequence = match environment {
-        Some((ui, _)) => format!("{} {}", consequence(row), environment::stop_note(ui)),
+        Some((ui, _)) => format!(
+            "{} {}",
+            consequence(row),
+            environment::stop_note(ui, program)
+        ),
         None => consequence(row),
     };
     let question = Question::new(
         "Stop confirmation",
         Answer::new(
             "Confirm stop",
-            HoverHelp::tooltip("Stop this session's agent and close its terminal tabs"),
+            HoverHelp::tooltip(format!(
+                "Stop this session's {program} and close its terminal tabs"
+            )),
             Tier::Danger,
         ),
         Frozen {
@@ -135,13 +159,15 @@ pub(crate) fn question(
     )
     .cancel_answer(Answer::new(
         "Cancel",
-        HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
+        HoverHelp::tooltip(format!(
+            "Cancel: keep the {program} and terminal tabs running"
+        )),
         Tier::Neutral,
     ))
     .keeps_focus_on_empty_click();
     match environment {
         Some((_, host)) => question.alternative(
-            environment::stop_and_suspend_answer(),
+            environment::stop_and_suspend_answer(program),
             move |frozen, _, cx| environment::stop_and_suspend(&frozen.key, host, frozen.guard, cx),
         ),
         None => question,

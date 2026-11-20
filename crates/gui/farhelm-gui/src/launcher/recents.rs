@@ -323,6 +323,9 @@ pub fn summary_before_permissions(selection: &LaunchSelection) -> String {
 /// `selection` in full, for a row's accessible name and hover help: "Codex · Model: … · Effort: … · Permissions: …",
 /// then Custom's flags.
 pub fn selection_summary(selection: &LaunchSelection) -> String {
+    if selection.harness.is_shell() {
+        return format!("{} shell", harness_label(selection.harness));
+    }
     let mut words = format!(
         "{} · {} · Permissions: {}",
         harness_label(selection.harness),

@@ -519,11 +519,7 @@ pub fn facts(action: &ApprovalAction) -> Vec<Fact> {
             session_facts(Role::Target, target, &mut facts);
             // The target's shield as the session list draws it, observed bypass included; display evidence only, never
             // a launch this request would run.
-            facts.push(Fact::Permission(Chips::of(
-                launch,
-                *screen_yolo,
-                Detail::Plain,
-            )));
+            facts.extend(Chips::of(launch, *screen_yolo, Detail::Plain).map(Fact::Permission));
             // SPEC.md: the card "says when the target session is open in the window", the one client a helm accepts
             // (One GUI at a time).
             if *attached {
@@ -733,8 +729,14 @@ enum Runs {
 /// command, which is all a restart runs. What a card shows is the stored launch: settings that changed since never
 /// reinterpret it.
 fn launch_facts(launch: &SessionLaunch, runs: Runs, facts: &mut Vec<Fact>) {
-    facts.push(Fact::Permission(Chips::of(launch, false, Detail::Launch)));
+    facts.extend(Chips::of(launch, false, Detail::Launch).map(Fact::Permission));
     match launch {
+        SessionLaunch::Agent { selection, .. } if selection.harness.is_shell() => {
+            facts.push(value("shell", crate::harness::name(selection.harness)));
+            if runs == Runs::Start {
+                facts.push(boxed("command", &launch.display_command()));
+            }
+        }
         SessionLaunch::Agent { selection, .. } => {
             facts.push(value("agent", &word(&selection.harness)));
             facts.push(optional("model", selection.model.clone()));
@@ -942,20 +944,21 @@ pub const TRUSTED_WORKSPACE: &str = "By Settings in a managed checkout; reposito
                                       commands can run without asking";
 
 impl Chips {
-    fn of(launch: &SessionLaunch, screen_yolo: bool, detail: Detail) -> Self {
-        let shield = permission::permission(launch, screen_yolo);
+    /// The card has a Permissions row only for launches with a shield.
+    fn of(launch: &SessionLaunch, screen_yolo: bool, detail: Detail) -> Option<Self> {
+        let shield = permission::permission(launch, screen_yolo)?;
         let kind = ChipKind::of(shield, launch);
         let selection = launch
             .agent_selection()
             .filter(|_| detail == Detail::Launch);
-        Chips {
+        Some(Chips {
             shield,
             kind,
             guarded: selection
                 .filter(|_| kind == ChipKind::Guarded)
                 .and_then(|selection| words::guarded_mode_name(selection.harness)),
             trust: selection.and_then(|selection| selection.workspace_trust),
-        }
+        })
     }
 
     /// The session list's shield for the launch.

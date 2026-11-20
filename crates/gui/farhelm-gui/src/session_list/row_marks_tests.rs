@@ -399,13 +399,21 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
     for (launch, shield) in cases {
         assert_eq!(
             permission(&decoded(launch.clone()), false),
-            shield,
+            Some(shield),
             "{launch}"
         );
         let marks = marks_of(&session("a").launch(launch.clone()), false, false);
-        assert_eq!(marks.permission, (shield, shield.ink(palette)), "{launch}");
+        assert_eq!(
+            marks.permission,
+            Some((shield, shield.ink(palette))),
+            "{launch}"
+        );
         let selected = marks_of(&session("a").launch(launch.clone()), false, true);
-        assert_eq!(selected.permission, (shield, palette.on_fill), "{launch}");
+        assert_eq!(
+            selected.permission,
+            Some((shield, palette.on_fill)),
+            "{launch}"
+        );
     }
     assert_eq!(Shield::Yolo.ink(palette), palette.warn);
     assert_eq!(Shield::Unknown.ink(palette), palette.warn);
@@ -426,6 +434,31 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
             Icon::PermissionUnknown
         ]
     );
+}
+
+/// The shell mark identifies the program by its stored launch type and
+/// carries no shield in either selection state. A stray status observation
+/// must not turn the missing agent permission into a bypass warning.
+#[test]
+fn shell_rows_name_the_shell_and_draw_no_permission_shield() {
+    for (word, name, glyph) in [
+        ("bash", "Bash", HarnessGlyph::Bash),
+        ("zsh", "Zsh", HarnessGlyph::Zsh),
+    ] {
+        let launch = agent(word, Value::Null, &[word]);
+        let row = session("a").launch(launch).screen_yolo();
+        for selected in [false, true] {
+            let marks = marks_of(&row, false, selected);
+            assert_eq!(marks.agent.0, glyph);
+            assert_eq!(marks.permission, None);
+            assert!(
+                marks
+                    .description
+                    .name()
+                    .starts_with(&format!("{name} shell · No agent"))
+            );
+        }
+    }
 }
 
 /// The description is the only place the shield's meaning is spelled out (several modes share one drawing), and the
@@ -615,10 +648,13 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
         (command("grok", false, json!("grok")), "always-approve"),
     ];
     for (launch, mode) in escalating {
-        assert_ne!(permission(&decoded(launch.clone()), false), Shield::Yolo);
+        assert_ne!(
+            permission(&decoded(launch.clone()), false),
+            Some(Shield::Yolo)
+        );
         assert_eq!(
             permission(&decoded(launch.clone()), true),
-            Shield::Yolo,
+            Some(Shield::Yolo),
             "{launch}"
         );
         assert_eq!(
@@ -634,10 +670,10 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
             false,
             false,
         );
-        assert_eq!(row.permission.0, Shield::Yolo);
+        assert_eq!(row.permission.map(|(shield, _)| shield), Some(Shield::Yolo));
     }
     let asserted = command("claude --yolo", true, json!("claude"));
-    assert_eq!(permission(&decoded(asserted), true), Shield::Yolo);
+    assert_eq!(permission(&decoded(asserted), true), Some(Shield::Yolo));
     for unread in [
         agent("codex", json!("guarded"), &["codex"]),
         legacy("claude --dangerously-skip-permissions", "claude"),

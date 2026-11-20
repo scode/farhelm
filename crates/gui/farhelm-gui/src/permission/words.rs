@@ -127,7 +127,9 @@ const fn guarded_mode(harness: LaunchHarness) -> Option<&'static str> {
         LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Pi
-        | LaunchHarness::OpenCode => None,
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     }
 }
 

@@ -59,6 +59,60 @@ fn a_word_and_enter_choose_it_and_empty_the_box(cx: &mut TestAppContext) {
     assert!(search_focused(cx), "focus stays in the box");
 }
 
+/// An exact shell word preselects its result, and the second Enter sends
+/// the normal create. An existing Guarded choice belongs to the agent draft
+/// and must never become a shell option or trigger an escalation banner.
+fn assert_shell_shortcut(cx: &mut TestAppContext, word: &str, harness: LaunchHarness) {
+    let (mut helm, cx) = new_launcher(cx);
+    assert!(search_focused(cx));
+    type_in(cx, "codex");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Guarded));
+    test_support::frame(cx);
+    assert!(cx.debug_bounds("launcher-permissions-row").is_some());
+
+    type_in(cx, word);
+    assert_eq!(search_text(cx), word);
+    assert!(results_shown(cx), "typing a shell word opens its results");
+    let results = read(cx, |launcher, _, cx| launcher.search_results(cx));
+    assert_eq!(
+        results.rows.get(results.default),
+        Some(&super::search::Row::Harness(harness))
+    );
+    assert_eq!(
+        results.rows[results.default].group(),
+        super::search::Group::Shells
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(harness));
+    assert_eq!(draft(cx).agent.permissions, None);
+    assert!(search_focused(cx));
+    assert_eq!(search_text(cx), "");
+    test_support::frame(cx);
+    assert!(cx.debug_bounds("launcher-permissions-row").is_none());
+    assert!(cx.debug_bounds("launcher-escalation").is_none());
+    keys(cx, "enter");
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("expected one create for {word}, got {}", sent.len());
+    };
+    let launch = &create.body.as_ref().unwrap()["launch"];
+    assert_eq!(launch["harness"], word);
+    assert!(launch["permissions"].is_null());
+}
+
+/// The Bash shortcut follows the normal create path and clears agent options.
+#[gpui::test]
+fn exact_bash_word_picks_and_launches_without_agent_options(cx: &mut TestAppContext) {
+    assert_shell_shortcut(cx, "bash", LaunchHarness::Bash);
+}
+
+/// Zsh reaches the same keyboard path with its own launch type on the wire.
+#[gpui::test]
+fn exact_zsh_word_picks_and_launches_without_agent_options(cx: &mut TestAppContext) {
+    assert_shell_shortcut(cx, "zsh", LaunchHarness::Zsh);
+}
+
 /// Composer search must draw its older-model group while keeping the group's rows in keyboard order.
 /// A partial model query lets Down move from the current match through the heading to the older match.
 #[gpui::test]

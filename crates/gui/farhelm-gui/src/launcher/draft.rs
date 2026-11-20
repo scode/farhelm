@@ -925,13 +925,16 @@ impl LaunchDraft {
     /// Whether switching agents since `before` made the shown permission more dangerous (SPEC.md: "Chat and approve
     /// are safest, then smart approve and Guarded, then YOLO, custom flags and the agent's own setting; only a move to
     /// a later group triggers the banner"). Before the first agent, only a permission chosen deliberately counts. A
-    /// switch made from the Command tab, or onto it, raises nothing.
+    /// switch made from the Command tab, onto it, or between a shell and an
+    /// agent compares no permissions for the shell.
     ///
     /// Public because a batch of edits that counts as one action compares once, from before the whole batch: applying
     /// a template is judged after all its edits (SPEC_impl.md, "Launch templates"), not edit by edit.
     pub fn escalation_since(&self, before: &LaunchDraft) -> Option<Escalation> {
         let harness = self.agent.harness?;
         if before.agent.harness == Some(harness)
+            || harness.is_shell()
+            || before.agent.harness.is_some_and(LaunchHarness::is_shell)
             || before.tab != Tab::Agent
             || self.tab != Tab::Agent
         {
@@ -1437,6 +1440,8 @@ pub const fn harness_label(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Pi => "Pi",
         LaunchHarness::Omp => "OMP",
         LaunchHarness::OpenCode => "OpenCode",
+        LaunchHarness::Bash => "Bash",
+        LaunchHarness::Zsh => "Zsh",
     }
 }
 
@@ -1466,6 +1471,17 @@ const fn danger(permission: Option<LaunchPermission>) -> u8 {
 /// What an agent switch cleared of the user's deliberate choices, in one sentence, or `None` when it cleared nothing
 /// (old `reconciliation_reset_reason` in `launch_composer.rs` at the reference commit).
 fn reconciliation_notice(before: &LaunchSelection, after: &LaunchSelection) -> Option<String> {
+    if after.harness.is_shell() {
+        // A shell has no agent choices. Keep one notice when a switch
+        // discards them, using the shell's name to explain the change.
+        return (before.model.is_some() || before.effort.is_some() || before.permissions.is_some())
+            .then(|| {
+                format!(
+                    "Cleared agent choices. {} starts a shell without model, effort or permission settings.",
+                    harness_label(after.harness)
+                )
+            });
+    }
     let mut cleared = Vec::new();
     if before.model.is_some() && after.model.is_none() {
         cleared.push("selected model is not in this harness's Farhelm offering");

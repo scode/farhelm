@@ -291,6 +291,7 @@ impl Rows<'_> {
             Field::Agent => {
                 let options = LaunchHarness::ALL
                     .iter()
+                    .filter(|agent| fields.kind != Some(LauncherKind::Command) || !agent.is_shell())
                     .map(|&agent| (agent, harness_label(agent).to_owned()))
                     .collect();
                 let chosen = fields.agent.unwrap_or(LaunchHarness::ALL[0]);
@@ -498,6 +499,11 @@ impl Rows<'_> {
     fn permissions(&self) -> Vec<AnyElement> {
         let fields = &self.editor.draft.fields;
         let options = permission_options(fields.agent);
+        if options.is_empty() {
+            // A template may carry a permission when its type is changed
+            // to a shell. Leave its field removable without offering a mode.
+            return vec![div().child("None (shell)").into_any_element()];
+        }
         let mut controls = vec![self.choice(
             Field::Permissions,
             options,

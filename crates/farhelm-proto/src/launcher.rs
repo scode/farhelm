@@ -778,6 +778,12 @@ pub fn apply_template(
                     next.prompt = None;
                 }
             }
+            LauncherKind::Command if agent.is_shell() => {
+                return Err(refuse(
+                    "agent type",
+                    "Bash and Zsh are shell session types. Choose one on the Agent tab.".into(),
+                ));
+            }
             LauncherKind::Command => next.command_agent = Some(agent),
         }
     }
@@ -1751,6 +1757,44 @@ mod tests {
             "the agent tab's draft is untouched"
         );
         assert_eq!(applied.command, "codex {farhelm_args}");
+    }
+
+    /// Shell templates can start an ordinary launch or quick launch. The
+    /// same shell choice cannot become a declared agent on the Command tab.
+    #[test]
+    fn a_shell_template_is_eligible_and_only_applies_on_the_agent_tab() {
+        let catalog = catalog();
+        let context = context(&catalog, &[], false);
+        for shell in [LaunchHarness::Bash, LaunchHarness::Zsh] {
+            let launch = template(
+                "shell",
+                TemplateFields {
+                    agent: Some(shell),
+                    ..TemplateFields::default()
+                },
+            );
+            assert!(quick_launch_eligible(&launch.fields));
+            let before = LauncherState {
+                harness: Some(LaunchHarness::Codex),
+                model: Some("gpt-6-luna".into()),
+                permissions: Some(LaunchPermission::Guarded),
+                ..LauncherState::default()
+            };
+            let applied = apply_template(&before, &launch, &context).unwrap();
+            assert_eq!(applied.harness, Some(shell));
+            assert_eq!(applied.model, None);
+            assert_eq!(applied.permissions, None);
+            let command = LauncherState {
+                kind: Some(LauncherKind::Command),
+                ..before
+            };
+            assert_eq!(
+                apply_template(&command, &launch, &context)
+                    .unwrap_err()
+                    .field,
+                "agent type"
+            );
+        }
     }
 
     /// Spec: templates stack, the later winning where they overlap, and a

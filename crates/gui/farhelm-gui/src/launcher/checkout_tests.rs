@@ -20,7 +20,9 @@ use super::request::{
     Account, CONVERSATION_IN_CHECKOUT, Preview, Recipes, SELECT_REPOSITORY, Target,
     UNVERIFIED_HOST, WAIT_FOR_PREVIEW,
 };
-use super::view_tests::{answer_catalog, draft, launcher_on, name_of, read, shown_refusal};
+use super::view_tests::{
+    answer_catalog, click_in_body, draft, launcher_on, name_of, read, shown_refusal,
+};
 use crate::layers;
 use crate::test_support::{self, settle};
 
@@ -1871,8 +1873,13 @@ fn a_guarded_wait_does_not_follow_a_taken_base_name(cx: &mut TestAppContext) {
 #[gpui::test]
 fn an_edit_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
     let (mut helm, cx, preview) = guarded_waiting(cx);
-    test_support::click(cx, "launcher-prompt-row");
+    click_in_body(cx, "launcher-prompt-row");
     test_support::keys(cx, "h i");
+    assert_eq!(
+        draft(cx).prompt,
+        "hi",
+        "the premise: the edit reached the draft"
+    );
     helm.reply(
         preview.id,
         200,

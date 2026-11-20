@@ -66,33 +66,29 @@ pub(crate) fn hover_help(row: &SessionRow) -> String {
     format!(
         "{} — {}",
         offer_label(row.info.restart_offer),
-        offer_continuation(
-            &row.info.status,
-            row.info.restart_offer,
-            row.info.agent_kind
-        )
+        offer_continuation(row)
     )
 }
 
-/// What a restart of a session with `status`, `offer` and `kind` does, or why it cannot, as the clause that follows the
+/// What a restart of this session does, or why it cannot, as the clause that follows the
 /// accessible name in the hover help: a lead for the two states where the terminal is gone for a reason the user should
 /// hear first (interrupted, never started), the offer's own clause, and for an uncaptured conversation the invitation to
 /// send feedback. Built from authored clauses, so the agent's name and "Restart" keep their case. The header's Restart
 /// menu shows it, with its first letter raised and no closing period, as its plain Restart's description, as the old
 /// menu showed the same explanation there.
-pub(crate) fn offer_continuation(
-    status: &SessionStatus,
-    offer: RestartOffer,
-    kind: AgentKind,
-) -> String {
+pub(crate) fn offer_continuation(row: &SessionRow) -> String {
+    let status = &row.info.status;
     let ended = status.has_ended();
-    let offered = offer_clause(offer, kind, ended);
-    let note = feedback_note(offer, ended);
+    let offered = offer_clause(row, ended);
+    let note = feedback_note(row.info.restart_offer, ended);
     match status {
         SessionStatus::Interrupted => {
             format!("interrupted by a host reboot or a Farhelm update — {offered}.{note}")
         }
-        SessionStatus::Error { .. } => format!("the agent never started — {offered}.{note}"),
+        SessionStatus::Error { .. } => {
+            let program = super::stop::program_word(row);
+            format!("the {program} never started — {offered}.{note}")
+        }
         SessionStatus::Running
         | SessionStatus::Waiting
         | SessionStatus::Idle
@@ -105,10 +101,13 @@ pub(crate) fn offer_continuation(
 /// unavailable clause names Replace, since SPEC.md makes Replace the way such a session starts over. No "Restart is
 /// unavailable" here: the accessible name says so, and the hover help joins the two. The interrupted card's text
 /// (`session_pane/card.rs`) is built from the same clause, so the card and the hover help cannot drift apart.
-pub(crate) fn offer_clause(offer: RestartOffer, kind: AgentKind, ended: bool) -> String {
-    match offer {
+pub(crate) fn offer_clause(row: &SessionRow, ended: bool) -> String {
+    match row.info.restart_offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation".to_owned(),
-        RestartOffer::NotCaptured => not_captured_clause(kind, ended, REPLACE_STARTS_OVER),
+        RestartOffer::NotCaptured => not_captured_clause(row.info.agent_kind, ended, REPLACE_STARTS_OVER),
+        RestartOffer::NoConversationReporting if row.info.launch.is_shell() => {
+            "this shell has no conversation to resume, so Replace starts a fresh shell".to_owned()
+        }
         RestartOffer::NoConversationReporting => {
             "Farhelm has no conversation reporting for this session's agent, so Replace starts it over"
                 .to_owned()

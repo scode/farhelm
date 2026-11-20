@@ -655,7 +655,7 @@ impl SessionList {
             (
                 bulk::Lifecycle::Stop,
                 bulk::STOP_ID,
-                "Stop the agents and close terminal tabs in the marked sessions currently shown",
+                "Stop the marked sessions currently shown and close their terminal tabs",
                 Tier::Neutral,
                 &self.marking.stop_focus,
                 unavailable[0],

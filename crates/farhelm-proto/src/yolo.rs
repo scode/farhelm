@@ -6,7 +6,8 @@
 //! own-setting launches both require the conservative gate; the sidebar
 //! distinguishes them instead of claiming own-setting is known bypass.
 //! Omitted Pi, OpenCode, OMP and Goose permissions retain their historical
-//! YOLO meaning. A command launch uses the user's assertion. Farhelm never
+//! YOLO meaning. Plain shell sessions have no permission mode and do not
+//! trigger this gate. A command launch uses the user's assertion. Farhelm never
 //! reads a command line to decide or second-guess it (SPEC.md, Creation).
 //!
 //! The `env`-prefix helpers below are not classification: they serve the
@@ -56,19 +57,21 @@ pub fn is_env_program(program: &str) -> bool {
 
 /// Whether admission must treat a stored selection as YOLO.
 ///
-/// Own-setting cannot prove a safety gate and therefore also returns true.
+/// An agent's own setting cannot prove a safety gate and therefore returns
+/// true. Shells do not run an agent, so the absence of a mode is intentional.
 /// New requests must be compiled first; this function never upgrades an older
 /// missing permission to today's guarded default.
 pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
-    selection
-        .harness
-        .stored_permission(selection.permissions)
-        .is_none_or(|permission| {
-            matches!(
-                permission,
-                LaunchPermission::Yolo | LaunchPermission::Custom
-            )
-        })
+    !selection.harness.is_shell()
+        && selection
+            .harness
+            .stored_permission(selection.permissions)
+            .is_none_or(|permission| {
+                matches!(
+                    permission,
+                    LaunchPermission::Yolo | LaunchPermission::Custom
+                )
+            })
 }
 
 #[cfg(test)]
@@ -144,6 +147,14 @@ mod tests {
         }
 
         assert!(selection_is_yolo(&selection(LaunchHarness::Codex, None)));
+        // Like a terminal tab, a shell has no permission choice and needs
+        // no YOLO confirmation. Cursor's missing value still means own-setting.
+        for shell in [LaunchHarness::Bash, LaunchHarness::Zsh] {
+            assert!(shell.is_shell());
+            assert_eq!(shell.omitted_permission(), None);
+            assert!(!selection_is_yolo(&selection(shell, None)));
+        }
+        assert!(selection_is_yolo(&selection(LaunchHarness::Cursor, None)));
         assert!(!selection_is_yolo(&selection(
             LaunchHarness::Codex,
             Some(LaunchPermission::Guarded)

@@ -89,6 +89,9 @@ impl FakeHarness {
                     LaunchHarness::OpenCode => "opencode",
                     LaunchHarness::Grok => "grok",
                     LaunchHarness::Antigravity => "agy",
+                    LaunchHarness::Bash | LaunchHarness::Zsh => {
+                        unreachable!("the vendor fixture covers agent executables")
+                    }
                 })
                 .to_string_lossy()
                 .into_owned(),
@@ -125,7 +128,9 @@ impl FakeHarness {
                     "--model".to_string(),
                     model.clone(),
                 ]),
-                LaunchHarness::Grok => unreachable!("Grok has no supported model"),
+                LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                    unreachable!("this launch type has no model")
+                }
             }
         }
         if let Some(effort) = selection.effort {
@@ -149,7 +154,9 @@ impl FakeHarness {
                 }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
                 LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-                LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
+                LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                    unreachable!("this launch type has no effort")
+                }
             }
         }
         if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -161,7 +168,11 @@ impl FakeHarness {
                 LaunchHarness::OpenCode => Some("--auto"),
                 LaunchHarness::Cursor => Some("--force"),
                 LaunchHarness::Grok => Some("--always-approve"),
-                LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
+                LaunchHarness::Goose
+                | LaunchHarness::Pi
+                | LaunchHarness::Omp
+                | LaunchHarness::Bash
+                | LaunchHarness::Zsh => None,
             };
             if let Some(flag) = flag {
                 argv.push(flag.to_string());
@@ -293,7 +304,10 @@ pub(crate) fn fake_agent_launch(
         LaunchHarness::Pi => Some(&["--session"]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
         LaunchHarness::Antigravity => Some(&["--conversation"]),
-        LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+        LaunchHarness::Cursor
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     };
     let resume = suffix.map(|suffix| {
         let mut resume = argv.clone();
@@ -606,7 +620,9 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Omp
             | LaunchHarness::Antigravity
             | LaunchHarness::OpenCode => "--model",
-            LaunchHarness::Grok => unreachable!("Grok has no supported model"),
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                unreachable!("this launch type has no model")
+            }
         };
         assert!(
             words.windows(2).any(|pair| pair == [model_flag, model]),
@@ -632,7 +648,9 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                unreachable!("this launch type has no effort")
+            }
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
@@ -642,7 +660,9 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                unreachable!("this launch type has no effort")
+            }
         };
         assert!(
             words
@@ -689,7 +709,11 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::OpenCode => "--auto",
             LaunchHarness::Cursor => "--force",
             LaunchHarness::Grok => "--always-approve",
-            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => return,
+            LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => return,
         };
         assert!(
             words.iter().any(|word| word == flag),

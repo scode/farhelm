@@ -154,7 +154,9 @@ fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity => {
+        | LaunchHarness::Antigravity
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => {
             anyhow::bail!("this harness has no managed-checkout trust setting")
         }
     }
@@ -181,7 +183,9 @@ fn agent_trust_state(
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity => {
+        | LaunchHarness::Antigravity
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => {
             anyhow::bail!("this harness has no managed-checkout trust setting")
         }
     };

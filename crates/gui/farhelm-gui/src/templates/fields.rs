@@ -209,7 +209,10 @@ impl Field {
             Field::Model => agent_kind && fields.agent.is_none_or(LaunchHarness::offers_model),
             Field::Effort => agent_kind && fields.agent.is_none_or(LaunchHarness::offers_effort),
             Field::Permissions => {
-                agent_kind && fields.agent.is_none_or(|agent| !agent.offers_only_yolo())
+                agent_kind
+                    && fields
+                        .agent
+                        .is_none_or(|agent| !agent.is_shell() && !agent.offers_only_yolo())
             }
             Field::Wrapper => agent_kind,
             Field::Container => false,
@@ -227,8 +230,14 @@ impl Field {
         if self == Field::Container {
             return Some(farhelm_proto::RETIRED_CONTAINER_REASON.to_owned());
         }
+        let shell = fields.agent.is_some_and(LaunchHarness::is_shell);
+        if self == Field::Agent && shell && fields.kind == Some(LauncherKind::Command) {
+            return Some(
+                "Bash and Zsh are shell session types. Choose one on the Agent tab.".to_owned(),
+            );
+        }
         let fits = if self == Field::Model {
-            fields.kind == Some(LauncherKind::Agent)
+            fields.kind == Some(LauncherKind::Agent) && !shell
         } else {
             self.offered(fields)
         };
@@ -322,6 +331,9 @@ impl Field {
 /// template may supply the agent. An explicit choice equal to the agent's default stays its own choice: hiding it would
 /// make otherwise valid stored templates unsaveable.
 pub fn permission_options(agent: Option<LaunchHarness>) -> Vec<(Option<LaunchPermission>, String)> {
+    if agent.is_some_and(LaunchHarness::is_shell) {
+        return Vec::new();
+    }
     let mut options = vec![(None, format!("{} (reset)", permission_label(agent, None)))];
     options.extend(
         LaunchPermission::ALL

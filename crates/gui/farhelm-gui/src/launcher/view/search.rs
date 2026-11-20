@@ -57,7 +57,9 @@ use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
-use crate::launcher::recents::{destination_label, permission_value, summary_before_permissions};
+use crate::launcher::recents::{
+    destination_label, permission_value, selection_summary, summary_before_permissions,
+};
 use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::theme::{self, metrics};
@@ -651,6 +653,7 @@ fn recent_lines(
         first.host(&destination)
     };
     let first = first.text(" · ").host(placement);
+    let shell = selection.harness.is_shell();
     // The old second line's `--fg-1`, and `--on-accent-dim` on the selected row's fill.
     let quiet = if selected {
         palette.on_accent_dim
@@ -670,18 +673,21 @@ fn recent_lines(
                 .mt(px(2.))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(quiet))
-                // A custom model id is host-supplied text, so the line is drawn escaped.
-                .child(
-                    HostSentence::new(part("selection"))
-                        .host(&HostText::from_host(summary_before_permissions(selection)))
-                        .text(" · Permissions: "),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .when(yolo, |word| word.text_color(theme::color(palette.danger)))
-                        .child(permission_value(selection)),
-                ),
+                .when(shell, |line| line.child(selection_summary(selection)))
+                .when(!shell, |line| {
+                    // A custom model id is host-supplied text, so the line is drawn escaped.
+                    line.child(
+                        HostSentence::new(part("selection"))
+                            .host(&HostText::from_host(summary_before_permissions(selection)))
+                            .text(" · Permissions: "),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .when(yolo, |word| word.text_color(theme::color(palette.danger)))
+                            .child(permission_value(selection)),
+                    )
+                }),
         )
         .into_any_element()
 }

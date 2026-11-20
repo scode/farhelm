@@ -282,6 +282,10 @@ pub enum Icon {
     HarnessOpenCode,
     /// A command no agent type was declared for: Farhelm's own window with a prompt.
     HarnessTerminal,
+    /// Farhelm's shell window with a dollar prompt.
+    HarnessBash,
+    /// Farhelm's shell window with a percent prompt.
+    HarnessZsh,
     /// A shield struck through: a session whose launch is YOLO, or was seen running without checks.
     PermissionYolo,
     /// A plain shield: an agent launch in guarded or an approval mode, or a command asserted not to be YOLO.
@@ -439,6 +443,8 @@ impl Icon {
         Icon::HarnessAntigravity,
         Icon::HarnessOpenCode,
         Icon::HarnessTerminal,
+        Icon::HarnessBash,
+        Icon::HarnessZsh,
         Icon::PermissionYolo,
         Icon::PermissionShielded,
         Icon::PermissionOwnSetting,
@@ -543,6 +549,8 @@ impl Icon {
             Icon::HarnessAntigravity => "icons/harness-antigravity.svg",
             Icon::HarnessOpenCode => "icons/harness-opencode.svg",
             Icon::HarnessTerminal => "icons/harness-terminal.svg",
+            Icon::HarnessBash => "icons/harness-bash.svg",
+            Icon::HarnessZsh => "icons/harness-zsh.svg",
             Icon::PermissionYolo => "icons/permission-yolo.svg",
             Icon::PermissionShielded => "icons/permission-shielded.svg",
             Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
@@ -661,6 +669,8 @@ impl Assets {
             "icons/harness-terminal.svg" => {
                 Some(include_bytes!("../assets/icons/harness-terminal.svg"))
             }
+            "icons/harness-bash.svg" => Some(include_bytes!("../assets/icons/harness-bash.svg")),
+            "icons/harness-zsh.svg" => Some(include_bytes!("../assets/icons/harness-zsh.svg")),
             "icons/permission-yolo.svg" => {
                 Some(include_bytes!("../assets/icons/permission-yolo.svg"))
             }

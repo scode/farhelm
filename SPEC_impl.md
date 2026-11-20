@@ -5065,21 +5065,23 @@ the helm's remembered word. This prevents default or forced YOLO from becoming a
 preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same boundary: passing
 through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects the real default.
 Preferences written before this change retain their value until the next structured launch; the stored word does not say
-which harness supplied it. No second default-mode table or preference provenance is kept.
+which harness supplied it. Bash and Zsh have no mode to remember. They retain recent setups and per-shell wrapper memory
+while leaving the remembered agent permission untouched. Their omitted permissions have no admission or shield meaning.
+No second default-mode table or preference provenance is kept.
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
 replay rather than after each inner edit. Between harnesses, the comparison uses effective request permissions,
 including passive memory seeds. Before the first harness, only an explicit permission choice counts; a passive memory
 seed or displayed default cannot trigger the notice. Permissions are ordered as Chat/Approve, SmartApprove/Guarded, then
-YOLO/Custom/own-setting. The existing reconciliation and remembered-choice rules are unchanged. One transient notice
-retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection evidence or cache
-contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. Notice generations fence
-queued Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and a new opening or
-prefill clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved draft. The banner's
-slide and the permission outline's fade are the component layer's one-shot transitions, keyed on the banner's
-generation; its eight seconds are a ticker deadline counted only while it is neither hovered nor holding focus, and,
-unlike the old app's, they keep running while the window is inactive (a recorded deviation,
+YOLO/Custom/own-setting. Switching to or from a shell skips this comparison, since the shell has no permission mode. One
+transient notice retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection
+evidence or cache contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. Notice
+generations fence queued Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and
+a new opening or prefill clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved
+draft. The banner's slide and the permission outline's fade are the component layer's one-shot transitions, keyed on the
+banner's generation; its eight seconds are a ticker deadline counted only while it is neither hovered nor holding focus,
+and, unlike the old app's, they keep running while the window is inactive (a recorded deviation,
 `crates/gui/farhelm-gui/src/launcher/view/escalation.rs`). Reduced motion drops the slide and keeps the outline,
 unfaded, while the banner shows. Removing the notice's controls returns focus through the existing launcher helper.
 
@@ -5178,7 +5180,10 @@ installation it is on, so it follows an open session the sidebar's filter hides
   existing Generic kind, with no resume template or capture machinery. The structured harness launches `cursor-agent`.
   Models use `--model`, with no separate effort flag. The UI preserves its harness in launch intent while explicitly
   disclosing the lack of tracking and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration
-  kind. Protocol 29 adds Grok as both a structured harness and a durable agent kind. Its compiler now emits
+  kind. Protocol 81 adds Bash and Zsh harness variants on the same Generic kind. Their start commands resolve `bash` and
+  `zsh` from PATH after the ordinary launch environment setup. The compiler leaves the Farhelm argument slot in the
+  stored launch, and the Generic integration supplies no arguments there. Shells compose neither a resume command nor an
+  agent option. Protocol 29 adds Grok as both a structured harness and a durable agent kind. Its compiler now emits
   `grok --no-leader --permission-mode auto` for guarded and `grok --no-leader --always-approve` for YOLO, refuses model
   and effort choices, and retains those flags before `--resume {conversation} {farhelm_args}` as argv elements. The
   dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity

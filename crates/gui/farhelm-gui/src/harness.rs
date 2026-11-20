@@ -35,6 +35,8 @@ pub(crate) const fn glyph(harness: LaunchHarness) -> HarnessGlyph {
         LaunchHarness::Omp => HarnessGlyph::Omp,
         LaunchHarness::Grok => HarnessGlyph::Grok,
         LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
+        LaunchHarness::Bash => HarnessGlyph::Bash,
+        LaunchHarness::Zsh => HarnessGlyph::Zsh,
     }
 }
 
@@ -72,6 +74,8 @@ pub(crate) const fn name(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Omp => "OMP",
         LaunchHarness::Grok => "Grok",
         LaunchHarness::OpenCode => "OpenCode",
+        LaunchHarness::Bash => "Bash",
+        LaunchHarness::Zsh => "Zsh",
     }
 }
 
@@ -95,7 +99,9 @@ pub(crate) const fn screen_yolo_mode(harness: LaunchHarness) -> Option<&'static 
         | LaunchHarness::Pi
         | LaunchHarness::Omp
         | LaunchHarness::Antigravity
-        | LaunchHarness::OpenCode => None,
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     }
 }
 
@@ -115,6 +121,8 @@ pub(crate) const fn icon(glyph: HarnessGlyph) -> Icon {
         HarnessGlyph::Grok => Icon::HarnessGrok,
         HarnessGlyph::OpenCode => Icon::HarnessOpenCode,
         HarnessGlyph::Terminal => Icon::HarnessTerminal,
+        HarnessGlyph::Bash => Icon::HarnessBash,
+        HarnessGlyph::Zsh => Icon::HarnessZsh,
     }
 }
 
@@ -134,7 +142,11 @@ pub(crate) const fn ink(glyph: HarnessGlyph, palette: &Palette) -> Option<Token>
         HarnessGlyph::Grok => Some(palette.harness[5]),
         HarnessGlyph::OpenCode => Some(palette.harness[6]),
         HarnessGlyph::Antigravity => Some(palette.harness[7]),
-        HarnessGlyph::Codex | HarnessGlyph::Goose | HarnessGlyph::Terminal => None,
+        HarnessGlyph::Codex
+        | HarnessGlyph::Goose
+        | HarnessGlyph::Terminal
+        | HarnessGlyph::Bash
+        | HarnessGlyph::Zsh => None,
     }
 }
 

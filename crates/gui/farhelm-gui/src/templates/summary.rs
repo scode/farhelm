@@ -178,6 +178,9 @@ pub(crate) fn permission_label(
             None => "Agent-dependent mode".to_owned(),
         };
     };
+    if harness.is_shell() {
+        return "None (shell)".to_owned();
+    }
     match harness.request_permission(permission) {
         Some(LaunchPermission::Guarded) => guarded_mode_name(harness)
             .unwrap_or_else(|| permission_display(Some(LaunchPermission::Guarded)))
