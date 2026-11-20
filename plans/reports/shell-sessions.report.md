@@ -75,3 +75,81 @@ An independent source reviewer confirmed the launcher tests exercise real scroll
 draft removes the TODO entry. The review prompted corrections to the Delete spec and Rustdoc, a stronger live-terminal
 test premise, and neutral progress wording if the session row is missing. The revised #4336 title and description passed
 a separate cold read.
+
+### Landing
+
+#### Since the previous landing attempt
+
+The landing two rounds earlier stopped this plan because six existing tests failed, and sent it back with instructions
+to fix each at its cause, finish the open review items and run the whole workspace suite. An independent reviewer and I
+checked the redelivery against those instructions; all of it is done:
+
+- The helm test now checks a named conversation start only for launch types that offer one, and checks that Bash and Zsh
+  refuse it.
+- The five launcher tests failed because of how the tests click, not because the launcher changed for users. The new
+  Shells row makes the launcher's scrolling body one row longer, and the tests clicked at the middle of a field that was
+  scrolled out of view, which in a test lands on the pinned footer (Cancel, in two of them). The body already scrolled
+  before shells at the app's usual window size; a user scrolls or tabs to a field, and a pointer cannot click a field
+  that is out of view. The tests now scroll a control into view and check it is visible before clicking. The guarded
+  launch test still proves that an edit cancels a launch waiting on the guarded-mode questions.
+- A shell session's Delete reads "Stopping shell…" in its row, in the open session's header and over its terminal, with
+  a test of all three. When the session's row is not in the list at all, all sessions, agent ones included, now read a
+  plain "Stopping…" there, not "Stopping agent…"; the report describes this as a shell case only.
+- SPEC.md now says a shell reads Running while its screen changes and Idle once the screen has been still for a few
+  seconds, so `top` reads Running and a command that prints nothing for a while reads Idle.
+
+#### What landed with it
+
+Main gained desktop-login-shell-path in the previous round: the desktop app now reads your login shell's PATH at startup
+for the programs it runs, and hands sessions the PATH it was started with. Shell sessions start through the same path as
+agent sessions, so they get that starting PATH too, and their login shell builds PATH once as before. The two plans
+touch no common files, and the combined tree was built and tested as listed below. The report's sentence that main had
+gained only bookkeeping since its base is out of date for that reason.
+
+#### Fixes made while landing
+
+One wording change, folded into [#4336](https://github.com/scode/farhelm/pull/4336/changes) (the earlier landing's own
+fix PR, which the executor extended): the changelog entry's `farhelm spawn` sentence read like a feature, and now says
+it works from inside the shell as it does from anything else run in a session, the caveat the earlier answer asked for.
+It changes no code.
+
+#### Checks
+
+The plan changes the protocol, the helm's launches and approvals, the supervisor, the app's launcher, session rows,
+header and Delete, and the docs, and main had gained desktop-login-shell-path since the executor's last run, so the
+landing ran the whole workspace suite, the desktop app's tests, the app's end-to-end smoke and the four lint (clippy)
+runs on the maintainer's own test machine (an arm64 Linux VM that builds and tests the tree itself), and the screenshot
+comparisons, the docs website build and the small checks locally on x86_64.
+
+On the plan as delivered, stacked on main with desktop-login-shell-path:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine
+  (`63eededc-6a12-4ca6-8e43-5f139afe42cb`): all 8169 tests passed, with no runtime skips. The first attempt
+  (`93fc9017-ab1a-4548-a467-c7ec04f92ed7`) never ran a test: the compiler building the helm's tests was killed, most
+  likely by the test machine running out of memory, as also happened once in the earlier attempt. The rerun on the same
+  tree built and passed.
+- `cargo nextest run -p farhelm-desktop`, on the test machine (`43484ad3-42df-4a42-a17c-eb2dcca218e1`): all 180 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (`4a4e8ba9-db9d-4b44-a78f-779792deebc7`): 49 of 50 steps
+  passed and the paste step skipped, as it always does on Linux.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's two
+  clippy runs (with and without the `agent` feature), on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py`, locally (`0d70c746-e6fc-454f-a71c-ea9382af216d`): passed.
+- `cd website && bun install --frozen-lockfile && bun run build`, locally: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and
+  `python3 -B scripts/test-gui-e2e-smoke.py`, locally: passed.
+
+The landing's wording change to the changelog entry changes no code, so the runs above were reused for it;
+`dprint check` and the changelog check passed again locally.
+
+Skipped: a run with a real Zsh, which the test machines lack (the tests check Zsh's selection and command line), and a
+macOS run, which the release test covers.
+
+#### Things you should know that the report does not say
+
+- With Bash as your login shell, starting a Bash session runs your `.bashrc` twice (once for the login shell, once for
+  the session's own Bash), so a `.bashrc` that adds to PATH unconditionally can list a directory twice in that session.
+- No screenshot reference covers the launcher's Shells row or the shell marks; the earlier landing's note that the shell
+  marks look soft at 1x still applies.
+- The helm's refusal of a model choice says "a shell session does not accept a model choice", although the check would
+  also apply to any future launch type without models. Harmless today.
