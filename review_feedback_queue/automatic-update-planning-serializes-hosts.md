@@ -52,3 +52,20 @@ Provenance: trailing-review run `1e4abedb-1946-4bfb-93a4-fd2f4e241acd`; `g139/f2
 `a029/a029-v6`, `a030/g140-f3`, `a054/g140-f3`, `a058/g108-sequential`. These are original reviewer identities for this
 concern, not additional bugs. Full revisions, withdrawals and independent verdicts remain in the private review
 evidence. No fix or triage decision was executed.
+
+## Additional wait after automatic admission
+
+Reviewed commit: aa0c139dd77691606c57740702210491840f63f4
+
+The later admission path adds a second wait. An automatic run has already claimed the host in provisioning memory when
+`crates/farhelm-helm/src/provisioning/service.rs:1887–1917` waits for its owned launch. That launch awaits the host
+provisioning lock before returning at `:2437–2479`. A session-owned environment Delete holds the same lock through a
+supervisor reply with a 240-second budget (`crates/farhelm-helm/src/sessions/sandbox.rs:165–166,211–212,245–249`),
+without taking the provisioning-memory busy claim that the scan checks. The serial scan waits for this host before
+considering later hosts. The execution-slot wait is inside the later spawned task.
+
+The original planning delay remains a distinct predecessor. Returning acceptance after the per-host claim, before
+joining the host-lock wait, would remove this additional fleet delay. The lock sharing and wait order are
+source-confirmed. Actual delay remains unmeasured.
+
+Provenance: trailing review 116de16d-0880-420e-9e7e-87f8b9869bf3, `automatic-updates/l8`.
