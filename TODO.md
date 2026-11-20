@@ -527,26 +527,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- **Failed-create replay test times out waiting for its create reply under load.**
-  `service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` in
-  `crates/farhelm-supervisor/src/service/core.rs` timed out at its 10-second wait for the create reply in two
-  consecutive landing rounds' full Rust runs on Tensorlake sandboxes (runs `eaaa34eb` and `d230a97e`); it passes in
-  about a second locally (five in a row, run `9f342a7d`). Cause unknown; see FLAKES.md, 2026-11-09.
-
-- **Crash-retry create test's Delete refused when the user manager stays silent.**
-  `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` in
-  `crates/farhelm/tests/e2e/create_idempotency.rs` failed in two consecutive landing rounds' full Rust runs on
-  Tensorlake sandboxes (runs `cf6e2b79` and `614967f5`): the reopened supervisor's systemd probe appears to run out its
-  15-second bound under load, and Delete then refuses the recorded scope by design. It passes locally and on a lighter
-  rerun. The 2026-09-30 FLAKES.md entry fixed the same exposure in another test by giving it a disabled scope manager;
-  this test likely needs the same, or a scope manager that answers quickly. See FLAKES.md, 2026-11-09.
-
-- **Retired session deletion depends on the systemd user manager.**
-  `containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use` in
-  `crates/farhelm/tests/e2e/containerized_sessions.rs` passed in RC.6 and failed in the v0.40.0 release gate (recorder
-  `8346914f`) after the reopened supervisor's systemd probe timed out. The test checks retired-session refusal and
-  deletion, so give it a scope manager whose responses do not depend on the runner. See FLAKES.md, 2026-11-17.
-
 ### Difficult deflake
 
 ## Broken tests

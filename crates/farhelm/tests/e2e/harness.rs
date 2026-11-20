@@ -1866,6 +1866,31 @@ pub(crate) async fn supervisor_on(state_dir: &std::path::Path) -> anyhow::Result
     .await
 }
 
+/// Default seams with the user manager turned off
+/// (`ScopeManager::disabled`), for a test that restarts a supervisor on one
+/// state directory and has nothing to say about launch scopes.
+///
+/// On the default seams such a test passes or fails on the host's systemd.
+/// The first supervisor records a scoped launch, and the restarted one gets
+/// a fresh manager whose first probe can run out its 15-second bound on a
+/// loaded runner. A later Delete then refuses the recorded scope it cannot
+/// check, as it must (SPEC.md "Lifecycle operations"). A create retry asks
+/// the same manager whether the reserved launch's scope exists. This
+/// failed `create_idempotency` on loaded Tensorlake shards and
+/// `containerized_sessions` in a release gate (FLAKES.md, 2026-11-09 and
+/// 2026-11-17). A disabled manager never asks systemd and never records a
+/// scoped launch, so teardown takes the process-tree sweep and a retry
+/// relies on its host and sentinel evidence. Every supervisor the test
+/// builds on the directory must use it, not only the first.
+///
+/// Tests about the scope path itself use [`probed_scope_manager`] instead.
+pub(crate) fn scopeless_seams() -> SupervisorSeams {
+    SupervisorSeams {
+        scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+        ..SupervisorSeams::default()
+    }
+}
+
 /// End every terminal on `state_dir` the way a reboot does, while leaving
 /// the state directory (database, launch records, reports) alone: every
 /// terminal host whose socket is in it.

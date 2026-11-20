@@ -4902,3 +4902,140 @@ gui-lifecycle: FAILED: premise: after the kill, the socket file is not there ref
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-09 — a crash-retry create's Delete refused while the user manager stayed silent (crates/farhelm/tests/e2e/create_idempotency.rs)
+
+`create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` failed in two consecutive landing
+rounds' full Rust runs on Tensorlake sandboxes (4 CPUs, 8 GiB, Ubuntu 24.04 clones with systemd as PID 1 and a lingering
+per-user manager), each a workspace nextest archive split by hash partition over nine sandboxes, four slots per sandbox,
+zero retries, through the recorder's generic mode: run `cf6e2b79-c129-4882-9c05-218f4aed65bd` on clean stacked commits
+`2cc53615`/`160f30e2` and run `614967f5-8f43-4dd9-9fcd-c6ba7d693206` on clean stacked commits `68da3700`/`e5fd6349`. The
+tmux was the repository's pinned 3.7c build shipped to the sandbox; its executable SHA256 and the locale were not
+recorded (unavailable). Ambient `FARHELM_*` names were scrubbed by the recorder. Both times the test failed alone in its
+shard, after about 15.3 s against about 1 s for a local pass, on the same assertion: Delete of the retried session
+refused because the recorded `-0.scope` could not be checked while the systemd user manager was "not usable now". The
+test reopens a supervisor on the same state directory; the reopened supervisor's fresh probe of the user manager has a
+15-second bound, which matches the failure's duration, so the probe most likely timed out under the shard's load and
+Delete refused the recorded scope by design, the same exposure as the 2026-09-30 entry for
+`an_ambiguous_planned_checkout_never_adopts_a_foreign_directory`. Reproduction: five consecutive local passes on this
+development machine (run `84880653-65d2-4dd4-8940-b3d7fc663468`, `--stress-count 5`), and three passes each on three
+sandboxes rerunning the create-idempotency and session-lifecycle modules from the same archive (runs `41f38188`,
+`1ad1e77f`, `3aa87de6`), where a different test on one sandbox reported the user manager unusable and skipped. The run
+just before these, on the same sandbox template without the scoped-cleanup change (#3237), passed it; whether that
+change made the probe's timeout likelier is not established. The retained failing runs live on this machine and expire
+with temporary-file cleanup; the failure is quoted below. Disposition: open, excluded from deflake sweeps.
+
+```text
+delete the retried session: killing process tree: the process-tree sweep confirmed nothing is running, but the named cgroup scope(s) could not be torn down (scope farhelm-<session>-0.scope could not be checked because this host's systemd user manager is not usable now, so its cgroup may still hold processes); the session is kept so the operation can be retried
+```
+
+Class: substrate
+
+Cause: hypothesis — the reopened supervisor's user-manager probe ran out its 15-second bound under load.
+
+## 2026-11-19 — closed: a crash-retry create's Delete refused while the user manager stayed silent (crates/farhelm/tests/e2e/create_idempotency.rs)
+
+Closed as fixed. `create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session` and its two
+siblings share the fixture `retry_after_a_crash_at`, which now builds both supervisors with a disabled scope manager
+(the e2e harness's new `scopeless_seams`). The test exercises crash recovery and the retry's launch evidence, not launch
+scopes. On the default seams the first supervisor recorded a scoped launch and the restarted one probed the host's user
+manager afresh, so the closing Delete depended on that probe answering inside its 15-second bound. With the manager
+disabled, no scoped launch is recorded, the retry's evidence comes from hosts and sentinels, and Delete takes the
+process-tree sweep. The fix was checked on a shared x86_64 Linux development machine (18 CPUs, other agents' work
+running, load about 7 at the start), on a dirty tree holding only this change over `05b1667f`, with four nextest slots
+and zero retries. Hunt batch `1b409820-3bba-4b67-8a90-101366b78c16` ran this module, `containerized_sessions` and the
+failed-create replay unit test five times, 19 tests each time, all passed. Run `74326e9a-8e01-44eb-9023-4f2db914a641`
+ran the three crash tests and the four retired-session tests with stand-in `systemd-run` and `systemctl` executables
+first on `PATH` that log every invocation; all seven passed and the log stayed empty, so the fixed fixtures never ask
+systemd anything. The original failure was not reproduced on demand: modelling it needs a manager that answers the first
+supervisor and then goes silent for the second, and the earlier stand-in experiment in the 2026-09-30 entry for
+`an_ambiguous_planned_checkout_never_adopts_a_foreign_directory` already showed that mechanism.
+
+Class: substrate
+
+Cause: hypothesis
+
+## 2026-11-09 — a failed-create replay test's create reply did not arrive in time (crates/farhelm-supervisor/src/service/core.rs)
+
+`service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts` failed in two consecutive
+landing rounds' full Rust runs on Tensorlake sandboxes (4 CPUs, 8 GiB, Ubuntu 24.04 clones with systemd as PID 1), each
+a workspace nextest archive split by hash partition over nine sandboxes, four slots per sandbox, zero retries, through
+the recorder's generic mode: run `eaaa34eb-7392-427b-80cc-328b1c6c9406` on clean stacked commits `68da3700`/`e5fd6349`
+and run `d230a97e-df2f-4da1-aa99-192fe6910671` on clean stacked commit `980ac423`. The tmux was the repository's pinned
+3.7c build shipped to the sandbox; its executable SHA256 and the locale were not recorded (unavailable). Ambient
+`FARHELM_*` names were scrubbed by the recorder. Both times it failed alone in its shard, after about 10.05 s, on the
+test's own 10-second wait for the reply to its in-process create, against about 0.2 s per iteration locally. Neither
+landing changed the create path. Five consecutive local passes on this development machine on the later tree (run
+`9f342a7d-f413-47fd-9723-71351aae8b1d`, `--stress-count 5`); not reproduced on a sandbox. Load on the sandboxes was not
+measured; the same shards also run the e2e suite's real supervisors. Whether the create waits on something slow under
+load (a systemd user-manager probe, as in the crash-retry entry above, is a candidate) is not established. The retained
+failing runs live on this machine and expire with temporary-file cleanup; the failure is quoted below. Disposition:
+open, excluded from deflake sweeps.
+
+```text
+owned create reply must arrive: Elapsed(())
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-19 — closed: a failed-create replay test's create reply did not arrive in time (crates/farhelm-supervisor/src/service/core.rs)
+
+Closed as fixed, and the cause is now established. A create decides its launch scope (`scope_selected`, which runs the
+user-manager probe on first use) before it writes `launch/`, so the test's first create waited on the probe. The probe's
+15-second bound outlasts the test's 10-second wait for the reply, which matches the two recorded failures at about 10.05
+s. Reproduced on a shared x86_64 Linux development machine (18 CPUs) with the unfixed test and stand-in `systemd-run`
+and `systemctl` first on `PATH`, modelling a loaded manager: every `systemctl show` answers at once with `not-found`, so
+the probe polls until its overall bound. Run `690ad33f-dc5a-4191-8ca3-a591c21af1b0` failed 1 of 1 after 10.07 s with the
+recorded message. With the fix, the same stand-ins passed 1 of 1 in 0.16 s (run `1844562c-1add-451a-be11-5c0380b00175`).
+A stand-in whose `systemctl` hangs instead does not reproduce it: each query's own 5-second bound ends the probe first,
+and the unfixed test passed in 5.1 s. The fix builds both of the test's supervisors with the unit tests' existing
+`scopeless_seams`, since scopes play no part in what it tests. It also passed the five-attempt hunt batch
+`1b409820-3bba-4b67-8a90-101366b78c16`. Both runs had four nextest slots, zero retries, one selected test, and a dirty
+tree holding only this change over `05b1667f`.
+
+```text
+owned create reply must arrive: Elapsed(())
+```
+
+Class: substrate
+
+Cause: established
+
+## 2026-11-17 — retired session deletion refused when the user manager stopped answering (crates/farhelm/tests/e2e/containerized_sessions.rs)
+
+`containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use` was the sole failed test in the first
+v0.40.0 x86_64 release workspace run, recorder `8346914f-7b4d-4f82-9c7d-ed2c4b007feb` at clean `addf7bcac`. It ran on
+hosted Ubuntu 24.04 (Linux 6.14.0-1017-azure, eight CPUs, load unavailable) with nextest 0.9.148,
+`cargo nextest run --workspace --exclude farhelm-desktop`, four slots, zero retries, and locale `C.UTF-8`. The only
+`FARHELM_*` input was the recorder-owned trace directory. The supervisor first recorded a scoped launch, then the
+reopened supervisor's user-manager probe timed out at 15 seconds. Delete kept the row because it could not confirm the
+scope was empty. The test took 15.340 s, compared with 0.397 s on the same product source in RC.6's hosted workspace
+run. The reason the user manager stopped responding is unknown. The test last changed in #3330. The release job's
+failure artifact retains the report and traces until hosted retention expires. A focused local run on the clean stable
+tag passed in 2.000 s with a working systemd user manager, recorder `3dbb1a5f-8029-4422-9f75-75de2c26a523`,
+`cargo nextest run -p farhelm --test e2e -E 'test(=containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use)'`,
+four available slots, one selected test, zero retries. Disposition: open and excluded from Deflake sweeps.
+
+```
+called `Result::unwrap()` on an `Err` value: killing process tree: the process-tree sweep confirmed nothing is running, but the named cgroup scope(s) could not be torn down (scope farhelm-<session>-0.scope could not be checked because this host's systemd user manager is not usable now, so its cgroup may still hold processes); the session is kept so the operation can be retried
+```
+
+Class: substrate
+
+Cause: established
+
+## 2026-11-19 — closed: retired session deletion refused when the user manager stopped answering (crates/farhelm/tests/e2e/containerized_sessions.rs)
+
+Closed as fixed. `legacy_session`, the fixture behind
+`containerized_sessions::retired_session_refuses_terminal_and_lifecycle_use` and three sibling tests, now builds both
+its supervisors with a disabled scope manager (`scopeless_seams`), so the closing Delete no longer depends on the
+restarted supervisor's probe of the user manager. The mechanism is the one the 2026-11-17 entry established, the same
+one as in the crash-retry entry above. The fix's evidence is shared with that entry: hunt batch
+`1b409820-3bba-4b67-8a90-101366b78c16` (five of five passes) and logging-stand-in run
+`74326e9a-8e01-44eb-9023-4f2db914a641` (four retired-session tests passed with no systemd invocation).
+
+Class: substrate
+
+Cause: established

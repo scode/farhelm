@@ -27722,12 +27722,24 @@ exit 1
     /// Both initial and replayed failures carry the no-session proof, including
     /// after reopening retains the refusal's full fingerprint within its
     /// 24-hour window. A different request must not borrow that proof.
+    ///
+    /// Both supervisors run without a user manager ([`scopeless_seams`]):
+    /// a create decides its launch scope before it writes `launch/`, so on
+    /// the default seams the first create waits on the host's systemd probe,
+    /// whose 15-second bound outlasts this test's 10-second wait for the
+    /// reply. On loaded Tensorlake shards it timed out at exactly that wait
+    /// (FLAKES.md, 2026-11-09). Scopes play no part in what is tested here.
     #[farhelm_testtrace::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -27797,9 +27809,14 @@ exit 1
             &original.fingerprint
         ));
         drop(sup);
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             sup.store.reservation("one-intent").await.unwrap().unwrap(),
             original,
