@@ -1608,3 +1608,61 @@ fn a_reset_reattaches_the_surviving_selection(cx: &mut TestAppContext) {
     assert_eq!(fleet.input(1), [letter("x", 88)]);
     assert_eq!(fleet.input(0), []);
 }
+
+/// The reconnect creates fresh terminal streams while the tab choice outlives the UI session. After replay, typing
+/// reaches the remembered shell through its new stream and the agent receives nothing.
+#[gpui::test]
+fn a_reset_restores_the_chosen_tab_on_its_new_stream(cx: &mut TestAppContext) {
+    let snapshot = || {
+        vec![
+            listing(&["a", "b"], &[session("a"), session("b").tabs(1)]),
+            preferences(&["b"], None),
+        ]
+    };
+    let mut fleet = open_main(cx, snapshot());
+    assert_eq!(
+        fleet.attached(),
+        ["b", "b"],
+        "the premise: b and its tab are attached"
+    );
+    assert!(
+        fleet
+            .opened
+            .borrow()
+            .iter()
+            .any(|(_, attach)| attach.tab.as_deref() == Some("tab-0")),
+        "the snapshot listed the shell tab"
+    );
+    click(fleet.cx, "session-terminal-tab-tab-0");
+    assert!(
+        terminal_focused(fleet.cx),
+        "the tab accepted focus before reset"
+    );
+
+    fleet.helm.break_channel();
+    settle(fleet.cx);
+    assert_eq!(fleet.phase(0), FakePhase::Closed);
+    assert_eq!(fleet.phase(1), FakePhase::Closed);
+    assert_eq!(fleet.attached(), ["b", "b"]);
+
+    fleet.helm.connect(snapshot());
+    settle(fleet.cx);
+    let (agent, tab) = {
+        let opened = fleet.opened.borrow();
+        assert_eq!(opened.len(), 4);
+        let find = |tab: Option<&str>| {
+            opened[2..]
+                .iter()
+                .position(|(_, attach)| attach.session == "b" && attach.tab.as_deref() == tab)
+                .expect("the reconnect attaches both terminals of b")
+                + 2
+        };
+        (find(None), find(Some("tab-0")))
+    };
+    fleet.go_live(agent);
+    fleet.go_live(tab);
+    assert!(terminal_focused(fleet.cx));
+    keys(fleet.cx, "x");
+    assert_eq!(fleet.input(tab), [letter("x", 88)]);
+    assert_eq!(fleet.input(agent), []);
+}

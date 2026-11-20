@@ -477,25 +477,29 @@ in `PerSession`. The session pane follows the connection, keyed on the session t
 store for the open session's recovery card (Interrupted or `terminal_missing`) and its host's reachability. These decide
 whether the pane mounts terminals, including the separate shell tabs, and whether they are inert under the unavailable
 card. An acknowledged Restart that published a terminal can dismiss the recovery card before the listing catches up. The
-one survivor the UI keeps itself is the selected session, by id, if the new snapshot still has it; it lives in a small
-foundation of its own outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in
-`docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one. A second,
-deliberate survivor is the attachment lines a terminal leaves when it goes
+selected session survives by id if the new snapshot still has it. It lives in a small foundation of its own outside the
+UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in `docs/gpui/foundation-ownership.md`),
+which is not a device-local preferences store and has no room for one. The last chosen shell tab per session lives in
+the app's `ShownTerminals` global (`crates/gui/farhelm-gui/src/terminal/set.rs`). A new set restores the choice only if
+it builds a terminal for that tab within the attach cap. Choosing Agent clears the entry. An absent or unattached tab
+keeps its entry because a short snapshot can omit a tab that is still open. Tab ids are never reused, so an old entry
+cannot select a different tab. Attachment lines a terminal leaves when it goes also survive
 (`crates/gui/farhelm-gui/src/terminal/attachments.rs`, `Carried`): the failures still on its strip, and a line for each
-upload the reset cut off, saying whether it was sent, which the session's next agent terminal shows. SPEC.md's
-"Attachments" has an attachment never disappear silently, and the terminal the lines belonged to will not come back, so
-dropping them with the UI session would lose them. They go when that agent terminal takes them, or once the current UI
-session's store proves their session gone (a complete session listing without it, checked by every terminal's
-attachments whenever the store changes, a new snapshot included), so a deleted session's lines do not stay for the life
-of the app. The window itself, its size included, is not part of the UI session and is untouched. The settings the old
-app kept per device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in
-the new app, so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13).
-SPEC.md no longer calls the sidebar width, appearance, terminal text size or status sounds per device; it still calls
-the host rail per device until the change that moves it. The store fed by the channel holds only helm state. Half-typed
-drafts do not survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
-(`layers::close_all`). Menus would close anyway with the ground they are anchored to, but a dialog closes only when its
-opener or its subject says so, and one left open would keep its veil over the inert window, taking the clicks and Tab
-presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
+upload the reset cut off, saying whether it was sent. The new set delivers them to the shown terminal once it knows
+which tab it will restore. SPEC.md's "Attachments" has an attachment never disappear silently, and the terminal the
+lines belonged to will not come back, so dropping them with the UI session would lose them. They go when the new
+terminal takes them, or once the current UI session's store proves their session gone (a complete session listing
+without it, checked by every terminal's attachments whenever the store changes, a new snapshot included), so a deleted
+session's lines do not stay for the life of the app. The window itself, its size included, is not part of the UI session
+and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
+terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
+helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width, appearance, terminal text
+size or status sounds per device; it still calls the host rail per device until the change that moves it. The store fed
+by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and menus: going
+inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the ground they
+are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would keep its veil
+over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm accepted continues
+independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports for commands, and their tests (an upload cut off by a reset is not a command: its line above says its outcome

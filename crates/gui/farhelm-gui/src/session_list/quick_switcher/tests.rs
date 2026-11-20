@@ -1257,6 +1257,57 @@ fn a_fresh_pick_of_a_hidden_session_stays_open_until_its_query_is_answered(
     );
 }
 
+/// The quick switcher can open a session before the sidebar has its row. The tab list from the widened query is
+/// the first chance to show the remembered tab, provided the user is still waiting.
+#[gpui::test]
+fn a_hidden_picks_first_row_restores_the_remembered_tab(cx: &mut TestAppContext) {
+    restore_a_hidden_picks_tab(cx, false);
+}
+
+/// The same late row cannot redirect the user's next input once they have started typing into Agent.
+#[gpui::test]
+fn a_hidden_picks_late_row_keeps_agent_after_the_user_types(cx: &mut TestAppContext) {
+    restore_a_hidden_picks_tab(cx, true);
+}
+
+/// Start with a remembered shell, then hide its session and use the actual quick switcher to reopen it. Keep
+/// the query unanswered until the test has observed Agent as the only available terminal in that visit.
+fn restore_a_hidden_picks_tab(cx: &mut TestAppContext, moved_on: bool) {
+    const TAB: &str = "session-terminal-tab-tab-0";
+    let c = session("c")
+        .host(3)
+        .status(json!({ "state": "idle" }))
+        .tabs(1);
+    let mut snapshot = filtered_fleet();
+    snapshot[0].entries[2] = c.entry();
+    let mut main = open_main(cx, snapshot);
+    click(main.cx, "session-row-c");
+    click(main.cx, TAB);
+    assert!(pressed(&frame(main.cx), TAB), "the shell was chosen");
+    click(main.cx, "session-row-b");
+    main.filter_to_idle_on_host_2();
+    main.pick("c");
+    let nodes = frame(main.cx);
+    assert_eq!(selected(main.cx).as_deref(), Some("c"));
+    assert!(node(&nodes, BAR_ID).is_none(), "the pushed row is missing");
+    assert!(node(&nodes, TAB).is_none(), "the tab list has not arrived");
+    assert!(
+        terminal_focused(main.cx),
+        "Agent is available while the row is pending"
+    );
+    if moved_on {
+        keys(main.cx, "x");
+    }
+
+    main.helm
+        .push(change(filtered(&["a", "b", "c"], 3, 3), &[c], &[]));
+    assert_eq!(main.accept_commands(), [json!({ "selected": "c" })]);
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, BAR_ID).is_some(), "the real row arrived");
+    assert_eq!(pressed(&nodes, TAB), !moved_on);
+    assert!(terminal_focused(main.cx));
+}
+
 /// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick". A pick is never
 /// refused in this app (as at the reference commit), so the refused pick SPEC.md mentions has no case; what can be
 /// refused is the query that widens the list, and then both choices must come back, as for any refused query.

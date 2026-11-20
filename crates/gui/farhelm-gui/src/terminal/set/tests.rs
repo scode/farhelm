@@ -8,11 +8,14 @@
 //! list changes the way the helm changes it: a pushed change to the open session's row.
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
+use farhelm_helm_client::fake::transfers::{FakeTransfer, FakeTransfers};
 use farhelm_helm_client::terminal::TerminalAttach;
+use farhelm_helm_client::transfers::Transfers;
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, GridOutput};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
@@ -28,6 +31,7 @@ use crate::session::Connection;
 use crate::session_list::tests::{listing_meta, painted, preferences, session};
 use crate::session_pane::SessionPane;
 use crate::terminal::attached::STATUS_RECONNECT_ID;
+use crate::terminal::attachments::{self, Offered};
 use crate::test_support::{self, click, keys, settle, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -71,8 +75,22 @@ fn snapshot(tabs: &[&str]) -> Vec<CollectionState> {
 
 /// The app connected with `snapshot`, its connection handing out fake terminals, and the main view open.
 fn open(cx: &mut TestAppContext, snapshot: Vec<CollectionState>) -> Window<'_> {
+    open_with_transfers(cx, snapshot, None)
+}
+
+/// Set up a live view with optional fake transfers so a test can leave an upload pending across a remount.
+fn open_with_transfers(
+    cx: &mut TestAppContext,
+    snapshot: Vec<CollectionState>,
+    transfers: Option<Transfers>,
+) -> Window<'_> {
     let (mut helm, connection) = started(cx);
     let opened = serve_terminals(&connection, cx);
+    if let Some(transfers) = transfers {
+        cx.update(|cx| {
+            connection.update(cx, |connection, _| connection.serve_transfers(transfers));
+        });
+    }
     helm.connect(snapshot);
     cx.run_until_parked();
     let (main, cx) = test_support::open_view(cx, MainView::new);
@@ -700,7 +718,8 @@ fn a_stalled_terminal_holds_back_no_other(cx: &mut TestAppContext) {
 /// The window builds terminals from a tab list it did not write (a supervisor reached over SSH, say), so it attaches at
 /// most 32 tabs, as the old app did, while still listing every one so none is hidden from the user. Specified: with 35
 /// tabs listed (t1 to t35), 33 streams open (the agent terminal and t1 to t32), the strip draws a tab for the agent
-/// terminal and each of the 35, and choosing t35 shows the not-attached notice instead of a terminal.
+/// terminal and each of the 35, and choosing t35 shows the not-attached notice instead of a terminal. Reopening the
+/// session shows the agent so the pane has a terminal to draw and focus.
 #[gpui::test]
 fn tabs_past_the_bound_are_listed_but_not_attached(cx: &mut TestAppContext) {
     let ids: Vec<String> = (1..=35).map(|n| format!("t{n}")).collect();
@@ -719,6 +738,12 @@ fn tabs_past_the_bound_are_listed_but_not_attached(cx: &mut TestAppContext) {
     });
     settle(window.cx);
     assert!(window.cx.debug_bounds(NOT_ATTACHED_ID).is_some());
+    drop(set);
+
+    click(window.cx, "session-row-b");
+    click(window.cx, "session-row-a");
+    assert_eq!(window.chosen(), None);
+    assert!(test_support::terminal_focused(window.cx));
 }
 
 /// The bound counts places, not tabs: when an attached tab goes, the first one past the bound moves into its place and
@@ -800,6 +825,113 @@ fn choosing_another_session_ends_every_terminal_of_the_open_one(cx: &mut TestApp
         (opened[2].1.session.as_str(), opened[2].1.tab.as_deref()),
         ("b", None)
     );
+}
+
+/// The remembered tab should get the user's next keystroke after the pane opens again, including when the agent
+/// is waiting. Re-selecting that session keeps the tab shown, and explicitly choosing Agent clears the memory.
+#[gpui::test]
+fn reopening_a_session_focuses_the_remembered_tab_until_agent_is_chosen(cx: &mut TestAppContext) {
+    let mut state = snapshot(&["t1"]);
+    state[0].entries[0].value["status"] = json!({"state": "waiting"});
+    let mut window = open(cx, state);
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+
+    click(window.cx, "session-row-b");
+    let first_new_stream = window.opened.borrow().len();
+    click(window.cx, "session-row-a");
+    let (agent, tab) = {
+        let opened = window.opened.borrow();
+        let find = |tab: Option<&str>| {
+            opened[first_new_stream..]
+                .iter()
+                .position(|(_, attach)| attach.session == "a" && attach.tab.as_deref() == tab)
+                .expect("the reopened session attaches both terminals")
+                + first_new_stream
+        };
+        (find(None), find(Some("t1")))
+    };
+    window.go_live(agent, "agent");
+    window.go_live(tab, "shell");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert!(test_support::terminal_focused(window.cx));
+    keys(window.cx, "x");
+    assert!(window.typed_into(tab));
+    assert!(!window.typed_into(agent));
+
+    click(window.cx, "session-row-a");
+    keys(window.cx, "y");
+    assert!(window.typed_into(tab));
+    assert!(!window.typed_into(agent));
+
+    click(window.cx, AGENT_TAB_ID);
+    assert_eq!(window.chosen(), None, "Agent is an explicit choice");
+    click(window.cx, "session-row-b");
+    click(window.cx, "session-row-a");
+    assert_eq!(window.chosen(), None);
+    assert!(test_support::terminal_focused(window.cx));
+}
+
+/// A short tab list can hide an open tab during remount. The pane shows Agent, and a later visit that can attach the
+/// originally chosen tab still restores it.
+#[gpui::test]
+fn a_missing_tab_falls_back_to_agent_without_erasing_the_choice(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    click(window.cx, "session-row-b");
+    window.push_tabs(&[]);
+
+    click(window.cx, "session-row-a");
+    assert_eq!(window.chosen(), None);
+    assert!(test_support::terminal_focused(window.cx));
+    click(window.cx, "session-row-b");
+    window.push_tabs(&["t1"]);
+    click(window.cx, "session-row-a");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+}
+
+/// An upload cut off when leaving a session reports its outcome in the restored shell. A line owned by the
+/// hidden Agent terminal would make the file disappear from the view where the user offered it.
+#[gpui::test]
+fn a_restored_tab_shows_the_upload_notice_left_by_its_old_view(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let tab = window.stream_of(Some("t1"));
+    window.go_live(tab, "shell");
+    {
+        let set = window.set();
+        window.cx.update(|_, cx| {
+            let owner = set.read(cx).shown().expect("the shell is shown").read(cx);
+            assert!(owner.is_live(), "the shell can take an upload");
+            owner.attachments().clone().update(cx, |attachments, cx| {
+                attachments.attach(vec![Offered::File(PathBuf::from("Cargo.toml"))], cx);
+            });
+        });
+    }
+    settle(window.cx);
+    let requests = transfers.take();
+    let [FakeTransfer::Upload { answer, .. }] = requests.as_slice() else {
+        panic!("expected one pending upload, got {requests:?}");
+    };
+    assert!(!answer.abandoned(), "the upload is still in flight");
+
+    click(window.cx, "session-row-b");
+    assert!(
+        answer.abandoned(),
+        "leaving the session stopped waiting for it"
+    );
+    click(window.cx, "session-row-a");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let nodes = test_support::frame(window.cx);
+    let notice = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(attachments::STRIP_ID))
+        .and_then(|node| node.label.as_deref())
+        .expect("the restored shell shows the upload notice");
+    assert!(notice.contains("Cargo.toml was interrupted"), "{notice}");
 }
 
 /// Old `terminal-reconnect.spec.ts`, "leaving-a-session-cancels-a-pending-reconnect". Why: a wait to reattach that
@@ -1040,7 +1172,7 @@ fn skipping(tabs: &[&str]) -> Vec<CollectionState> {
 /// the tab must be chosen either way, or a press would leave the user looking at the old terminal. Specified: New terminal sends one
 /// `POST /api/sessions/a/tabs`; answered with tab t1 before the row lists it, nothing is chosen yet; once the push lists
 /// t1, t1 is chosen and a typed key reaches its stream. A second press, answered after the push of t2, chooses t2 at
-/// once.
+/// once. The automatically chosen second shell is also the one shown on returning to the session.
 #[gpui::test]
 fn new_terminal_opens_a_tab_and_shows_it(cx: &mut TestAppContext) {
     let mut window = open(cx, snapshot(&[]));
@@ -1076,6 +1208,9 @@ fn new_terminal_opens_a_tab_and_shows_it(cx: &mut TestAppContext) {
         .helm
         .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t2" } })));
     settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t2"));
+    click(window.cx, "session-row-b");
+    click(window.cx, "session-row-a");
     assert_eq!(window.chosen().as_deref(), Some("t2"));
 }
 

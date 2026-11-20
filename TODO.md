@@ -290,10 +290,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and hit enter (like you can type claude and hit enter). it automatically means yolo. probably /usr/bin/env bash and
   /usr/bin/env zsh to remain portable. need to pick what to use for icons. Plan: `plans/queue/shell-sessions.md`.
 
-- **Remember the active terminal per session.** when you're in a session and you select or start a terminal and the
-  terminal is active, it should be remembered as the active terminal fro that session instead of always switching back
-  to the main agent terminal when you switch away and then back. Plan: `plans/queue/remember-active-terminal.md`.
-
 - **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
   type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable

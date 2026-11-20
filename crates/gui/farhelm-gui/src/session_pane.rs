@@ -1,7 +1,7 @@
 //! The main pane beside the session list: the selected session's top row and live terminal, or what the window says
 //! with no session open.
 //!
-//! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns the selected session's
+//! SPEC.md, "Session view": the agent's real TUI is live. The pane owns the selected session's
 //! terminals, the agent terminal and one per shell tab (the terminal area's [`TerminalSet`], which draws whichever the
 //! user chose), and draws the session's top row above them ([`header`]: the lifecycle actions, and the left region
 //! holding the set's tab strip and the open-tunnels pill), with the lines a long Restart or Replace, a refusal and a
@@ -19,9 +19,10 @@
 //! - **One UI session.** The terminal is made with the current UI session's opener and retires with that session. The
 //!   pane keeps it in [`PerSession`], which compares the current UI session with the one it was made under each time
 //!   the pane reaches it, drawing included, so a terminal made for an earlier connection is never drawn or focused. The
-//!   session that a reset rebuilds gets a terminal of its own for the selection that survived.
-//! - **Focus.** The shown terminal is home (SPEC.md, "Where focus rests"): the agent terminal when the pane makes the
-//!   set, then whichever terminal the user chooses in the strip, and the agent terminal again when a chosen tab goes.
+//!   session that a reset rebuilds gets a new terminal set for the selection that survived.
+//! - **Focus.** The shown terminal is home (SPEC.md, "Where focus rests"). When the pane makes the set, home is the
+//!   remembered tab if it can be shown, or the agent terminal. It follows each choice in the strip and returns to
+//!   the agent terminal when a chosen tab goes.
 //!   Each time, the pane tells the focus coordinator, which gives it focus only if nothing else holds it. That covers
 //!   the automatic choices: the session opened at startup, and the next session after the open one went away, from
 //!   the command line or an agent included. When the user chooses a session ([`chosen`]), its terminal also takes
