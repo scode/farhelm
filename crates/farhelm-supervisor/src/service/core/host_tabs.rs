@@ -592,7 +592,13 @@ impl Supervisor {
         let shell_variable = self.host_shell_variable(shell).await;
         // The managed value reaches the child's environment only, never the
         // host's command line or environment.
-        let mut child_env = host_child_env(std::env::vars_os(), env, &shell_variable, cwd);
+        let mut child_env = host_child_env(
+            std::env::vars_os(),
+            self.seams.session_start_path.as_deref(),
+            env,
+            &shell_variable,
+            cwd,
+        );
         crate::github_token::inject(
             &mut child_env,
             &crate::github_token::host_file(&self.state_dir),

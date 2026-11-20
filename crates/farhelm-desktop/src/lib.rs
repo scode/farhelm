@@ -22,8 +22,10 @@
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Write};
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
@@ -43,6 +45,7 @@ use farhelm_supervisor::service::STATE_DIR_CLAIM_WAIT;
 mod agent;
 pub mod bundle;
 mod local_host;
+mod login_path;
 mod reduced_motion;
 mod second_launch;
 mod sound;
@@ -158,7 +161,13 @@ const RULE: &str =
 /// way. Quitting asks the embedded helm to stop; the local supervisor keeps running, as it always has after a quit. On
 /// Linux this function then waits for the helm to finish stopping. On macOS quitting ends the process from inside
 /// GPUI's event loop, so the helm gets only GPUI's quit deadline to stop and this function never returns.
-pub fn run() -> anyhow::Result<()> {
+///
+/// # Safety
+///
+/// Call once from the binary's main thread, with no other threads running
+/// or able to start until bootstrap. Startup replaces the process PATH
+/// before starting any runtimes, the supervisor, or the GUI.
+pub unsafe fn run() -> anyhow::Result<()> {
     init_tracing();
     // A second launch of the Linux app hands its activation token to the app already open and exits, before it takes
     // or waits for the app lock (`second_launch`). A state directory that cannot be resolved is left for startup to
@@ -179,7 +188,40 @@ pub fn run() -> anyhow::Result<()> {
     if let Some(refusal) = missing_wayland(|name| std::env::var_os(name)) {
         refuse_and_exit(&refusal);
     }
-    let mut desktop = match DesktopBootstrap::start() {
+    let env_shell = std::env::var("SHELL")
+        .ok()
+        .filter(|shell| !shell.is_empty());
+    let passwd_shell = env_shell
+        .is_none()
+        .then(farhelm_supervisor::launch::passwd_shell_for_euid)
+        .flatten();
+    let shell = farhelm_supervisor::launch::resolve_shell_from(env_shell, passwd_shell);
+    let session_start_path = match login_path::lookup(Path::new(&shell), login_path::TIMEOUT) {
+        Ok(path) => {
+            let inherited = std::env::var_os("PATH")
+                .unwrap_or_else(|| farhelm_supervisor::service::DEFAULT_SESSION_PATH.into());
+            // SAFETY: per run's contract this is still the only thread.
+            // Logging, forwarding and a successful lookup start no threads
+            // here. Only a timeout can start a reaper, and it keeps PATH.
+            unsafe { std::env::set_var("PATH", path) };
+            Some(inherited)
+        }
+        Err(error) => {
+            match error {
+                login_path::LookupError::Start(error) => {
+                    tracing::warn!(%error, "could not run the interactive login shell to read PATH")
+                }
+                login_path::LookupError::NoPath => {
+                    tracing::warn!("the interactive login shell did not leave a usable PATH")
+                }
+                login_path::LookupError::Timeout => {
+                    tracing::warn!("the interactive login shell did not finish within five seconds")
+                }
+            }
+            None
+        }
+    };
+    let mut desktop = match DesktopBootstrap::start(session_start_path.as_deref()) {
         Ok(desktop) => desktop,
         Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
     };
@@ -523,7 +565,7 @@ impl DesktopBootstrap {
     /// program than this launch would start; see [`plan_local_supervisor`].
     /// A supervisor this launch starts is detached and outlives the app; it
     /// is monitored only until startup is done.
-    pub fn start() -> anyhow::Result<Self> {
+    fn start(session_start_path: Option<&OsStr>) -> anyhow::Result<Self> {
         let state_dir = desktop_state_dir()?;
         let devbuild = std::env::var_os(DEVBUILD_ENV).is_some_and(|value| value == "1");
         // The hosts a staged agent run registers before the helm serves (`agent::ENSURE_HOSTS_ENV`). Every other build
@@ -574,6 +616,7 @@ impl DesktopBootstrap {
             absolute: &absolute,
             program: &program,
             state_dir: &state_dir,
+            session_start_path,
         };
         let plan = plan_local_supervisor(
             own.map(|own| {
@@ -1201,6 +1244,20 @@ fn rotated_supervisor_log(state_dir: &Path, kept: File) -> File {
     }
 }
 
+/// Give an owned child its own session so it cannot take over the desktop's
+/// launching terminal or receive signals aimed at that terminal.
+fn detach_from_terminal(command: &mut Command) {
+    // SAFETY: setsid is async-signal-safe and the closure captures nothing.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 /// What starting the managed supervisor needs, gathered once so both the
 /// plain start and the replacement use the same checks and command.
 struct SpawnInputs<'a> {
@@ -1213,6 +1270,9 @@ struct SpawnInputs<'a> {
     /// `absolute`'s file, read before the spawn, for the record.
     program: &'a ProgramFile,
     state_dir: &'a Path,
+    /// The app's PATH before its login shell ran. Only the supervisor's
+    /// session children start from it, since their login shells run again.
+    session_start_path: Option<&'a OsStr>,
 }
 
 impl SpawnInputs<'_> {
@@ -1287,16 +1347,14 @@ impl SpawnInputs<'_> {
     /// update until it exits. A record that cannot be written is logged and
     /// has the same effect.
     fn spawn(&self, log: File) -> anyhow::Result<Child> {
-        use std::os::unix::process::CommandExt as _;
+        use farhelm_supervisor::service::SESSION_START_PATH_ENV;
         let log = rotated_supervisor_log(self.state_dir, log);
         let mut command = Command::new(self.farhelm);
         command
             .args(["supervisor", "run", "--state-dir"])
             .arg(self.state_dir)
-            // The supervisor inherits this process's PATH unchanged: it is
-            // launched by absolute path, and the launch shim prepends the
-            // directory the supervisor names for the spawn CLI inside
-            // sessions, so nothing else needs the bundle's directory there.
+            // Its tool lookups use the app's login PATH. Pass the earlier
+            // PATH separately so a session's login shell starts as before.
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log)
@@ -1321,17 +1379,12 @@ impl SpawnInputs<'_> {
             // session, where a Farhelm started from one would take it as its
             // own: refusing as "replaced by another installation", or never
             // reopening itself.
-            .env_remove(bundle::REOPENED_ENV);
-        // SAFETY: setsid is async-signal-safe and touches no memory; nothing
-        // else runs between fork and exec here.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
+            .env_remove(bundle::REOPENED_ENV)
+            .env_remove(SESSION_START_PATH_ENV);
+        if let Some(path) = self.session_start_path {
+            command.env(SESSION_START_PATH_ENV, path);
         }
+        detach_from_terminal(&mut command);
         let child = command.spawn().with_context(|| {
             format!(
                 "starting the managed supervisor child through the farhelm at {}",
@@ -2953,6 +3006,7 @@ mod tests {
                 absolute: farhelm,
                 program: &program,
                 state_dir: &state,
+                session_start_path: None,
             }
             .check_program_runs()
         };
@@ -2991,6 +3045,7 @@ mod tests {
                 absolute,
                 program: &program,
                 state_dir: &state,
+                session_start_path: None,
             }
             .check_prerequisites()
         };

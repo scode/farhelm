@@ -39,7 +39,7 @@
 //! per-launch scope from the wrapper in its command.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -83,7 +83,11 @@ pub(crate) const HOST_TERM_PROGRAM_VERSION: &str = farhelm_proto::BUILD_VERSION;
 /// What `PATH` is when neither the supervisor nor the launch environment
 /// has one, so that the login shell and the launch shim can still find the
 /// system's programs.
-const DEFAULT_PATH: &str = "/usr/bin:/bin";
+pub const DEFAULT_SESSION_PATH: &str = "/usr/bin:/bin";
+
+/// The desktop's inherited PATH, passed privately to its managed supervisor
+/// after the app switches to the login PATH for its own tools.
+pub const SESSION_START_PATH_ENV: &str = "FARHELM_SESSION_START_PATH";
 
 /// Variables a host's child never inherits from the supervisor, because
 /// they describe something the child is not part of.
@@ -99,30 +103,34 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 /// - `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`: systemd's socket
 ///   activation hand-off, which names descriptors given to the supervisor
 ///   process, not to the child.
+/// - [`SESSION_START_PATH_ENV`] is consumed by the supervisor before a
+///   session starts. A later app launch inside that session gets its own base.
 ///
 /// The terminal's own variables (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 /// `TERM_PROGRAM_VERSION`) are not here because [`host_child_env`] always
 /// sets them, which replaces whatever the supervisor's terminal left.
-const NOT_INHERITED: [&str; 6] = [
+const NOT_INHERITED: [&str; 7] = [
     "TMUX",
     "TMUX_PANE",
     "FARHELM_TMUX",
     "LISTEN_PID",
     "LISTEN_FDS",
     "LISTEN_FDNAMES",
+    SESSION_START_PATH_ENV,
 ];
 
 /// The complete environment of a host's child.
 ///
-/// The child gets the supervisor's own environment (`base`), which is what
-/// SPEC.md's "as if the user had SSHed in" contract builds on, with
-/// `launch_env` over it, and then the variables that describe the terminal
+/// The child gets the supervisor's environment, with the app's inherited
+/// PATH restored when the managed supervisor received one. A session's
+/// login shell must not start from the result of another login shell.
+/// `launch_env` then applies, followed by the variables that describe the terminal
 /// over both: [`HOST_TERM`], [`HOST_COLORTERM`], [`HOST_TERM_PROGRAM`] and
 /// [`HOST_TERM_PROGRAM_VERSION`]. These are always set, never inherited, so
 /// that a supervisor started from some other terminal (an iTerm, the user's
 /// own tmux) passes none of that terminal's claims to the child. Then
 /// `SHELL` (`shell`, the user's login shell) and `PWD` (`cwd`), and `PATH`
-/// when nothing gave one ([`DEFAULT_PATH`]). The [`NOT_INHERITED`]
+/// when nothing gave one ([`DEFAULT_SESSION_PATH`]). The [`NOT_INHERITED`]
 /// variables are removed, also when `launch_env` sets them.
 ///
 /// Nothing here claims tmux: a host's child runs in no tmux, and a login
@@ -132,11 +140,15 @@ const NOT_INHERITED: [&str; 6] = [
 /// Sorted by name, so the same inputs give the same spec.
 pub(crate) fn host_child_env(
     base: impl IntoIterator<Item = (OsString, OsString)>,
+    session_start_path: Option<&OsStr>,
     launch_env: &[(String, String)],
     shell: &str,
     cwd: &str,
 ) -> Vec<(OsString, OsString)> {
     let mut env: BTreeMap<OsString, OsString> = base.into_iter().collect();
+    if let Some(path) = session_start_path {
+        env.insert("PATH".into(), path.into());
+    }
     for (name, value) in launch_env {
         env.insert(name.into(), value.into());
     }
@@ -151,7 +163,7 @@ pub(crate) fn host_child_env(
         HOST_TERM_PROGRAM_VERSION.into(),
     );
     env.entry("PATH".into())
-        .or_insert_with(|| DEFAULT_PATH.into());
+        .or_insert_with(|| DEFAULT_SESSION_PATH.into());
     env.insert("SHELL".into(), shell.into());
     env.insert("PWD".into(), cwd.into());
     env.into_iter().collect()
@@ -487,6 +499,7 @@ impl Supervisor {
         let shell_variable = self.host_shell_variable(&shell).await;
         let mut env = host_child_env(
             std::env::vars_os(),
+            self.seams.session_start_path.as_deref(),
             &self.seams.launch_env,
             &shell_variable,
             &cwd,
@@ -1119,6 +1132,7 @@ mod tests {
                 ("LISTEN_FDS", "1"),
                 ("LISTEN_FDNAMES", "x"),
             ]),
+            None,
             &[],
             "/bin/zsh",
             "/work",
@@ -1170,6 +1184,7 @@ mod tests {
     fn the_launch_environment_applies_under_the_terminals_variables() {
         let child = host_child_env(
             env(&[("HOME", "/home/someone"), ("PATH", "/usr/bin")]),
+            Some(OsStr::new("/unused-app-path")),
             &[
                 ("HOME".into(), "/fixture/home".into()),
                 ("PATH".into(), "/fixture/bin".into()),
@@ -1203,15 +1218,33 @@ mod tests {
     /// with none in the supervisor's is kept.
     #[test]
     fn without_a_path_the_child_gets_a_default() {
-        let child = host_child_env(env(&[]), &[], "/bin/sh", "/");
-        assert_eq!(get(&child, "PATH"), Some(DEFAULT_PATH));
+        let child = host_child_env(env(&[]), None, &[], "/bin/sh", "/");
+        assert_eq!(get(&child, "PATH"), Some(DEFAULT_SESSION_PATH));
         let child = host_child_env(
             env(&[]),
+            None,
             &[("PATH".into(), "/fixture/bin".into())],
             "/bin/sh",
             "/",
         );
         assert_eq!(get(&child, "PATH"), Some("/fixture/bin"));
+    }
+
+    /// The app's starting PATH feeds the session's login shell once. Its
+    /// private handoff must disappear even if the launch sets it again.
+    #[test]
+    fn a_desktop_supervisor_restores_the_sessions_starting_path() {
+        for original in [None, Some("/inherited/bin"), Some("")] {
+            let child = host_child_env(
+                env(&[("PATH", "/login/bin"), (SESSION_START_PATH_ENV, "handoff")]),
+                original.map(OsStr::new),
+                &[(SESSION_START_PATH_ENV.into(), "override".into())],
+                "/bin/sh",
+                "/",
+            );
+            assert_eq!(get(&child, "PATH"), Some(original.unwrap_or("/login/bin")));
+            assert_eq!(get(&child, SESSION_START_PATH_ENV), None);
+        }
     }
 
     /// The launch record reads back what was written, and refuses anything

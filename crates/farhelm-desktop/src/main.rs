@@ -19,5 +19,7 @@ fn main() -> anyhow::Result<()> {
         print!("{}", farhelm_desktop::licenses_text());
         return Ok(());
     }
-    farhelm_desktop::run()
+    // SAFETY: startup is still on the only thread. Argument handling above
+    // starts no runtime. `run` sets PATH before starting the first one.
+    unsafe { farhelm_desktop::run() }
 }

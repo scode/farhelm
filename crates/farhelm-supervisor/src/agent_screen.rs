@@ -168,7 +168,7 @@ async fn start(spec: &AgentScreen) -> anyhow::Result<HostTerminal> {
     let child = ChildSpec {
         argv: spec.argv.clone(),
         cwd: spec.cwd.clone(),
-        env: crate::service::host_child_env(base, &[], &shell, cwd),
+        env: crate::service::host_child_env(base, None, &[], &shell, cwd),
         size: Size {
             cols: spec.cols,
             rows: spec.rows,

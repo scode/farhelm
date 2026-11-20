@@ -25,6 +25,7 @@ mod vendor;
 /// Starting a create's agent in a terminal host (see its own docs).
 mod host_launch;
 pub(crate) use host_launch::{AtRecordedSocket, host_child_env, read_launch_record};
+pub use host_launch::{DEFAULT_SESSION_PATH, SESSION_START_PATH_ENV};
 use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
 
 /// Keeping host terminals across a supervisor restart: the stopping
@@ -954,6 +955,9 @@ pub struct SupervisorSeams {
     /// reason its neighbour defaults to `All`: this is an operator
     /// override, not a value with a discoverable "real" setting.
     pub agent_instructions: crate::agent_kind::AgentInstructions,
+    /// Starting PATH handed in by the desktop, used only for session children.
+    /// The CLI reads it once. In-process constructors inject it through this field.
+    pub session_start_path: Option<std::ffi::OsString>,
     /// The fault and gate hooks tests install. See [`FaultHooks`]: without
     /// the `test-seams` feature it is empty and every hook reads as absent.
     pub faults: FaultHooks,
@@ -1152,6 +1156,7 @@ impl Default for SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
+            session_start_path: None,
             faults: FaultHooks::default(),
             user_home: None,
             ticker_interval: TICKER_INTERVAL,
@@ -5271,6 +5276,9 @@ pub struct SupervisorStartup {
     /// opinion pass [`crate::agent_kind::AgentInstructions::default()`],
     /// which announces on every hooked launch.
     pub agent_instructions: crate::agent_kind::AgentInstructions,
+    /// The private starting PATH passed by the desktop for session shells.
+    /// `None` keeps the supervisor's own PATH as their base.
+    pub session_start_path: Option<std::ffi::OsString>,
     /// A file to read this host's boot id from instead of the kernel's own
     /// source — `farhelm supervisor run --boot-id-file`, a TEST-ONLY seam.
     /// `None`, which every production launch passes, keeps
@@ -5908,6 +5916,7 @@ impl Supervisor {
             SupervisorStartup {
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
+                session_start_path: None,
                 boot_id_file: None,
             },
         )
@@ -5938,6 +5947,7 @@ impl Supervisor {
         let SupervisorStartup {
             agent_hooks,
             agent_instructions,
+            session_start_path,
             boot_id_file,
         } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
@@ -5958,6 +5968,7 @@ impl Supervisor {
             SupervisorSeams {
                 agent_hooks,
                 agent_instructions,
+                session_start_path,
                 boot_id,
                 state_dir_claim_wait: STATE_DIR_CLAIM_WAIT,
                 ..defaults
@@ -25608,6 +25619,7 @@ exit 1
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
+                session_start_path: None,
             },
         )
         .await
@@ -32257,6 +32269,7 @@ exit 1
             agent_hooks,
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: None,
+            session_start_path: None,
         };
         let argv = vec!["claude".to_string()];
 
@@ -32314,6 +32327,7 @@ exit 1
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions,
             boot_id_file: None,
+            session_start_path: None,
         };
         let argv = vec!["claude".to_string()];
 
@@ -32375,6 +32389,7 @@ exit 1
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: Some(boot_file.clone()),
+            session_start_path: None,
         };
 
         std::fs::write(&boot_file, "boot-first\n").expect("write boot id");

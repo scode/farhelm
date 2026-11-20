@@ -514,7 +514,7 @@ fn parse_getent_passwd_line(line: &str) -> Option<String> {
 /// so it can be unit-tested without a real passwd database; this function
 /// supplies the initial size hint and the actual unsafe libc call as a
 /// closure.
-fn passwd_shell_for_euid() -> Option<String> {
+pub fn passwd_shell_for_euid() -> Option<String> {
     // SAFETY: geteuid takes no arguments and cannot fail; it is always
     // safe to call.
     let euid = unsafe { libc::geteuid() };
