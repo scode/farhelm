@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`stop-agent-podman-containers`](reports/stop-agent-podman-containers.report.md) landed 2026-11-19 in #4281, #4283, #4287: Stop agent- and tab-started Podman containers through Podman before the scope kill, with notices on failure
 - [`tooltip-placement-audit`](reports/tooltip-placement-audit.report.md) landed 2026-11-19 in #4285, #4288, #4289, #4290, #4292: Hover help placement standard across the app: menus beside the panel, sidebar and rail stacks beside their edge, top band and dialog buttons below, dialog lists beside, tall controls at the pointer
 - [`settings-search`](reports/settings-search.report.md) landed 2026-11-19 in #4293, #4294: Search field in Settings: section list narrows to matches, pane lists matches, jump to the setting
 - [`ssh-askpass-2fa`](reports/ssh-askpass-2fa.report.md) landed 2026-11-20 in #4296, #4299, #4300, #4302, #4303, #4305, #4308: SSH sign-in prompts: relay what ssh asks (2FA codes, passwords, host keys) to an attention row and popover, inline in Add host; Sign-in needed after cancel or expiry; keepalives; remove SSH needs 2FA?
