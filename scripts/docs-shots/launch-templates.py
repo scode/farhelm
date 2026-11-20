@@ -64,12 +64,18 @@ def applied(bridge):
 def save_as_template(bridge):
     """Fill in the launcher's save-as-template panel from a setup made by hand, stopping short of Save.
 
-    Codex and High are chosen by hand so the panel has something checked; the launcher's starting host and directory
-    are offered unchecked. The name field is clicked before it is filled, which makes its focus a pointer focus: focus
-    gained from the keyboard would show the field's hover help over the panel.
+    Choose the same Codex model as the staged codex-deep template so the model catalog has answered before choosing
+    High. The launcher's starting host and directory are offered unchecked. The name field is clicked before it is
+    filled so that keyboard-focus help does not appear over the panel.
     """
     bridge.click("id:new-session-button")
+    bridge.wait("id:launcher-search")
     bridge.click("id:launcher-harness-Codex")
+    # Typing opens the model choices even in the headless window, where focus events do not fire.
+    bridge.fill("id:launcher-model", "sol")
+    model = "id:launcher-model-option-Codex-gpt-6.2-sol"
+    bridge.wait(model)
+    bridge.click(model)
     bridge.wait("id:launcher-effort-High")
     bridge.click("id:launcher-effort-High")
     bridge.click("id:launcher-save-template")

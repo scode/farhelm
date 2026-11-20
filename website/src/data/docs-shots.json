@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-20T04:00:03Z",
-  "captured_from": "9ca71cc845e5d68f0908645dd2167a666f8e6c3d",
-  "commit": "f47e334f421c60591c1a823a46b1f40c0294f951",
+  "captured_at": "2026-11-20T05:21:43Z",
+  "captured_from": "0055c6bebe5aa0d0b678a7122a3f9707b9de7823",
+  "commit": "21ed58d3fa4c3df2e9250f100a811a62e077512c",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 699,
@@ -26,7 +26,7 @@
       "width": 1860
     },
     "first-session/statuses": {
-      "height": 854,
+      "height": 780,
       "width": 1368
     },
     "first-session/this-machine": {
@@ -50,7 +50,7 @@
       "width": 1984
     },
     "launch-templates/save-as-template": {
-      "height": 997,
+      "height": 1055,
       "width": 2484
     },
     "launch-templates/templates-button": {
@@ -365,6 +365,34 @@
       "height": 366,
       "width": 924
     },
+    "release-notes/v0-42-0-antigravity": {
+      "height": 914,
+      "width": 1884
+    },
+    "release-notes/v0-42-0-automatic-remote-updates": {
+      "height": 368,
+      "width": 2110
+    },
+    "release-notes/v0-42-0-group-membership": {
+      "height": 547,
+      "width": 1368
+    },
+    "release-notes/v0-42-0-hover-submenu": {
+      "height": 1315,
+      "width": 1172
+    },
+    "release-notes/v0-42-0-settings-search": {
+      "height": 574,
+      "width": 2110
+    },
+    "release-notes/v0-42-0-ssh-sign-in-sound": {
+      "height": 553,
+      "width": 1734
+    },
+    "release-notes/v0-42-0-tooltip-placement": {
+      "height": 443,
+      "width": 1652
+    },
     "session-list/controls": {
       "height": 1166,
       "width": 1656
@@ -374,11 +402,11 @@
       "width": 1496
     },
     "session-list/row-menu": {
-      "height": 1315,
+      "height": 1316,
       "width": 1866
     },
     "session-list/statuses": {
-      "height": 738,
+      "height": 727,
       "width": 1368
     },
     "session-list/trash-button": {

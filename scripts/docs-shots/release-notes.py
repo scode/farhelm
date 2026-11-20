@@ -9,7 +9,7 @@ that preserves the existing shots. If the engine cannot stage that state yet, ex
 private fleet before adding the shot. The capture skips images that are already published.
 """
 
-from docs_shots import Shot
+from docs_shots import Callout, Shot
 
 
 def open_session_actions(bridge):
@@ -36,4 +36,162 @@ def mute_choices(bridge):
 SHOTS = [
     Shot("v0-41-0-session-groups", new_group, ["id:rename"], park="id:rename-frame-title"),
     Shot("v0-41-0-session-mute", mute_choices, ["id:session-menu-mute", "id:submenu"]),
+]
+
+# --- v0.42.0 --------------------------------------------------------------------------------------------------------
+
+OPEN_SESSION = "fix flaky attach test"
+LOOSE_SESSION = "Review terminal links"
+GROUP_NAME = "Release preparation"
+
+
+def grouped_sessions(bridge):
+    """Drag a loose row into the open session's group and show the resulting indentation.
+
+    The first member is seeded through the staged helm so the shot can demonstrate the drag itself. The returned
+    cleanup removes the temporary group from the shared fleet before another shot uses these rows.
+    """
+    request = bridge.gui.helm_request
+    open_key = bridge.session_key(OPEN_SESSION)
+    loose_key = bridge.session_key(LOOSE_SESSION)
+    group = request(bridge.run, "POST", "/api/session-groups", {"name": GROUP_NAME, "sessions": [open_key]})["id"]
+
+    def remove_group():
+        """Restore the loose rows and wait for the sidebar to receive the removal."""
+        request(bridge.run, "DELETE", f"/api/session-groups/{group}")
+        bridge.wait_gone_text(GROUP_NAME)
+
+    def member():
+        """Confirm the helm accepted the drop before framing the resulting rows."""
+        rows = request(bridge.run, "GET", "/api/sessions")["sessions"]
+        row = next(row for row in rows if row["id"] == loose_key)
+        return (True if row.get("group") == group else None), f"the moved session's group is {row.get('group')}"
+
+    try:
+        toggle = f"id:session-group-{group}-toggle"
+        grip = f"id:session-pin-grip-{loose_key}"
+        bridge.wait(toggle)
+        bridge.hover(f"id:session-item-{loose_key}")
+        bridge.wait(grip)
+        bridge.drag(grip, toggle)
+        bridge.gui.poll("the session to join the illustrated group", member, 10, 0.2)
+    except Exception:
+        remove_group()
+        raise
+    return remove_group
+
+
+def settings_search(bridge):
+    """Find settings across sections with one plain search, leaving the results open."""
+    bridge.click("id:app-settings-toggle")
+    bridge.wait("id:settings-search")
+    bridge.fill("id:settings-search", "ssh")
+    bridge.wait("id:settings-search-results")
+
+
+def antigravity(bridge):
+    """Show Antigravity in the session launcher with its conversation field, before starting anything."""
+    bridge.click("id:new-session-button")
+    bridge.wait("id:launcher-harness-Antigravity")
+    bridge.click("id:launcher-harness-Antigravity")
+    bridge.wait("id:launcher-conversation")
+
+
+def remote_updates(bridge):
+    """Show the default remote update setting in a fresh staged helm."""
+    bridge.click("id:app-settings-toggle")
+    bridge.click("id:settings-section-hosts")
+    bridge.wait("id:settings-auto-update-remote-hosts")
+
+
+def ssh_sign_in_sound(bridge):
+    """Show the new SSH sign-in sound setting without sending an authentication request."""
+    bridge.click("id:app-settings-toggle")
+    bridge.click("id:settings-section-notifications")
+    bridge.wait("id:settings-sound-ssh-sign-in")
+    bridge.scroll_into_view("id:settings-sound-ssh-sign-in")
+
+
+def hover_mute(bridge):
+    """Open Mute's duration menu by resting the pointer on Mute, without picking a duration."""
+    open_session_actions(bridge)
+    bridge.hover("id:session-menu-mute")
+    bridge.wait("id:session-menu-mute-indefinite")
+
+
+def new_session_help(bridge):
+    """Show the toolbar tooltip below New session, where it leaves the controls beside it visible."""
+    bridge.hover("id:new-session-button")
+    bridge.wait_text("New session: start an agent or a command on any host")
+
+
+SHOTS += [
+    Shot(
+        "v0-42-0-group-membership",
+        grouped_sessions,
+        ["id:session-order", f"id:session-item-{{session:{OPEN_SESSION}}}",
+         f"id:session-item-{{session:{LOOSE_SESSION}}}"],
+        annotations=[
+            Callout(f"id:session-item-{{session:{LOOSE_SESSION}}}",
+                    "Group members are indented. Drag a session by the grip that appears on hover.", side="right"),
+        ],
+    ),
+    Shot(
+        "v0-42-0-settings-search",
+        settings_search,
+        ["id:settings-search-field", "id:settings-search-heading", "id:settings-search-results"],
+        park="id:settings-frame-title",
+        annotations=[
+            Callout("id:settings-search-field", "Find settings by name or description.", side="left"),
+        ],
+        max_height=400,
+    ),
+    Shot(
+        "v0-42-0-antigravity",
+        antigravity,
+        ["id:launcher-harness-row", "id:launcher-conversation-row"],
+        park="id:launcher-frame-title",
+        annotations=[
+            Callout("id:launcher-harness-Antigravity", "Choose Antigravity to start an agy session.", side="top",
+                    dy=-95),
+        ],
+    ),
+    Shot(
+        "v0-42-0-automatic-remote-updates",
+        remote_updates,
+        ["id:settings-section-hosts", "id:settings-heading", "id:settings-auto-update-remote-hosts"],
+        park="id:settings-frame-title",
+        annotations=[
+            Callout("id:settings-auto-update-remote-hosts", "Turn this off to update remote hosts yourself.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-42-0-ssh-sign-in-sound",
+        ssh_sign_in_sound,
+        ["id:settings-sounds"],
+        park="id:settings-frame-title",
+        annotations=[
+            Callout("id:settings-sound-ssh-sign-in", "Farhelm can chime when a remote host needs you to sign in.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-42-0-hover-submenu",
+        hover_mute,
+        ["id:session-menu", "id:submenu"],
+        park="id:session-menu-mute",
+        annotations=[
+            Callout("id:session-menu-mute", "Hover over Mute to see the durations.", side="right", dy=-135),
+        ],
+    ),
+    Shot(
+        "v0-42-0-tooltip-placement",
+        new_session_help,
+        ["id:new-session-button", f"id:session-item-{{session:{OPEN_SESSION}}}"],
+        park="id:new-session-button",
+        annotations=[
+            Callout("id:new-session-button", "The tooltip opens below the button.", side="right", dx=150, dy=24),
+        ],
+    ),
 ]

@@ -1,0 +1,39 @@
+{
+  "screenshots": [
+    {
+      "entry": 4135,
+      "name": "release-notes/v0-42-0-group-membership",
+      "alt": "Release preparation in the session list, with two sessions indented under the group heading."
+    },
+    {
+      "entry": 4293,
+      "name": "release-notes/v0-42-0-settings-search",
+      "alt": "Settings search results for ssh, showing matching settings grouped by section."
+    },
+    {
+      "entry": 4274,
+      "name": "release-notes/v0-42-0-antigravity",
+      "alt": "Antigravity selected in the session launcher, with a field for the conversation ID."
+    },
+    {
+      "entry": 4313,
+      "name": "release-notes/v0-42-0-automatic-remote-updates",
+      "alt": "Settings → Hosts with Update remote hosts automatically turned on."
+    },
+    {
+      "entry": 4300,
+      "name": "release-notes/v0-42-0-ssh-sign-in-sound",
+      "alt": "Settings → Notifications with the SSH sign-in sound turned on."
+    },
+    {
+      "entry": 4139,
+      "name": "release-notes/v0-42-0-hover-submenu",
+      "alt": "The Mute submenu showing three durations after the pointer rests over Mute."
+    },
+    {
+      "entry": 4289,
+      "name": "release-notes/v0-42-0-tooltip-placement",
+      "alt": "The New session tooltip below the plus button, leaving the adjacent controls visible."
+    }
+  ]
+}
