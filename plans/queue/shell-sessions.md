@@ -414,58 +414,91 @@ report through the queue script, write a closing entry in its log, and stop the 
 You can now start a plain Bash or Zsh shell as a session, just like you can start agents. Typing "bash" or "zsh" in the
 launcher text field is the quickest way to do so.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-11-20 (claim 5573f7).
+### 2026-11-20: answer to a blocked question
 
-### Landing stopped: six tests fail with shell sessions in place
+The question, as the executor put it:
 
-The plan lets you start a plain Bash or Zsh shell as a Farhelm session, beside agent sessions: #4333 adds the launch and
-#4334 documents it. The landing monitor stopped landing it because the stack breaks six existing tests. Nothing of the
-plan has merged; main holds none of it. The stack was rebased onto main without conflicts (main had only gained the
-Tensorlake pause fix, which does not touch launches), and three PRs are open: #4333 and #4334 as delivered, and #4336, a
-landing fix described below.
+> Blocked while landing on 2026-11-20 (claim 5573f7).
+>
+> ### Landing stopped: six tests fail with shell sessions in place
+>
+> The plan lets you start a plain Bash or Zsh shell as a Farhelm session, beside agent sessions: #4333 adds the launch
+> and #4334 documents it. The landing monitor stopped landing it because the stack breaks six existing tests. Nothing of
+> the plan has merged; main holds none of it. The stack was rebased onto main without conflicts (main had only gained
+> the Tensorlake pause fix, which does not touch launches), and three PRs are open: #4333 and #4334 as delivered, and
+> #4336, a landing fix described below.
+>
+> #### What fails
+>
+> `cargo nextest run --workspace --exclude farhelm-desktop` on an arm64 test worker
+> (`f7071529-2199-4c53-a7ad-dffedde2b750`) failed 6 of 8164 tests. A narrow run of those six on x86_64,
+> `cargo nextest run -p farhelm-gui -p farhelm-helm --lib -E '<the six tests>'`
+> (`6fc8e654-4f59-4478-a0e4-0ba10b54a81a`), failed all six again, so this is the change, not the machine. The same
+> workspace suite on main without the plan passed in full on 2026-11-20 (`de032654-f2c8-4111-941c-fcbcf26020ae`). The
+> executor's delivery report ran only selected tests, which did not include these six.
+>
+> - A helm test checks that a configured launch prefix wraps every way a session can start or resume
+>   (`launches::tests::wrapper_prefix_surrounds_every_agent_start_and_resume`). It also asks the shells for a
+>   named-conversation start, which shells do not have. This is most likely the test's assumption, not a bug.
+> - Five tests of the desktop app's session launcher fail, and these may be real regressions a user would see:
+>   - in two, the launcher is no longer open shortly after it opens
+>     (`launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped`,
+>     `an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`);
+>   - in two, clicking the custom permission flags field no longer puts the cursor there
+>     (`launcher::custom_flags_tests::clone_sends_the_stored_words_then_an_edits`,
+>     `a_trailing_space_keeps_the_words_and_a_new_word_changes_them`);
+>   - in one, editing the launch while it waits on the guarded-mode questions should cancel it, and the launch is sent
+>     anyway (`launcher::checkout_tests::an_edit_cancels_the_guarded_answers_waiting_launch`).
+>
+>   The landing did not find the cause.
+>
+> #### What the landing already fixed (#4336)
+>
+> The landing review found shell sessions still described as agent sessions in places. #4336 makes a shell session's
+> main terminal tab read "Shell" instead of "Agent" and makes Delete's question name the shell. It also stops SPEC.md
+> from calling shells fully supported harnesses: Farhelm cannot tell from a shell's screen whether it is working or
+> idle, so that wording would make the shortfall a spec violation. And it adds caveats to the changelog fragment. It
+> passed the lints, and its two new tests passed in the worker run above.
+>
+> Still open from the landing review: while a shell session is being deleted, its row, header and terminal still say
+> "Stopping agent…"; the SPEC.md paragraph describes when a shell reads Idle less precisely than the reader behaves; two
+> of the fragment's new caveats need rewording; and one new test's description overstates what it checks.
+>
+> #### The question
+>
+> Should this go back to an executor to make the six tests pass and close the open review items before it lands? The
+> alternatives are that the landing monitor fixes the helm test and sends back only the launcher failures, which saves
+> little since the plan goes back either way, or that the monitor debugs the launcher itself, which is more than a
+> landing fix and holds the next landings meanwhile. Sending it back costs another executor run before shells reach
+> main. I recommend sending it back whole.
 
-#### What fails
+The maintainer's answer:
 
-`cargo nextest run --workspace --exclude farhelm-desktop` on an arm64 test worker
-(`f7071529-2199-4c53-a7ad-dffedde2b750`) failed 6 of 8164 tests. A narrow run of those six on x86_64,
-`cargo nextest run -p farhelm-gui -p farhelm-helm --lib -E '<the six tests>'` (`6fc8e654-4f59-4478-a0e4-0ba10b54a81a`),
-failed all six again, so this is the change, not the machine. The same workspace suite on main without the plan passed
-in full on 2026-11-20 (`de032654-f2c8-4111-941c-fcbcf26020ae`). The executor's delivery report ran only selected tests,
-which did not include these six.
+The landing monitor answered this block on the maintainer's behalf (`plans/.agents/landing.md`, "Answering blocks"): a
+landing that failed because tests fail goes back with an instruction to fix them. A later change of mind is a follow-up,
+not a reason to stop the plan.
 
-- A helm test checks that a configured launch prefix wraps every way a session can start or resume
-  (`launches::tests::wrapper_prefix_surrounds_every_agent_start_and_resume`). It also asks the shells for a
-  named-conversation start, which shells do not have. This is most likely the test's assumption, not a bug.
-- Five tests of the desktop app's session launcher fail, and these may be real regressions a user would see:
-  - in two, the launcher is no longer open shortly after it opens
-    (`launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped`,
-    `an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`);
-  - in two, clicking the custom permission flags field no longer puts the cursor there
-    (`launcher::custom_flags_tests::clone_sends_the_stored_words_then_an_edits`,
-    `a_trailing_space_keeps_the_words_and_a_new_word_changes_them`);
-  - in one, editing the launch while it waits on the guarded-mode questions should cancel it, and the launch is sent
-    anyway (`launcher::checkout_tests::an_edit_cancels_the_guarded_answers_waiting_launch`).
+Make the six failing tests pass and land nothing else new. Build on the open stack, including the landing's #4336, and
+keep it as its own PR.
 
-  The landing did not find the cause.
-
-#### What the landing already fixed (#4336)
-
-The landing review found shell sessions still described as agent sessions in places. #4336 makes a shell session's main
-terminal tab read "Shell" instead of "Agent" and makes Delete's question name the shell. It also stops SPEC.md from
-calling shells fully supported harnesses: Farhelm cannot tell from a shell's screen whether it is working or idle, so
-that wording would make the shortfall a spec violation. And it adds caveats to the changelog fragment. It passed the
-lints, and its two new tests passed in the worker run above.
-
-Still open from the landing review: while a shell session is being deleted, its row, header and terminal still say
-"Stopping agent…"; the SPEC.md paragraph describes when a shell reads Idle less precisely than the reader behaves; two
-of the fragment's new caveats need rewording; and one new test's description overstates what it checks.
-
-#### The question
-
-Should this go back to an executor to make the six tests pass and close the open review items before it lands? The
-alternatives are that the landing monitor fixes the helm test and sends back only the launcher failures, which saves
-little since the plan goes back either way, or that the monitor debugs the launcher itself, which is more than a landing
-fix and holds the next landings meanwhile. Sending it back costs another executor run before shells reach main. I
-recommend sending it back whole.
+- Fix each failing test at its cause. The helm test should cover only launch types that offer a named conversation
+  start, with shells checked to refuse one. For the five launcher tests, find why the launcher closes, why the flags
+  field no longer takes the click and why a launch request goes out, and fix the product if shells changed launcher
+  behavior that existed before; change a test only where its premise legitimately changed, and say which in the report.
+- Finish the landing review's remaining items:
+  - While a shell session's Delete runs, the row, the open session's header and the scrim over its terminal still say
+    "Stopping agent…". Make them say "Stopping shell…" for a shell session, with a test.
+  - SPEC.md's paragraph on shell sessions: the generic reader reports Running while the screen changes and Idle once it
+    has been still for a few seconds, at a prompt or not. Say that, using `top` or `watch` as the example of a program
+    that reads Running for as long as it runs, and add that a command that prints nothing for a while reads Idle. Drop
+    `tail -f` as an example.
+  - The changelog fragment: drop "a remote host needs this release too" (the protocol bump is for release testing, not
+    the public notes, per `releasing/EDITORIAL_GUIDANCE.md`); say only that `farhelm spawn` works from inside the shell,
+    as anything else run there does, presented as a caveat; and give the missing conversation, not the permission mode,
+    as the reason Restart is unavailable.
+  - The docstring of `a_shell_sessions_delete_question_names_the_shell` in `session_list/delete.rs` should say exactly
+    what it checks (running, unknown and never-started for a Bash session, and the running wording of an agent session),
+    and rewrap the over-long doc line above `consequence` in that file.
+- Run the whole workspace suite through the recorder before delivering, not only selected tests, and report its run id.
