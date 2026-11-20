@@ -56,6 +56,9 @@ uuid.workspace = true
 # runtime, including worker and blocking threads, without a subscriber shared
 # by concurrently running tests.
 farhelm-testtrace.workspace = true
+# The SSH sign-in tests use poll! to observe an attachment while a question is open.
+# A focused helm run must enable the macro without relying on other workspace members.
+futures-util = { workspace = true, features = ["async-await"] }
 # The child spec's terminal size, for the uninstall test that starts a real
 # terminal host through the supervisor's spawn and stops it with the stop step.
 terminal-host.workspace = true
