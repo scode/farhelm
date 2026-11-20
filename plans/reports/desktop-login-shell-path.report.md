@@ -84,3 +84,85 @@ check because it needs macOS.
 Both changes passed separate fresh-context source reviews. The first review caught startup shells configured to refuse
 overwriting the result file and prompted a correction to how an overdue shell is reaped. The second found no product
 correctness issues.
+
+### Landing
+
+#### What landed with it
+
+Main gained nothing but plan bookkeeping since this plan's work started, and nothing else landed in this round. The one
+other plan with open PRs, shell-sessions (Bash and Zsh sessions, sent back in the previous round), touches none of the
+files this plan changes and adds no helm database version, so the two do not interact. An independent reviewer and I
+checked that.
+
+The review also checked what the report does not spell out. The PATH swap happens while the app still runs one thread,
+so it cannot race anything; only a lookup that ran out of time starts a thread, and then the PATH is left alone. The
+session PATH handoff reaches both a session's agent terminal and its shell tabs and never shows up in a session's own
+environment. The helm's notice table rebuild keeps every existing notice, its read mark and the numbering of later
+notices.
+
+#### Fixes made while landing
+
+One went in as a third PR, [#4340](https://github.com/scode/farhelm/pull/4340/changes). On a Mac, Restart to update and
+the reopen that follows a missing app version start the next copy of the app with the running app's environment, and
+that environment now held the login shell's PATH. The new copy then took the login PATH as the PATH it was started with,
+and because an update also replaces the local supervisor, it gave that PATH to the new supervisor as the PATH sessions
+start from. Every session's login shell would then run its startup files over a PATH another login shell had already
+built, which on macOS moves your own directories behind the system ones, the very thing the plan keeps a separate
+session PATH to avoid. It would have lasted until the next supervisor replacement, normally the next update, so it would
+have come back every time. Both relaunch paths now hand the next copy the PATH this one was started with. A new test
+checks the command they build; whether macOS really passes the environment through is not something a Linux test can
+see, so the next Mac release test covers it.
+
+The same PR adds a context paragraph to the changelog entry for the release curation (the change applies on Linux too,
+and sessions keep their usual starting PATH), one sentence about the relaunch to SPEC_impl.md, and corrects a code
+comment that said a reopened app gets no variables from the app that opens it.
+
+#### Checks
+
+The plan changes the desktop app's startup, the supervisor's session environment, the helm's notices and their database
+version, and the app's notification panel, so the landing ran the whole workspace suite, the desktop app's tests, the
+app's end-to-end smoke and lifecycle runs and the four lint (clippy) runs on the maintainer's own test machine (an arm64
+Linux VM that builds and tests the tree itself), and the screenshot comparisons and small checks locally on x86_64.
+
+On the plan as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine
+  (`cab5c4d8-3324-4981-aa52-2b5b5a67c5c4`): all 8158 tests passed, with no runtime skips.
+- `cargo nextest run -p farhelm-desktop`, on the test machine (`43c233cb-6c32-4425-979f-39c23694ec73`): all 179 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (`873dbf29-5a8f-499d-8be6-a97e9cf7cf72`): 49 of 50 steps
+  passed and the paste step skipped, as it always does on Linux.
+- `python3 -B scripts/gui-lifecycle.py`, on the test machine (`8e4bf081-02b2-4aa5-9bad-2c1c9e931da4`): every step
+  passed, including relaunches that reuse and replace the supervisor.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's two
+  clippy runs (with and without the `agent` feature), on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py`, locally (`17944bea-e75d-4c7a-bae0-3c525968e8d6`): passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix (#4340), which changes only the desktop app's sources, SPEC_impl.md and the changelog fragment:
+
+- `cargo nextest run -p farhelm-desktop`, on the test machine (`dc953136-adc2-4a8a-9be3-e4276aa63ad6`): all 180 passed,
+  the new relaunch test among them.
+- The desktop app's two clippy runs, on the test machine: passed.
+- `cargo fmt --all -- --check`, `dprint check` and `python3 releasing/check-changelog.py format`, locally: passed.
+
+The other runs above were reused for the fix: it touches nothing they cover outside the desktop app's relaunch commands.
+A last amendment to #4340 after its review changed only comments, a test's description and the changelog fragment, so
+these runs were reused for it too; `cargo fmt --all -- --check`, `dprint check` and the changelog check passed again
+locally.
+
+Skipped: the macOS checks (the Dock or Finder launch and the relaunch's environment), which need a Mac; the report asks
+the maintainer to confirm the Dock launch on a devbuild.
+
+#### Things you should know that the report does not say
+
+- Every app start now waits for an interactive login shell, up to five seconds, before the window opens. A shell whose
+  startup files cannot finish without a terminal (one that starts tmux unconditionally, say) fails the lookup, keeps the
+  old PATH and shows the new notice each start; the notice's Send feedback is how you would hear about that.
+- The report's Mac check still stands: launch a devbuild from the Dock or Finder and sign in to a host whose ssh
+  configuration runs a program from `/usr/local/bin`. Also worth trying once: Restart to update from that devbuild, then
+  open a new session and run `echo $PATH`; your own directories should still come before `/usr/bin`.
+- Smaller points from the review, left as they are: a failure to wait on the shell is logged as "could not run the
+  interactive login shell" though the shell did start; the new SPEC_impl.md paragraph sits under the heading about
+  versions inside Farhelm.app although it covers Linux too; and no test checks that the lookup's shell runs without a
+  terminal of its own, though the code does so the same way the supervisor's start does.
