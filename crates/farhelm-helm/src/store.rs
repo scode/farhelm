@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 91;
+pub(crate) const SCHEMA_VERSION: i64 = 92;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -2783,6 +2783,7 @@ pub struct HelmStore {
 /// - 89: the time a sealed environment's destruction was first attempted, retained with its host row.
 /// - 90: the SSH sign-in sound preference, on when unset.
 /// - 91: enroll existing installations in automatic remote-host updates by clearing earlier opt-outs.
+/// - 92: permit the desktop login PATH notice while preserving notice IDs and history.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3127,7 +3128,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 91;",
+              PRAGMA user_version = 92;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -5016,6 +5017,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         )
         .context("migrating helm.db to schema version 91")?;
         version = 91;
+    }
+    if version == 91 {
+        crate::notices::upgrade_desktop_login_path_notice(&tx)
+            .context("adding the desktop login PATH notice")?;
+        tx.execute_batch("PRAGMA user_version = 92;")
+            .context("migrating helm.db to schema version 92")?;
+        version = 92;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

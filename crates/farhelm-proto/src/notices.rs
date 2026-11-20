@@ -20,6 +20,8 @@ pub enum NoticeContent {
     },
     HostSessionLimit,
     FleetSessionLimit,
+    /// The desktop kept its inherited PATH after its interactive login shell lookup failed.
+    DesktopLoginPathUnavailable,
 }
 
 /// Stable identity and first observation belong to the notice, not to each removal attempt. Resolved notices are

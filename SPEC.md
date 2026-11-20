@@ -3090,6 +3090,12 @@ read state, so it stays quiet. If the user cleared it while resolved, the next o
 that does not identify its installation (an older supervisor) still counts toward the merged fleet, but its own cut
 raises no host notice and shows only in the list's count warning.
 
+A desktop launch that cannot read its interactive login shell's PATH raises one app-wide notice. It explains that tools
+such as ssh use the PATH the app started with, says this should only happen if the shell takes more than five seconds to
+start, and offers **Send feedback**. A later successful lookup resolves it. Repeated failures preserve its read state
+and identity. One that reopens from retained resolved history stays quiet. Once cleared, the next occurrence makes a new
+notice.
+
 An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
 supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.
 

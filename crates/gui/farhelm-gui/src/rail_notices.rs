@@ -578,8 +578,8 @@ impl Actions {
 /// Draw one record and the actions appropriate to its condition. A trash cleanup notice (`.rail-notice`) shows the host
 /// and what happened, the checkout's repository and last measured size, the reason in red (greyed with the rest once
 /// resolved), when it last failed (to the minute, in the viewer's local time), and for an unresolved notice the promise
-/// of a retry at the host's supervisor restart with Retry now beside Open Trash. A session-limit notice says which list
-/// was cut and offers Send feedback. A host the registry does not list is named "Unknown host", as the old panel said;
+/// of a retry at the host's supervisor restart with Retry now beside Open Trash. A session-limit or desktop startup
+/// notice offers Send feedback. A host the registry does not list is named "Unknown host", as the old panel said;
 /// trash reports keep their original host name while the registry load is pending.
 #[allow(
     clippy::too_many_arguments,
@@ -606,6 +606,19 @@ fn entry(
         } => (checkout_id, name, repository, bytes, reason, at),
         NoticeContent::HostSessionLimit | NoticeContent::FleetSessionLimit => {
             return session_limit_entry(notice, host, button, bell, palette);
+        }
+        NoticeContent::DesktopLoginPathUnavailable => {
+            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{}-title", notice.id))
+                .text("Could not read your login shell's PATH");
+            return feedback_notice_entry(
+                notice,
+                title,
+                "Programs Farhelm starts, such as ssh, used the PATH the app started with for that launch.",
+                "This should only happen if an interactive login shell takes more than 5 seconds to start. Please send feedback if you see this.",
+                button,
+                bell,
+                palette,
+            );
         }
     };
     let actions = Actions::of(notice, checkout_id, trash_snapshot);
@@ -718,6 +731,29 @@ fn session_limit_entry(
             format!("The list across your hosts shows only {LIST_SESSIONS_CAP} sessions.")
         }
     };
+    feedback_notice_entry(
+        notice,
+        title,
+        detail,
+        "Farhelm is built for tens of sessions. Send feedback if you need this many or think a bug caused it.",
+        button,
+        bell,
+        palette,
+    )
+}
+
+/// Conditions that offer feedback share the ordinary panel dismissal and
+/// read mark, and return focus to the bell when the feedback dialog closes.
+fn feedback_notice_entry(
+    notice: &Notice,
+    title: HostSentence,
+    detail: impl IntoElement,
+    guidance: &'static str,
+    button: &WeakEntity<NoticesButton>,
+    bell: &FocusHandle,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let id = notice.id;
     let (button, bell) = (button.clone(), bell.clone());
     let feedback = Button::new(
         format!("{SEND_FEEDBACK_ID_PREFIX}{id}"),
@@ -743,7 +779,7 @@ fn session_limit_entry(
             content.child(div().font_weight(FontWeight::SEMIBOLD).child("Resolved"))
         })
         .child(detail)
-        .child("Farhelm is built for tens of sessions. Send feedback if you need this many or think a bug caused it.")
+        .child(guidance)
         .child(div().flex().child(feedback));
     entry_frame(
         SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),

@@ -3919,6 +3919,11 @@ live-only rows. One observer starts with the initial registry and reads that cou
 invalidations, including deletes and host removal. A renewed condition keeps the retained row and its read mark. The
 usual notices collection delivers additions and resolutions to the rail.
 
+The desktop hands its login PATH lookup result to the embedded helm before serving. The result reconciles one app-wide
+notice through the same condition lifecycle as the session ceilings. A successful lookup resolves it. A helm started
+without a desktop result leaves it alone. The notice has a fixed message, so failure details stay in the desktop log and
+no path values are stored in the notice.
+
 ### Runtime state
 
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's
