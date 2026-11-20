@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Farhelm runs any coding agent in a session, but how much it adds on top depends on the agent. The matrix below is the
-big picture: what Farhelm does for each agent it knows, and for anything else you run as a
+big picture: what Farhelm does for each agent it knows, for [Bash and Zsh shells](/docs/agents/shells/), and for anything else you run as a
 [custom command](/docs/agents/custom-commands/). Claude and Codex get the most; the others get less, in different
 ways. Each agent also has its own page, linked from its name in the matrix, with setup steps and gotchas specific to
 that agent when it has any.
@@ -21,7 +21,7 @@ container or sandbox ([Agents in sandboxes and containers](/docs/using/approve-a
 
 export const groups = [
   { name: 'Launch choices', caps: [
-    { key: 'launch', label: 'Start from the launcher', desc: "Pick the agent on the launcher's agent tab, and Farhelm builds its command line. Anything else runs from the command tab." },
+    { key: 'launch', label: 'Start from the launcher', desc: "Pick an agent, Bash, or Zsh on the launcher's Agent tab. Other programs run from the Command tab." },
     { key: 'model', label: 'Choose the model', desc: "Pick a model from the launcher's suggestions, or type any model name." },
     { key: 'effort', label: 'Choose the effort', desc: 'Pick how much effort the model puts in, from the levels that agent offers.' },
     { key: 'perms', label: 'Guarded or YOLO', desc: "Guarded lets the agent approve actions through a safety check; YOLO skips those checks. Cursor's own setting cannot be classified. See Permission modes below." },
@@ -59,6 +59,8 @@ export const agents = [
     tip: { perms: "YOLO or the agent's own setting; Farhelm cannot force a guarded mode.", trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and Farhelm cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'OpenCode', href: '/docs/agents/opencode/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'y', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO only.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+  { name: 'Shells', href: '/docs/agents/shells/', head: 'Bash and Zsh in their own sessions.', tier: 3, v: { launch: 'y', model: 'n', effort: 'n', perms: 'n', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
+    tip: { status: 'The row shows Running while the terminal changes and Idle when it settles.', resume: 'Use Replace to start a fresh shell.' } },
   { name: 'Command', href: '/docs/agents/custom-commands/', head: 'Any other program, run as a custom command.', tier: 3, v: { launch: 'p', model: 'n', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
     tip: { warn: 'If you declare which agent it runs, the same warnings as that agent.', trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'You say whether the command runs in YOLO mode.', status: "Basic, or Claude's, Codex's or Muse's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
 ];

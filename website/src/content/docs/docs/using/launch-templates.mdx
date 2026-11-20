@@ -34,6 +34,8 @@ with suggestions when the template sets an **Agent type**, earlier versions unde
 Without an agent type, every approval choice is offered, and applying the template is refused if the chosen agent does
 not offer that choice.
 
+An **Agent** template can also choose Bash or Zsh as its **Agent type** for a [shell session](/docs/agents/shells/).
+
 An agent template can also set a **Wrapper prefix**. Type the words that go before Farhelm's agent command, or leave
 the field empty to explicitly run without a wrapper. Removing the field with **✕** leaves the launcher's current prefix
 alone, including its remembered value. See [Agent wrappers](/docs/agents/agent-wrappers/) for the pass-through rules and
@@ -79,8 +81,9 @@ In Farhelm, **? → Keyboard shortcuts** also shows which templates currently ho
 
 Mark a template with **⚡** to start it with Cmd+P on a Mac, or Ctrl+Shift+P on Linux. The session starts and is selected
 without opening the session launcher. Only one template is marked, and in the Templates list its bolt is filled amber
-while the others are outlines: selecting another template's bolt moves the mark, and selecting the filled one clears it. An **Agent** template needs an agent to be marked; a **Command** template needs a nonblank command. With **Don't
-switch**, it is judged as an agent launch.
+while the others are outlines: selecting another template's bolt moves the mark, and selecting the filled one clears it.
+To mark an **Agent** template, set **Agent type** to an agent, Bash, or Zsh. A **Command** template needs a nonblank
+command. With **Don't switch**, it is judged as an agent launch.
 
 Choices the template leaves out use the defaults of **+** (New session), including the open session's destination and
 the [directory it starts in](/docs/using/start-a-session/#choose-where-it-runs), except that an open sandbox or container
@@ -277,8 +280,8 @@ Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for 
 They can assign **⚡** with `--quick-launch` or a number with `--key 1` (using any digit from 1–9 or 0). An edit can
 remove this template's mark or key with `--no-quick-launch` or `--no-key`, even without changing its other choices.
 Assigning a mark or key that belongs to another template moves it; the card tells you which template loses it.
-The **⚡** mark needs an agent for an **Agent** template or a nonblank command for a **Command** template; without a
-saved launch kind, it needs an agent. A number key can select a partial template.
+The **⚡** mark needs an agent, Bash or Zsh for an **Agent** template, or a nonblank command for a **Command** template.
+Without a saved launch kind, it is judged as an agent launch. A number key can select a partial template.
 `farhelm agent templates` shows these assignments alongside each template's choices.
 Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
 unless you have told Farhelm not to ask for that agent's host ([Approve what agents
