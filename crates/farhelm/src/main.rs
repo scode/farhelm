@@ -1877,6 +1877,9 @@ fn main() -> anyhow::Result<()> {
             let startup = farhelm_supervisor::service::SupervisorStartup {
                 agent_hooks,
                 agent_instructions,
+                session_start_path: std::env::var_os(
+                    farhelm_supervisor::service::SESSION_START_PATH_ENV,
+                ),
                 boot_id_file,
             };
             run_supervisor(&dir, startup, exit_on_stdin_close)

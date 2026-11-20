@@ -7483,6 +7483,21 @@ missing or removed before the lock was taken, refuses startup with one sentence 
 does one still held exclusively after the five-second wait. The lock's descriptor is close-on-exec, so neither the
 supervisor nor the updater's installer inherits it.
 
+On macOS and Linux, after the second-launch check and before starting any runtime, the app runs the same interactive
+login shell as sessions. With no usable `$SHELL`, the dynamically linked app uses its local passwd lookup before the
+shell timer starts. The shell runs in its own session with standard input, output and error on `/dev/null` and writes
+its PATH to a private file by passing the value as one argument to `/bin/sh`. After five seconds, the app sends SIGKILL
+to the shell's process group. It reaps the shell in the background if the kernel has yet to report exit. A failed lookup
+keeps the inherited PATH and logs a warning.
+
+The app applies only PATH while it is still single-threaded. This reaches by-name tool lookups in the app, the embedded
+helm and a supervisor it starts, including lookups made by libraries. The app passes the inherited PATH separately to
+that supervisor as `FARHELM_SESSION_START_PATH`, using the normal session default if PATH was absent at app launch.
+`farhelm supervisor run` reads it once. New and restarted agent terminals and new shell tabs use it as their base PATH
+and strip the handoff variable. This lets a session's login shell apply its own startup files once. Running those files
+over the already resolved login PATH can reorder entries, as macOS's `path_helper` does. A reused supervisor keeps its
+existing environment.
+
 The app starts that supervisor detached, so it outlives the app, as a Linux supervisor runs under systemd: in a session
 of its own (`setsid`), with stdin and stdout on `/dev/null` and stderr appended to `supervisor.log` in the state
 directory (0600; a launch that starts a supervisor first moves a log of 16 MiB or more aside as `supervisor.log.1`).

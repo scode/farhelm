@@ -4757,8 +4757,11 @@ The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below defi
 trust between hosts, and the user's approval that agent-requested actions across hosts need. Apply those boundaries when
 interpreting the transport and credential rules here.
 
-Farhelm trusts the user's own local configuration. The desktop app uses the user's PATH when it looks up a helper by
-name, as it does for Linux's `pw-play`. The user chooses the flags in a custom command, including Muse hook settings
+Farhelm trusts the user's own local configuration. On macOS and Linux, the desktop app reads the PATH set by the user's
+interactive login shell once at startup. The app, its helm and a local supervisor it starts use that PATH for programs
+they run by name, including ssh and Linux's `pw-play`. Session shells start from the PATH the app originally inherited.
+A supervisor already running keeps the PATH it started with. If the lookup fails or exceeds five seconds, the app logs a
+warning and uses the PATH it inherited. The user chooses the flags in a custom command, including Muse hook settings
 that can clash with the hooks Farhelm adds. The user also manages unusually large agent settings files. Applying agent
 credentials to a sandbox host reads only settings files of at most 1 MiB, and its own write can grow a file near that
 size past it. Later applications then refuse the file until the user reduces its size.

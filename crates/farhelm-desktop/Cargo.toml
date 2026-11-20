@@ -54,6 +54,8 @@ serde.workspace = true
 serde_json.workspace = true
 # The updater checks a downloaded `install.sh` against its entry in the release's signed `SHA256SUMS` before running it.
 sha2.workspace = true
+# A private result file keeps the login shell's startup output off the lookup path.
+tempfile.workspace = true
 tokio.workspace = true
 # This binary embeds a helm in its own process, which no `farhelm` subcommand's subscriber reaches, so it installs its
 # own (`init_tracing` in src/lib.rs).
@@ -92,7 +94,6 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 farhelm-teststate.workspace = true
 # Per-test tracing capture. The attribute owns an isolated dispatcher and, for async tests, a Tokio runtime.
 farhelm-testtrace.workspace = true
-tempfile.workspace = true
 
 # Not built by cargo-dist's cargo build. The release describes the shipped `farhelm-desktop` as a generic package
 # (`packaging/farhelm-desktop/dist.toml`), whose build command builds this crate with cargo and stages the binary with
