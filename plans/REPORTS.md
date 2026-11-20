@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`docs-shot-desktop-fixes`](reports/docs-shot-desktop-fixes.report.md) landed 2026-11-19 in #4280, #4286: Settings → Hosts auto-update wording, template summary ellipsis, session row place id for the docs shot
 - [`persist-environment-seal`](reports/persist-environment-seal.report.md) landed 2026-11-19 in #4282: Remember a sealed environment across helm restarts so a failed deletion keeps Retry and a suspended sandbox gets destroyed
 - [`stop-agent-podman-containers`](reports/stop-agent-podman-containers.report.md) landed 2026-11-19 in #4281, #4283, #4287: Stop agent- and tab-started Podman containers through Podman before the scope kill, with notices on failure
 - [`tooltip-placement-audit`](reports/tooltip-placement-audit.report.md) landed 2026-11-19 in #4285, #4288, #4289, #4290, #4292: Hover help placement standard across the app: menus beside the panel, sidebar and rail stacks beside their edge, top band and dialog buttons below, dialog lists beside, tall controls at the pointer
