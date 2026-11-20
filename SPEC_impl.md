@@ -4436,15 +4436,16 @@ usual notices collection delivers additions and resolutions to the rail.
   complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
   directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
   replaced by rename: `latest.json` for the single-report integrations, including Claude, Muse and Antigravity. Their
-  SessionStart and Stop both select the current conversation under the pin, so the newest report suffices without a
-  separate confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop;
-  Grok's later events), drained selection first. Enrichment is refused without its selection, and the separate slot
-  keeps a long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue,
-  cap, or eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names
-  a sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then
-  be refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, or any `agy`
-  run inside a Farhelm session, whose user-installed hooks are global) can still take that slot, within one pass while
-  the supervisor runs or across an outage, and is then refused, which is an accepted gap.
+  admitted SessionStart and Stop each select a conversation under the pin, so a verified report needs no separate
+  confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's
+  later events), drained selection first. Enrichment is refused without its selection, and the separate slot keeps a
+  long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or
+  eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names a
+  sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then be
+  refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, or any `agy` run
+  inside a Farhelm session, whose user-installed hooks are global) can still take that slot, within one pass while the
+  supervisor runs or across an outage, and is then refused. An Antigravity subagent sharing the main process can take
+  the slot the same way before its transcript check refuses it. The next verified main report restores capture.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
@@ -4485,16 +4486,20 @@ usual notices collection delivers additions and resolutions to the rail.
 
   Antigravity likewise uses manual configuration, with `SessionStart` and `Stop` entries in
   `~/.gemini/config/hooks.json` invoking `farhelm internal hook --vendor antigravity`. The adapter accepts the camelCase
-  `conversationId` and `hookEventName` and checks that any vendor discriminator agrees. Each event can independently
-  select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt, ignores
-  `--announce`, and exits zero, keeping stderr quiet. The launch adds no reporter arguments and starts no silent-hook
-  tripwire. Farhelm shares positional attribution, the version-0 process pin and ancestor correction with Claude and
-  Muse. A correction records `AntigravityPinCorrected` once per launch.
+  `conversationId`, `hookEventName` and `transcriptPath` and checks that any vendor discriminator agrees. Each event can
+  independently select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt,
+  ignores `--announce`, and exits zero, keeping stderr quiet. The launch adds no reporter arguments and starts no
+  silent-hook tripwire. Farhelm shares positional attribution, the version-0 process pin and ancestor correction with
+  Claude and Muse. A correction records `AntigravityPinCorrected` once per launch.
 
-  The process pin cannot distinguish Antigravity's main conversation from a child that shares its process. In CLI 1.5.12
-  a subagent sent both events with its own ID, the same emitter and no child marker. Farhelm accepts those reports as
-  explicitly allowed in SPEC.md, so the newest accepted child report can become the Restart target. The user can supply
-  the main conversation's ID to select it explicitly. Farhelm uses no vendor record lookup here.
+  A process pin alone cannot distinguish Antigravity's main conversation from a child sharing its process. Under the
+  capture claim and before committing any pin or identity change, admission reads the bounded first record of the
+  reported absolute transcript path. It requires `source: USER_EXPLICIT` and `type: USER_INPUT`, as observed in CLI
+  1.5.13. Child transcripts may be absent at SessionStart and begin with a system message when written. A missing,
+  unreadable, unrecognized or over-64-KiB first record refuses the report. Stop refusals settle quietly. A later
+  verified Stop can establish the capture. A CLI format change can leave the last capture in place without a user
+  notification. The check verifies the incoming report. Stored captures remain plain IDs, and Restart uses them without
+  rereading the transcript.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second

@@ -7,6 +7,12 @@
 
 use super::super::*;
 
+/// Evidence a vendor needs beyond the pinned process for a selecting report.
+enum RecordCheck {
+    None,
+    AntigravityMainTranscript,
+}
+
 /// Facts selected by per-kind dispatch, separate from the shared authority rules.
 /// All three vendors currently emit Stop. Keeping the spelling here makes adopting
 /// another vendor's end-of-turn policy an explicit decision.
@@ -14,6 +20,7 @@ pub(in crate::service::core) struct PositionalReportPolicy {
     kind: AgentKind,
     name: &'static str,
     quiet_event: &'static str,
+    record_check: RecordCheck,
     correction_kind: crate::service::notifications::NotificationKind,
     correction_text: &'static str,
 }
@@ -22,6 +29,7 @@ pub(in crate::service::core) const CLAUDE: PositionalReportPolicy = PositionalRe
     kind: AgentKind::Claude,
     name: "Claude",
     quiet_event: "Stop",
+    record_check: RecordCheck::None,
     correction_kind: crate::service::notifications::NotificationKind::ClaudePinCorrected,
     correction_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
 };
@@ -32,16 +40,18 @@ pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalRepo
     kind: AgentKind::Muse,
     name: "Muse",
     quiet_event: "Stop",
+    record_check: RecordCheck::None,
     correction_kind: crate::service::notifications::NotificationKind::MusePinCorrected,
     correction_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
 };
 
-/// Antigravity emits the same callbacks for the main conversation and children
-/// it runs in the same process. A process pin accepts either conversation.
+/// Antigravity emits both callbacks from the same process for main and child
+/// conversations. The transcript check supplies the distinction the pin lacks.
 pub(in crate::service::core) const ANTIGRAVITY: PositionalReportPolicy = PositionalReportPolicy {
     kind: AgentKind::Antigravity,
     name: "Antigravity",
     quiet_event: "Stop",
+    record_check: RecordCheck::AntigravityMainTranscript,
     correction_kind: crate::service::notifications::NotificationKind::AntigravityPinCorrected,
     correction_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
 };
@@ -50,12 +60,10 @@ impl Supervisor {
     /// Admit a positional vendor's conversation without versioned record proof.
     /// The capture claim protects both the recorded process pin and the current
     /// binding. Ancestor correction and its once-per-launch notification commit
-    /// together. Position establishes authority for a process, so it cannot
-    /// distinguish unmarked conversations that Antigravity runs in that same
-    /// process. Admission uses no vendor files and writes ownership version 0.
-    /// Stop is an ordinary selecting report of the current conversation. A
-    /// rival Stop acknowledges without effect or warning, including when pin
-    /// liveness is unavailable; validation and storage failures remain errors.
+    /// together after any required vendor record check. The stored binding is
+    /// a plain ID with ownership version 0. Stop is a selecting report, but
+    /// acknowledgments of rival or unverified Stops leave capture untouched.
+    /// Validation and storage failures remain errors.
     pub(in crate::service::core) async fn report_positional_conversation(
         &self,
         id: &str,
@@ -69,6 +77,7 @@ impl Supervisor {
             source,
             ancestry,
             hook_event_name,
+            transcript_path,
             ..
         } = report;
         let kind = policy.kind;
@@ -174,6 +183,24 @@ impl Supervisor {
                     "the {name} report came from a process other than this launch's pinned emitter"
                 ),
             ));
+        }
+        match policy.record_check {
+            RecordCheck::None => {}
+            RecordCheck::AntigravityMainTranscript => {
+                if !crate::agent_kind::antigravity::verifies_main_conversation(
+                    transcript_path.as_ref(),
+                )
+                .await
+                {
+                    if stop {
+                        return Ok(());
+                    }
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "the Antigravity transcript does not verify a main conversation",
+                    ));
+                }
+            }
         }
         let correction = decision == PinDecision::Correct;
         let replacement_pin = if decision == PinDecision::Accept

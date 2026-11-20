@@ -121,7 +121,7 @@
 //!   [`AgentIntegration::inject_hooks`]), the exhaustive
 //!   per-kind functions below (ownership, locators, resume verification,
 //!   report vocabularies, executable names), and one file per kind
-//!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
+//!   (`antigravity.rs`, `claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
 //!   the vendor-file verification some locators need. Screen readers:
 //!   `screen_reader.rs`, including exhaustive launch-harness permission-footer
@@ -131,7 +131,7 @@
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
 //!   exhaustive matches. Claude, Muse and Antigravity share `vendor/positional.rs` with
-//!   explicit per-kind event and correction-notice policies.
+//!   explicit per-kind event, record-verification and correction-notice policies.
 //! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor;
 //!   Claude, Muse and Antigravity share `procs/positional.rs` without executable recognition.
 //! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
@@ -260,6 +260,7 @@ mod prompt_delivery_tests {
     }
 }
 
+pub(crate) mod antigravity;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod goose;
@@ -2102,8 +2103,8 @@ pub fn validate_named_conversation(value: &str) -> Result<(), String> {
 /// Codex, Grok, and OMP have complete proofs. Claude attributes by position
 /// and pins the admitted process, without a vendor record proof or versioned
 /// provenance. Muse shares that positional contract without a record check.
-/// Antigravity uses the same positional contract and accepts that an unmarked
-/// child conversation from the pinned process can become the Restart target.
+/// Antigravity adds a bounded first-record check at report admission and keeps
+/// its plain ID and version-0 Restart contract for existing captures.
 /// Claude's policy deliberately stays false: flipping it would withdraw every
 /// existing Claude Restart offer. Goose and Pi retain their legacy behavior.
 ///
