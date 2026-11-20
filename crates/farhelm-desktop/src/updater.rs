@@ -388,6 +388,9 @@ fn relaunch_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // The next instance looks up its own login PATH; it must start from this
+    // one's original PATH, not the login PATH this process switched to.
+    crate::restore_inherited_path(&mut command);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

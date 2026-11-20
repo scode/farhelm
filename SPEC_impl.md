@@ -7501,7 +7501,9 @@ that supervisor as `FARHELM_SESSION_START_PATH`, using the normal session defaul
 `farhelm supervisor run` reads it once. New and restarted agent terminals and new shell tabs use it as their base PATH
 and strip the handoff variable. This lets a session's login shell apply its own startup files once. Running those files
 over the already resolved login PATH can reorder entries, as macOS's `path_helper` does. A reused supervisor keeps its
-existing environment.
+existing environment. Restart to update and the missing-version reopen give the next instance's opener the PATH this
+instance inherited, because an app started with `open -n` inherits the opener's environment and would otherwise take the
+login PATH as the PATH it started with.
 
 The app starts that supervisor detached, so it outlives the app, as a Linux supervisor runs under systemd: in a session
 of its own (`setsid`), with stdin and stdout on `/dev/null` and stderr appended to `supervisor.log` in the state
