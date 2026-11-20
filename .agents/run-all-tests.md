@@ -89,7 +89,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   only its owners switch one off, and no crate switches one off as a whole)
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
-- `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
+- `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts. The
+  workspace Rust selection covers the devbuild's remote-update startup preference.
 - `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` (the desktop archive's
   build command; the self-test builds nothing)
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` (the focused

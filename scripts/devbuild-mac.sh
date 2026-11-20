@@ -306,7 +306,7 @@ fi
 # removed first, since their pids may be reused.
 launch() {
   refuse_if_state_in_use
-  local old
+  local old seed_update_choice=0
   for old in "$devbuild"/launch-state.*; do
     [ -e "$old" ] || continue
     kill -0 "${old##*.}" 2>/dev/null || rm -f "$old"
@@ -314,7 +314,13 @@ launch() {
   printf '%s\n' "$state" >"$devbuild/launch-state.$$"
   echo "== starting farhelm-desktop built from $(sed -n 1p "$stamp")"
   echo "   state: $state"
-  exec env -u FARHELM_DESKTOP_FARHELM FARHELM_DESKTOP_STATE_DIR="$state" \
+  # Let the embedded helm seed the default after migrating its own database,
+  # before it starts inspecting shared hosts. A deliberate launch on the
+  # installed app's state uses that state's ordinary preference default.
+  if [ "$(canonical_dir "$state")" != "$(canonical_dir "$installed_state")" ]; then
+    seed_update_choice=1
+  fi
+  exec env -u FARHELM_DESKTOP_FARHELM FARHELM_DESKTOP_STATE_DIR="$state" FARHELM_DESKTOP_DEVBUILD="$seed_update_choice" \
     FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
 }
 
