@@ -32,14 +32,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   conversation. The plan keeps automatic tracking and plain Restart and accepts that risk as the Goose and Pi exceptions
   do, documented on the Antigravity docs page. The alternative was shipping launch support and explicit conversation
   selection only, with automatic tracking and plain Restart unavailable until Farhelm can tell the main conversation
-  from a subagent's.
+  from a subagent's. Plan: `plans/queue/antigravity-subagent-check.md`.
 - **Revisit taking the Tensorlake pause attribution fix out of gui-ux-backend-fixes.** Decided on the maintainer's
   behalf by the landing monitor on 2026-11-19, when gui-ux-backend-fixes blocked twice on that one outcome (a later
   Tensorlake pause can show the earlier "Suspended from Farhelm" label and time in Hosts): the plan delivers its six
   other backend fixes without it, and the outcome stays unexecuted in the triage ledger to be scheduled as a plan of its
   own. A first answer had allowed one draft of about 200 lines; the second attempt reached 265 lines and still had a
   race (a Suspend clicked while Farhelm records that the sandbox ran can reuse the first pause's time). The alternative
-  was holding the six fixes for one larger pause draft.
+  was holding the six fixes for one larger pause draft. Plan: `plans/queue/tensorlake-pause-attribution.md`.
 
 ## Near term
 
@@ -288,11 +288,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a custom command but let's make it simple and first class by adding a "shell" type besides agent+command, and to start
   with supporting bash and zsh. both bash and zsh should be supported as typing shortcuts so you can just type "bash"
   and hit enter (like you can type claude and hit enter). it automatically means yolo. probably /usr/bin/env bash and
-  /usr/bin/env zsh to remain portable. need to pick what to use for icons.
+  /usr/bin/env zsh to remain portable. need to pick what to use for icons. Plan: `plans/queue/shell-sessions.md`.
 
 - **Remember the active terminal per session.** when you're in a session and you select or start a terminal and the
   terminal is active, it should be remembered as the active terminal fro that session instead of always switching back
-  to the main agent terminal when you switch away and then back
+  to the main agent terminal when you switch away and then back. Plan: `plans/queue/remember-active-terminal.md`.
 
 - **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
   type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
