@@ -927,7 +927,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "template-leave-question",
-        // The reference window's 1000 pixels of height, so the question shows whole below the editor's fields.
+        // Keep the reference window size so both the editor and the question over it are visible.
         size: (1010., 1000.),
         draw: template_leave_question_scene,
         setup: template_leave_question_setup,

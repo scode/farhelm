@@ -130,8 +130,8 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
 - `templates::leave_tests::undo_refuses_a_taken_name_and_keeps_a_spaced_one` ("taken names refuse save and undo")
 - `templates::leave_tests::undo_lasts_ten_seconds_a_later_delete_replaces_it_and_closing_ends_it` ("undo expires
   independently of earlier deletions and ends on close")
-- `templates::leave_tests::the_question_is_scrolled_into_view` ("model suggestions and phone departure controls remain
-  reachable", the departure question's half)
+- `templates::leave_tests::untouched_legacy_template_closes_without_asking` (both close controls leave a legacy template
+  without a prompt or a write)
 - `templates::save_tests::a_spaced_or_taken_name_is_refused_without_a_write` ("save as template requires a name without
   whitespace" and "launcher template save refuses a taken name")
 - `templates::save_tests::new_checks_its_choices_and_offers_passive_values_unchecked` ("save as template captures the
@@ -759,15 +759,13 @@ orchestrator.
   words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
   moved, and the old one is still there. Tested by
   `templates::editor_tests::a_refused_delete_of_the_old_name_shows_the_helms_words`.
-- **A save from the leave question that fails.** The old question stayed up through its Save and after a refusal, so the
-  user could answer it again. An inline question's confirming answer runs once (the prompt's rule), so here the question
-  closes when Save is pressed; a refused save leaves the editor on the draft with the helm's words in the status line,
-  and leaving again asks again. Tested by `templates::leave_tests::save_leaves_only_once_the_save_succeeds`.
-- **The leave question's answers while a ⚡ or number-key write runs.** The old answers were disabled during any write
-  of the dialog's. The prompt has no busy look for its owner's writes, so here Discard and Save stay pressable, and
-  pressed then they close the question and do nothing else, keeping the draft, as every other way to open a template
-  does nothing while a write is in flight. The bolts and keys are the only writes the question leaves pressable. Tested
-  by `templates::leave_tests::answers_while_a_bolt_write_runs_keep_the_draft`.
+- **The leave question.** The older inline question could scroll the editor when it took focus. It now opens over the
+  dialog with a veil, so the question and its answers stay visible. Only changes since opening or saving the draft
+  require an answer. Saving from the question closes it and waits for the save to settle before departing. A refusal
+  keeps the draft and puts the helm's words in the editor's status line. Covered by
+  `templates::leave_tests::every_departure_from_an_unsaved_draft_asks_first`,
+  `templates::leave_tests::untouched_legacy_template_closes_without_asking` and
+  `templates::leave_tests::save_leaves_only_once_the_save_succeeds`.
 - **One Delete button.** The old footer kept a Delete and a "Delete permanently" button mounted and hid one, because its
   web view could swap a click listener before painting the new label. A GPUI click handler belongs to the frame that
   drew it, so here one button's handler holds the kind its label showed. Tested by

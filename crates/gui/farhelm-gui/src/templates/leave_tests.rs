@@ -77,10 +77,9 @@ fn without(name: &str) -> Vec<LaunchTemplate> {
 
 // ---- The leave question --------------------------------------------------------------------------------------------
 
-/// SPEC.md: "Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order, with initial focus
-/// still on Save". The question must stand in every way out the old dialog guarded, or an unsaved draft is lost by
+/// The question must stand in every way out the old dialog guarded, or an unsaved draft is lost by
 /// the one that forgot it. Specified: a clean editor opens another row without asking; with an unsaved draft, another
-/// row, "+ New template", Duplicate, the header Close and Escape each ask instead, with the answers in that order and
+/// row, "+ New template", Duplicate, the header Close and Escape each ask instead, with Keep editing, Discard and Save in order and
 /// focus on Save, and the editor and dialog stay; Keep editing then puts focus back in the name field, sending nothing.
 #[gpui::test]
 fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
@@ -89,6 +88,7 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
     click(cx, "template-open-codex-deep");
     assert_eq!(draft(cx).name, "codex-deep", "a clean editor just leaves");
     click(cx, "templates-suggestion-gpt-6-luna");
+    assert_eq!(draft(cx).fields.model, Some(Some("gpt-6-luna".into())));
     let departures: [fn(&mut VisualTestContext); 5] = [
         |cx| click(cx, "template-open-webbuilder"),
         |cx| click(cx, "templates-new"),
@@ -103,7 +103,12 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
         let answers: Vec<String> = frame(cx)
             .into_iter()
             .filter_map(|node| node.element_id.map(|id| id.to_string()))
-            .filter(|id| id.starts_with("prompt-") && id != "prompt")
+            .filter(|id| {
+                matches!(
+                    id.as_str(),
+                    "prompt-cancel" | "prompt-alternative-0" | "prompt-confirm"
+                )
+            })
             .collect();
         assert_eq!(
             answers,
@@ -114,12 +119,85 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
             Some("prompt-confirm")
         );
         assert!(any_open(cx) && draft(cx).name == "codex-deep");
-        click(cx, "prompt-cancel");
+        // The template footer stays behind the veil. The prior inline question replaced it.
+        assert!(frame(cx).iter().any(|node| {
+            node.element_id
+                .as_ref()
+                .is_some_and(|id| id.to_string() == "templates-save")
+        }));
+        if index == 4 {
+            keys(cx, "escape");
+        } else {
+            click(cx, "prompt-cancel");
+        }
         settle(cx);
         assert!(!painted(cx).contains(QUESTION));
         assert!(name_focused(cx), "Keep editing returns to the name field");
     }
+    keys(cx, "escape");
+    settle(cx);
+    assert!(
+        painted(cx).contains(QUESTION),
+        "Escape asks again with the draft still edited"
+    );
+    click(cx, "prompt-alternative-0");
+    settle(cx);
+    assert!(!any_open(cx), "Discard closes the Templates dialog");
     assert!(helm.commands().is_empty(), "nothing was sent");
+}
+
+/// The legacy switch and trust cleanup leave Save available, but neither may trap the user in the editor.
+/// Check both close controls against the same stored template, with no helm write on either departure.
+#[gpui::test]
+fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
+    let close_controls: [fn(&mut VisualTestContext); 2] =
+        [|cx| keys(cx, "escape"), |cx| click(cx, "templates-close")];
+    let mut stored = templates();
+    let legacy = stored
+        .iter_mut()
+        .find(|template| template.name == "kindless")
+        .unwrap();
+    legacy.fields.workspace_trust = Some(Some(true));
+    let (mut helm, cx) = open_header(cx, &stored, None);
+    for (index, close) in close_controls.into_iter().enumerate() {
+        open_editor(&mut helm, "template-open-kindless", cx);
+        assert!(painted(cx).contains("Unsaved changes"));
+        assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
+        assert!(draft(cx).fields.workspace_trust.is_none());
+        if index == 1 {
+            click(cx, "templates-switch-Don't switch");
+            assert_eq!(draft(cx).fields.kind, None);
+            click(cx, "templates-switch-Agent");
+            assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
+            assert!(painted(cx).contains("Unsaved changes"));
+        }
+        close(cx);
+        settle(cx);
+        assert!(!any_open(cx), "the first close leaves without asking");
+        assert!(
+            helm.commands().is_empty(),
+            "leaving preserves the stored template"
+        );
+    }
+}
+
+/// Picking Don't switch can reproduce the stored legacy fields while changing the displayed draft.
+/// Save in the leave question still finishes the departure when it has no write to send.
+#[gpui::test]
+fn save_leaves_when_an_edit_restores_the_stored_template(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_header(cx, &templates(), None);
+    open_editor(&mut helm, "template-open-kindless", cx);
+    assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
+    click(cx, "templates-switch-Don't switch");
+    assert_eq!(draft(cx).fields.kind, None);
+    assert!(!painted(cx).contains("Unsaved changes"));
+    keys(cx, "escape");
+    settle(cx);
+    assert!(painted(cx).contains(QUESTION));
+    click(cx, "prompt-confirm");
+    settle(cx);
+    assert!(!any_open(cx));
+    assert!(helm.commands().is_empty());
 }
 
 /// Why this matters: on macOS a click focuses no button, so the press on Keep editing falls through to the Templates
@@ -163,6 +241,17 @@ fn discard_goes_where_the_user_was_heading(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
     open_unsaved(&mut helm, cx);
     click(cx, "template-open-webbuilder");
+    settle(cx);
+    assert!(painted(cx).contains(QUESTION), "the row departure asked");
+    assert!(
+        !test_support::bounds(cx, "prompt").contains(&test_support::center(cx, "templates-close")),
+        "the click targets the veiled header beyond the question"
+    );
+    click(cx, "templates-close");
+    assert!(
+        painted(cx).contains(QUESTION),
+        "the veil keeps Close from replacing the question"
+    );
     click(cx, "prompt-alternative-0");
     settle(cx);
     assert_eq!(draft(cx).name, "webbuilder");
@@ -209,22 +298,6 @@ fn save_leaves_only_once_the_save_succeeds(cx: &mut TestAppContext) {
     settle(cx);
     assert_eq!(draft(cx).name, "webbuilder");
     assert!(name_focused(cx));
-}
-
-/// SPEC.md's question is about where the user is heading now, so a second departure while it is up must not leave
-/// the first one's answer behind. Specified: asked for another row, then for "+ New template", Discard opens a new
-/// template.
-#[gpui::test]
-fn a_new_departure_replaces_the_question(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
-    open_unsaved(&mut helm, cx);
-    click(cx, "template-open-webbuilder");
-    click(cx, "templates-new");
-    settle(cx);
-    click(cx, "prompt-alternative-0");
-    settle(cx);
-    assert_eq!(draft(cx).name, "", "the new template, not webbuilder");
-    assert!(painted(cx).contains("New template"));
 }
 
 // ---- Delete and Undo -----------------------------------------------------------------------------------------------
@@ -426,28 +499,6 @@ fn deleting_a_template_deleted_elsewhere_sends_nothing(cx: &mut TestAppContext) 
     assert!(helm.commands().is_empty());
 }
 
-/// The question sits at the editor's foot, which a short window leaves below the fold; the old prompt scrolled its
-/// footer into view as it opened, and a question the user cannot see holds focus unseen. Specified: in a window too
-/// short for the whole editor, Escape on an unsaved draft brings the question's Save inside the window.
-#[gpui::test]
-fn the_question_is_scrolled_into_view(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
-    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(800.)));
-    settle(cx);
-    open_unsaved(&mut helm, cx);
-    assert!(
-        test_support::bounds(cx, "templates-save").top() > gpui::px(800.),
-        "the premise: the editor's foot is below the window"
-    );
-    keys(cx, "escape");
-    settle(cx);
-    let save = test_support::bounds(cx, "prompt-confirm");
-    assert!(
-        save.bottom() <= gpui::px(800.) && save.top() >= gpui::px(0.),
-        "{save:?}"
-    );
-}
-
 /// The old dialog had one status line, which every save cleared; an Undo refusal must not linger under the panes as if
 /// it answered a later, unrelated save. Specified: with `codex-deep` deleted and its name taken again, Undo's refusal
 /// shows while `webbuilder` is open; an edit and a successful save of `webbuilder` clear it.
@@ -510,49 +561,6 @@ fn save_from_the_question_waits_for_a_whole_rename(cx: &mut TestAppContext) {
     let (id, _) = one(&mut helm, Method::Delete, "/api/templates/codex-deep");
     push_removal(&mut helm, &renamed(false), "codex-deep", cx);
     helm.reply(id, 204, None);
-    settle(cx);
-    assert_eq!(draft(cx).name, "webbuilder");
-}
-
-/// The fields stay editable under the question, so the user may undo their edits before answering; the old prompt's
-/// Save then left, having nothing to save. Specified: asked to open `webbuilder`, the model put back to its stored
-/// value, Save opens `webbuilder` and sends nothing.
-#[gpui::test]
-fn save_on_a_draft_no_longer_unsaved_leaves_at_once(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
-    open_unsaved(&mut helm, cx);
-    click(cx, "template-open-webbuilder");
-    click(cx, "templates-suggestion-gpt-6.1-sol");
-    assert!(
-        !painted(cx).contains("Unsaved changes") && painted(cx).contains(QUESTION),
-        "the premise: the edit is undone with the question up"
-    );
-    click(cx, "prompt-confirm");
-    settle(cx);
-    assert_eq!(draft(cx).name, "webbuilder");
-    assert!(helm.commands().is_empty());
-}
-
-/// The question's answers stay pressable while a ⚡ write runs, and must then keep the draft rather than open another
-/// template beside the write (a recorded deviation: the old answers were disabled). Specified: with the question up, a
-/// bolt click's write unanswered, Discard closes the question and keeps the unsaved draft; once the write is answered,
-/// asking again and discarding opens `webbuilder`.
-#[gpui::test]
-fn answers_while_a_bolt_write_runs_keep_the_draft(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
-    open_unsaved(&mut helm, cx);
-    click(cx, "template-open-webbuilder");
-    click(cx, "template-bolt-webbuilder");
-    let (id, _) = one(&mut helm, Method::Put, "/api/preferences");
-    click(cx, "prompt-alternative-0");
-    settle(cx);
-    assert!(!painted(cx).contains(QUESTION));
-    assert_eq!(draft(cx).name, "codex-deep");
-    assert!(painted(cx).contains("Unsaved changes"));
-    helm.reply(id, 204, None);
-    settle(cx);
-    click(cx, "template-open-webbuilder");
-    click(cx, "prompt-alternative-0");
     settle(cx);
     assert_eq!(draft(cx).name, "webbuilder");
 }
