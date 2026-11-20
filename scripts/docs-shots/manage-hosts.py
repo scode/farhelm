@@ -116,8 +116,10 @@ SHOTS = [
         annotations=[
             # Both boxes above the dialog, as the old shot had them: beside it they would make the picture far wider
             # than the docs' text column, and the dialog leaves room above it at the scenario's height.
-            Callout("id:settings-sections", "The gear opens Settings at Sessions; choose Hosts here.", side="top",
-                    dx=-80, dy=-140),
+            # Aimed at the Hosts button itself rather than the whole section list, whose top is now the Search field;
+            # dy keeps the box where it sat above the list, so the arrow runs down past Search to Hosts.
+            Callout("id:settings-section-hosts", "The gear opens Settings at Sessions; choose Hosts here.", side="top",
+                    dx=-80, dy=-257),
             Callout("id:settings-skip-host-setup",
                     "Turn either on to skip that question; turn it off to be asked again.", side="top", dx=-90,
                     dy=-180),

@@ -330,7 +330,8 @@ While Farhelm deletes it, the host shows **Deleting…**. If deletion fails, the
 Settings → **Tensorlake** lists **Sandboxes not on this helm** alongside the account settings. The recipe catalog is
 under **Recipes**. These Farhelm-created sandboxes have no host, snapshot build or preparation on this helm. They can
 remain after interrupted setup, lost helm state, or creation by another helm; the latter are marked **from another
-helm**. Sandboxes you created outside Farhelm do not appear.
+helm**. Sandboxes you created outside Farhelm do not appear, unless their names start with `farhelm-host-`,
+`farhelm-sess-`, `farhelm-build-` or `farhelm-prepare-`: Farhelm treats any sandbox named that way as its own.
 
 Nothing is deleted automatically. Check the name and state before choosing **Delete**: confirmation deletes that
 sandbox's files, sessions and snapshots too. Failed cleanup stays visible with **Retry cleanup**. **Refresh** beside the

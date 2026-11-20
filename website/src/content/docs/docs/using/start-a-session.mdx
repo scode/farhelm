@@ -77,6 +77,12 @@ first. **Name (optional)** names the session in the session list; leave it empty
   alt="The harness buttons with Codex chosen, and the model choice under them, both explained."
 />
 
+To get a family's latest model without looking up its full name, type the family's short name in **Model** (`sol`,
+`astra`, `luna`, `terra`, `fable`, `spark` or `glm`) and press Enter. If you have not chosen an agent yet and only one
+offers that family, Farhelm chooses it for you; otherwise it asks you to choose one first. Earlier versions of each
+family are listed under **Older models**. Typing the same short name in the launcher's search box highlights that latest
+model too.
+
 <Screenshot
   name="start-a-session/effort-and-permissions"
   alt="The effort and permissions choices, each explained."
@@ -394,7 +400,8 @@ like FAT: Farhelm does not detect such changes.
 ## When a launch fails
 
 What you see depends on how far the launch got. When Farhelm can tell before starting anything that the launch will not
-work, for example because the directory does not exist on that host or the host just went offline, it shows the reason
+work, for example because the directory does not exist on that host, Farhelm cannot enter it, or the host just went
+offline, it shows the reason
 in a **Not launched.** alert under the launcher's buttons and keeps your choices, so you can fix it and launch again.
 No session is created. When
 the agent itself fails to start, for example because it is not installed on that host, the session is created and its
@@ -403,6 +410,7 @@ then quits shows exited. [Read the session list](/docs/using/session-list/) expl
 
 If you try to launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume), Farhelm shows the
 host's name and asks you to resume it first. For example, **devbox is suspended. Resume it in Hosts, then launch.**
+**Restart with** and **Replace with** say **then restart** or **then replace** instead.
 A [quick launch](/docs/using/launch-templates/#quick-launch) to a suspended Tensorlake host is refused for the same
 reason.
 
