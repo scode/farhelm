@@ -965,6 +965,10 @@ impl Drop for ProvisionLockGuard {
 struct ActorStatus {
     state: HostState,
     client: Option<Arc<SupervisorClient>>,
+    /// Latest evidence the environment ran, in unix milliseconds. A Farhelm
+    /// suspend time older than this belongs to an episode that ended.
+    /// Connection incarnations and actor replacements leave this evidence intact.
+    running_seen_at: Option<i64>,
     /// Consent belongs to this actor and disappears on removal or restart.
     takeover: Option<Takeover>,
     /// The last successful drain of a host that reports NO identity, kept
@@ -2004,7 +2008,7 @@ impl ConnectionManager {
                             "the host's connection actor is gone; respawning it"
                         );
                         let mut replacement = self.spawn_actor(row, false);
-                        Self::carry_connection_hold(handle, &replacement);
+                        Self::carry_host_status(handle, &replacement);
                         if let Some(start) = replacement.start.take() {
                             started.push(start);
                         }
@@ -2131,25 +2135,26 @@ impl ConnectionManager {
         Ok(())
     }
 
-    /// Preserve host-level exclusion across replacement of an actor task.
+    /// Preserve host-level exclusion and Running evidence when replacing an actor.
     ///
     /// Call under the actor-map lock, with the replacement's start gate still
     /// closed. Reading the current entry here includes holds acquired while
     /// a revival was awaiting the registry. Parking is task-local: the new
     /// actor must acknowledge the inherited hold itself.
-    fn carry_connection_hold(previous: &ActorHandle, replacement: &ActorHandle) {
+    fn carry_host_status(previous: &ActorHandle, replacement: &ActorHandle) {
         let previous = previous.status.borrow();
-        if let Some(hold) = previous.hold {
-            replacement.status.send_modify(|status| {
+        replacement.status.send_modify(|status| {
+            status.running_seen_at = previous.running_seen_at;
+            if let Some(hold) = previous.hold {
                 status.hold = Some(hold);
                 status.state = previous.state.clone();
                 status.parked = None;
-            });
-        }
+            }
+        });
     }
 
     /// Start one dormant actor and hand back the manager's handle on it.
-    /// The caller installs it and transfers any existing connection hold
+    /// The caller installs it and transfers any hold and Running evidence
     /// before releasing its start gate.
     fn spawn_actor(&self, row: HostRow, startup: bool) -> ActorHandle {
         let status = Arc::new(watch::Sender::new(ActorStatus {
@@ -2159,6 +2164,7 @@ impl ConnectionManager {
                 last_error: None,
             },
             client: None,
+            running_seen_at: None,
             takeover: None,
             live_sessions: None,
             // Zero is "never connected": no claim can ever carry it,
@@ -2414,6 +2420,14 @@ impl ConnectionManager {
             incarnation: published.incarnation,
             refusal_attempt: published.refusal_attempt,
         })
+    }
+
+    /// The latest evidence the sandbox ran. Suspend reads it after the
+    /// connection hold so a reply received while parking counts too.
+    pub(crate) fn running_seen_at(&self, host: HostId) -> Option<i64> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let status = map.actors.get(&host)?.status.borrow();
+        status.running_seen_at
     }
 
     /// One host's live state, or `None` if no actor is running for that id.
@@ -3435,7 +3449,7 @@ impl ConnectionManager {
                 // dial anything.
                 return Ok(true);
             }
-            Self::carry_connection_hold(existing, &replacement);
+            Self::carry_host_status(existing, &replacement);
         }
         // Install FIRST, release SECOND: the actor does nothing until the
         // gate opens, so the map is the single arbiter of which actor owns
@@ -4180,6 +4194,8 @@ impl HostActor {
                     std::mem::take(&mut startup),
                 )
                 .await;
+            let running_seen_at = self.status.borrow().running_seen_at;
+            self.retire_suspend_attribution(&row, running_seen_at);
             let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
                 // The manager already published the retargeted row. Reload
                 // it before doing anything with the old dial's answer.
@@ -4351,7 +4367,8 @@ impl HostActor {
                     let previous = match &self.status.borrow().state {
                         HostState::Suspended { observed_at, .. } => Some(*observed_at),
                         _ => None,
-                    };
+                    }
+                    .filter(|&at| running_seen_at.is_none_or(|seen| at >= seen));
                     // On the way in only: a master opened before the
                     // suspension would hang the next session on it, and
                     // the re-probes that follow open nothing.
@@ -4359,11 +4376,14 @@ impl HostActor {
                         self.transport.release_shared_connections(&row).await;
                     }
                     self.set_state(HostState::Suspended {
-                        observed_at: previous.unwrap_or_else(unix_millis),
-                        suspended_by_farhelm_at: suspended_by_farhelm_at.or_else(|| {
-                            row.environment_binding()
-                                .and_then(|binding| binding.handle.suspended_at())
-                        }),
+                        observed_at: previous
+                            .unwrap_or_else(|| unix_millis().max(running_seen_at.unwrap_or(0))),
+                        suspended_by_farhelm_at: suspended_by_farhelm_at
+                            .or_else(|| {
+                                row.environment_binding()
+                                    .and_then(|binding| binding.handle.suspended_at())
+                            })
+                            .filter(|&stamp| running_seen_at.is_none_or(|seen| stamp >= seen)),
                         resume_failed,
                     });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
@@ -4832,7 +4852,10 @@ impl HostActor {
             Err(reason) => Err(reason),
         };
         match environment_gate(observed, binding.provider().when_status_unanswered()) {
-            EnvironmentGate::Dial { unanswered: None } => self.dial(row, progress).await,
+            EnvironmentGate::Dial { unanswered: None } => {
+                self.record_running();
+                self.dial(row, progress).await
+            }
             EnvironmentGate::Dial {
                 unanswered: Some(reason),
             } => match self.dial(row, progress).await {
@@ -4843,7 +4866,12 @@ impl HostActor {
                     cause,
                     error: format!("{error} ({})", peer_text(&reason)),
                 },
-                outcome => outcome,
+                outcome => {
+                    if matches!(outcome, AttemptOutcome::Connected { .. }) {
+                        self.record_running();
+                    }
+                    outcome
+                }
             },
             EnvironmentGate::Suspended { resume_failed } => AttemptOutcome::Suspended {
                 resume_failed: resume_failed.map(|details| peer_text(&details)),
@@ -4853,6 +4881,34 @@ impl HostActor {
                 cause: UnreachableCause::TransportFailure,
                 error,
             },
+        }
+    }
+
+    /// Publish Running evidence even if Retry or Suspend cancels the dial.
+    /// A hold can already be set when the answer arrives, so this update
+    /// bypasses state publication and happens before the actor can park.
+    fn record_running(&self) {
+        let observed_at = unix_millis();
+        self.status.send_modify(|status| {
+            status.running_seen_at = status.running_seen_at.max(Some(observed_at));
+        });
+    }
+
+    /// Dispatch the best-effort clear after dial or cancellation so its
+    /// SQLite write cannot take time from that attempt's own registry reads.
+    fn retire_suspend_attribution(&self, row: &HostRow, running_seen_at: Option<i64>) {
+        if let Some(seen) = running_seen_at
+            && row
+                .environment_binding()
+                .and_then(|binding| binding.handle.suspended_at())
+                .is_some_and(|stamp| stamp < seen)
+        {
+            let (store, host) = (self.store.clone(), self.id);
+            tokio::spawn(async move {
+                if let Err(error) = store.clear_suspend_attribution_before(host, seen).await {
+                    warn!(host, %error, "could not retire old suspension attribution");
+                }
+            });
         }
     }
 
@@ -14536,7 +14592,8 @@ mod tests {
     /// re-probe interval with the first observation time kept. Re-probes
     /// recover persisted attribution and preserve a newer confirmation even
     /// across an active probe's Connecting publication and an older row.
-    /// When the answer turns to running, the next re-probe dials and connects.
+    /// Running retires the earlier attribution. A stale row must not bring
+    /// it back when Retry sees a later pause, even after actor replacement.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn a_suspended_sandbox_is_never_dialed_and_resumes_by_itself() {
         use crate::tensorlake::api::SandboxStatus;
@@ -14620,6 +14677,53 @@ mod tests {
             .await
             .expect("the host connects once the sandbox runs again");
         assert_eq!(fixture.transport.attempts(host).len(), 1);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let rows = fixture.store.list_hosts().await.unwrap();
+            let row = rows.iter().find(|row| row.id == host).unwrap();
+            if row.tensorlake.as_ref().unwrap().suspended_at.is_none() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Running should clear the stored stamp"
+            );
+        }
+        let manager = &fixture.manager;
+        for replace_actor in [false, true] {
+            if replace_actor {
+                // The next Running probe retires the actor at its dial.
+                sandboxes.answer(sandbox_status(SandboxStatus::Running));
+                fixture
+                    .transport
+                    .edit(host, |script| script.panic_on_dial = true);
+                assert!(manager.retry_now(host).await.unwrap());
+                manager
+                    .wait_for_state(host, |s| matches!(s, HostState::Retired { .. }))
+                    .await
+                    .expect("the actor retired after the failed dial");
+            }
+            let running_seen_at = manager.running_seen_at(host).unwrap();
+            sandboxes.answer(sandbox_status(SandboxStatus::Suspended));
+            fixture
+                .store
+                .set_tensorlake_suspended_at(host, Some(10))
+                .await
+                .unwrap();
+            assert!(manager.retry_now(host).await.unwrap());
+            let later = manager
+                .wait_for_state(host, |s| matches!(s, HostState::Suspended { .. }))
+                .await
+                .expect("Retry observes the later pause");
+            assert_eq!(manager.running_seen_at(host), Some(running_seen_at));
+            assert!(
+                matches!(later, HostState::Suspended {
+                observed_at, suspended_by_farhelm_at: None, ..
+            } if observed_at >= running_seen_at),
+                "later pause has its own observation: {later:?}"
+            );
+        }
     }
 
     /// Why: a connected Tensorlake host must cost no API traffic, and a
@@ -14740,8 +14844,8 @@ mod tests {
     /// must still say that Tensorlake could not be asked.
     ///
     /// Spec: with the check unavailable, the actor dials; a reachable host
-    /// connects, and an unreachable one ends Unreachable with both the dial's
-    /// failure and the check's reason in its error.
+    /// connects and establishes Running evidence. An unreachable one shows
+    /// both the dial's failure and the check's reason.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn an_unanswered_status_check_dials_anyway() {
         let sandboxes = ScriptedEnvironments::new(Err(crate::tensorlake::hosts::unanswered(
@@ -14753,6 +14857,7 @@ mod tests {
             .wait_for_state(host, |state| matches!(state, HostState::Connected { .. }))
             .await
             .expect("a reachable host connects without an answer");
+        assert!(fixture.manager.running_seen_at(host).is_some());
 
         let sandboxes = ScriptedEnvironments::new(Err(crate::tensorlake::hosts::unanswered(
             "no Tensorlake API key is saved".into(),

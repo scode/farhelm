@@ -6718,11 +6718,17 @@ answer, the actor dials anyway and adds the reason to a failed dial's text: a ne
 refused promptly by the gateway, while refusing to dial would cut off every running sandbox whenever the key is cleared
 or the API is down. The check is made per attempt and never while connected, so a connected host costs no API traffic
 and a suspended one one call per re-probe (45 seconds). A sandbox suspended under a live connection is noticed when the
-30-second refresh timeout tears the connection down. `suspended` carries the time this helm first saw it; the host list
-adds the row's own suspend time, so the UI can tell Farhelm's suspension from Tensorlake's idle timeout across helm
-restarts. Provisioning does not go through the actor's gate, so it checks the same state itself: Update and setting a
-host up again are refused for a host the manager shows suspended, before anything is probed and again before a confirmed
-run's preflight probe, with a resume-first message, and the panel offers neither while the host is suspended.
+30-second refresh timeout tears the connection down.
+
+The host list takes observation time and attribution from the actor's `suspended` snapshot. The saved completion time
+survives a helm restart. A Running answer or successful fallback supervisor connection retires strictly older times. The
+evidence survives retries, holds and actor replacements. The actor records it before parking and starts the database
+clear outside the dial's deadline. The snapshot ignores retired times even if that write fails or a registry read is
+stale.
+
+Provisioning does not go through the actor's gate, so it checks the same state itself. Update and setting a host up
+again are refused for a host the manager shows suspended, before anything is probed and again before a confirmed run's
+preflight probe, with a resume-first message, and the panel offers neither while the host is suspended.
 
 Removal (`DELETE /api/hosts/{id}`, the GUI's only removal) first holds the host's connection actor: the manager
 publishes a not-connected state with no client, interrupts whatever the actor was doing, and waits until it parks, after
@@ -6755,9 +6761,7 @@ releases both shared SSH masters, asks Tensorlake to suspend and waits at most 6
 records the completion time and publishes `Suspended` under the hold, so the displayed timestamp cannot momentarily
 attribute Farhelm's own suspension to an outside action. Resume holds a disconnected actor as Resuming around the
 Tensorlake call, waits at most 120 seconds for running, clears the timestamp and releases the hold with a fresh retry.
-The transient phase ends at hold release rather than covering reconnection. The confirmed Suspended snapshot also
-carries Farhelm's completion time: a host listing may have read an older registry row before taking that snapshot, so
-the snapshot's attribution wins over the row's. The stored value remains the fallback after a restart. Already-at-target
+The transient phase ends at hold release rather than covering reconnection. Suspend and Resume on already-at-target
 states succeed; conflicts are reconciled by reading status. An actual resume withdraws any pre-suspension connection and
 releases both masters before retrying, even if the actor has not yet detected an external suspension. Only an
 already-running sandbox with an already-connected actor skips recovery, preserving its viewers on repeated Resume. Every
@@ -6769,6 +6773,12 @@ environments work brings resume-before-create (`crates/gui/farhelm-gui/src/launc
 classifier treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning
 progress and unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host
 eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
+
+An explicit Suspend keeps a saved time for the current pause. With no saved time or a newer Running observation, it
+records its own completion time even when Tensorlake is already paused. A resume and re-pause missed by the helm leaves
+the old time, as can a failed clear followed by a restart and an outside pause. A backwards wall-clock step, a delayed
+Running answer that arrives after a Suspend's confirming read, or two events in the same millisecond can also
+misattribute the pause. This affects wording.
 
 The Suspend question uses the shared framed-dialog header, scroll body and footer as direct siblings; its existing
 lifecycle callback still owns acceptance and dispatch. Dismissal releases that modal before returning focus to the

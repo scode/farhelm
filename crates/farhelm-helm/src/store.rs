@@ -1093,6 +1093,7 @@ pub struct TensorlakeBinding {
     pub resources: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
     /// When Farhelm's own Suspend of this sandbox finished (unix ms), so the
     /// host can say "suspended from Farhelm at …" even after a helm restart.
+    /// A later Running answer retires it when the answer is newer.
     /// Wording only: whether the host is suspended is always Tensorlake's
     /// answer, never this column.
     pub suspended_at: Option<i64>,
@@ -7254,6 +7255,27 @@ impl HelmStore {
                     Ok(changed == 1)
                 },
             )
+            .await
+    }
+
+    /// Retire attribution older than a positive Running answer (unix ms).
+    /// The comparison is part of the write so a delayed clear leaves a newer
+    /// Suspend's timestamp intact, including one in the same millisecond.
+    pub(crate) async fn clear_suspend_attribution_before(
+        &self,
+        host: HostId,
+        observed_at: i64,
+    ) -> anyhow::Result<()> {
+        self.conn
+            .call("clear suspend attribution task panicked", move |conn| {
+                conn.execute(
+                    "UPDATE hosts SET tensorlake_suspended_at = NULL \
+                     WHERE id = ?1 AND tensorlake_suspended_at < ?2",
+                    rusqlite::params![host, observed_at],
+                )
+                .context("retiring old suspend attribution")?;
+                Ok(())
+            })
             .await
     }
 

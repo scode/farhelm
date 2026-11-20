@@ -1374,10 +1374,6 @@ consequences.
 - [`mixed-setup-plans-escape-cache-bound.md`](mixed-setup-plans-escape-cache-bound.md) — A mixture of setup-plan kinds
   can accumulate retained plan entries beyond the intended cache bound.
 
-- [`old-suspension-stamp-labels-later-external-pause.md`](old-suspension-stamp-labels-later-external-pause.md) — A
-  suspension remembered from an earlier operation can be reused to describe a later independent pause, misattributing
-  its timing.
-
 - [`provider-error-cleaning-can-miss-transformed-secret.md`](provider-error-cleaning-can-miss-transformed-secret.md) —
   Error cleaning can miss a key after truncation or normalization changes its spelling. An actual provider response
   echoing that key remains unverified after investigation.

@@ -24382,3 +24382,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   change.
 - Execution: change `plvwnpkoytmrkknvkppxpnloywourusr`, bookmark `plan/gui-ux-desktop-fixes/09-gui-labels-and-refusals`,
   [PR #4251](https://github.com/scode/farhelm/pull/4251/changes).
+
+## old-suspension-stamp-labels-later-external-pause.md
+
+- Outcome: `fix code`.
+- Assessment: by a delegated checker on main bc98e4ec3 (code reading, not run), reviewed by triage: confirmed. Only
+  Farhelm's own Resume clears the stored suspension time (crates/farhelm-helm/src/tensorlake/lifecycle.rs), a later
+  suspension reuses it (crates/farhelm-helm/src/manager.rs), and the app labels it "Suspended from Farhelm" with the old
+  time (crates/gui/farhelm-gui/src/environment_ui.rs). So after a Farhelm Suspend, a resume outside Farhelm and a later
+  Tensorlake idle suspension, details wrongly say Farhelm suspended it, at the old time. SPEC.md "Topology" (Tensorlake
+  hosts): "Its details say since when, and whether Tensorlake suspended it on its own." Bucket: other (diagnostic
+  wording).
+- Decision: recorded as `fix code` under the clearly-settled rule without asking (2026-11-18 GUI UX triage). Taken out
+  of the backend fixes plan on 2026-11-19 so it can be scheduled separately. A correct fix needs more room than that
+  plan allowed to handle a new Suspend while Farhelm records that the sandbox ran, and a Retry after an attempt to clear
+  the old timestamp failed.
+- Completion criteria: the stored Farhelm suspension time is cleared once the host is seen running again, without racing
+  a Farhelm Suspend (which holds the connection), so a later suspension is attributed to Tensorlake with its own time;
+  with a test. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
+  removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
+  feedback file and its index entry in the same change.
+- Execution: change `syumrtrrxlnyryquvqknpsmvpzyukvun`, bookmark
+  `plan/tensorlake-pause-attribution/01-retire-old-suspend-time`,
+  [PR #4329](https://github.com/scode/farhelm/pull/4329/changes).

@@ -336,34 +336,12 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     .is_some_and(|row| row.local_links_without_asking),
                 icon: registry.map(|row| row.icon).unwrap_or_default(),
                 color: registry.map(|row| row.color).unwrap_or_default(),
-                state: state_view(&snapshot.state, registry),
+                state: HostStateView::from(&snapshot.state),
                 incarnation: snapshot.incarnation,
                 trash_epoch: state.trash_requests.epoch(snapshot.id),
             }
         })
         .collect())
-}
-
-/// A host's state with persisted suspension attribution as a recovery fallback.
-/// The state snapshot wins: the registry read precedes the manager snapshots,
-/// so its completion time can be older than a just-published confirmation.
-fn state_view(state: &HostState, registry: Option<&HostRow>) -> HostStateView {
-    match HostStateView::from(state) {
-        HostStateView::Suspended {
-            observed_at,
-            suspended_by_farhelm_at,
-            resume_failed,
-        } => HostStateView::Suspended {
-            observed_at,
-            suspended_by_farhelm_at: suspended_by_farhelm_at.or_else(|| {
-                registry
-                    .and_then(|row| row.tensorlake.as_ref())
-                    .and_then(|binding| binding.suspended_at)
-            }),
-            resume_failed,
-        },
-        view => view,
-    }
 }
 
 /// One host's view by id, or a 404-shaped error — the reply every mutation
@@ -1596,87 +1574,28 @@ pub(crate) async fn refresh_podman_probe(
 mod tests {
     use super::{HostStateView, RefreshView};
 
-    /// Spec: a suspended Tensorlake host's view carries the actor's
-    /// observation time, diagnosis and confirmed own suspend time. The row
-    /// fills missing attribution after recovery; an older row cannot erase
-    /// or replace the completion carried by a newer confirmed snapshot.
-    ///
-    /// Why: the UI says "suspended from Farhelm at …" or "Tensorlake
-    /// suspended it" from exactly this field (goal 3.1), and the time lives
-    /// on the row so a helm restart keeps it.
+    /// Hosts uses the actor's observation, diagnosis and attribution so an
+    /// older registry read cannot credit a later pause to Farhelm.
     #[farhelm_testtrace::test]
-    fn a_suspended_view_preserves_confirmation_and_recovers_attribution_from_the_row() {
+    fn a_suspended_view_preserves_the_actors_confirmation() {
         use crate::manager::HostState;
         let suspended = HostState::Suspended {
             observed_at: 20,
             suspended_by_farhelm_at: None,
             resume_failed: Some("restore failed".into()),
         };
-        let mut row = crate::store::HostRow {
-            id: 2,
-            entry_uuid: "00000000-0000-4000-8000-000000000002".into(),
-            kind: crate::store::HostKind::Tensorlake,
-            destination: Some("sbx@sbx.sandbox.tensorlake.ai".into()),
-            alias: None,
-            remote_farhelm: None,
-            remote_state_dir: None,
-            host_identity: None,
-            cache_truncated: false,
-            yolo_without_asking: true,
-            commands_without_asking: false,
-            own_sessions_without_asking: false,
-            session_owned: false,
-            links_without_asking: false,
-            local_links_without_asking: false,
-            icon: Default::default(),
-            color: Default::default(),
-            podman: None,
-            tensorlake: Some(crate::store::TensorlakeBinding {
-                sandbox: "sbx".into(),
-                sandbox_id: None,
-                pending_create_at: None,
-                recipe: "rust".into(),
-                resources: None,
-                suspended_at: Some(10),
-            }),
-        };
         let expected = |by_farhelm| HostStateView::Suspended {
             observed_at: 20,
             suspended_by_farhelm_at: by_farhelm,
             resume_failed: Some("restore failed".into()),
         };
-        assert_eq!(
-            super::state_view(&suspended, Some(&row)),
-            expected(Some(10))
-        );
-        assert_eq!(super::state_view(&suspended, None), expected(None));
-        row.tensorlake.as_mut().unwrap().suspended_at = None;
-        assert_eq!(super::state_view(&suspended, Some(&row)), expected(None));
+        assert_eq!(HostStateView::from(&suspended), expected(None));
         let confirmed = HostState::Suspended {
             observed_at: 20,
             suspended_by_farhelm_at: Some(30),
             resume_failed: Some("restore failed".into()),
         };
-        // These are controlled snapshots of the host-list race: a row read
-        // before Suspend completed, joined to the state read afterwards.
-        assert_eq!(
-            super::state_view(&confirmed, Some(&row)),
-            expected(Some(30))
-        );
-        row.tensorlake.as_mut().unwrap().suspended_at = Some(10);
-        assert_eq!(
-            super::state_view(&confirmed, Some(&row)),
-            expected(Some(30))
-        );
-        assert_eq!(super::state_view(&confirmed, None), expected(Some(30)));
         assert_eq!(HostStateView::from(&confirmed), expected(Some(30)));
-        let retired = HostState::Retired {
-            reason: "gone".into(),
-        };
-        assert_eq!(
-            super::state_view(&retired, Some(&row)),
-            HostStateView::from(&retired)
-        );
     }
     use crate::rest_harness::{self, FleetBuilder, Harness, HostScript};
     use axum::http::StatusCode;
