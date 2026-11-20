@@ -294,6 +294,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   terminal is active, it should be remembered as the active terminal fro that session instead of always switching back
   to the main agent terminal when you switch away and then back
 
+- **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
+  type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
+  row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
+  button/something selectable, which is basically what that appearance of the rectangle on hover is showing
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
