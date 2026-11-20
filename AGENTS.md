@@ -175,8 +175,8 @@ A repo-wide rename, sweep or cleanup leaves these alone; each changes only under
 - Published releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the published release shots are
   never touched by a refresh, a sweep, or a cleanup, only by a task that targets them.
 - `TRIAGE_OUTCOMES.md` and `TRIAGE_OUTCOMES_ARCHIVE.md` records (an entry still graduates to the archive per
-  `review_feedback_queue/AGENTS.md`, "Lifecycle"), older `FLAKES.md` entries, and `plans/`, which has its own editing
-  rules (`plans/AGENTS.md`).
+  `review_feedback_queue/AGENTS.md`, "Lifecycle"), `FLAKES.md` and `FLAKES_ARCHIVE.md` entries (a closed flake's still
+  move to the archive), and `plans/`, which has its own editing rules (`plans/AGENTS.md`).
 - The captured agent screens under `crates/farhelm-supervisor/tests/fixtures/screens/`, which change only by re-capture
   (`docs/agent-screen-fixtures.md`).
 - The README hero's and demo video's designs (scenarios, transcripts, `intent.md`) under `docs/readme-hero/` and
@@ -217,13 +217,13 @@ included), fetch and rebase the working copy onto the latest main per jjstack: `
 working-copy change onto `main@origin`. In a stack (a deflake run, plan or triage execution), fetch and read main's
 `TODO.md` instead of rebasing mid-run, and keep both sides when the stack's own rebase meets a `TODO.md` conflict.
 
-`FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
+`FLAKES.md` holds the LATENT flakes believed active: tests that pass where they were written and fail elsewhere,
 sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
 flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry. Do NOT log a
-test that was written, flaked, and was fixed within the same session. Open flakes also get a Deflake entry in TODO.md
-and its `deflake/known-flakes.txt` line, as `deflake/AGENTS.md` describes for a deflake run's flakes; this covers flakes
-recorded from now on, not older entries. Before writing an entry, read `.agents/test-evidence.md`, "FLAKES.md", for its
-fields.
+test that was written, flaked, and was fixed within the same session. Each also gets a Deflake entry in TODO.md and its
+`deflake/known-flakes.txt` line, as `deflake/AGENTS.md` describes. The PR closing one (fixed, dismissed, moot) moves its
+entries, with a dated closing entry, to the append-only `FLAKES_ARCHIVE.md`; search that by test name, never read it
+whole. Before writing an entry, read `.agents/test-evidence.md`, "FLAKES.md", for its fields.
 
 ## Tests and validation
 

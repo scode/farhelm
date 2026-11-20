@@ -94,7 +94,8 @@ termination grace.
 `--help` and `-h` work without the required labels or a command. Help after the `--` boundary belongs to the child argv.
 Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes
 `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records
-(older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.
+(`FLAKES_ARCHIVE.md` and older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are
+rerun.
 
 The default root is `$TMPDIR/farhelm-tmp/test-runs` when `TMPDIR` is an absolute path, otherwise
 `/tmp/farhelm-tmp/test-runs`: the agent scratch tree root AGENTS.md describes. The default used to be
@@ -419,7 +420,8 @@ Run `python3 scripts/summarize-test-runs.py --root /path/to/retained-runs > /pat
 useful. The command reads existing evidence; it launches no tests and changes neither retention nor `FLAKES.md`. Repeat
 `--root` for separate collections, or use `--run` and `--batch` for individual UUID directories. Roots contain run or
 batch directories directly; discovery does not recursively search arbitrary archives. Extract selected evidence before
-reading it. `--flakes /path/to/FLAKES.md` selects another ledger; the default is this checkout's ledger.
+reading it. `--flakes /path/to/FLAKES.md`, repeatable, selects other ledger files; the default is this checkout's
+`FLAKES.md` and `FLAKES_ARCHIVE.md` together, whose dated entries are counted as one ledger.
 
 The report keeps three denominators separate: recorded command attempts, reported test cases, and dated latent-flake
 entries. Development, repetition and release attempts have separate totals. Child failures remain failures when a later

@@ -1,0 +1,4904 @@
+# Flakes archive
+
+NOTE: Do not read this file end to end. Search it by test name or file when a test fails, to find an earlier record of
+the same flake. The flakes believed active are in `FLAKES.md`.
+
+The append-only history of closed LATENT flakes. An entry moves here from `FLAKES.md` when its flake is fixed,
+dismissed, or made moot by its test's removal, together with a dated closing entry saying which. The entry format is in
+`FLAKES.md`'s header. Nothing here is edited after it moves. A closed flake that recurs gets a new entry in `FLAKES.md`
+citing the one here.
+
+Everything up to 2026-11-19 moved here in one batch when the archive was split off, in the order `FLAKES.md` held it,
+which is not strictly by date. Most of those entries predate the closing-entry rule. Their flakes count as closed
+because TODO.md's Deflake bucket no longer listed them at the split, and the browser suite's because that suite was
+removed in #3401. Some of them still say "open" in their own text. That was true when they were written.
+
+## 2026-11-05 — host menu fixture absent before expanded setup failure (e2e/tests/provisioning.spec.ts)
+
+`expanded setup failure closes the menu below it` failed in Chromium during browser sweep run
+`b0269440-1711-4470-8e18-f6f7ef88bec3`. Opening the second host's menu never produced its flyout through the five-second
+visibility wait, before the test could check that growing setup failure details close that menu. All three isolated
+classification reruns passed on both engines: `1d205cfb-1e97-4479-96bf-d07b22e5dc3a`,
+`33e6b9ea-fbe3-49a5-a93b-acced1730ff3`, and `919edd50-a83c-4c2a-a5f1-ee90f7387526`. No cause was established. Open and
+excluded from future sweeps; no fix attempted.
+
+```text
+Locator: locator('[data-host-id="71"]').locator('.host-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Evidence: clean commit `2146e607ea9227579740704f2e120ee6192c2525`, shared x86_64 Linux; ordinary browser suite on both
+engines, three workers with one stack each and zero retries. The same run failed
+`sidebar surfaces give every control hover text` on Chromium and WebKit; its console summary reported 3,037 passed, 18
+skipped and three failed. The retained Playwright JSON is 33,090,209 bytes and exceeds the recorder's report inspection
+limit, so those full-run totals come from the console, not validated report counts; the classification reports are
+complete. The five-second menu wait is known, but total failing-case duration, concurrent load, memory pressure and
+browser build identifiers are unavailable. Recorded tmux 3.7c SHA256
+`811e874f9f7802eb8f58cb4e9ff972959bc0f4d760d4273f0190d462ca0cfdc4`; locale C.UTF-8; Node 26.13.0, Playwright 1.64.0,
+Python 3.15.2, Linux kernel 6.8.0-147-generic. Recorder-owned child variables were `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`, with ambient Farhelm variables scrubbed. Raw evidence remains in the UUID run
+directories and expires with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: unknown
+
+## 2026-11-04 — visit-history deletion fixture reports error after Stop (e2e/tests/sidebar.spec.ts)
+
+`visit history chooses and remembers the next session after row deletion` failed in Chromium during sweep browser run
+`ceac5813-b025-478a-9019-a370b5fc97e5`, before exercising selection after deletion. The fixture stopped its first
+session and expected `exited`, but observed `error` through the five-second polling deadline. All three isolated
+classification reruns passed: `46ef9fa7-7605-4b68-9a5f-77a4e60d1e6c`, `7a1c431b-99c8-4581-b46b-b126c58b3407`, and
+`63f93b25-ad0e-4db1-99a5-6b9367db2d30`. Cause unknown. Open and excluded from future sweeps; no fix attempted.
+
+```text
+Expected: "exited"
+Received: "error"
+Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Evidence: clean commit `bcd9df417a0e660d6f2d917247a87b715018dc01`, shared x86_64 Linux; full ordinary browser suite,
+both engines, three workers with one stack each and zero retries. This was its only failed case; 2,907 passed and 18
+skipped. Concurrent load, memory pressure and the full failing duration were not measured. Recorded tmux 3.7c SHA256
+`384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`; locale C.UTF-8; recorder-owned child variables
+`FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, with ambient Farhelm variables scrubbed. The evidence,
+including the failure trace, is retained in the UUID run directory and expires with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: unknown
+
+## 2026-11-04 — checkout folder save cleanup stalls on WebKit (e2e/tests/settings.spec.ts)
+
+`an untouched checkout folder save writes nothing and edited paths are trimmed` completed its save and readback
+assertions, then exceeded 60 seconds while draining submitted saves in host-terminal run
+`81a954d9-bbe9-4556-a8bd-dd718350514c`. The exact WebKit case passed unchanged in 7.7 seconds in isolated run
+`d53c5dbf-8491-4eba-bf3d-3f3714cc0674`. Hypothesis: WebKit's request-finished observation stalls, as in the pending
+post-clone save flake below; the cause is not established. Open and excluded from future sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+AggregateError: owned fixture cleanup failed
+Error: cleanup failed: submitted checkout saves
+```
+
+Evidence: clean commit `4f3fef2831e0ff89edcb66d9ab72924028e17c71`, shared x86_64 Linux, host-terminal browser suite on
+both engines with three workers, one stack each and zero retries. The same run also failed the quick-launch route
+cleanup case below. Load and memory pressure were not measured. The isolated pass used code-identical `851a1d13`, one
+selected WebKit test, zero retries and three harness stacks; lint compilation ran concurrently with that pass. Locale
+C.UTF-8; recorded tmux 3.7c executable SHA256 `d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The
+recorder retained `FARHELM_E2E_SUITE_TERMINALS` and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables
+were scrubbed. Private run evidence and copied traces expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-11-04 — quick-launch host route removed before fulfillment (e2e/tests/quick-launch.spec.ts)
+
+`a host-read fallback permits keyboard cancellation before recovery` failed in WebKit host-terminal run
+`81a954d9-bbe9-4556-a8bd-dd718350514c`. The trace shows a host-list reply callback begin its build-stamp read, cleanup
+remove the interception while that read was in flight, and the callback then try to fulfill the released route. The same
+case passed on Chromium in that run and on WebKit in the earlier browser sweep `8cb83a8d-7220-4997-9c9c-23e8e1927ed4` at
+a different commit. Open and excluded from future sweeps.
+
+Follow-up: fixed in #3043 by draining the host-list callback before removing its interception. Cancellation and recovery
+still exercise the same assertions; the test is enabled again in sweeps.
+
+```text
+Error: route.fulfill: Route is already handled!
+```
+
+Evidence: clean commit `4f3fef2831e0ff89edcb66d9ab72924028e17c71`, shared x86_64 Linux, host-terminal browser suite on
+both engines with three workers, one stack each and zero retries. The failing case took 5.5 seconds; concurrent load was
+not measured. Locale C.UTF-8; recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The recorder retained `FARHELM_E2E_SUITE_TERMINALS`
+and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables were scrubbed. Private run evidence and trace
+expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-11-04 — host-terminal startup-session check recurs (e2e/global-setup.ts)
+
+The host-terminal suite's global setup found no startup session in run `6e4fb56e-d4bf-4833-bf75-57115b19170d` and
+stopped before either selected launcher test ran. The stack logged that it was creating the session just before the
+failure, consistent with the earlier startup-race hypothesis below. A second run,
+`a74201be-2382-44b1-9b21-bcafb83e5626`, reached and passed both selected tests. The cause remains a hypothesis and the
+existing Deflake entry stays open; this setup check is not a test that can be excluded from a sweep.
+
+Follow-up: fixed in #3042 by waiting for the startup session's publication before checking its terminal kind. The helm
+can answer Playwright's web-server probe before the stack script finishes creating that session; a published session of
+the wrong kind still fails immediately.
+
+```text
+Error: the stack at <loopback URL> must list its startup session
+```
+
+Evidence: clean commit `c43d3600875b16dd3b2323d8b16c1f6b883f64bf`, shared x86_64 Linux, Chromium launcher warning-color
+selection with up to three workers and one stack each, retries disabled. The failure came after five seconds; concurrent
+load was not measured. Locale C.UTF-8; recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`. The recorder retained `FARHELM_E2E_SUITE_TERMINALS`
+and supplied `FARHELM_TEST_TRACE_DIR`; other ambient Farhelm variables were scrubbed. Private evidence expires with
+temporary-file cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-02 — `restart_with_resume::named_restart_with_uses_the_requested_target_and_only_reports_capture_it` (crates/farhelm/tests/e2e/restart_with_resume.rs)
+
+Observed as the one failure among 403 tests in run `adf66a9a-4f3f-4750-8aa6-93d6bf127ebf`, a wider host and terminal
+selection on unmerged terminal-host stack commit `9741cc35e1085f7bed8a5cc7dd689878ffef15c1` (tree clean apart from an
+untracked `clippy.log` the same job wrote earlier), on a Tensorlake cloud sandbox. Run alone there it then failed 8 of
+10 at that commit (clean, runs starting `ff7488e5-1ec7-4fca-b82a-8e014c6b1bcd`) and 9 of 10 on its parent in the stack,
+`f4e93b6874cf5824b10ceecaa84c18da8a8e2c28` (clean, runs starting `6b8058a3-9321-4044-995b-e7473fefe05e`); its whole
+module failed it in 3 of 6 runs across the two (2 of 3 on `9741cc35`, 1 of 3 on `f4e93b68`), and the rest of the module
+passed every time. On clean main `ce6b55c0` it failed 5 of 5 alone on a sandbox (`0f13b410-0e79-40a9-9812-4448effe8660`,
+`cb204897-c110-4d7b-9f6f-4d6e8845b2d9`, `da8c23ab-c208-4a0a-8104-f8e2b41b6358`, `d65dc909-f76f-4455-bac7-0a605b1fd023`,
+`7bbea98e-c820-4e74-b1c0-efd3f03b6ee9`), so it predates that stack: the test has had this shape since #2012, and there
+is no earlier entry for it. Every failure ran into the 30-second wait for wrapper generation two (about 30.2 s;
+uninstrumented passes took 0.5 to 5.6 s) in the first loop iteration, the one with nothing captured. The cause is a race
+in the test, not in Restart. That iteration sends Restart straight after create returns, and create returns while the
+first launch can still be inside `farhelm internal launch`, before the fake `claude` wrapper has bumped its generation
+counter. Restart's stop then kills the first launch uncounted, the relaunch becomes generation one, and the wait for
+generation two can never succeed. Instrumented runs of the test alone on main (`8fa2093f-a6ce-473f-85dd-4ee0e6d36624`
+and `f52312cd-7c9c-4a79-bb13-5ac9f4c7f08f`, the two failures of five; the instrumentation itself shifted the timing)
+logged process trees and timestamps showing the first launch still in `farhelm internal launch` when Restart stopped it,
+its wrapper never running, and the relaunch's wrapper running as generation one with the requested `--resume` argv and
+reaching the fake agent's READY prompt. Its module, instrumented the same way on main, passed 3 of 3
+(`5d39f333-ed25-4ab7-bb3d-b602f36a3a45`, `410fcd3c-04eb-4873-a4f8-15dc6630863d`,
+`917b08c7-c9df-48b2-a438-c0f25c99476a`). In every failure the relaunch ran the requested argv and reached READY, so
+Restart itself worked and there is no product impact. The fix waits for generation one before restarting when nothing
+has been captured, as the sibling `restart_with_refuses_a_non_resume_offer_without_changing_settings` already did; an
+instrumented build with that wait passed 10 of 10 alone on a sandbox (runs starting
+`0dfcc3cb-f9d2-4089-aaa6-f32745f638b0`). Ruled out: the sandbox's missing systemd user manager, because this test's
+fixture builds its supervisor with scopes disabled, so its stop is the same process-tree sweep on every machine. Fixed
+in the PR that adds this entry. Main `ce6b55c0` with that change's final test file applied uncommitted (no
+instrumentation) passed 10 of 10 alone on a sandbox (runs starting `83f3187e-9e05-4640-b93f-ddd1e9e1e91e`) and its whole
+module once (`bfd2a39e-5f02-4ade-8045-afa4c4488622`). Why this sandbox loses the race far more often than the machines
+the test usually runs on is unknown.
+
+```text
+panicked at crates/farhelm/tests/e2e/structured_launches.rs:375:23:
+session 7ec87ee1-c7da-4048-a416-971b6263effd's generation 2 never reached its complete post-exec boundary; transcript:
+```
+
+Evidence: Tensorlake sandbox, x86_64 Linux, kernel 7.0.7, 4 CPUs, no systemd user manager, one sandbox per job and no
+other test runs on it; load average and memory pressure were not recorded. The first run's selection was
+`cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_tabs/) | test(/^tmux::/) | test(/hosts::terminal::/) | test(/core::tests::host_terminals::/) | test(/session_hosts::/) | test(/host_launch::/) | test(/launch_artifacts::/) | test(/host_handover/) | test(/^host_creates::/) | test(/^host_restarts::/) | test(/^host_terminals::/) | test(/^terminal_tabs::/) | test(/^tab_lifecycle_edges::/) | test(/^restart_with_resume::/) | test(/supervisor_stop/) | test(/grid_stream::/)'`.
+The focused runs used
+`cargo nextest run -p farhelm --test e2e -E 'test(/^restart_with_resume::named_restart_with_uses_the_requested_target/)'`
+(or `test(/^restart_with_resume::/)` for the module runs). All went through the recorder with four nextest slots and
+zero retries. Tree status per group: the first run as above; the stack repetitions and stack module runs clean at the
+commits named; the baseline main runs clean `ce6b55c03dbccfd4229cff739591075c2d481aa2`; the instrumented runs main with
+an uncommitted experiment-only patch adding timestamps and process listings to the fixture (plus the wait, for the
+instrumented fix runs); the final fix runs main with this change uncommitted. cargo-nextest 0.9.148, recorded tmux 3.7c
+executable SHA256 `d85b5932c893e6176a8a4f78aeb9ecf0411381b4739bc3da050f2ba0351e6857`, locale `C.UTF-8`; the only
+`FARHELM_*` variable was the recorder-owned `FARHELM_TEST_TRACE_DIR`. Compiler version unavailable. Retained run
+directories are private to the machine that copied them back from the sandboxes and expire with its temporary-file
+cleanup.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-29 — confirming-state test status premise (e2e/tests/terminal.spec.ts)
+
+`a failed listing read while confirming does not clear the confirming state` failed in WebKit in full browser sweep
+`e0526613-832f-4fba-b023-b38cc064e5c2`, waiting ten seconds for a basic session status while the badge showed
+`Idle — new output`. All three isolated classification reruns passed (`2d9754a3-cc01-4570-ba93-43cfdaf7d866`,
+`653a6901-8a15-4d7d-8f6f-737854594ede`, `f595a1ba-4576-48f8-b391-922163c21513`). Cause unknown; the excerpt does not
+establish a failure in the confirming-state behavior named by the test. Open and excluded from subsequent sweeps; no
+further reproduction or fix attempted.
+
+```text
+Expected pattern: /^(Running|Waiting|Idle)$/
+Received string: "Idle — new output"
+Timeout: 10000ms
+```
+
+Evidence: clean commit `32299b8eb13a37b33e5fec139a76ac269e8ea2d1`, shared x86_64 Linux, full Chromium and WebKit
+selection excluding known flakes, three workers with one stack each and zero retries. The same battery also failed the
+folder-dropdown visibility test recorded below. Battery duration 8996 seconds; individual duration, concurrent load at
+failure and OS/compiler versions were not extracted. Playwright 1.64.0, Node 26.12.1, locale C.UTF-8; recorded tmux 3.7c
+SHA256 `384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`. Ambient `FARHELM_*` markers were scrubbed;
+child inputs were `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Private evidence is addressed by the
+run UUIDs and expires with temporary-file cleanup. The recorder's bounded browser report was incomplete; the driver
+supplied the named failure and classification results independently.
+
+Class: fixture-premise
+
+Cause: unknown
+
+## 2026-10-29 — folder dropdown keyboard reset visibility (e2e/tests/sidebar.spec.ts)
+
+`composer folder dropdown preserves keyboard launch and grouped history` failed in WebKit during browser sweep
+`e0526613-832f-4fba-b023-b38cc064e5c2`: the reset option was selected but remained outside the viewport for five
+seconds. Three isolated classification reruns passed (`e3ebe846-ebc4-44da-9a7c-cf6981037ca2`,
+`eaf03d42-4533-48b6-9fc6-21ffa08944f1`, `7a80d996-edd8-46aa-8d82-f1ca43c6d5c8`). Cause unknown; open and excluded from
+subsequent sweeps. No further reproduction or fix was attempted.
+
+```text
+Error: keyboard navigation must reveal a reset below the scroll cap
+Expected: in viewport
+Received: viewport ratio 0
+Timeout: 5000ms
+```
+
+Evidence: clean commit `32299b8eb13a37b33e5fec139a76ac269e8ea2d1` on shared x86_64 Linux; full browser selection on
+Chromium and WebKit excluding recorded flakes, three workers with one stack each, zero retries. The battery took 8996
+seconds; the individual test's total duration and concurrent load at failure were not extracted. Earlier initial checks
+observed unrelated browser/build load; that does not establish load at this failure. Playwright 1.64.0, Node 26.12.1,
+locale C.UTF-8. Recorded tmux 3.7c executable SHA256:
+`384c071bf93d416a8f1d884ceb13df0cebabfabe885a3f1408f6144f17fda723`. The recorder removed ambient `FARHELM_*` markers;
+child inputs were `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Retained private run directories are
+addressed by the UUIDs above and expire with temporary-file cleanup. The recorder marked its bounded browser report
+incomplete; the driver supplied the named failure and classification results independently.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-18 — stop and delete through the HTTP API (e2e/tests/terminal.spec.ts)
+
+`stop and delete a session through the HTTP API` saw `error` rather than `exited` for ten seconds after its stop request
+succeeded in the WebKit portion of full browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Three isolated
+classification reruns passed (`ec751e51-7a3c-4d7d-b91d-6d18724e409b`, `e1cb3e55-5bcf-46b8-b201-c10f27071dd8`,
+`323bb0bc-b176-494a-93a3-edb39f93e4c6`); Chromium passed in all four runs. The test stopped before the normal delete
+assertion. The source of the error status is unknown. Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, SSH help tests, tab lifecycle, launcher geometry, and trash layout tests. Machine load and slot peers at this
+test's start were not recorded. The test file was last changed in #2269; no earlier entry for this exact test was found.
+Retained runs and the Playwright trace are under the local test-runs directory; their lifetime is the machine's
+temporary-file cleanup.
+
+```
+Error: stopped session must show as exited
+Expected: "exited"
+Received: "error"
+Call Log:
+- Timeout 10000ms exceeded while waiting on the predicate
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-18 — tab opened and closed before polling (e2e/tests/terminal-tabs.spec.ts)
+
+`a tab opened and closed before any poll observes it does not come back` failed in WebKit during the full browser run
+`3727b704-5894-4a20-9fb6-1967d56fabb8`: its held detail route parsed a plaintext `no such session` response as JSON. The
+first isolated classification rerun failed, and the next two passed (`72d1143f-d4bc-4085-9916-ef46949249c0`,
+`3ea7dcc1-4f72-4a1f-a487-18f6521e2f32`, `3b1939c9-7c9c-4d55-a4fb-754b5ce89a82`); Chromium passed in all four runs. The
+route does not check response status before parsing, but why the session disappeared is unknown. A different test
+encountered a similar server reply during restart in September; its established cause does not establish this one's.
+Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, SSH help tests, launcher geometry, trash layout, and HTTP session lifecycle tests. Machine load and slot peers
+at this test's start were not recorded. The test file was last changed in #2253; no earlier entry for this exact test
+was found. Retained runs and the Playwright trace are under the local test-runs directory; their lifetime is the
+machine's temporary-file cleanup.
+
+```
+SyntaxError: Unexpected token 'o', "no such ses"... is not valid JSON
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-18 — overflowing trash layout (e2e/tests/modal-layout.spec.ts)
+
+`overflowing trash keeps vertical margins at width 1000` found zero archive rows for five seconds in WebKit during the
+full browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`, though its fixture supplies 24. Three isolated classification
+reruns passed (`10fab11f-7891-459e-97e2-b1dac4713e2c`, `0bdfd389-b8ce-458f-a3d2-7c13038001ba`,
+`d6719411-4c1d-42b7-b82d-04578ae8196c`); Chromium passed in all four runs. The failure preceded the vertical margin
+assertions, and the reason the listing was empty is unknown. Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, SSH help tests, tab lifecycle, launcher geometry, and HTTP session lifecycle tests. Machine load and slot peers
+at this test's start were not recorded. The test was last changed in #2226; no earlier entry for it was found. Retained
+runs and the Playwright trace are under the local test-runs directory; their lifetime is the machine's temporary-file
+cleanup.
+
+```
+Locator:  locator('.checkout-trash-dialog').locator('.checkout-trash-entry')
+Expected: 24
+Received: 0
+Timeout:  5000ms
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-18 — long SSH command Copy (e2e/tests/keyboard-scroll.spec.ts)
+
+`long SSH commands wrap while Copy preserves their exact bytes` timed out at 60 seconds in WebKit in browser run
+`3727b704-5894-4a20-9fb6-1967d56fabb8`. The click on the help menu's `ssh needs 2FA?` item saw the element detach and
+did not complete its retry, before the dialog or Copy assertions ran. Three isolated classification reruns passed
+(`6f590635-f235-4873-bcd2-72104c9ce912`, `8f5a6fb5-e23b-49d2-9e47-d197092d1454`,
+`11c527c4-c92f-4b0f-b0ad-f3274afab9ca`); the first took about 12 seconds for both engines. Chromium passed in all four
+runs. Why the menu item detached is unknown. Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, another SSH help test, tab lifecycle, launcher geometry, trash layout, and HTTP session lifecycle tests. Machine
+load and slot peers at this test's start were not recorded. The test and its scroll helper were last changed in #2222;
+no earlier entry for this test was found. Retained runs and the Playwright trace are under the local test-runs
+directory; their lifetime is the machine's temporary-file cleanup.
+
+```
+Error: locator.click: Test timeout of 60000ms exceeded.
+Call log:
+  - waiting for getByRole('menu', { name: 'help', exact: true }).locator('[data-bar-menu-item="ssh needs 2FA?"]')
+  - element was detached from the DOM, retrying
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-18 — SSH help with no hosts (e2e/tests/keyboard-scroll.spec.ts)
+
+`SSH help remains keyboard-scrollable with no hosts` timed out after 60 seconds in WebKit during the full browser
+battery, run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Two isolated classification reruns passed in about three seconds
+(`84ec8315-ddda-47ad-8514-1b5a8d325ffd`, `839a11bb-abaa-464c-9267-74ec02a1a9b0`), and the third timed out at 60 seconds
+(`2b03f1ba-45f4-4c86-823c-90bd5bf0b4d9`); Chromium passed in all four runs. The timeout snapshot had no SSH help dialog,
+but the report does not identify which awaited step stalled. The later `page.unrouteAll` error was reported after the
+timeout, when the page had already closed. Cause unknown; open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, tab lifecycle, launcher geometry, long SSH command, trash layout, and HTTP session lifecycle tests. Machine load
+and slot peers at this test's start were not recorded. The test and its scroll helper were last changed in #2222; no
+earlier entry for this test was found. Retained runs and the Playwright trace are under the local test-runs directory;
+their lifetime is the machine's temporary-file cleanup.
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-29 — `a tab list past the island cap is listed in full but only partly attached` (e2e/tests/terminal-tabs.spec.ts)
+
+The deflake sweep's full browser battery failed this test in WebKit (`webkit-terminal-tabs`) in run
+`a7cb2f9a-820d-43fe-aa89-02e8a36e5ffd`, and the first of three classification reruns failed the same way in run
+`6c0d66ef-a4db-4194-907e-e79def8cb87d`; the other two reruns, `76017a36-c24e-44a2-a14b-6787ec415fe2` and
+`957cfe2f-b7eb-4894-9421-f2f9b3a3d15e`, passed. Both failures were the 20s agent-readiness budget expiring with
+`mounted=true, open=false, socketMatches=true, revealed=false`: the agent socket never reported open, which is the
+pre-retry shape rather than the `open=true, revealed=false` residual TODO.md recorded after the 2026-09-17 retry fix.
+Linux x86_64, clean tested commit `3c5996cdddaccc72cc1d83f9374e3153c27e1c6d`, selection `browser suite, both engines`
+narrowed by the sweep to this test for the reruns, one browser worker and zero retries, pinned tmux 3.7c executable
+SHA256 `75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, locale `C.UTF-8`, ambient `FARHELM_*`
+scrubbed with only the recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` supplied. Machine
+load during the runs was not recorded. Disposition: fixed by two changes (#1292, #1293). The first mount built all 33
+terminals in one task, which held WebKit's main thread for 8–10s, and each terminal's 5s connect watchdog expired inside
+that hold and discarded sockets the helm had already accepted. The fake tabs' attaches were refused as not found, which
+the browser retried as outages, rebuilding terminals until the page starved. Unfixed, the test failed 4 of 10 WebKit
+repetitions (run `a80c1f02-52f3-4744-92ee-d0e25f92fe58`); with both changes it passed 30 of 30 (runs
+`cd27799e-55e1-4f11-9403-44385a7ea138` and `a945da61-0981-4c41-b27a-92324e9ec46f`) at load averages of 9–21.
+
+Class: readiness
+
+Cause: established
+
+## 2026-09-25 — composer controls inside the initial viewport (e2e/tests/sidebar.spec.ts)
+
+`composer keeps launch and cancel inside the initial viewport at default and narrow width` failed in Chromium during
+interrupted full browser run `946f3bb1-6398-4bbc-9ece-7ab6232be092` on Linux x86_64, then passed unchanged among the
+exact failing-test selections in run `51f444c3-d0db-4e33-bd27-32b6d429c3a7`. The full run used clean release commit
+`c47e3463ec09121492ecf90f8184c69278d59f37`; the rerun used clean test-fix commit
+`2c25bf3ba22719fbe3896b18270d1c0194696379` with unchanged RC application builds. Both used one browser worker and zero
+retries, locale `C.UTF-8`, and scrubbed ambient `FARHELM_*`; only recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied.
+Tmux executable identity is unavailable because these runs did not record it. The original interruption left no final
+assertion report, so at the time the failed geometry condition and cause were unknown. Disposition: ignored on
+2026-10-01 as most likely not a failure at all. A later review of the retained run found that it ended by interruption:
+its manifest records outcome `interrupted` and recorder exit 130, and the generic recorder mode forwarded SIGINT to the
+run and SIGKILLed it two seconds later. Playwright 1.62's list reporter marks a test that was running when the run is
+interrupted with the same `✘` and elapsed time as a failure, and prints the "interrupted" summary only after webServer
+teardown, which the SIGKILL cut off. This test is the last test line in the console, and no replacement worker started
+after it, as one did after every real failure earlier in that log. The test passed in the rerun above and in both full
+deflake sweeps on 2026-09-29, and its source is unchanged since. A real fast failure in the same 1.8 s is not ruled out,
+but nothing supports it. Browser runs through `record-test-run.py --runner playwright` record per-test outcomes, which
+tells an interrupted test from a failed one.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-09-25 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
+
+The workspace nextest battery failed this identity-mismatch test once on the Linux x86_64 worker, while the exact test
+passed immediately afterward in isolation. Retained full run `131912d5-0ee2-4313-a204-38edf6fc942c`; exact rerun
+`c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; tested commit `6f238ccab7ed8420f78c896ba1ed207947b03cdd` with the
+lifecycle-harness tree dirty. Selection was `workspace Rust targets` versus the exact test, both with four nextest slots
+and zero retries, pinned tmux 3.7c executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`,
+locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. At the time the cause was unknown, and the entry asked to
+investigate the concurrent filesystem premise before changing reconciliation behavior. Disposition: fixed by #1046,
+which landed on 2026-09-27, after this run. The test removes the checkout directory and then creates the "stranger" at
+the journaled destination with `create_dir_all`, which first creates an intermediate `.archive` directory. On its own,
+`.archive` takes the removed checkout's freed inode; but when a concurrent test frees a lower-numbered inode at any
+point after the checkout was created, `.archive` takes that one instead and the stranger gets the removed checkout's
+inode number. The code at this commit, which identified a directory by device and inode alone, took the stranger for the
+already-archived checkout and returned `Ok(MetadataComplete)` instead of `IdentityMismatch`. A 2026-10-01 analysis
+reproduced it at `6f238ccab7ed8420f78c896ba1ed207947b03cdd` by running the whole `working_copies` test module rather
+than the test alone (exact test 0 of 20; module 5 of 60 in hunt batch `8571e023-cbb0-4b96-87a3-c0c1e3e6c171`, and 3 of
+40 with the test instrumented to print identities in batch `52db9b77-7098-4607-9003-d15a35013a9e`); in the instrumented
+batch all three failures printed the stranger's identity equal to the recorded one and the result
+`Ok(MetadataComplete)`. #1046 added the directory's birth time to its identity, and the same module passed 60 of 60 at
+`541cc3dbee0e22e71ccad1b0b396561a6a523899` (batch `52d9f40f-448e-424f-a98d-1f5c7c1a352d`). The residual exposure is two
+directories created within one coarse clock tick, or a filesystem that reports no birth time, where identity falls back
+to device and inode and this test is as exposed as before; the tick case matters most to
+`a_recreated_checkout_directory_is_a_different_object`, which saw inode reuse in 45 of those 60 runs and no failure.
+
+Class: product
+
+Cause: established
+
+## 2026-09-02 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e)
+
+Fails with `the supervisor never answered the agent request: Elapsed(())`, the peer's 20 s `answer()` budget running
+out. Predates the 0.3.0 stack: on a 4-vCPU sandbox running the whole e2e binary at `--test-threads=4` it failed in 2 of
+5 runs against main and 3 of 7 against the stack, while 16 runs alone passed on both and every local run on a 6-core
+machine passed. A load flake in the helm-death detection racing the request, or in the budget itself; the relay
+mechanism is not suspected. Disposition: open (TODO.md); marked `#[ignore]` in the 0.3.0 stack after it blocked release
+gates, to be un-ignored when deflaked.
+
+## 2026-09-02 — `terminal_backpressure::a_paused_replay_detaches_relative_to_the_first_pause_despite_pause_spam` (crates/farhelm/tests/e2e; renamed `a_paused_flood_detaches_relative_to_the_first_pause_despite_pause_spam` in #357)
+
+Failed once on a GitHub-hosted runner in CI's `test` job for a PR that touched nothing on the terminal path, and passed
+on the re-run; the panic is in the file's shared wait ("timed out waiting for FLOOD-…"). Predates that PR. Disposition:
+fixed in #357. The wait matched one of the first 100 records, and every failing transcript had already received records
+through 799999: the initial prefix of the burst had aged out of tmux history before the attachment started draining, so
+no budget could have found it. The flood now starts behind an input gate after the attachment is ready, making that
+initial-prefix wait a valid setup oracle again.
+
+## 2026-09-02 — `session_lifecycle::input_bytes_survive_verbatim_through_hexecho` (crates/farhelm/tests/e2e)
+
+Under load on a 4-vCPU sandbox, 1 of 7 full-binary runs: the transcript read `ESC[2;1H61 7f 62 …`, every byte present
+but the first hex token glued to a cursor-address sequence, which the whitespace tokenizer dropped whole. Cause: the
+attach snapshot ends with tmux's synthesized cursor restore, and when the fixture's READY line was captured into the
+snapshot the wait for it returned with that tail still queued in front of the live hex output. Which side of the
+snapshot READY lands on is scheduling. Disposition: fixed in #333 (the tokenizer strips escape sequences before
+splitting). One of four flakes with the same root cause, the attach-snapshot-versus-live seam; see TODO.md's "Systematic
+deflake" bucket.
+
+## 2026-09-02 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e)
+
+Under load, 1 of 5 full-binary runs on main and 1 of 7 on the 0.3.0 stack: `live_bytes.contains(0xff)` false. The
+`binary` fixture wrote its 0xff at startup; when it won the race against the test's attach, the byte arrived through the
+capture-pane snapshot, where tmux is allowed to canonicalize invalid bytes, instead of the live stream the test makes
+its claim about. Disposition: fixed in #333 (the fixture emits on request, the test asks through its own attachment) and
+hardened in #339 after the v0.3.0-rc.1 release gate failed twice on the request itself: the fixture waited for a LINE in
+the pty's canonical mode, and on the release runner the line never completed; it now reads one byte in raw mode, the way
+the hexecho fixture does.
+
+## 2026-09-03 — `hook_identity::farhelm_agent_instructions_off_suppresses_announce_through_the_real_cli` and `wrapper_launch::a_wrapper_profile_receives_the_sessions_directory` (crates/farhelm/tests/e2e)
+
+Both failed the v0.3.0-rc.1 release gate with "the argv line filled the pane and may have wrapped; raise WIDE_COLS" on a
+484-column line for a 245-character argv. The argv-width guard exists to catch a wrapped marker line; what it caught was
+a snapshot row padded with spaces to the full pane width, the shape the marker line takes when it arrives through the
+attach snapshot rather than live. Same seam as the two entries above. Disposition: fixed in #338 (the guard trims
+trailing blanks before measuring; a row that really wrapped is full of argv characters to its last column, so the bound
+still holds).
+
+## 2026-09-03 — `session_lifecycle::delete_fails_closed_when_a_launch_artifact_cannot_be_removed` (crates/farhelm/tests/e2e)
+
+Failed once in the v0.3.0-rc.2 release gate on a GitHub-hosted runner: the delete that must fail closed succeeded
+instead. It passed three rc.1 gate runs on the same runner type, a 4-vCPU sandbox, and locally. The test waits for the
+launch shim to consume the session's spec, plants a replacement, makes the launch directory read-only, and expects the
+delete to fail on the artifact it cannot remove; at the time, the suspicion was that under load the shim consumed the
+planted spec before the delete ran, leaving nothing to fail on. Disposition: fixed in #355. The race was the test's, and
+not with the planted file: it planted `launch/<id>.json`, a name delete had not recognized since per-launch generations
+arrived (#37), so the test passed only when it ran ahead of the shim's read-and-unlink of the real `launch/<id>.0.json`;
+under load the shim won, delete found nothing to remove, and succeeded. The test now plants at the real path after that
+consume.
+
+## 2026-09-03 — `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e)
+
+Failed in the same rc.2 gate run, in the same shared wait its sibling above timed out in the day before
+(`timed out waiting for FLOOD-000000; 11619657 bytes seen`). Two members of one file failing at one wait under load
+points at the wait's budget rather than either test. Disposition: fixed in #357, with the entry above; the wait's oracle
+was wrong (the initial prefix had aged out), not its budget. The gated start described there restores that prefix as a
+loud premise instead of accepting a retained tail.
+
+## 2026-09-03 — profiles popup, three cases (e2e/tests/profiles.spec.ts)
+
+`the profiles popup follows its focus and Escape dismissal contract`,
+`unknown then transit waits for the pending focus request`, and
+`stale focus-out classifiers cannot clear newer obligations` fail only on a loaded 4-vCPU sandbox running the spec with
+the default worker count beside a live helm, supervisor, and both browsers, Chromium only; all three pass locally in
+both engines, repeatedly. The first is a product policy under load: when the page cannot learn where focus went within
+its settlement budget it declines to close the popup, and the retries added for that case were not enough on that box.
+The second is the test for that retry racing the test hooks that drive it. The third is the harness's stubbed feed never
+seeing the page's socket within its wait. Disposition: open (TODO.md, with the fingerprints and first steps).
+
+## 2026-09-03 — `a client that stops draining is detached with the stall reason after the full stall interval` (e2e/tests/terminal-flood.spec.ts)
+
+WebKit, same loaded sandbox: the poll "the attachment must cross HIGH_WATER and pause before the stall clock can start"
+saw zero pauses in 30 s, so the stall clock never started. The spec and the backpressure code were untouched by the
+stack that surfaced it; the load is the difference. Disposition: open (TODO.md).
+
+## 2026-09-03 — `a keyboard-focused selected tab keeps its accent fill instead of the neutral hover tint` (e2e/tests/terminal-tabs.spec.ts)
+
+WebKit, same loaded sandbox: `toHaveCSS` read the hover tint where the accent fill was expected, for 5 s. The pointer
+was presumably still over the tab from the click that selected it, so hover won the cascade; whether that is the test's
+sequencing or a real precedence bug is unsettled. The tab styles were untouched by the stack that surfaced it.
+Disposition: open (TODO.md).
+
+## 2026-09-03 — `replay-stale-mount` and `reattach-lands-at-tail (tab)` (e2e/tests/terminal-replay-rename.spec.ts), NOT a flake
+
+Recorded here because it looked like one: three failures in both engines on the loaded sandbox, all "waiting for … to be
+holding its catch-up open". It was a deterministic regression, not a flake: a profiles-popup fix round had made the
+browser suite's replay hold one-shot per page, so specs where several terminal islands mount (a tab session; a remount
+after navigating away) never held the island the test waited on. Fixed in #340 before the tag. Kept as a reminder that
+"fails only under load" is a hypothesis to test, not a diagnosis: this one failed under load first only because the
+loaded run was the first run of that spec after the change.
+
+## 2026-09-03 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), recurrence
+
+Under load on a 4-vCPU sandbox (a `cargo build` of the workspace looping beside the tests, the attach-boundary deflake's
+"before" proof run), 2 of 10 single-test runs against 0.3.0 timed out after 40 s waiting for `BINARY-MARKER`, the marker
+the `binary` fixture writes after its one-byte read, and 1 of 3 full-binary runs at `--test-threads=4` failed the same
+way. Not the attach-shape seam the two entries above were fixed for: the fixture is in raw mode before it prints READY,
+and the 0xff assertion never ran. What the timeout shows is only that the request-and-reply round trip (the test's
+`send_input`, the supervisor's `send-keys` exchange, the fixture's read and write, the output's trip back) did not
+complete within the budget; the transcript that would localize it was not kept. The input path, the behavior #339's
+hardening was aimed at, is the first hypothesis, not an established cause. The load was harsher than a release runner's,
+where the build finishes before the tests start, so the measured rate is not directly representative. Then it failed the
+same way on a GitHub-hosted runner, in CI's `test` job for a docs-only PR of the same stack (run 33716079614, the only
+failure in 337 tests), so the stall is not an artifact of the sandbox's load. Disposition: open (TODO.md).
+
+## 2026-09-03 — `hook_identity::a_hook_outside_a_farhelm_session_does_nothing_silently` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox runs as the entry above: 1 of 3 full-binary runs on 0.3.0 and 1 of 10 loaded `hook_identity::`
+module runs on the attach-boundary stack, `write the payload: Broken pipe` from `assert_silent`. The hook under test has
+nothing to do and exits without reading its stdin; under load it was gone before the test wrote the payload, so the
+write hit a closed pipe and the test panicked on the very behavior it asserts. Disposition: fixed in #353 (the payload
+write tolerates a broken pipe; the exit status and captured output still decide).
+
+## 2026-09-03 — `terminal_backpressure::a_deep_pause_ends_correctly_under_either_tmux_flow_control_behavior` and `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox, full binary at `--test-threads=4` on 0.3.0: the deep-pause test failed 2 of 3 runs in the file's
+shared wait (`timed out waiting for FLOOD-000000; ~12 MB seen, last records [799999, ...]`), the same wait and the same
+fingerprint as the two `#[ignore]`d siblings above; the memory test failed 1 of 3. Neither failed in the three loaded
+full runs on the attach-boundary stack the same day, so the rate is noisy. A third member at the same wait strengthens
+the reading that the wait's budget under load, not any one test, is the thing to look at. Disposition: the deep-pause
+test is fixed in #357 with the two entries above (same wait, same cause: the first 100 records had aged out of history);
+its gated start now makes the initial-prefix premise deterministic. The memory test's failure was its RSS assertion, not
+that wait, and it stays open (TODO.md).
+
+## 2026-09-03 — `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e)
+
+Same loaded sandbox: 1 of 3 full-binary runs on 0.3.0 (before the locale fix, so alongside four locale-caused failures)
+and 1 of 3 on the attach-boundary stack, `timed out waiting for "FAKE-AGENT READY"` after the test's attach at a
+degenerate pane size. Never alone. Nothing about the cause is known beyond the fingerprint. Disposition: open (TODO.md).
+
+## 2026-09-03 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e), diagnosed
+
+Reproduced on a loaded 4-vCPU sandbox with the `#[ignore]` lifted for the run: 1 of 10 four-thread full-binary runs
+beside a looping `cargo build`, the usual `Elapsed(())` at the peer's 20 s read. A sandbox-only diagnostic then widened
+only that read to 60 s and kept the test's 10 s promptness assertion; on its second loaded run the test received
+`ErrorKind::Timeout` where it requires `Unavailable`. That is the supervisor relay's own upcall-answer budget expiring
+before the helm connection-loss path had run, so the helm's death was not observed in time under load. The budget and
+the oracle are therefore not the flake; the product's detection latency is. Disposition: open (TODO.md, with the
+proposed product direction); still `#[ignore]`d.
+
+## 2026-09-03 — `a client that stops draining is detached with the stall reason after the full stall interval` (e2e/tests/terminal-flood.spec.ts), not reproduced
+
+Thirty loaded WebKit runs of the test on a 4-vCPU sandbox (a `cargo build` looping beside Playwright) all passed, and a
+temporary timer around the gate-to-first-pause interval read 1.3 to 2.7 s loaded over ten runs, 1.3 s unloaded on WebKit
+and 0.9 s on Chromium, against the poll's 30 s budget. The single sighting's Playwright output was not kept.
+Disposition: open (TODO.md); no change made, for lack of a reproduction or an evident cause.
+
+## 2026-09-03 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), localized
+
+Twenty loaded single runs on a 4-vCPU sandbox: 8 failed, each after the full 40 s wait for `BINARY-MARKER`, with only
+`FAKE-AGENT READY` in the transcript. A temporary test-side barrier, a `ListSessions` request queued immediately after
+`send_input` (the helm writer keeps frame order and `handle_connection` finishes the input handler, including its tmux
+`send-keys` exchange, before reading the next frame), replied in 6 ms on a failing run while `send_input` itself had
+queued in 11 µs; the marker still never came. So the stall is not a slow supervisor exchange and not a short budget:
+tmux acknowledged the `send-keys` and the raw-mode fixture never produced its reply. Disposition: open (TODO.md, with
+the proposed product direction).
+
+## 2026-09-03 — profiles popup, three cases (e2e/tests/profiles.spec.ts), attempted
+
+A loaded before leg on a 4-vCPU sandbox (10 full-spec runs, both engines, a `cargo build` looping beside Playwright)
+reproduced two of the three: `unknown then transit waits for the pending focus request` 5/10 Chromium and 1/10 WebKit,
+`stale focus-out classifiers cannot clear newer obligations` 2/10 and 2/10; the focus-and-Escape case 0/10. The
+attempted fix (an exhausted `Unknown` retried on the next focus event, ordinal-named test hooks, a quiescence wait
+before arming holds, a 30 s `stubFeed` socket wait) passed the stale case but made the pending-focus case fail 11/20 on
+Chromium, so it was not shipped. Disposition: open (TODO.md, with the attempt's shape and rates).
+
+## 2026-09-03 — `session_rename::a_renamed_title_survives_a_supervisor_restart` (crates/farhelm/tests/e2e)
+
+Loaded 4-vCPU sandbox, full binary at `--test-threads=4` beside a looping `cargo build`: 1 of 3 runs panicked in the
+restart helper's own setup assertion in `create_idempotency.rs`, "the replacement must hold the state directory's claim,
+or it reconciles nothing and this test would pass for the wrong reason". The replacement supervisor did not hold the
+claim when the helper checked, under load. Never seen alone; nothing else known. Disposition (2026-09-17): fixed by the
+scoped correction the TODO entry prescribed — the helper's claim probe now releases with an explicit unlock instead of a
+close. The inherited-description mechanism was re-confirmed for THIS probe with a bare-fork probe (parent holds the
+flock, forks without exec, closes its descriptor: the lock stays held until the child's copy closes; an explicit LOCK_UN
+releases immediately despite the child's copy) — the same close-waits-for-inherited-copies defect demonstrated for the
+teststate sweep fixture in #384. The ownership assertion is retained. Twenty recorded exact repetitions of the rename
+test passed after the fix; the original loaded failure was never reproduced, so the fix rests on the confirmed
+mechanism, not on a reproduced cure.
+
+## 2026-09-03 — two more profiles cases (e2e/tests/profiles.spec.ts)
+
+A full browser-suite run on a 4-vCPU sandbox (both engines, no load beside the suite):
+`only layout changes after a profiles opening invalidate its geometry` failed once on Chromium and
+`a saved profile is what the next editor sees, before the re-read lands` once on WebKit, beside the three known profiles
+cases; the latter had also failed twice in ten loaded runs earlier that day. Disposition: open (TODO.md).
+
+## 2026-09-03 — `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts), localized
+
+Seen on `[webkit-sidebar]` during a full four-project sidebar/terminal-multihost run (`--repeat-each=3`) on a 4-vCPU
+sandbox for PR #363 (the sidebar locality-glyph change): `Error: route.fulfill: Route is already handled!` inside
+`forceBuildSkew` (`helpers/fleet.ts`), which rewrites every `**/api/**` reply's build-stamp header (`route.fetch()` then
+`route.fulfill({ response, headers })`). Neither this test nor `fleet.ts` was touched by PR #363. `forceBuildSkew` has
+four callers in the target snapshot — three in `feed.spec.ts` and this sidebar test — not the broader set of every test
+that reads a build stamp. Reproduced alone:
+`--project=webkit-sidebar -g "the sidebar app bar shows the helm build and client tooltip" --repeat-each=20`, single
+worker, no other test in play, failed 1 of 20 with the identical error. The shape reads as the route handler racing
+itself — WebKit re-issuing or re-dispatching the intercepted request so the handler runs twice concurrently for one
+navigation, and the second `fulfill` finds the route already answered. Not chased further: no hypothesis yet for why
+WebKit produces the second dispatch, and the other three `forceBuildSkew` callers (`feed.spec.ts`) passed throughout
+both runs, so whatever triggers it is rare and not obviously tied to this one test's own body. Disposition: open
+(TODO.md).
+
+## 2026-09-03 — `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+Seen during the host-alias feature's finishing-work run on a 4-vCPU sandbox:
+`cargo test -- --show-output --test-threads=4` failed this one test (338 passed, 1 failed) with "a consumed sentinel is
+deleted once its Error outcome commits durably". The launch-sentinel and supervisor code this test exercises was
+untouched by that work. Reproduced alone immediately after —
+`cargo test -p farhelm --test e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail -- --exact --show-output --test-threads=1`
+— and it passed. One isolated pass does not distinguish a test race from a load-triggered product or harness defect, so
+no cause is claimed beyond the observed fingerprint: fails under a loaded `--test-threads=4` full-binary run, passes
+alone. Not chased further. Disposition: open (TODO.md).
+
+## 2026-09-03 — `the sidebar app bar shows the helm build and client tooltip` (e2e/tests/sidebar.spec.ts), also on Chromium
+
+The identical failure the entry above this one already tracks — `Error: route.fulfill: Route is already handled!` inside
+`forceBuildSkew` — recurred during the host-alias feature's finishing-work run, this time on
+`chromium-sidebar --repeat-each=3` (1 of 168 executions) rather than the WebKit-only sighting previously logged. Same
+test, same helper, same error text and call site (`helpers/fleet.ts:696`); `sidebar.spec.ts` was touched only by adding
+two new, unrelated tests at the end of the file in that run. This widens the earlier entry's engine scope from
+WebKit-only to both engines, which the next person chasing it should know before assuming it is WebKit-specific.
+Disposition: still open (TODO.md); the existing entry's diagnosis stands.
+
+## 2026-09-03 — `tests::sweep_never_reaps_a_held_lock` (crates/farhelm-teststate/src/lib.rs)
+
+One `cargo test` run of the whole workspace at `--test-threads=4` on a 4-vCPU sandbox: `left: []`,
+`right: ["/tmp/.tmpHAvtBc/fh-it.live01"]`. That is the test's SECOND assertion — after the test drops its own flock,
+`sweep`'s second call is expected to reap the now-genuinely-dead directory (`assert_eq!(outcome.reaped, vec![live])`).
+An empty `reaped` list on the left means the sweep FAILED TO REAP a directory whose lock had actually been released, not
+that it wrongly reaped one still held — the opposite of what an earlier version of this entry claimed. Never reproduced:
+5 solo repetitions and 3 repetitions of the whole `farhelm-teststate` crate under its own `--test-threads=4` all passed;
+only the full-workspace run (every crate's test binaries competing for real `/tmp` and process-table activity at once)
+has shown it, once. Cause not established: the workspace-only reproduction points at some form of contention specific to
+a full-suite run, but nothing in this test's own logic identifies a mechanism, and no cross-test interaction has
+actually been demonstrated — a claim to that effect in an earlier version of this entry was speculation, not a finding.
+Disposition: open (TODO.md).
+
+## 2026-09-05 — final-client cleanup with an unanswered upcall
+
+`agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` in `crates/farhelm/tests/e2e/agent_relay.rs`
+simulates helm death by dropping its last client handle. An unanswered handler's owner retained a writer sender, so
+dropping the client did not close a quiet connection; a later terminal frame could incidentally wake the demultiplexer
+and hide the leak. A deterministic quiet-peer unit test failed against the prior implementation with the transport still
+open after two seconds. Final-owner cleanup now aborts registered answers and signals both transport halves; the unit
+test verifies EOF and handler release. Review found that an already blocked frame write also needed to observe that
+signal. A separate gated-writer regression reproduced the two-second failure before that correction. The ten-test relay
+module and twenty focused helm-death runs with two CPU-load children passed on a 4-vCPU, 8-GiB sandbox with pinned tmux
+3.7c. The helm-death test is no longer ignored. This corrects the client-lifetime failure in the simulated death; it
+does not establish scheduler starvation in the supervisor's EOF handler as the historical cause. The other release-gate
+flakes remain separate work in TODO.md.
+
+## 2026-09-05 — build-skew interceptor removal
+
+`the sidebar app bar shows the helm build and client tooltip` in `e2e/tests/sidebar.spec.ts` failed on repetition 48 of
+50 in WebKit at `route.fulfill`, with `Route is already handled!`. The trace shows the test removing interception while
+provisioning fetch handlers were still awaiting responses; their later fulfilments failed before the navigation. This
+establishes an interceptor-removal race, rather than the previously suspected duplicate dispatch. Waiting for active
+route handlers before removing them fixes that boundary without swallowing errors. Fifty repetitions per engine passed
+on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c and one browser worker, as did the three shared-helper feed callers in
+each engine. Disposition: fixed; removed from TODO.md.
+
+## 2026-09-05 — sweep fixture lock inherited before exec
+
+`tests::sweep_never_reaps_a_held_lock` in `crates/farhelm-teststate/src/lib.rs` reproduced in the first parallel 16-test
+crate run on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. Temporary diagnostics showed `live=1` after the fixture
+dropped its file, with the mtime already in the past: the sweep found a contended lock, rather than refusing a future
+timestamp or failing removal. Concurrent crate tests spawn tmux. Close-on-exec does not prevent a child from briefly
+inheriting the parent's open file description, and a pipe-barrier fork probe confirmed that the flock survives the
+parent's close until the child exits. The fixture now unlocks explicitly before asserting reaping; the initial held-lock
+safety assertions and production sweep are unchanged. Twenty subsequent parallel crate runs passed. Forty earlier
+isolated runs, split equally with and without a controlled agent marker, also passed; this sweep does not read process
+environments. Earlier entries' claim that Cargo runs separate crate test binaries concurrently was incorrect; the
+relevant concurrency is inside this crate's test process. Disposition: fixed; removed from TODO.md.
+
+## 2026-09-05 — profiles focus fixtures race the opening handoff
+
+`the profiles popup follows its focus and Escape dismissal contract`,
+`unknown then transit waits for the pending focus request`, and
+`stale focus-out classifiers cannot clear newer obligations` in `e2e/tests/profiles.spec.ts` reproduced against the
+near-term baseline on a 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. An event trace showed a reopened popup becoming
+visible before opening had placed focus inside it: moving directly from the toggle to an outside control then emitted no
+popup focus-out event, leaving the classifier count unchanged. The unknown/transit fixture instead settled as `missing`
+after its 250-ms placement deadline, before the test's 400-ms observation; hiding a known target did not produce the
+unknown evidence the assertion required. The three scenarios now wait for initial popup focus before injecting events,
+and the unknown fixture delays its placement observation beyond the deadline. All original dismissal, Escape, and
+stale-result assertions remain. Six initial cases passed across Chromium and WebKit; 120 subsequent repetitions (20 per
+case per engine) passed with one browser worker and two CPU-load children. Disposition: the reproduced harness races are
+fixed; TODO.md retains the unexplained historical startup/bridge symptoms. This does not establish that all historical
+failures shared these causes: the older missing feed-socket symptom did not recur, and the earlier exhausted-Unknown
+product diagnosis remains unproven. Review added an explicit `focusSettled === "unknown"` assertion, which passed twenty
+repetitions per engine without extra CPU load.
+
+## 2026-09-05 — profile editor focus moves during fixture input
+
+`a saved profile is what the next editor sees, before the re-read lands` in `e2e/tests/profiles.spec.ts` failed on the
+tenth diagnostic WebKit repetition on the same near-term baseline and 4-vCPU, 8-GiB sandbox with pinned tmux 3.7c. The
+recorded POST and confirmed reply both contained the old invocation and a profile name with `edited-invocation`
+appended: the save had faithfully stored what the fixture sent. Opening the editor asynchronously focuses its name
+field, which could interrupt Playwright filling the invocation field. The test now waits for that initial focus handoff
+before filling the other field; it still blocks catalog reads and verifies that the save reply alone updates the row and
+the reopened editor. Twenty corrected repetitions per engine passed without extra CPU load. Disposition: harness
+correction; the separate layout-epoch case remains in TODO.md.
+
+## 2026-09-05 — binary reply is flushed but absent from the live attachment
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`
+failed on the fifth exact execution against `d71a87fb`, with READY but no BINARY-MARKER after forty seconds. On a
+four-CPU, 8-GiB worker with pinned tmux 3.7c, a temporary fixture recorded both consuming the request byte and flushing
+the binary reply in a reproduced loaded failure (sixteen passes, then the seventeenth failed, with two CPU-load
+children). Twenty quiet diagnostic runs passed. Keeping the fixture alive after flushing passed twenty loaded runs;
+restoring immediate exit with failure-only pane diagnostics also passed twenty, so no failing pane capture was obtained.
+The receipt disproves the older missing-input localization for this occurrence and supports investigating the
+output/exit handoff, without establishing which layer lost progress. No product change or fixture keep-alive was
+shipped. Disposition: remains ignored and open under Difficult deflake in TODO.md, with the next
+raw-tmux/forwarder/writer/terminal-end measurements recorded there.
+
+## 2026-09-05 — forced-pause client listing lacks the expected tab
+
+`replay_marker::a_tmux_pause_catch_up_replays_without_a_marker` and
+`terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment`,
+`terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane`, and
+`terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`, in
+`crates/farhelm/tests/e2e/replay_marker.rs` and `crates/farhelm/tests/e2e/terminal_backpressure.rs`, failed in the
+four-thread native run at `aa333815` on a four-CPU, 8-GiB worker with pinned tmux 3.7c. Their shared helper could not
+find an output control client even though the printed listing contained `pause-after=5`: the name/flags separator was an
+underscore, while the parser splits at a tab. The exact replay-marker case reproduced on untouched `d71a87fb` on a
+second worker with the same pin, one test thread, and no extra load. The helper and test bodies are unchanged across
+that comparison. This establishes a pre-existing test/substrate compatibility failure before the catch-up assertions,
+not a new product regression. Disposition: open under Difficult deflake in TODO.md; inspect delimiter bytes and correct
+the helper without weakening its positive output-client discriminator.
+
+## 2026-09-05 — large terminal paste reaches the reply deadline
+
+`an over-one-megabyte message does not drop the terminal socket` in `e2e/tests/terminal-flood.spec.ts` failed in the
+combined WebKit run on a four-CPU, 8-GiB Ubuntu worker with pinned tmux 3.7c. The socket-open/drained assertion passed,
+but the fifteen-second `echo:after-big-message` wait timed out. Its retained trace shows steadily growing echoed input
+and the exact reply arriving at the deadline, with the inner assertion succeeding just after the outer poll timed out.
+Twenty fresh-stack exact candidate executions passed; restoring and rebuilding untouched `d71a87fb` on the same worker
+reproduced the same reply-wait failure on execution thirteen, after twelve passes, without extra CPU load. This proves
+the failure predates the current fixes. Processing 4,097 tmux send-key commands and returning the whole megabyte-scale
+terminal buffer leave little assertion margin; the relative costs still need measurement. Disposition: open under
+Difficult deflake in TODO.md. No timeout or product behavior was changed, and the failed full WebKit command is not
+counted as a clean gate.
+
+## 2026-09-05 — two distinct profiles focus handoffs fail
+
+`an inert sidebar click dismisses the profiles popup` and `a popup-created profile is offered on every host`, in
+`e2e/tests/profiles.spec.ts`, failed in Chromium at `6903cf90` on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux
+3.7c and no extra load. The inert-click trace observes body focus, then a late opening handoff returns focus to the
+new-profile button and the popup stays mounted. The create-profile trace shows a pending editor handoff redirecting
+invocation text into the name; native required-field validation refuses the empty invocation, no POST reaches the route,
+and the catalog wait expires. A correctly pinned candidate batch passed inert once and failed profile creation once.
+Separate exact baseline batches on untouched `d71a87fb` failed inert on the first attempt and profile creation on the
+second, after one pass. The popup production code is unchanged. The inert click exposes a pre-existing product
+focus-obligation defect: the late opening request overrides the user's newer outside destination. Preserve the immediate
+outside click as regression coverage and make that obligation invalidate or override stale opening focus; waiting past
+the handoff would hide the defect. Profile creation is a separate fixture race, for which the existing editor-name-focus
+precondition is the next correction to try. Disposition: both remain open under Difficult deflake in TODO.md; no
+product, timeout, or retry change was made for these failures in this pass.
+
+## 2026-09-05 — WebKit menu entry loses focus to initial terminal reveal
+
+`opening the actions menu enters it, and Tab leaves it`, in `e2e/tests/sidebar.spec.ts`, failed in the full WebKit run
+at `6903cf90` on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux 3.7c and no extra load. The toggle-focus
+assertion passed, but the ArrowDown action snapshot about 23 ms later showed terminal focus and the menu stayed closed.
+The trace places this at initial attach/reveal, after `__farhelmTermReady` became true. The test, menu handler, and
+`terminal.js` are unchanged from frozen `d71a87fb`; twenty quiet exact baseline executions passed. This therefore
+appears pre-existing, but is not baseline-reproduced, and the changed layout may affect its frequency. Disposition: open
+under Difficult deflake in TODO.md. Check actual replay-reveal settlement before focusing the toggle, keeping keyboard
+entry and Tab exit covered; do not treat terminal readiness alone as proof that focus has settled.
+
+## 2026-09-05 — WebKit stalled-client case detaches before observing a pause
+
+`a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays`,
+in `e2e/tests/terminal-flood.spec.ts`, reproduced the historical zero-pause failure in the full WebKit run at `6903cf90`
+on a four-CPU, 8-GiB Ubuntu 24.04 worker with pinned tmux 3.7c and no extra load. Pause count stayed zero for thirty
+seconds, but the trace already showed the stalled-detach banner about 404 ms after gate send, much earlier than the
+supervisor's sixty-second stall interval. The unchanged helm outgoing-channel backstop may have won before the browser
+paused; the trace establishes the ordering, not that queue-level cause. Disposition: still open under Difficult deflake
+in TODO.md. Add detach-reason and queue receipts to the existing gate/write/replay measurements before repeating the
+expensive scenario or changing its budget.
+
+## 2026-09-06 — forced-pause baseline substrate caveat
+
+The 2026-09-05 forced-pause entry in `crates/farhelm/tests/e2e/replay_marker.rs` and
+`crates/farhelm/tests/e2e/terminal_backpressure.rs` records real failed observations, but does not establish
+deterministic failure on the same executable used by CI. Rechecking
+[CI run 34006471792](https://github.com/scode/farhelm/actions/runs/34006471792), test job 101414574943, shows all four
+named cases passing at `2069e0c83e8a7775daf68798fff08a85528d5e4a` with four libtest threads and the successful pinned
+tmux builder on PATH. The available worker record does not retain resolved executable hashes; the CI log supplies the
+pin/build assertion rather than an executable digest or a dirty-tree fingerprint. Locale and ambient FARHELM variable
+names were not retained in these receipts either. Those inputs cannot be reconstructed from a reported version alone.
+Disposition: the delimiter failure remains open in TODO.md, but the worker substrate and underlying cause are
+unverified; obtain a retained command, raw delimiter bytes, and executable identity before treating the worker failure
+as a same-substrate baseline. Disposition (2026-09-17): closed as not reproducible on the supported substrate —
+hexdumping `list-clients -F "#{client_name}\t#{client_flags}"` from the checkout's verified pinned tmux 3.7c build, with
+a control client carrying the supervisor's exact `!no-output,pause-after=5` cutover flags, shows a real 0x09 tab between
+name and flags — exactly what `force_tmux_pause`'s `split_once('\t')` parses — so the entry's own condition for an
+unambiguous separator was never met. The failing workers' tmux identities were never hashed and cannot be reconstructed;
+a recurrence under a recorder run would retain them. No fix claimed.
+
+Class: substrate
+
+Cause: unknown
+
+## 2026-09-07 — `session_lifecycle::attach_with_degenerate_size_still_works` (crates/farhelm/tests/e2e/session_lifecycle.rs)
+
+A full workspace nextest run on a 4-CPU Linux worker failed this case while 2,301 others passed: receipt
+`9edbb6f2-61a7-4103-ad96-966b1ae075f4`, clean `c2fcabf53525ec91f5e383de87890c8bdc7d3498`,
+`cargo nextest run --locked --workspace --exclude farhelm-desktop`, four global slots and zero retries. The retained
+transcript contains the complete READY marker wrapped one character per row; pane diagnostics show a live agent and the
+expected 1x1 dimensions. The byte-substring wait mistook replay row boundaries for missing output. This change ignores
+CR/LF only when recognizing that marker, retains the independent geometry assertion, and explicitly uses the mid-launch
+fixture to preserve the test's original boundary. The run used pinned tmux 3.7c, executable SHA256
+`eec88f3db9d844d72f5ff2a13ef73e95f2386945cc7e9e8adca9ba57053ba630`, `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` unset.
+No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR`. Disposition: corrected by
+the accompanying test change; the earlier failed receipt remains retained.
+
+Class: ambiguous-observable
+
+Cause: established
+
+## 2026-09-08 — profiles opening focus overrides an outside click
+
+The inert-click product defect recorded on 2026-09-05 was reproduced with the controlled companion
+`an outside click overrides a delayed opening focus commit` in `e2e/tests/profiles.spec.ts`. Run
+`db4afac4-d335-43c4-b64e-24968828bc1f`, at `92090716d559` with only the regression fixture changed, used
+`npx playwright test --project chromium-profiles -g 'an outside click overrides a delayed opening focus commit' --workers 1 --retries 0`.
+The trace recorded body focus after the trusted click, then opening focus returned to the new-profile button and left
+the popup mounted. A browser commit already dispatched before the outside choice had no synchronous veto. The
+accompanying popup correction supplies that veto and preserves unresolved dismissal intent across renderer failures. The
+final test uses an explicit commit hold and pointer/deadline receipts rather than a fixed delay. Batch
+`2ded0438-5af3-45c2-a58d-a95fb650615e` passed all 24 cases across three attempts, selecting
+`profiles\.spec\.ts -g 'inert sidebar click|outside click overrides|unresolved outside focus|outside focus recovery survives'`
+under Chromium and WebKit, one worker and zero retries. Both runs used a non-root Ubuntu 26.04 container with a six-CPU
+quota, a 24 GiB memory limit and no added load; tmux 3.7c executable SHA256 was
+`1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`, `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` unset.
+No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR` and, for the strict
+repetitions, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: fixed in #527. The separate profile-creation fixture race
+and historical startup/bridge symptoms remain open in TODO.md.
+
+Class: product
+
+Cause: established
+
+## 2026-09-08 — overdue focus fixture assumes a transient attempt count
+
+`an overdue focus commit expires before its side effect` in `e2e/tests/profiles.spec.ts` failed in WebKit in run
+`86c17b1c-5f2c-482c-9b44-1f3491996063`, at `92090716d559` with the popup correction in progress: it observed two commit
+attempts where the unchanged test expected exactly one. The exact selection was `profiles\.spec\.ts` with
+`-g 'focus and Escape|delayed and superseded|overdue focus|focus evaluation errors|unknown then transit|stale focus-out|profile form transitions|busy profile work|synthetic outside|Tab to an outside|Tab leaving|same-turn programmatic|late busy claim|inert sidebar click|outside click overrides|unresolved outside focus'`,
+both engines, one worker and zero retries. The unchanged worker permits another Expired attempt before its Rust budget
+ends; the fixture's shorter browser deadline cannot establish an exact attempt count. The correction requires at least
+one dispatched commit and retains the expiry, Unknown settlement and absence-of-focus assertions. Exact both-engine run
+`7f3ea0ee-184c-4463-a25a-e1e0cdbfb7d6` and final related run `70d4e08d-026d-4675-a585-a9d61cfab8f7` passed. The failing
+run used a non-root Ubuntu 26.04 container with a six-CPU quota, a 24 GiB memory limit and no added load; tmux 3.7c
+executable SHA256 was `1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`, `LC_CTYPE=C.UTF-8`, with
+`LANG` and `LC_ALL` unset. No ambient `FARHELM_*` variables were present; the recorder supplied `FARHELM_TEST_TRACE_DIR`
+and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: fixed in #527; the product retry loop is unchanged.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-09-08 — browser gate follow-up on terminal and profile fixtures
+
+Run `03f274cb-017a-40ef-b362-02c693ffa3b9` executed `npx playwright test` on clean
+`606396a49c405271947ff201d396dad41cc63b87`: 889 passed, 13 expected skips, 14 failed. It used Chromium and WebKit, one
+worker, zero retries, a non-root Ubuntu 26.04 container with six CPUs and 24 GiB, and no added CPU-load process. Pinned
+tmux 3.7c SHA256 was `1151ac9d3217afd8c4bc07e54c9fa01d3c71d70357688b6e296094d8ef3deeb3`; `LC_CTYPE=C.UTF-8`, `LANG` and
+`LC_ALL` unset. No ambient `FARHELM_*` names were present; the recorder supplied `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`. The following observations share this substrate and retained failure record. They do
+not turn that failed command into a clean gate.
+
+Class: unknown
+
+Cause: unknown
+
+### Raw-byte sentinels depend on the byte dumper
+
+Four cases in `e2e/tests/terminal-keys.spec.ts` failed in each engine: Shift+Enter, plain Enter, Ctrl+Shift+Enter, and
+plain Enter after the chord all reached `RAWREADY` but missed the final sentinel. The default `od` was uutils coreutils
+0.8.0. Direct pty comparison `c99b4526-07a0-41e1-8449-64a5297a940e` observed no live output from its unbounded
+`od -v -An -tx1 -w1` after CR and `z`, while installed GNU od 9.7 emitted both bytes immediately. Selecting GNU od only
+in the isolated runner made all ten key cases pass in `25c38eeb-c7f5-4e6e-af1b-50d6934f8db6`, which selected
+`terminal-keys.spec.ts profiles.spec.ts -g 'Shift.Enter|plain Enter|Ctrl.Shift.Enter|outside click overrides a delayed|profile edited in another browser'`
+on the same clean revision, both engines, one worker and zero retries. No product or fixture source changed. The
+full-run failures therefore do not establish lost Farhelm input. Disposition: closed by the per-byte `dd`/`od` pipeline
+(`RAW_DUMP_INVOCATION` in `e2e/tests/terminal-keys.spec.ts`): each byte's od input ends at EOF, which forces a live row
+out of uutils od as well as GNU od; the sentinel waits and `bytesIn` were made tolerant of od's leading-space variance.
+Verified against a real pty pair on GNU od 9.4; uutils od remains verified only by the EOF argument, not by execution.
+The TODO entry this disposition pointed at is removed with the fix.
+
+Class: substrate
+
+Cause: established
+
+### Large paste times out on the unchanged baseline too
+
+`an over-one-megabyte message does not drop the terminal socket` and the following
+`real backspace erases; real ctrl-c kills the fake agent`, in `e2e/tests/terminal-flood.spec.ts`, failed in both engines
+in the full run above. Both backspace cases failed during `resetStack` session-deletion setup: `deleted.ok()` was false,
+before either input assertion ran. Narrow candidate run `184477eb-d9b5-490b-bc26-a8f5bbae75b2` selected
+`terminal-flood.spec.ts -g 'over-one-megabyte|real backspace'`, both engines, one worker and zero retries: both paste
+waits failed and both backspace cases passed. After rebuilding clean baseline
+`722a690f4ee06dbf7350519811ddec0bcc3e5413`, run `ee79924b-b525-4f7e-ba9f-f105f3faa1f7` selected
+`profiles.spec.ts terminal-flood.spec.ts -g 'outside click overrides a delayed|profile edited in another browser|over-one-megabyte|real backspace'`
+with the same policy. Both paste waits failed again; the six other cases passed. Both narrow runs used the substrate
+above with GNU od selected. This extends the earlier WebKit paste observation to Chromium and establishes that the paste
+failure predates the host-selector stack. The backspace failure's relationship to the preceding paste remains unproven;
+a narrow pass does not erase it. Disposition: paste remains in its existing Difficult deflake entry; retain a separate
+backspace follow-up and inspect the deletion response and session lifecycle evidence before changing deadlines or
+behavior.
+
+Class: unknown
+
+Cause: unknown
+
+### Profile focus fixtures miss their intended boundary
+
+In WebKit, `an outside click overrides a delayed opening focus commit` in `e2e/tests/profiles.spec.ts` failed its
+unexpired-commit premise in the full run: the trusted click arrived after the held deadline. Narrow run `25c38eeb` above
+failed the release-within-deadline assertion instead. The full run also failed
+`a profile edited in another browser reaches this one over the real feed` while opening the popup, before exercising the
+profile update: the new-profile button never acquired focus. That case passed narrowly on the candidate; both profile
+cases passed once on clean baseline `722a690f` in `ee79924b`. These are non-reproductions, not proof that the failures
+predate the stack or that the earlier outside-click product defect returned. The new sidebar layout may affect timing.
+Disposition: open in TODO.md; preserve pointer/deadline receipts and popup focus readiness while locating the missing
+fixture boundary. Do not remove the assertions or extend the product focus deadline to make the tests pass.
+
+Class: pointer-focus
+
+Cause: unknown
+
+## 2026-09-10 — printable paste delays supervisor control traffic
+
+The previously recorded `an over-one-megabyte message does not drop the terminal socket`, in
+`e2e/tests/terminal-flood.spec.ts`, failed again in full browser run `7fd44a19-ce3f-42fb-a3df-410da327634a` on frozen
+composer candidate `f0aa71e488d1cb2f55099865b85c23025c106edf`. The command selected the full Chromium/WebKit suite with
+one worker and zero retries. An independent tmux receiver probe confirmed the parsing cost: equal 256 KiB inputs took
+8.66 seconds with per-byte hex arguments and 0.386 seconds with one literal argument per printable chunk, with both
+receiver counts verified. Serial input handling delayed session-list replies enough to retire the helm connection. The
+repair in #542 uses escaped, option-terminated literal arguments only for printable ASCII; arbitrary bytes retain the
+hex path. The browser fixture now inspects the buffer inside the page and checks the same live socket before and after
+the paste. Focused browser run `dd8e52e9-2546-45d7-a8a9-dc5e3c84bc9d` passed all four paste/control-key cases in both
+engines; it preceded the option-termination correction. Corrected native run `1f004419-8f6c-4847-9b8c-1e4166d854dd` on
+`ee5dcbaa4348fd697a1ef5bab71e3e7ad11bc430` passed the four exact byte-preservation, option-looking-input, chunk-ordering
+and reconstruction cases with four nextest slots and zero retries. These local Linux runs overlapped isolated validation
+jobs. The recorded tmux 3.7c executable SHA256 was `2981fc785ff7ac6236d1c13ebbf1eb3169fa316ed94169e786d75df44a692bcb`;
+`LANG`, `LC_ALL` and `LC_CTYPE` were `C.UTF-8`. Ambient `FARHELM_*` inputs were scrubbed; the recorder supplied
+`FARHELM_TEST_TRACE_DIR`. Pure Jujutsu and copied browser fixtures lacked strict Git-root attestation; retained source
+identities and executable hashes supplement that gap. Disposition: printable-paste repair in #542; the separate
+historical backspace setup failure remains in TODO.md.
+
+Final corrected-input browser shards also passed both oversized-paste and backspace cases in both engines. Their
+combined 998-case selection had 978 passes, 14 skips and six unrelated or separately repaired fixture failures; this
+focused coverage does not make the broad gate green.
+
+Class: product
+
+Cause: established
+
+## 2026-09-10 — profile focus premises fail again in the browser gate
+
+WebKit run `a612fb9b-803b-4de1-ad55-0be77ebc8699` selected `npx playwright test --shard=3/4 --workers=1 --retries=0`:
+256 passed, three skipped and three failed. Two failures in `e2e/tests/profiles.spec.ts` occurred before their intended
+behavior: `Tab leaving the document preserves busy dismissal intent` lacked editor-name focus, and
+`a profile edited in another browser reaches this one over the real feed` lacked the first client's popup focus. The
+third failure was a new composer stub-handshake mistake, repaired separately, and is not a latent flake. The immutable
+fixture combined corrected native source `ee5dcbaa4348fd697a1ef5bab71e3e7ad11bc430` with browser sources captured in
+`638e83bb71f8cc297e1a5e480117a4a8471f368f`; it did not change during execution. The local Linux runner overlapped other
+isolated validation jobs, with one worker per browser shard. It used the same recorded tmux executable, locale and
+scrubbed-variable policy as the paste entry above; strict Git-root attestation was unavailable for the copied fixture.
+This extends the earlier popup-readiness observations without proving a regression in profile saving or feed delivery.
+Disposition: open in TODO.md; preserve the focus assertions and investigate the failed premise before expanding repairs.
+
+Class: pointer-focus
+
+Cause: unknown
+
+## 2026-09-10 — provisioning attach misses a listening supervisor
+
+`provisioning::tests::local_provisioning_and_update_preserve_a_running_session`, in
+`crates/farhelm-helm/src/provisioning.rs`, passed exact run `568e8782-afa5-4e2f-9ac3-64dd0c227de4`, then failed the
+workspace run `de55db2b-7b22-475a-9465-35212dd8de5a` on recorded Jujutsu snapshot
+`cab86367182889c97e15170bf2b69a1638651fcc`. The latter selected workspace Rust targets excluding desktop, four nextest
+slots and zero retries, while isolated browser validation also ran. The manager had exhausted its active retry ladder.
+Its provisioning-triggered single probe preceded the supervisor's listening log, and the next 45-second reprobe would
+fall outside the 30-second attach deadline. These timings and unchanged provisioning/manager control flow support a
+startup-race hypothesis; there was no pre-composer reproduction. Both commands used the local Linux substrate, actual
+tmux 3.7c SHA256 `2981fc785ff7ac6236d1c13ebbf1eb3169fa316ed94169e786d75df44a692bcb`, and `C.UTF-8` for `LANG`, `LC_ALL`
+and `LC_CTYPE`. Ambient `FARHELM_*` inputs were scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. Strict
+Git-root attestation was unavailable. The broad JUnit overwrote the exact run's shared report path; the exact console
+and recorder remain, but its original JUnit is missing. Disposition: open in TODO.md; do not weaken attach readiness or
+increase its deadline based on the exact pass.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-09-10 — sidebar scrolling passes before teardown exhausts its budget
+
+`the sidebar app bar stays pinned while the session list scrolls`, in `e2e/tests/sidebar.spec.ts`, failed Chromium run
+`45efb275-84b9-4aab-9dd2-550fd45d4e7a`. Its trace passed all nine scrolling/geometry expectations, then the last session
+DELETE raced request-context disposal when the 60-second test budget expired. The fixture's serial cleanup behavior was
+unchanged. The command used an explicit 250-case test list preserving the original first shard minus authentication
+rotation, which ran separately, with one worker and zero retries. Its immutable source assembly and local Linux
+tmux/locale/variable policy were the same as the profile-focus entry above, with other isolated validation jobs running.
+This is evidence about cleanup duration, not a failed sticky-bar assertion or a proven composer regression. Disposition:
+open in TODO.md; preserve geometry assertions and establish teardown ownership separately.
+
+Class: budget
+
+Cause: established
+
+## 2026-09-10 — authentication recovery assertions vary between runs
+
+`rotation logs out an open client and drops its feed and terminal sockets`, in `e2e/tests/auth.spec.ts`, failed the
+original first browser shard `7653ea10-0f7d-411d-88cc-872ac7d1906b` on an aborted recovery detail read. The shared
+credential file is updated only after recovery assertions, so later cases used stale credentials and produced a cascade;
+that shard was canceled as invalid evidence. Exact candidate run `498f139d-3aa6-41a3-8f0f-00b10a1a4a62` instead failed a
+sidebar-row assertion after a successful detail read. A prior composer build and exact candidate run
+`62dbfa15-2692-4217-91af-79c69ec4215f` passed. No authentication source or test was changed. Candidate fixtures used the
+immutable source assembly, local Linux substrate, actual tmux hash, locale and scrubbed-variable policy recorded in the
+profile-focus entry above. Each exact command selected only this Chromium test, one worker and zero retries, alongside
+isolated validation jobs. This establishes intermittent observations, not the cause of recovery failure or pre-composer
+provenance. Disposition: closed by the read-timeout split (`send_read`/`READ_TIMEOUT` in
+`crates/farhelm-ui/src/api.rs`); the recovery assertions were never weakened, and the stall's location remains
+unestablished, but an unanswered read now fails into the retry ladder inside the budget instead of starving it. The
+mechanism being unproven, a recurrence under the new deadline reopens this — the `fetch_session` detail read
+deliberately keeps the sixty-second deadline (it drains a remote supervisor live), so only the sessions and hosts reads
+are covered by the split.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-10 — Chromium profile boundaries fail before the create picker
+
+Run `45efb275-84b9-4aab-9dd2-550fd45d4e7a`, with the exact source assembly, selection and substrate recorded in the
+sidebar-scrolling entry above, also failed two existing `e2e/tests/profiles.spec.ts` cases. In
+`an outside click overrides a delayed opening focus commit`, the trusted click reached a held commit after its deadline;
+the fixture's unexpired-boundary assertion failed. In `a popup-created profile is offered on every host`, the saved
+profile was registered successfully, but `closeProfiles` left the popup mounted after its toggle click, before opening
+the create picker. The latter differs from the older editor-fill failure despite sharing a test title. Production
+`profiles.rs` is unchanged from the preserved host-selector parent. Disposition: both observations remain in TODO.md;
+retain deadline, save-settlement and focus receipts without treating a persistent popup as proof of a failed save.
+
+Class: fixture-premise
+
+Cause: unknown
+
+## 2026-09-12 — `a popup-created profile is offered on every host` editor-fill race closed (e2e/tests/profiles.spec.ts)
+
+The editor-focus fixture race recorded on 2026-09-05 never recurred after #417 converted this test to `openNewProfile`,
+which waits for the editor's name field to own focus before either field is filled. A confirmation batch
+`2fe38e66-080b-4cbe-b4fb-2eac4d0ee3a7` ran the exact test twenty times on clean
+`073d0bb907612afaf33c09dc1a199c456a2c9014`, both engines, one worker and zero retries: all forty executions passed.
+Focus-event traces are retained by the existing `recordPage` calls in `openNewProfile` and `openProfiles`. The run used
+an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, ambient `FARHELM_*` names scrubbed
+and the recorder supplying `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: closed; the
+TODO.md entry is removed. The separate popup-close observation in this same test stays open in TODO.md.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-09-12 — scrolling teardown sweeps over lanes under its own step (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar stays pinned while the session list scrolls` passed all nine geometry assertions in Chromium run
+`45efb275-84b9-4aab-9dd2-550fd45d4e7a`, then exhausted its 60-second budget deleting eighteen fixture sessions one by
+one (stop plus DELETE each, thirty-six sequential requests); the timeout then raced request-context disposal on the last
+DELETE. `cleanupAll` now sweeps over six lanes with each session's stop-before-delete order preserved, every session
+attempted, errors aggregated in creation order, and the sweep wrapped in its own `teardown:` report step so a trace
+shows teardown as teardown rather than as a failed geometry assertion. Geometry checks are unchanged. Run `5732a9ee`
+passed all four scrolling-fixture tests on both engines (8/8); run `9d6cc14c` passed the new partial-allocation and
+bounded-teardown ownership test on both engines; batch `0d1c73f3` passed the app-bar test and the mounted-fixture
+ownership test ten times on both engines (40/40). All ran on `61817891` with this fix's own uncommitted sidebar changes,
+one worker and zero retries, on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, ambient `FARHELM_*` names scrubbed
+and the recorder supplying `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Other jobs overlapped on the
+same host. Disposition: fixed; the TODO.md entry is removed.
+
+Class: budget
+
+Cause: established
+
+## 2026-09-12 — canceled runs strand detached stacks; the fixture shell now watches its spawner (e2e/start-stack.sh)
+
+Canceled recorder-backed Playwright shards left their `start-stack.sh` shells, helms, and supervisors alive, holding
+ports and state locks. The layering is now established: Playwright (pinned 1.62.0) spawns its web server detached into
+its own process group and SIGTERMs that group on its graceful paths — but the runner handles SIGINT only, so a SIGTERM,
+SIGKILL, or crash of the Playwright leader skips teardown entirely. The recorder owns the leader's group, not the
+detached one, so no layer reaped the stack; the live shell kept holding the run lock the sweep would otherwise reap.
+`start-stack.sh` now watches its spawner and delivers the same TERM a graceful shutdown would have, converging every
+spawner death on the existing trap. Delivery is guarded by a live `ps` identity check on the script pid, because a
+background subshell inherits its parent's PPID instead of its own, which a PPID comparison cannot see. Review then found
+the watcher was watching the wrong pid on Linux: Playwright launches the command as `/bin/sh -c`, and that shell is
+dash, which stays resident — so the script's parent was a dash wrapper in the detached session that survives the
+leader's death, while the test's direct-child spawner never modeled that hop. The webServer command now carries an
+`exec` prefix so the shell becomes the script (one layering on every platform), and the test's new layering guard pins
+the configured command's `exec` prefix plus the shell honoring it before the kill phases assume the direct-child shape.
+Run `e8a8e126` passed the spawner-SIGKILL, spawner-SIGTERM, and script-SIGTERM phases on `1a356896` with uncommitted
+working-copy changes; a repeat run on 2026-09-12 passed the extended script with the added guard, each kill phase
+asserting helm liveness before its kill, with an unrelated tmux server, process, and state lookalike surviving all three
+— on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, and ambient `FARHELM_*` names
+scrubbed. The ssh control mux still lingers up to its 60s ControlPersist window on every path including the old normal
+one; it holds no port or lock and is out of scope. Disposition: fixed; the TODO.md entry is removed.
+
+Class: harness
+
+Cause: established
+
+## 2026-09-12 — provisioning attach dials through the supervisor restart (crates/farhelm-helm)
+
+`provisioning::tests::local_provisioning_and_update_preserve_a_running_session` failed its first update's
+`attach-supervisor` step in workspace run `de55db2b` after passing standalone twice: the manager had burned its whole
+retry ladder dialing a not-yet-installed supervisor, the update restarted the unit, and the attach step's single
+`retry_now` probe landed before the restarted supervisor listened. Worse than a lost race, the nudge consumed the
+remaining re-probe hold, so the next dial sat a full 45-second cadence out — past the step's 30-second deadline. This
+was a product robustness gap, not a test defect: any slow supervisor restart failed provisioning the same way.
+`AttachSupervisor` now retries with a fresh window (`retry_now_with_fresh_window`, the same evidence class as a registry
+edit), dialing the ladder through the restart latency; the attach deadline is unchanged, and user retry, probes, and
+adopt stay single-probe. One user-visible side effect: the fresh window publishes `Connecting (attempt n)` while it
+dials, for up to 60 seconds — 30 past the attach step's own deadline — where the row previously kept reading
+Unreachable. SPEC.md pins no backoff display, so this is a note, not a conflict. New virtual-clock tests pin the exact
+14-attempt schedule and the mid-ladder recovery (a host back after the immediate dial connects on the next step with no
+further dials). Run `7fce9e61` passed all 182 manager and provisioning lib tests including both heavy real-provisioning
+legs, batch `549113fc` passed the exact local test five times, and run `27ce0af6-00d4-490f-a6dd-263099add19b` passed the
+full 713-test helm lib suite with the added recovery test. All ran on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux
+3.7c, executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, and ambient
+`FARHELM_*` names scrubbed. Disposition: fixed as a product change out of the Deflake bucket; the TODO.md entry is
+removed.
+
+Class: product
+
+Cause: established
+
+## 2026-09-12 — rotation recovery still unreproduced; cascade contained (e2e/tests/auth.spec.ts)
+
+Follow-up to the 2026-09-10 authentication entry. Neither shape reproduced locally: batch `f45de613` passed the exact
+rotation test fifteen times on both engines, and batch `55d47716` passed the full auth spec five times on both engines
+(a sixth attempt died on setup when another session's stack took the shared port mid-batch — environmental, not a test
+outcome). All ran with pinned tmux 3.7c, `LANG=C.UTF-8`, and scrubbed `FARHELM_*` on an 18-CPU Ubuntu 24.04 Linux host.
+The code read found the recovery path sound on its face — selection survives the token gate, mount reads fire
+unconditionally, the default view's reads are not authoritative for absence, and dropped futures cannot reopen the
+prompt — so no mechanism is claimed. What did land: the shared suite credential refresh moved from the test's end to
+right after the exchange, so a post-exchange failure (both observed shapes) no longer leaves later tests
+unauthenticated; the TODO.md entry is narrowed to the recovery provenance itself. The next failure's retained trace
+carries network, DOM, and console. Disposition: closed by the read-timeout split (`send_read`/`READ_TIMEOUT` in
+`crates/farhelm-ui/src/api.rs`), the maintainer's fork choice of 2026-09-17; see the 2026-09-10 entry above.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-12 — `profile focus counts delayed evaluations against one deadline` misses its budget on loaded WebKit (e2e/tests/profiles.spec.ts)
+
+WebKit run `897e85bb-47b1-404f-a6cf-5f727048dcfe` (full profiles spec, both engines, one worker, zero retries, recorded
+pinned tmux 3.7c executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`,
+ambient `FARHELM_*` scrubbed): the opening focus commit never landed within the 2 s premise wait, so the 2-attempt/250
+ms timing assertions never ran; 119/120 passed. A concurrent full two-engine gate overlapped the run on the same host. A
+recorded narrow `--repeat-each=5` webkit loop on the same tree, run `8e961b39-960a-46f8-b289-0ac548710259`, then passed
+4/5 with the fourth repeat missing the same opening focus commit (`toBeFocused` failed), so the miss reproduces in a
+narrow loop. The test injects 180 ms of evaluation delay against a 250 ms wall-clock budget, leaving about 70 ms for all
+WebKit bridge overhead. No path in this test claims the operation lock, so no control is ever disabled and the
+concurrent disable-blur repair cannot execute here; the miss reads as load, not as a regression from that change.
+Disposition: closed by the 2026-09-17 `FOCUS_SETTLE_MS` raise to 1000 ms (`crates/farhelm-ui/src/profiles.rs`) — the
+injected 180 ms plus bridge overhead now fits with wide margin; the test's two-attempt assertion is unchanged, and its
+elapsed bound was re-derived from the budget (≤1000 ms) so a loaded renderer that focuses inside the deadline passes
+instead of tripping the old 250 ms constant.
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-09-12 — popup disable-blur dismissal race fixed (e2e/tests/profiles.spec.ts, crates/farhelm-ui/src/app_bar.rs)
+
+Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` left the popup mounted after the toggle close in
+`a popup-created profile is offered on every host` with the profile registered server-side. Batch
+`acc5a4cf-2087-4f2a-a4f0-9c2d4450d927` ran the exact test twenty times per engine with the strengthened fixture premise
+but the product unmodified, reproducing the underlying event twice (attempts 1-2, Chromium): the popup dismissed between
+the save click and the close (form trivially gone, saved row never rendered, failure screenshot shows no popover). The
+mechanism is the product's own busy-disabling: the save claims the operation lock, the focused save button disables,
+focus falls to `body`, and the popup `focusout` listener reported that blur as an ordinary outside intent. When the
+dismissal classifier sampled `body` after the lock released but before completion focus committed, the popup closed and
+killed completion focus with it; the later toggle click then reopened the dismissed popup instead of closing it. The
+listener now ignores a focus-out whose target is disabled (a control that was already disabled cannot hold focus, so any
+such event is a disable-blur), while trusted pointer and Tab provenance report exactly as before. The test pins its
+close to the save completion contract (POST receipt, unmounted form, rendered row) and `closeProfiles` asserts its open
+premise with lock-state receipts. Batch `39f81e52-2277-4e55-b584-9a15c0d48653` ran the exact test twenty times per
+engine with zero failures; run `4627195c-2fb2-472c-8e8c-557400527b2f` passed the whole profiles spec 120/120 on both
+engines with pinned tmux 3.7c executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`,
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. A deterministic pin test
+(`disabling the focused save control does not dismiss the popup`) now scripts the disable-blur directly: run
+`d08fc2fa-9de0-4c9c-9474-fa8fb0c34cd6` fails it against the pre-fix bundle (the popup unmounts inside the observation
+window), and batch `23367a9f-dc59-4761-ac1d-3b4ab0c2bee1` passes it twice per engine against the fixed one. Disposition:
+fixed in this PR; the TODO.md entry is removed.
+
+Class: product
+
+Cause: established
+
+## 2026-09-13 — `events::tests::an_unanswered_keepalive_releases_the_subscriber_seat` (crates/farhelm-helm/src/events.rs)
+
+The deflake sweep's workspace nextest battery failed this helm subscriber-seat test once: the keepalive assertion
+(`the keepalive must be a WebSocket Ping`) reported `left: 1, right: 9`, so the frame in the keepalive slot carried
+opcode 1 where a Ping (opcode 9) was expected. All three classification reruns of the exact test passed. Sweep failure
+retained run `02cf3518-4309-473e-9ee7-b968451bf0d7`; reruns `3a79edca-26e0-4cf9-9902-81957bfa8824`,
+`a9638c60-6170-4a57-8a33-9931ca275832`, `55bcbde4-fc2e-4b00-b7aa-60832bcb3569`. Tested commit `b475c5c6` with a clean
+tree. Selection `workspace Rust targets` (`cargo nextest run --workspace --exclude farhelm-desktop`, minus the recorded
+exclusions); concurrency `4 nextest slots; retries 0` with `--test-threads 4`, on a Linux x86_64 worker. Pinned tmux
+3.7c executable SHA256 `c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient
+`FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` present in the test process). Suspected frame interleaving ahead of
+the keepalive Ping under full-suite load; not established. Disposition: fixed — see the 2026-09-13 fix entry below; the
+TODO.md entry is removed in the fix PR.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-09-13 — `events::tests::an_unanswered_keepalive_releases_the_subscriber_seat` fixed (crates/farhelm-helm/src/events.rs)
+
+The interleaving was a genuine revision racing the keepalive, and the test's premise was wrong rather than its subject.
+The server resets the idle window on every revision write, so a revision that lands after the handshake read arrives as
+the next frame; the test asserted Ping on the first frame unconditionally. The revision the sweep saw came from the
+local row's connect ladder walking its attempts under the test's clock (the retained trace shows the phase transitions
+mid-test), and a later instrumented run caught a fourth attempt — a ladder restart — landing mid-test the same way. The
+test now settles the ladder first, then pins the same event deterministically: a direct `bump()` after the handshake
+read, the same revision through the same watch channel, read back as exactly `handshake + 1` — which failed the old
+assertion with the sweep's exact signature (`left: 1, right: 9`) in retained run `fca722a5-d691-4ec8-a7f7-94caa1b144f5`.
+An adversarial review of that first fix showed it spent the release window reaching the Ping and reintroduced a network
+round trip whose loopback IO stalled under the paused clock (retained run `37ebc934-e43f-41cd-aa2c-0558ff5ea6e7`: one
+poll attempt, no retry, NOTICE fired). The committed shape instead consumes text revisions across capped intervals, then
+reads the seat through the same counter the endpoint gates on — held after the Ping, free within a bounded silence — so
+a late ladder restart only costs intervals, never correctness, and the caps fail loud past any sane burst. Fixed test
+passed 20/20 recorded repetitions, and the full `events::` module passed 21/21. Tested commit `3d057550` with the
+uncommitted fix (the diff is retained in each manifest's porcelain). Selection `keepalive burst-tolerant test`
+(`cargo nextest run -p farhelm-helm --lib -E` with the exact test); concurrency `4 nextest slots; retries 0`, no tmux (a
+helm unit test), `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. Disposition: fixed in this PR; the TODO.md entry and the
+`deflake/known-flakes.txt` line are removed.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-09-13 — `profile CRUD round-trips from the app-bar popup to the helm` (e2e/tests/profiles.spec.ts)
+
+The deflake sweep's browser battery failed this profiles test once on Chromium (`chromium-profiles` project): the 60 s
+test timeout fired in the `openProfileEditor` helper (profiles.spec.ts:214), whose click on `.profile-edit` inside the
+freshly created profile row never became actionable. All three classification reruns passed. Sweep failure retained run
+`fc4285c8-b667-4f2d-86c1-97dfe260aded` (failure screenshot and trace.zip retained under `playwright-artifacts`); reruns
+`b04195c1-6ad7-4c2d-a779-924ba0342b8a`, `cebdd484-c94a-4df4-8b0b-61175ba99b00`, `36a54b08-c525-4bdb-9570-d9517a0d8630`.
+Tested commit `b475c5c6` with a clean tree. Selection `browser suite, both engines`; concurrency
+`one browser worker; retries 0`. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, only
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` present in the test process. No attributed cause; the
+trace was not opened for this record. Disposition: open (TODO.md).
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-14 — `agent_listing_real_stack::an_authenticated_agent_clone_starts_a_structured_successor` (crates/farhelm/tests/e2e/agent_listing_real_stack.rs)
+
+The deflake sweep's workspace nextest battery failed this structured-clone test once: the parent-generation argv
+assertion ("the structured parent must reach the owned fake executable") saw an empty observed argv, even though the
+retained trace shows the fake's `STRUCTURED-LAUNCH-GENERATION:1` marker and `FAKE-AGENT READY`. Classification reruns of
+the exact test passed twice and failed once, the failure at the clone-generation argv assertion ("clone argv lost
+model") with an empty argv as well. Sweep failure retained run `bab77953-df15-4df6-88fc-83f4ac2ee18e`; reruns
+`f09afa88-3506-482a-b17a-afd08570917d`, `69a2a2b2-c1c8-4f22-9e3e-131d88ac618c`, `23f578e3-bba7-4932-bc13-13809d162fe2`.
+Tested commit `f4c3840de3aff5fefb5c4c2ae10483314886fa4f` with a clean tree. Selection `workspace Rust targets`
+(`cargo nextest run --workspace --exclude farhelm-desktop`, minus the recorded exclusions); concurrency
+`4 nextest slots; retries 0` with `--test-threads 4`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only
+`FARHELM_TEST_TRACE_DIR` present in the test process). Suspected observation race: the generation-argv wait returned
+empty before the marker arrived, at two different generations, rather than either launch losing the model; not
+established. Disposition: open (TODO.md).
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-09-14 — `agent_listing_real_stack::an_authenticated_agent_clone_starts_a_structured_successor` fixed (crates/farhelm/tests/e2e/structured_launches.rs)
+
+The open entry above guessed an observation race; the mechanism turned out to be two defects in the generation-argv
+decoder, both in how it reads the attach replay. The replay carries terminal rows, not the wrapper's byte stream: rows
+arrive with cursor-positioning escapes and padding, and a snapshot taken mid-render holds a payload-less argv prefix
+row. First, the decoder accepted the first (stale) prefix row, returning an empty argv for a healthy launch — the
+sweep's empty-argv failures. Second, the hex join stopped at any non-hex line, so a payload row wearing a positioning
+escape (`\x1b[2;28H` ahead of the hex, as retained) was invisible and the wait sat pending until its deadline even
+though the failure transcript carries the full boundary. That second shape reproduced 1/20 and 5/20 in isolation hunts
+(batches `562ec3f5-21ef-45cd-a0d4-244a82685e46`, `785d243b-457a-4245-a8ca-9fdafb39c864`) with the generation-2 timeout
+signature, always at the clone observation. The decoder now normalizes rows through the harness's own
+`normalize_pane_text` before parsing, resolves to the most recent witness (matching the generation marker's own
+last-occurrence rule), joins the payload across the replay's not-yet-rendered rows, and treats an empty decode as a
+payload still in flight. Adversarial review then found the join still stopped at the first blank, truncating a snapshot
+cut mid-payload, so blanks filter throughout the run and the wrapper's trailing NUL terminator witnesses completeness.
+One investigation note for the next reader: the retained failure logs strip raw ANSI escapes, so every timeout
+transcript looked clean; only a Debug-escaped buffer dump showed the `\x1b[2;28H` prefix. Tested commit `08182855` with
+the uncommitted fix. Selection `structured clone argv observation` (decoder unit tests 10/10; exact flake test 20/20 in
+batch `3d4163fa-3168-47d8-b5d9-a2607f7d3de2`; `structured_launches` plus `agent_listing_real_stack` modules 17/17);
+concurrency `4 nextest slots; retries 0`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only
+`FARHELM_TEST_TRACE_DIR` present in the test process). Disposition: fixed in this PR; the TODO.md entry and the
+`deflake/known-flakes.txt` line are removed.
+
+Class: readiness
+
+Cause: established
+
+## 2026-09-15 — `a detail read that starts during a restart cannot describe the previous run` (e2e/tests/m6-5-debts.spec.ts)
+
+The deflake sweep's browser battery failed this restart-seam test once on Chromium: the test holds a detail read issued
+during a restart, parses the recorded reply, and re-signs it — but the recorded body was the plaintext
+`no such session: ...` error, so `JSON.parse` threw
+`SyntaxError: Unexpected token 'o', "no such ses"... is not valid JSON`. The page snapshot shows the client itself
+detached with the same `no such session` error. All three classification reruns passed. Sweep failure retained run
+`963d54d5-217a-4798-be58-331e80ae571b` (failure screenshot, trace.zip, and error-context.md retained under
+`playwright-artifacts`); reruns `77e34f5b-79f4-4d7d-b695-a4fb251881d8`, `7d01057a-6205-46d7-bf8c-0984d9758e3d`,
+`e3b617a7-c99b-4091-b040-43a89d274e4b`. Tested commit `204b5cb964315ccf15aa97fa719d9a558c30c33b` with a clean tree.
+Selection `browser suite, both engines` (Playwright with the recorded exclusions, `--workers=1 --retries=0`);
+concurrency `one browser worker; retries 0`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, only
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` present in the test process. Hypothesis: the read was
+served after the restart discarded the old session, so the server answered the teardown error rather than the held
+detail JSON; not established. Disposition: open (TODO.md).
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-09-15 — `a detail read that starts during a restart cannot describe the previous run` fixed (e2e/tests/m6-5-debts.spec.ts)
+
+The open entry above guessed the read was served after the restart discarded the session; the mechanism is narrower and
+documented: `Supervisor::relaunch` takes the session off the map between the generation claim and the republication, so
+a read landing in that gap is honestly answered 404 (`get_session`'s missing-from-drain arm). The test re-signed the
+held reply by parsing it as JSON, and the plaintext `no such session` body crashed the parse. The product behavior is
+intended — an admitted 404 only raises the `.refresh-stale` notice and a later good reply clears it — so the fix stays
+on the test side: 404 gap answers are released and re-read (every attempt still starts inside the restart, so each
+carries the same first-bump epoch) until a 200 JSON reply is in hand, with no new reads issued after 30 s; any other
+status fails loudly with the capture index, status, and a body excerpt. A temporary probe forcing one retry iteration
+passed once on Chromium (run `1983e6aa-3aba-40e5-a38f-13bc82449f94`); the committed shape passed the exact test 20/20 on
+Chromium (run `da6e41ed-7f8e-413b-a096-875a70673406`) and 3/3 on WebKit (run `5228471f-4021-443b-b43e-d6b52a7cb518`).
+Tested commit `204b5cb964315ccf15aa97fa719d9a558c30c33b` with the uncommitted fix. Selection
+`exact mid-restart read on one engine` (Playwright `--project=chromium-m6-5-debts` / `--project=webkit-m6-5-debts` with
+`-g` on the test title); concurrency `one browser worker; retries 0`, on a Linux x86_64 worker. Pinned tmux 3.7c
+executable SHA256 `62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4` (this checkout's own `.ci-tmux`
+build), `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` present in the test process).
+Disposition: fixed in this PR; the TODO.md entry and `deflake/known-flakes.txt` line written during classification never
+left the working copy, so none remains to remove.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-09-19 — `stalling one tab's writes pauses only that tab; the agent and a sibling stay live` (e2e/tests/terminal-tabs.spec.ts)
+
+Third sighting of the never-paused shape TODO.md watches. Under 9 busy-loop children (about half of an 18-core host),
+repeat 3 of 20 loaded WebKit executions failed: the stalled tab's `pauseCount` stayed at 0 for the full 60 s HIGH_WATER
+poll ("the stalled tab must cross HIGH_WATER and pause"), while the other 19 repeats in the same batch passed. The
+retained console carries no product receipts — detach reasons and queue states are not instrumented — and the retained
+trace and error context preserve only the page state, so whether this occurrence also had the recorded early socket
+close from run `7fd44a19` is not established. Tested tree: commit `74910dca` (main plus seven earlier doc-only sweep
+commits) with pending doc-only sweep edits; recorder run `4c1de15e-9977-482f-a9c7-e02bfd79df0f` (playwright artifacts of
+the failing repeat copied beside it). Selection: `--project=webkit-terminal-tabs` with `-g` on the test title,
+`--repeat-each=20`; concurrency `one browser worker; retries 0`. Pinned tmux 3.7c, executable SHA256
+`b3f11c4f45d7672243ad0a1e0e5a60ba7e335c4a56c2e3ddf48582aa28de6de6` (this checkout's own `.ci-tmux` build),
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` in the test process).
+
+Disposition: closed on 2026-09-20 by making the pause mark lowerable from the fixture, after instrumenting the failure
+answered what three sightings could not. The shape is a race between two bounds, not an ambiguous observable. A stalled
+tab asks the supervisor to pause only after four megabytes of undrained output; the supervisor cuts a viewer that stops
+consuming loose with a visible stall reason, and on a loaded machine that arrives first. Three reproductions in twenty
+loaded WebKit executions all carried the same fingerprint: the socket closed at 4.0-5.4 s with code 1006 and the banner
+"Detached: terminal stopped consuming output (stalled)", with only 1.4-2.2 MB undrained — so the crossing `pauseCount`
+records was unreachable rather than late. The same receipts cleared the fixture, which no earlier sighting could: 7757
+held write callbacks, every one matched to the stalled island, and no remount. With the mark lowered to 64 KiB the
+crossing takes milliseconds and lands far inside the supervisor's window; 20 of 20 passed under the load that had failed
+3 of 20 twice.
+
+Class: budget
+
+Cause: established
+
+## 2026-09-21 — `deleting_refuses_to_move_a_stranger_at_the_recorded_source` (crates/farhelm-supervisor/src/service/teardown.rs)
+
+The checkout-ownership fixture failed while removing its inode-allocation filler directory: on this filesystem the first
+replacement already had a different identity, so no fillers had been created. The failure reproduced in the exact-test
+selection. Cleanup now runs only when the fixture created fillers; the different-identity premise and foreign-directory
+preservation assertions remain. Fixed in #834. Observed on a Linux x86_64 container with four CPU slots, at combined
+stack source `43bc4d2a` (recorded Git base `58b2fc5c5730` plus dirty source), in workspace run
+`be8d017f-3d7b-41fe-9daf-4c2b644dc628` and focused run `35e269ac-5115-49d3-b476-9ca487e22409`. The latter selected
+fourteen exact failures from the workspace, with four nextest slots and zero retries. Both used pinned tmux 3.7c,
+executable SHA256 `ebc01bf8f9226634bda074fc7daf1c13dfbe2a89858eb3c6c32c96342d02f43b`, `LC_CTYPE=C.UTF-8` with `LANG` and
+`LC_ALL` unset, and only recorder-owned `FARHELM_TEST_TRACE_DIR` in the test environment.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-09-25 — parent SIGTERM cleanup (scripts/test-start-stack-cleanup.sh)
+
+The isolated browser-stack cleanup check left its HTTP port, state directory, stack-info file and service processes
+alive after its spawner received SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`; parent SIGKILL and direct script
+SIGTERM passed. The unchanged script passed all phases in repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45`. Both ran on
+Linux x86_64 with one stack phase at a time and pinned tmux 3.7c, executable SHA256
+`9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed;
+the recorder supplied only `FARHELM_TEST_TRACE_DIR`. The working tree contained pending browser-test, lint and
+formatting changes above `2c25bf3ba22719fbe3896b18270d1c0194696379`; application builds used the main-source version.
+Neither run captured watcher state at the failed boundary, so the cause remains unknown. Disposition: open (TODO.md);
+retain both observations. The script and the stack now record lifecycle markers and, on a failed phase, the stack's
+process tree and log tails, so the next occurrence shows which startup step the TERM landed in and whether the trap ran.
+A 2026-10-01 review of this run's timestamps put the phase-2 kill about half a second to a second after the helm
+started, inside the script's foreground startup steps, where bash defers the TERM trap until the running command
+returns; that is a hypothesis, not established.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-09-25 — Replace refusal row (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` timed out after 60 seconds in
+WebKit while locating the injected refusal row in full browser run `bd3fa658-dcf7-4820-8b68-67be5e4b89ed`. The same test
+passed unchanged on both engines in focused run `8b2b2c31-7608-4b6d-97b7-b11353f26554`. The full run started at
+`ac4e0f30ea54300748ab10e4cf1675669a2fcbba` with pending test and lint edits; the focused selection started clean at
+`25b0cc531551a8abb5e6be06faffdfb2c0c453d9`. Both ran on Linux x86_64 with one browser worker, zero retries, pinned tmux
+3.7c, executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, and locale `C.UTF-8`.
+Ambient `FARHELM_*` was scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+The failed boundary does not establish whether the injected listing was delivered; the cause remains unknown.
+Disposition: open (TODO.md); retain the trace and inspect listing interception and refresh on recurrence.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-25 — Replace refusal row reproduces in whole-file WebKit runs (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` failed the same way as the
+earlier entry (60-second timeout locating the second, route-injected refusal row) in every one of three runs of the
+whole `terminal-restart.spec.ts` file on the WebKit project alone at clean `main` commit
+`1867aeddbd997df0c6fdba9d34c3f0cb826442bf`, first run `85814340-1ac0-48a4-beb1-1ed468c26d7b`, and in three more such
+runs on an unmerged UI stack built on it (first run `b4279fc7-97db-4003-8eed-f0795f84b2d3`). In the same session the
+test passed six times out of six on both engines when selected alone (repetition
+`51a974c0-332d-40c5-9ac4-85fb18da8d15`), and failed twice in larger multi-file WebKit selections. So the failure depends
+on the tests that run before it in the file, not on load: it is reproducible on demand with the whole file on WebKit,
+which is the useful step for the open TODO.md entry. Linux x86_64, one browser worker, zero retries, pinned tmux 3.7c,
+executable SHA256 `49acd3312738da4447a018cf1c37e23270404b90fc53f6a396f2c25e113f2190`, locale `C.UTF-8`; ambient
+`FARHELM_*` scrubbed by the recorder, which ran in generic mode with tmux validation downgraded to a warning because it
+could not locate the repository-owned tmux from a jj workspace. Disposition: open (existing TODO.md entry).
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-29 — webview authentication at desktop smoke boot (scripts/desktop-smoke.sh)
+
+The native desktop smoke failed with `FAIL: the webview JavaScript stack did not authenticate its event socket` in both
+attempts of the v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, x86_64 Linux job, runner image
+`ubuntu-24.04` 20260920.314.1, WebKitGTK 2.52.6). The retained recorder run `bf8b80c8-54ee-41e3-b7f6-6d44c7207e2f`
+covers the first attempt: clean tag commit `af8f5ab65f15078a1295e724758fa0abc3837421`, selection
+`native desktop smoke legs`, sequential legs, pinned tmux 3.7c with executable SHA256
+`74c2614b1b48280e9d4c767a09fa5aee07fc66ae0d437dc3282b7bc56dc59884`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
+recorder-owned `FARHELM_TEST_TRACE_DIR`). In both failures the helm and managed supervisor came up and connected, WebKit
+printed its usual Xvfb EGL warnings, the window stayed black, and the desktop asset handler logged no request at all
+within the 30-second wait, so the page never started loading its assets. It is not a regression: a throwaway bisect
+workflow (run `36603454788`, same hosted runner type, one smoke per job, no gate steps before it) failed the same way at
+the untouched v0.18.0 base `03a3051815234e45260c567719f09bf2804b5469` in one of two jobs, and at two of six intermediate
+commits, while `af8f5ab6` passed twice; 5 of 12 CI runs failed in all. The v0.18.0 release job itself passed. Locally on
+Linux x86_64 the same commit passed 6 of 6, including runs pinned to 4 and 2 CPUs and one without a session bus.
+Disposition: fixed in #1227. The page was late, not missing: one of the bisect failures served its assets 29.8 seconds
+after launch, just past the wait. A diagnostic run on the same runner type (Actions run `36607548613`, 10 jobs of 5
+launches of the prebuilt app, launched the way the smoke's first boot does) put every launch but one per job at 30 to 36
+seconds to the first asset request, against about 3 locally, and gdb stacks taken 12 seconds in showed the app's main
+thread inside `g_application_register` → `g_dbus_proxy_new_sync`, polling with a 25-second timeout. That is GTK 3's
+`GtkApplication` startup auto-starting `org.freedesktop.portal.Desktop`, before tao's event loop, and so the window,
+exists. `libwebkit2gtk-4.1-0` recommends `xdg-desktop-portal-gtk`, so the gate's `apt-get install` put the portal on the
+runner; the user journal showed systemd starting it, its GTK backend exiting at once for want of a display, and the
+portal timing out on backend lookups instead of claiming its name. Local runs never paid this because no portal was
+installed, so activation failed in milliseconds. The gate now purges both portal packages after installing its
+dependencies.
+
+Class: substrate
+
+Cause: established — a D-Bus activation of the desktop portal that cannot start on the headless runner blocks GTK
+startup for D-Bus's 25-second default, which puts the first page load right at the smoke's 30-second wait.
+
+## 2026-09-29 — `restricted_inherited_create_waits_for_parent_restart_then_inherits` (crates/farhelm-supervisor/src/service/handlers.rs)
+
+The test failed with `parent mutation and restricted create must both finish: Elapsed(())`, its 10-second bound on the
+parent Restart and the inherited create completing after the test releases the parent's lifecycle claim, in the third
+attempt of the v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, x86_64 Linux job, runner image `ubuntu-24.04`
+20260920.314.1). Retained recorder run `202dfc97-363a-42d2-bf94-81da09526533`: clean tag commit
+`af8f5ab65f15078a1295e724758fa0abc3837421`, selection `workspace except farhelm and farhelm-desktop`, 4 nextest slots
+across binaries with retries 0, pinned tmux 3.7c with executable SHA256
+`f924697f00d247c2c38baaad49ba00041dc36d5f546750928d567bf847ed001c`, locale `C.UTF-8`, no ambient `FARHELM_*` (only the
+recorder-owned `FARHELM_TEST_TRACE_DIR`). The same commit passed this test in the job's first two attempts. Locally on
+Linux x86_64, 30 repetitions of the test and its Delete sibling, selected alone under the same pinned tmux, all passed
+in well under a second each. Disposition: fixed in #1228, with the Delete entry below. Both handlers reach
+`reap_process_tree`, whose first `ScopeManager::available` call probes the host's systemd user manager with a real
+transient scope under a 15-second budget, and the fixture used the default, real manager. The hosted runner has a user
+manager, and the probe logs its verdict at INFO either way; that line is missing from both retained traces, so the probe
+had not returned when the 10-second bound fired. The local runs never paid this: the stand-ins answered at once, and a
+local manager answers in milliseconds. Stand-ins that model a scope which never starts (`systemd-run` exits 1,
+`systemctl show` answers `not-found` successfully) fail both tests every time at 10.17 seconds with exactly the retained
+two-line trace. Why the runner's probe ran past 10 seconds is not established; a failed scope start and a manager slowed
+by the four-slot battery both fit. The fixture now uses a disabled scope manager, since the test is about lock ordering
+between the handlers and not about cgroup scopes, and its completion bound is 30 seconds, above what the fallback sweep
+and a restart may legitimately spend.
+
+Class: budget
+
+Cause: established — the test's 10-second bound covered a real systemd user-manager probe whose own bound is 15 seconds.
+
+## 2026-09-29 — `restricted_inherited_create_waits_for_parent_delete_then_refuses` (crates/farhelm-supervisor/src/service/handlers.rs)
+
+The Delete sibling of the entry above failed the same way
+(`parent mutation and restricted create must both finish: Elapsed(())` after 10 seconds) in the fourth attempt of the
+same v0.19.0-rc.2 release job (GitHub Actions run `36591492646`, retained recorder run
+`b6db54a7-c603-47ad-94e8-7b57e22c609b`, clean commit `af8f5ab65f15078a1295e724758fa0abc3837421`, same selection, 4
+nextest slots with retries 0, pinned tmux 3.7c with executable SHA256
+`00dddfb2de5c68b3efc121f9222c86076d6ba9f620a95ec2194689d874e12f49`, locale `C.UTF-8`, no ambient `FARHELM_*`). So the
+pair failed in two of the job's four attempts. The captured trace ends at the teardown's debug line reporting no systemd
+user manager, 46 ms into the test, and shows nothing for the remaining ten seconds. The user-manager probe had therefore
+already answered quickly, and the silence falls after it, in upload cancellation or the process-tree sweep. Local
+attempts to reproduce on Linux x86_64 all passed: 30 plain repetitions of the pair, 20 with `systemd-run` and
+`systemctl` replaced by fast-failing stand-ins to force the sweep-only path CI takes, 1 with stand-ins that hang (the
+probe's own five-second query bound held and the pair passed in about five seconds), and 25 with the pair and three busy
+loops pinned to a single CPU. One untested lead: both tests use the literal session id `mutation-parent`, and a
+sweep-only teardown selects every process on the host whose environment carries that id, so the two tests running at
+once could reach each other's processes. Disposition: fixed in #1228; see the entry above. The trace's last line is
+logged just before the sweep's first user-manager probe, not after it, so the silence is the probe itself; the
+shared-session-id lead was not the cause, since nothing in either test carries that marker.
+
+Class: budget
+
+Cause: established — the same unfinished systemd user-manager probe as the entry above.
+
+## 2026-09-29 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), recurrence after dismissal
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`,
+un-ignored and dropped from the deflake exclusions on 2026-09-19 after a clean sweep, failed again in deflake sweep run
+`4a18b9ac-c53b-4b7b-bd70-5a1171a7bbc6`: READY arrived, then the live attachment received no bytes at all before the 40 s
+wait for BINARY-MARKER expired. The three exact-test repetitions `46bba954-49cd-482e-942c-f68b356ac46d`,
+`e2a38976-be77-4a58-a56e-09b95da2ed98`, and `4fbb16a4-6d12-4272-bffe-21bcae13e712` passed. The sweep ran the whole
+workspace nextest battery (`cargo nextest run --workspace --exclude farhelm-desktop`, 4 nextest slots, retries 0) at
+clean `main` commit `8e82d8b271b1015c25302bbbbb0df019b290ce76` on an 18-CPU Linux x86_64 host, with pinned tmux 3.7c,
+executable SHA256 `75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, and locale `C.UTF-8`. Ambient
+`FARHELM_*` was scrubbed; only the recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied. Unlike the 2026-09-05 attempts,
+the tmux fixture's teardown diagnostics captured the failing pane: it shows the marker rendered and the fixture exited
+with status 0. So tmux received the reply, which extends the earlier receipt that the fixture flushed it; the bytes were
+lost somewhere between tmux's control-mode output and the test's client, and which layer dropped them is not
+established. Disposition: open (TODO.md Deflake), excluded from later sweeps.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-09-29 — Replace refusal row in a full browser sweep (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` hit the 60-second test timeout on
+WebKit in deflake sweep run `0c787185-c40c-4070-a3fe-a69bc1a44a82`, the whole browser suite (`npx playwright test`, one
+browser worker, zero retries), and passed in all three exact-test reruns `452368f2-ce11-42b3-8eb2-43b31854e1de`,
+`7f8a9e9e-3f24-4fe1-913d-0df3e95bc2ab`, and `0c842a5b-e6aa-46ae-aa44-2147229374af`. All four ran at clean `main` commit
+`8e82d8b271b1015c25302bbbbb0df019b290ce76` on an 18-CPU Linux x86_64 host with pinned tmux 3.7c, executable SHA256
+`75ede1768324817dc386aee550c8e7ca68e98530af54762fcb9df0b46491b071`, and locale `C.UTF-8`; ambient `FARHELM_*` was
+scrubbed, and the recorder supplied `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. The excerpt names
+only the timeout, not the step that stalled. The pattern matches the earlier finding that the test fails behind the rest
+of its file on WebKit and passes when selected alone. The test had an open TODO.md entry but no
+`deflake/known-flakes.txt` line, so the sweep was not excluding it; this record adds that line. Disposition: open
+(existing TODO.md entry).
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-30 — Replace refusal row fixed (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal`, logged three times above as a
+WebKit timeout that reproduced whenever the whole file ran and passed when the test ran alone, waited for a row that
+only a listing fetch could bring. Its second half installs a second page route that injects a refused interrupted
+session into the session listing, but that session exists nowhere on the helm, so nothing prompts the page to fetch the
+listing again. The retained trace of the 2026-09-29 sweep failure (full browser run
+`0c787185-c40c-4070-a3fe-a69bc1a44a82`) shows the page's last `GET /api/sessions` completing before the route was
+installed and none after it, so the click on the injected row waited out the 60-second test timeout. A pass depended on
+some unrelated refresh happening to follow the route. Before the fix, the whole file on WebKit alone still failed on
+`main` at `1205c0e7` plus #1253's unrelated `terminal.spec.ts` change, run `3ecf40b9-da83-4e0b-a41d-0ba6dc6ab266`. With
+the test reloading the page after installing the route, three whole-file WebKit runs
+(`9b4c601a-a52c-435a-8897-236d24bdeb18`, `c5a87151-3349-4765-a249-c773312ceb58`, `688a1f9a-f36b-49c3-a938-950785749d6f`)
+and one whole-file Chromium run (`63de584c-3411-4d92-8a90-4b03ea346a72`) passed on the same base with the fix applied.
+Every one of these trees was dirty with uncommitted supervisor debug-logging edits that were not built into the binaries
+under test. All ran on an 18-CPU Linux x86_64 host with one browser worker, zero retries, pinned tmux 3.7c (executable
+SHA256 `40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`), locale `C.UTF-8`, and ambient `FARHELM_*`
+scrubbed by the recorder, which ran the single-engine runs in generic mode. Why an incidental refresh arrives when the
+test runs alone but not behind the rest of its file was not pursued; the fix removes the dependence on it. Disposition:
+fixed by the PR that adds this entry; the TODO.md entry and its `deflake/known-flakes.txt` line are removed.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-09-30 — `session_lifecycle::non_utf8_terminal_output_survives_live_stream` (crates/farhelm/tests/e2e), cause located in tmux
+
+`session_lifecycle::non_utf8_terminal_output_survives_live_stream` in `crates/farhelm/tests/e2e/session_lifecycle.rs`
+reproduced on demand with the supervisor's new debug checkpoints on the output path built in: 6 of 40 exact-test
+attempts failed in hunt batch `a8487127-853c-4926-badf-92095a1fcea1` (attempts 11, 13, 18, 20, 24, 25) and 3 of 20 in
+batch `eb55af56-5e52-4315-af60-881fbfbf4a52` (attempts 8, 11, 13), each run under a transient systemd user scope limited
+to `CPUQuota=400%` beside two CPU-bound `yes` processes, the 2026-09-05 shape of two load children on four CPUs. Every
+attempt ran one selected test with the four-slot nextest budget and zero retries, at commit `58652a052dcd` (#1255's head
+before the stack was rebased), with the checkpoint edits uncommitted in the tree, pinned tmux 3.7c (executable SHA256
+`40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`), locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed,
+with only the recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. All nine failing traces are the same: the attach replay
+and the READY line are decoded, queued, and written to the client, and then the supervisor's control client receives no
+line of any kind (no `%output`, no command reply, no `%exit`) for the 40-second wait, while tmux's own pane capture
+shows BINARY-MARKER rendered and the pane dead with status 0. Reading tmux 3.7c's source explains it:
+`control_write_output` only queues a pane's new output for each control client and enables the client's write event, the
+pane's EOF then runs `server_destroy_pane`, which frees the pane's input buffer and sets `wp->fd = -1`, and
+`control_write_pending` discards every block still queued for a pane whose `fd` is -1. Output that arrives just before
+the pane's process exits is therefore drawn on the screen but never sent to a control client, and load widens the window
+between the queueing and the write callback. The fake agent prints the marker and exits at once, which lands in that
+window. This is not specific to the test: an agent's last output before it exits can be missing from a live attachment,
+which shows it only when the terminal is next attached and replayed. Disposition: open (TODO.md Deflake, with the fix
+options), still excluded from the deflake sweep; the checkpoints ship so any later occurrence is traced.
+
+Class: substrate
+
+Cause: established
+
+## 2026-09-30 — final output recovered after pane exit (crates/farhelm/tests/e2e/session_lifecycle.rs)
+
+The final-output loss recorded for `session_lifecycle::non_utf8_terminal_output_survives_live_stream` is fixed by
+catching an existing attachment up from retained pane history when the supervisor observes pane death. tmux 3.7c can
+discard its queued live bytes at EOF; resetting before replay replaces already-delivered content rather than duplicating
+it. The test still makes its producer write and exit immediately, now runs the serving supervisor's ticker, and accepts
+raw `0xff` before recovery or its rendered replacement after a recovery reset (tmux canonicalizes that byte in history).
+The exact selection `test(=session_lifecycle::non_utf8_terminal_output_survives_live_stream)` passed all 40 attempts in
+hunt batch `994e88a8-adc1-4d75-9701-280ef02fd750` on Linux x86_64 under a transient user scope limited to
+`CPUQuota=400%` beside two CPU-bound load processes, with four nextest slots, zero retries, and a one-hour batch cap.
+Tested commit `36949b4d1f2d6afa445f3b334b1e7570f524df3e` with the fix uncommitted; recorded tmux 3.7c executable SHA256
+`40812d9309ff36ac7aae468a62eb944c4df4fefab0df135814b1dfa0f34ecdf2`, locale `C.UTF-8`, ambient `FARHELM_*` scrubbed, and
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. A separate deterministic supervisor regression suppresses live
+delivery and proves reset plus final history on the same attachment. Disposition: fixed by the PR that adds this entry;
+the TODO.md entry and its `deflake/known-flakes.txt` line are removed.
+
+Class: substrate
+
+Cause: established
+
+## 2026-09-30 — `service::core::tests::an_ambiguous_planned_checkout_never_adopts_a_foreign_directory` (crates/farhelm-supervisor/src/service/core.rs)
+
+The v0.20.0 release gate's workspace nextest step failed this one test on the hosted x86_64 Linux runner (GitHub Actions
+run `36811756125`, recorder run `80893b36-8051-45bd-97f4-9ed8e8b451fb`, clean tested commit
+`e0b9992760ed27896d90b9c6826ce2959ecead3e`, selection `workspace except farhelm and farhelm-desktop`, four nextest slots
+across binaries with zero retries, pinned tmux 3.7c with executable SHA256
+`0838fd84ec24dfb4c70e250f7a8db71e3c2a2095847ef8335aee8871c925c07a`, locale `C.UTF-8`, no ambient `FARHELM_*`, only
+recorder-owned `FARHELM_TEST_TRACE_DIR` supplied); the other 2605 tests passed. It panicked after 15.17 s at "Delete
+retires the committed refusal without a restart". The retained trace shows the reopened supervisor's systemd
+user-manager probe starting about 130 ms into the test and reporting at 15.13 s that it did not finish within its 15 s
+bound, after which teardown found no usable user manager and took the sweep-only path, and Delete returned an error. The
+same code (the gate's source differs from v0.20.0-rc.4 only in the version, changelog and TODO.md) passed the rc.4 gate
+on the same runner type, and the exact test passed all 20 attempts of local hunt batch
+`dda5c41c-7b4e-4b78-af86-23bc4999924a` on Linux x86_64 at commit `e0b9992760ed27896d90b9c6826ce2959ecead3e`, where the
+user manager answers in milliseconds. This is the same exposure as the 2026-09-29 entries above, a test exercising the
+host's real user manager on a runner where it can stay silent for the full probe bound. Disposition: fixed in #1324,
+which gave the test a disabled scope manager. The test runs two supervisors on one store. The first, on the default real
+scope manager, found the user manager usable at 117 ms and recorded on the row that its launch was scoped before the
+simulated crash; the reopened supervisor got a fresh manager whose probe, started as it reopened, timed out before
+Delete ran. A recorded scope that cannot be checked is an unconfirmed cleanup, which Delete refuses by design (SPEC.md
+"Lifecycle operations"); the trace's last line is that warning for the row's `-0.scope` unit. So the sweep-only path
+itself did not fail: Delete refused on the scope evidence, as it does in production until the probe's one-minute backoff
+passes and the manager answers again. Locally, a `systemd-run` stand-in that reaches the real manager once and then
+models a scope that never appears failed the unchanged test with the same trace, and the fixed test passed under it in
+0.34 s without invoking the stand-in at all.
+
+Class: substrate
+
+Cause: established — the test depended on the host's systemd user manager answering twice, and the second probe ran out
+its 15-second bound.
+
+## 2026-10-01 — `InstalledUninstall.test_confirmation` and `test_fresh_preview_and_remove` (scripts/test-uninstall.py)
+
+The v0.21.0 release gate's macOS installed-uninstall step failed these two tests on the hosted macOS 15 arm64 runner
+(image `20260828.587`, Darwin 24.6.0, 3 CPUs; GitHub Actions run `36870068282`, job `110395516935`, recorder run
+`effd9cb4-3ec4-4998-89ee-4454ce9bf790`, clean tested commit `2e8aa753964559e8ce5583cac3f09fcad259c006`, selection
+`macOS installed uninstall acceptance`, one fixture at a time, no tmux, locale `en_US.UTF-8`, no ambient `FARHELM_*`,
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied); the other seven tests passed and one skipped as Linux-only. Both
+failures are the harness's 30-second timeout on a `farhelm uninstall` child (the debug build the step installs), in one
+case answering a terminal prompt and in the other with `--yes`. In the prompted case the killed child's captured stdout
+runs through the complete removal report and ends with "Farhelm uninstalled. User data was retained.", so uninstall had
+finished its work and written its last output before the 30 seconds ran out; what did not happen in time is the child
+exiting (or its pipes closing). Nothing in uninstall runs after that final write: its locks are released before the
+report and it starts no other process. The two failures came about a minute apart and the run was slower throughout:
+`test_confirmation` took 81 s and `test_fresh_preview_and_remove` 46 s, against 65 s and 37 s when both passed in the
+v0.21.0-rc.1 gate (run `36827033494`) on the same runner type that morning, with the same shipped code (the gate's
+source differs from rc.1 only in the version, the changelog, and docs and test-script commits outside this step). So
+even a passing run spends a large share of the budget, but how much of it is the uninstall child itself is unavailable.
+The uninstall code and this script last changed in #1330 (2026-09-30), which added the install, app, setup and runtime
+locks. No earlier entry names this script. No reproduction was attempted; the hosted failure artifact expires
+2026-12-30. v0.21.0 was re-cut as v0.21.1, whose gate (run `36877043811`, job `110419166903`, clean tested commit
+`b13ddc71511b53f743e2e7f98e17b036ebd06e64`) failed the same way in `test_fresh_preview_and_remove`,
+`test_install_lock_interplay` and `test_missing_flat_desktop`, all `uninstall --yes` children at 30 s. A diagnostic copy
+of the script that timed each child and sampled it on timeout then separated the two hypotheses. Each uninstall verifies
+every file it removes against its recorded SHA-256, and since #1330 it does so twice, once for the plan and again under
+its locks; the step tests the debug build, whose `sha2` is unoptimized and whose CLI is hundreds of megabytes (354 MB on
+Linux), and the CLI is hashed twice per pass on macOS (the flat copy and the app's copy). On an otherwise idle Linux
+x86_64 machine a single pass (`--dry-run`) took 15.3 s and confirmed uninstalls 28 to 30 s, and one prompted uninstall
+timed out there with only its plan printed (recorder run `cdfd5583-b185-4d84-b353-8534a2b2220d`). On a hosted macOS
+runner outside the release job (CI run `36883649071`) passes took about 6.2 s and confirmed uninstalls about 12 s, and
+every child exited within 0.7 s of its last output, so there is no stall on exit; the release job ran the whole suite
+1.6 to 2 times slower (276 to 340 s against 173 s). Scaling by that alone puts a confirmed uninstall at 19 to 24 s,
+short of the 30 s the failures show, so the hashing there was slowed more than the suite as a whole; by how much is
+unmeasured. A kill landing just after the final report explains the complete output in the first failure. Disposition:
+fixed by the PR that adds this paragraph, which compiles `sha2` at `opt-level = 3` in the dev profile; with that, every
+uninstall child in the same Linux run finished in under 1 s and the suite passed (recorder run
+`891a907b-c3a7-458c-ba4c-b69bd7e3ee89`). The TODO.md entry is removed.
+
+```
+FAIL: test_confirmation (__main__.InstalledUninstall.test_confirmation)
+AssertionError: confirmation child timed out: b'... Remove this installation? [y/N] removed ... Farhelm uninstalled. User data was retained.\n' b''
+ERROR: test_fresh_preview_and_remove (__main__.InstalledUninstall.test_fresh_preview_and_remove)
+subprocess.TimeoutExpired: Command '['<fixture-home>/.local/bin/farhelm', 'uninstall', '--yes']' timed out after 30 seconds
+```
+
+Class: budget
+
+Cause: established — the debug build's unoptimized SHA-256, run twice over a debug CLI since #1330, put a confirmed
+uninstall at the harness's 30-second per-child limit on the release job's macOS runner.
+
+## 2026-10-05 — `sidebar menu flyouts sit under no stacking context inside the sidebar` (e2e/tests/feedback.spec.ts)
+
+The test #1598 added fails intermittently, on either engine, at its first `await expect(helpFlyout).toHaveCount(0)`: the
+Escape it presses after opening the help menu does not close it. Seen on a Linux x86_64 development machine (kernel 6.8,
+Node 24.20, Playwright 1.62.0, recorder-pinned tmux 3.7c with executable SHA256 prefix `3590826b41cd0671`, locale
+`C.UTF-8`, no ambient `FARHELM_*`, one browser worker, retries 0) while validating the auto-update plan's stack rebased
+on main `84c10b3b`, with that stack's own changes to the sidebar bar's menus (not on main; the tree was otherwise
+clean): once in a run of the feedback, tooltip and tooltip-coverage specs (recorder run
+`4c88e5c5-64f6-4ece-a1f9-c5b77c15c0e7`, chromium; the other 33 cases passed, this one failed after the 5 s expect
+timeout), and then 1 of 3 focused attempts of this test alone on both engines (runs
+`2a894aca-f5e1-468a-8320-19188305e5bf` and `2ff5d950-1b58-4808-befd-8c04e9370f08` passed;
+`a959a160-1719-47e7-b0b9-d0afb068eb15` failed on webkit). Both failures' page snapshots show the selected session's
+`Terminal input` focused, not the menu. Cause: established by reading the code, not by a run of main's own build — the
+terminal takes focus when it reveals after connecting (`takesFocus` in `crates/farhelm-ui/assets/terminal.js` yields
+only to an editable field, another terminal or a dialog, not to an open menu), and the test opens the help menu right
+after `page.goto` and closes it with Escape, which only reaches the menu while focus is inside it; whenever the terminal
+connects after the menu has opened, it takes the focus and swallows the Escape. Main's version of the test has the same
+sequence and the same terminal rule, so the race is not introduced by the stack's menu changes, though the failures
+above were all seen with them. Fixed in the auto-update stack's PR #1604 by waiting for the terminal to take focus
+before the first menu opens; with that, 4 of 4 focused attempts on both engines passed (runs
+`79c0dd79-1678-4604-be21-9a8b9d9d06e0`, `f7e21223-c3bb-4653-a682-d4650b32b520`, `363c37b5-3f62-4d5c-96b2-50418753b070`,
+`5e56d6b7-987f-45b9-8ba3-0d6b64047c3d`). Whether the terminal stealing focus from an open sidebar menu is itself worth
+fixing in the product is left open.
+
+Class: readiness
+
+Cause: established by code reading — the selected terminal's reveal takes focus from the just-opened help menu, so the
+test's Escape lands in the terminal.
+
+## 2026-10-06 — `unconfirmed_restart_is_refused_only_while_the_agent_is_working` (crates/farhelm-supervisor/src/service/core.rs)
+
+Failed once in the v0.25.0-rc.3 release build's x86_64 Linux gate (release run 37571233310 attempt 1, retained recorder
+run `fc591c2f-c3b8-4ebe-beda-9b64e26a6688` in the hosted `test-run-failure-37571233310-1-2` artifact, which expires), at
+tested commit `7f46e0c6` with a clean tree, selection "workspace except farhelm and farhelm-desktop", 4 nextest slots
+across binaries, retries 0, the recorder's pinned tmux 3.7c (executable SHA256 prefix `f6fc5de04bae852f`), locale
+`C.UTF-8`, and only the recorder-owned `FARHELM_TEST_TRACE_DIR` in the child. It failed alone (2773 of 2774 passed),
+fast (1.46 s) on its first premise assertion, about 0.3 s after the session was created; the same test passed in the
+rc.1 and rc.2 gates on the same supervisor code. It reproduces readily on a quiet Linux x86_64 development machine
+(kernel 6.8, 18 CPUs, recorder-pinned tmux 3.7c with executable SHA256 prefix `c8f5e37c5169b045`, `C.UTF-8`, ambient
+`FARHELM_*` removed by the recorder): 5 of 20 attempts of this test alone at `7f46e0c6`, clean tree (first retained
+failure `749a6ec8-99ff-4943-bcf4-232e23d6a819`). It also fails on v0.24.0's source, 2 of 20 alone, run directly with
+cargo-nextest rather than through the recorder (the scratch copy was not a checkout) and with every `FARHELM_*` unset,
+so it predates this release. Every failure shape is the test's `sleep 300` agent no longer being alive a second or two
+after launch: the "agent is alive" premise fails, or the refused restart's follow-up finds no live agent, or the
+unconfirmed restart is not refused because the session reads `Unknown` instead of working. A failing attempt's trace
+shows the later stop reporting that the launch's transient systemd scope was already gone. Cause not established. The
+suspicion is the launch's transient scope on the shared `systemd --user` manager, or the test's `sh -c` stand-in agent,
+ending early; neither has been checked. Open; recorded in TODO.md's Deflake bucket and in `deflake/known-flakes.txt`.
+
+```
+thread 'service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working' panicked at crates/farhelm-supervisor/src/service/core.rs:17822:18:
+fixture premise: the agent is alive
+```
+
+Class: fixture-premise
+
+Cause: unknown
+
+## 2026-10-09 — `the session view gives every control hover text` (e2e/tests/tooltip-coverage.spec.ts)
+
+The launcher template-save validation's three-spec browser run `0bcdfedf-2839-4732-b2c2-8accc96344a6` passed 37 of 38
+cases and failed this existing WebKit case alone, before terminal interaction: the shared row did not appear within the
+helper's default five-second assertion budget. An exact WebKit-only three-repeat run
+`fb09f027-72c6-4384-b643-6573f1c895dd` passed twice and failed once at the same boundary, without the preceding sidebar
+test. Both runs tested clean commit `3293195e`; the first selected templates, tooltip coverage and launcher tabs on both
+engines, the second selected only this case, each with one browser worker and zero retries. Both failed traces contain
+successful session listings with the shared session still present. In the first trace, browser-side processing of that
+listing completed 4.80 seconds after the row assertion began, the assertion expired at 5.05 seconds, and the terminal
+received focus at 6.78 seconds; the healthy fixture's initial rendering raced the assertion budget. Underlying
+scheduling pressure is unproven: original load was not recorded; the narrow run's observed load averages were
+9.51/11.81/13.97 on 18 logical CPUs, with no other owned build, but other executors' activity was not inventoried. Linux
+x86_64, kernel 6.8.0-146-generic, Node 26.11.0, Playwright 1.62.0, pinned tmux 3.7c executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, locale `C.UTF-8`; ambient `FARHELM_*` was scrubbed.
+The initial strict browser run supplied recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`;
+the generic narrow run supplied only `FARHELM_TEST_TRACE_DIR`. Browser executable identity and compiler version were not
+extracted. Full evidence, including both failed traces, is retained privately under the run IDs above. Disposition: the
+launcher template-save PR (#1717) gives the shared helper the sidebar fixture's existing 20-second row-readiness budget
+and probes the session API on a timeout to distinguish disappearance from delayed rendering. Attachment and fake-agent
+readiness remain separate oracles. With the correction, the same exact WebKit case passed three of three repetitions in
+run `98ba4b12-ce93-414d-8911-c4d759db83a0`; the original failures remain retained.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: established
+
+## 2026-10-08 — `borrowers retain the checkout until the final stopped session is deleted` (e2e/tests/github-checkouts.spec.ts)
+
+The fresh-checkout cache plan's browser selection failed this Chromium scenario at its unchanged 60-second test limit in
+run `687d4902-b93f-4b51-8aac-c992e53883c9`, clean commit `1aba59e805580ff20f2e1bc0ef6ab7b8e110055e`. That selection ran
+only `github-checkouts.spec.ts`, both engines, one worker and zero retries: 11 passed, six timed out, and three WebKit
+fixture premises failed. The timeouts were Chromium borrowers, replacement and clone defaults, and WebKit lost durable
+refusal, structured checkout and clone lost race. The three later fixture failures followed a separate, established
+cleanup defect: session cleanup throws before the Git fixture restores its URL mappings, so the next engine's reused
+repository name resolves to the old fixture commit. Exact borrowers-only Chromium runs, with a fresh stack each time,
+also timed out: one of one at four CPUs (`ef15cc41-c2b8-4631-8e67-6369ab1a0538`), one of one at eight CPUs
+(`22f6e517-77a1-40b4-ab51-c6410d6cb0e5`), and one of one on rebuilt, clean main
+`7b2c390b07c9a7654a13f73f2dbb877d00842adb` at eight CPUs (`0217e0f1-a5fc-4400-ac7c-99c94c008d62`). Their redacted child
+command was
+`npx playwright test --project=chromium-github-checkouts --workers=1 --retries=0 --grep 'borrowers retain the checkout until the final stopped session is deleted'`.
+The timeout therefore predates the cache change; the other five timeouts have no clean-main control. Traces show several
+64-character keyboard typing calls taking 5–10 seconds after real clones completed, but the cause is unknown. More CPU
+capacity did not resolve it. The runner was an owned Linux x86_64 Ubuntu 26.04 sandbox, kernel 6.8.0-146-generic, 8 GiB
+memory, initially four CPUs; no other build or test ran during the exact reproductions. Initial run CPU usage reached
+its four-CPU cap; load average and typical passing duration are unavailable. Node 22.22.1, Playwright 1.62.0, native
+Chromium build 1234 and WebKit build 2336, Rust 1.98.1 and Python 3.14.4; tmux 3.7c executable SHA256
+`7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1` was recorded. Locale `LC_CTYPE=C.UTF-8`, with `LANG`
+and `LC_ALL` absent. Ambient `FARHELM_*` names were empty; the recorder supplied `FARHELM_TEST_TRACE_DIR`, and the
+controlled spec run also supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`. Browser test and UI sources were identical between
+the tested cache commit and main. Full evidence, including traces copied before later runs could overwrite them, is
+retained privately on the executing machine with no hosted expiry. Open: TODO.md's Deflake entry tracks the timeout and
+cleanup cascade; only the borrowers scenario is excluded from the deflake sweep.
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-09 — `composer keeps arbitrary model-first choices reviewable` (e2e/tests/sidebar.spec.ts)
+
+The deflake sweep's browser phase failed this scenario in both Chromium and WebKit in run
+`edf936f9-21f6-463b-8ecd-01a1b2eb1efd`, clean commit `0c2453de30267184405ce1868031a822344596fd` (empty porcelain). The
+selection was the full browser suite on both engines, one worker and zero retries, with the redacted child command
+`npx playwright test --grep-invert '<the known-flakes exclusions>'`; 1360 passed, 14 skipped and 4 failed in 3.0 hours.
+The only other failures were `a wheel over the header or the sidebar edge never scrolls the document` in
+`e2e/tests/shell-scroll.spec.ts`, in both engines, a deterministic cleanup failure fixed separately in #1740. Both
+failing attempts here ended on a five-second assertion timeout, not the test limit: 7.4 seconds in Chromium and 14.2
+seconds in WebKit, against isolated passes of 3.1–3.9 and 7.2–8.5 seconds. The summary showed `trust: true` throughout
+the wait. The deflake driver's three classification reruns, each running the test alone in both engines, passed six of
+six (`eec5659f-2500-45bd-8956-89110f94210a`, `877a67bb-3be6-457b-aac7-e9761a1db2fb`,
+`46f837df-e174-4133-9411-155d45d2bade`), which is what made it look like a flake. It is order dependence instead. A
+fresh launch dialog preselects the helm-wide remembered workspace trust. The quick-switcher test
+`the pinned name action opens ordinary New with remembered defaults` sets that preference to `true`, and its spec's
+`afterEach` calls the shared `resetPreferences` helper, which reset every preference except remembered workspace trust.
+Projects run in file order with one worker, so `quick-switcher.spec.ts` runs before `sidebar.spec.ts` in each engine and
+the sidebar test inherited `true`. The test already pinned its permissions choice for the same reason, but not trust.
+Running only those two tests in that order on main `b7188aaa` failed the sidebar test in both engines on the first
+attempt (`1b3eebcb-e7bf-4f11-8ad5-cab554017f3d`, one of one). Fixed in #1739: `resetPreferences` now clears remembered
+workspace trust, and the test pins trust to default as it does permissions. With both changes the same pair passed four
+of four (`f7bd1275-bcea-447c-b2d9-f78b11aa3903`). With only the test's pin, and the helper still leaking, it also passed
+four of four (`a5851836-1b7f-41f3-889e-7ac7f4656bf2`). The full quick-switcher and tooltip-coverage specs passed 20 of
+20 on both engines with the helper change (`ae8c5025-e05d-4eb0-909c-e4e3ad0dfe49`). The sweep ran on a Linux x86_64 host
+with 18 CPUs, kernel 6.8.0-146-generic, Python 3.14.8, while another agent ran its own test batteries from a sibling
+checkout; load average was not recorded. tmux 3.7c, executable SHA256
+`9278b74aab5e012b9732f9f1af693929ba9edc7296c7b2a2c25818683adc2647`, was recorded. Locale `LANG=C.UTF-8` with `LC_ALL`
+and `LC_CTYPE` absent. The recorder removed the ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` and supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+Node, Playwright and browser build versions are unavailable here. The full evidence is retained privately on the
+executing machine with no hosted expiry.
+
+```
+Expected: "model: reviewable-codex · effort: default · permissions: default · trust: default"
+Received: "model: reviewable-codex · effort: default · permissions: default · trust: true"
+Timeout:  5000ms
+```
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-09 — sidebar version-readout startup (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar explains the helm and window builds` failed in WebKit before reaching its hover assertions in run
+`be42dc00-8cc4-4978-bcdc-8be93f9006d0`; Chromium passed. The pre-existing initial readout assertion (formerly in
+`the sidebar app bar shows the helm build and client tooltip`) gave rendering only five seconds after navigation. The
+exact WebKit case, unchanged, then failed two of three attempts in run `042d9e34-5ff8-4b24-ab7d-b3bda69c8c4a`. Both runs
+used clean feature commit `3598ae3cf9f9b5fdd62046518a47654f7f5a9210`, one worker, zero retries and the exact
+version-readout selection; the second repeated only `webkit-sidebar` three times. No original-product baseline was
+rebuilt, so these runs alone do not establish the failure rate before the hover change. The failed trace shows
+navigation ending at 34.15s, the assertion starting at 34.21s, preferences fulfillment at 39.16s and session-list
+fulfillment at 39.97s, after the assertion's 39.50s deadline. A later snapshot contains the expected readout. This
+establishes a startup-readiness failure; why startup took that long is unknown. Load average was observed around 21 on
+18 CPUs, but CPU causation was not established; contemporaneous process inventory, memory pressure and typical passing
+duration are unavailable. Linux x86_64, kernel 6.8.0-146-generic, Node 26.11.0, Playwright 1.62.0; browser build
+identities and compiler version were not extracted. Both recorded tmux 3.7c executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`, plus `FARHELM_PLAYWRIGHT_POLICY_FILE` in the first run. The
+reproduction used generic recording; its attachments were copied before another run could overwrite them. Full evidence
+is retained privately on the executing machine without hosted expiry. Disposition: fixed in #1733 by waiting for the
+exact rendered stamp with the existing sidebar's 20-second readiness budget at both navigations, with a live helm probe
+on failure; hover assertions retain their five-second budget. Corrected run `c7852c83-aefe-4964-9765-10af59ef9c0f`, the
+same feature source plus that test-only correction, passed one Chromium and one WebKit case without retries. Those two
+passes do not establish a long-term flake rate.
+
+```
+Error: expect(locator).toHaveText(expected) failed
+Locator: locator('.app-version')
+Expected: "9.9.9-forced-helm"
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: established
+
+## 2026-10-10 — `structured_claude_resume_survives_supervisor_reconstruction` (crates/farhelm/tests/e2e/restart_with_resume.rs)
+
+The bounded Linux x86_64 container workspace run `1c7d2fa4-5c88-4696-8e8b-6f13ceac682c` failed this existing fixture
+while inspecting the reconstructed successor's argv: it extracted an 80-column prefix before establishing complete
+output. The same unmodified test failed one of one exact attempts in `308f7324-73d1-4e12-a5fd-1ff4591f2d66`, using
+`cargo nextest run --workspace --exclude farhelm-desktop -E 'test(=restart_with_resume::structured_claude_resume_survives_supervisor_reconstruction)'`.
+The failures took 0.780 s and 3.250 s, respectively, at an assertion rather than a timeout. Both recorded HEAD
+`fbdd8ad4a0ef8b86fe7ec5086f42ed56c945f4ae` plus dirty PR3 changes to settlement, cleanup, tests, SPEC_impl.md, TODO.md
+and its fragment. The full run's other failures were Codex attribution (a same-session missing reconciliation boundary)
+and the restart-consent fixture below; the exact attempt failed alone. Fixed in #1758 by attaching the structured branch
+wide and waiting for `FAKE-AGENT READY` before extracting argv, retaining its post-replay live exchange. Corrected run
+`0d7b4d8b-871b-4684-8aaa-6af53b1a7ea6` passed this case once in 2.979 s and the unstructured branch once; it still
+failed the Codex case at a later migration boundary. The corrections do not establish how much wrapping versus
+partial-frame timing contributed, or a long-term failure rate. The fixture predates this stack; no pre-stack product
+baseline was rebuilt. Both failing runs used four global nextest slots and zero retries, a four-CPU/32 GiB container on
+a shared 18-CPU host, kernel 6.8.0-146-generic, Rust 1.98.1, Python 3.14.4, nextest 0.9.143, and recorded tmux 3.7c
+executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale was `LC_CTYPE=C.UTF-8`,
+with LANG and LC_ALL absent; no ambient `FARHELM_*` names were present, and the recorder supplied
+`FARHELM_TEST_TRACE_DIR`. The container had no usable systemd user manager or passwordless SSH; host load and
+overlapping process inventory were not recorded for the failures. Full console, JUnit and traces are retained privately
+without hosted expiry.
+
+```
+the reconstructed Claude successor must use its default resume form: <owned fixture>/claude fake-agent --script hook-report --rec
+```
+
+Class: replay-live
+
+Cause: established
+
+## 2026-10-10 — `unconfirmed_restart_is_refused_only_while_the_agent_is_working` (crates/farhelm-supervisor/src/service/core.rs)
+
+The known restart-consent flake from 2026-10-06 recurred in workspace run `1c7d2fa4-5c88-4696-8e8b-6f13ceac682c` and
+failed one of one unchanged exact attempts in `d2b8c62d-0882-4efc-a251-a5968ac1fabd`, with
+`cargo nextest run --workspace --exclude farhelm-desktop -E 'test(=service::core::tests::unconfirmed_restart_is_refused_only_while_the_agent_is_working)'`.
+Both failed the live-agent premise, in 0.381 s and 1.466 s, rather than a timeout. The supervisor fixture passed
+`dummy_exe()`, explicitly `/nonexistent/farhelm`, as its launch shim: the requested `sleep 300` never executes, and a
+briefly live login shell can satisfy the PID check before dying. This establishes the defect in this recurrence; the
+container had no systemd user manager, so one is not necessary for it, but that does not establish the cause of every
+historical failure. Fixed in #1758 with an owned executable stand-in that `exec`s `sleep 300` and a pinned `/bin/sh`
+launch shell, retaining same-PID refusal and different-live-PID accepted restart assertions for Idle and Waiting.
+Corrected run `0d7b4d8b-871b-4684-8aaa-6af53b1a7ea6` passed once in 3.309 s; this is correction evidence, not a
+long-term failure rate. The matching TODO and deflake exclusion are removed. The workspace run also failed the
+reconstruction fixture above and a same-session Codex migration; the exact attempt failed alone. Both failing runs
+recorded HEAD `fbdd8ad4a0ef8b86fe7ec5086f42ed56c945f4ae` plus dirty PR3 settlement, cleanup, tests, documentation and
+fragment changes. Four global nextest slots, zero retries; Linux x86_64, four-CPU/32 GiB owned container on a shared
+18-CPU host, kernel 6.8.0-146-generic, Rust 1.98.1, Python 3.14.4, nextest 0.9.143, recorded tmux 3.7c executable SHA256
+`3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale `LC_CTYPE=C.UTF-8`, LANG and LC_ALL absent;
+no ambient `FARHELM_*` names, only recorder-owned `FARHELM_TEST_TRACE_DIR` in the child. The container also lacked
+passwordless SSH. Host load and overlapping process inventory were not recorded. Full console, JUnit and traces remain
+privately retained without hosted expiry; the earlier release artifact's expiry is unchanged.
+
+```
+fixture premise: the agent is alive
+```
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-10 — `remembered destination is rechecked after key minting` (e2e/tests/destination-authority.spec.ts)
+
+WebKit failed this existing destination-authority case in retained run `219019be-3701-4a7f-a6e6-23e9bed45091`; the other
+65 selected cases passed. The selection covered launcher host-picker, keyboard, destination-authority, sidebar,
+switcher, checkout-preview and multi-host transitions on both engines, one worker and zero retries. The tested Git head
+was `6c395a7326bf90a979da20f8917c69228ae65987`, with the uncommitted launcher host-picker change above it. The bounded
+timeline records the stub feed closing 9.995 seconds after arrival, matching the client's ten-second silent-feed
+deadline: the fixture never greeted its connection, although the real helm always does. Notification then had no live
+peer. The failed case took 23.656 seconds; three unchanged exact WebKit repetitions in generic recorded run
+`78f7a8c1-1d1d-47ae-bce7-b32191c18043` passed in 18.8, 22.4 and 13.7 seconds. Those passes do not invalidate the
+recorded lifetime failure. This was Linux x86_64, Node 26.11.1 and Playwright 1.62.0, pinned tmux 3.7c with recorded
+executable SHA256 `c84c73fdedbcf3fbcca8cc261e208c5795f7493609b027b39fe11e4af3a2fb04`, locale `C.UTF-8`. The recorder
+removed ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`; its child carried recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Other
+process load and load averages were not captured. Full evidence remains in private local recorder storage. PR #1775
+fixes both destination fixtures with the existing greeting facility and checks for a live feed before notifying, while
+retaining the deliberately held key-creation boundary.
+
+```text
+Error: no feed socket is open to notify on
+```
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-10 — `borrowers retain the checkout until the final stopped session is deleted` (e2e/tests/github-checkouts.spec.ts)
+
+The managed-checkout trash plan's final checkout/sidebar selection reproduced the existing 60-second borrower timeout on
+WebKit in run `6a629bb4-ed2b-4d80-9a8e-c95f71f0d192`: 27 passed, this one timed out, with no skipped or unstarted cases.
+The tested parent was `3edcbbc228c4f3ee0852a13cd3fe09b732802550`, with the final trash UI, docs and browser-fixture
+changes uncommitted. Selection was `npx playwright test 'github-checkouts.spec.ts' 'sidebar-resize.spec.ts'`, both
+engines, one worker and zero retries. Chromium's same case passed in 42.5 seconds; the WebKit result includes 66.4
+seconds through teardown. Its trace shows continued progress through the final filesystem comparison, whose assertions
+completed just after the total deadline; several terminal keyboard typing calls took 2–3 seconds. An exact fresh-stack
+WebKit reproduction, run `7510f5f0-49da-4204-aba6-13a6aee817e0`, failed one of one at the same unchanged limit while
+reaching the final borrower's stop, followed by request-context closure during cleanup. Its child command was
+`npx playwright test --project=webkit-github-checkouts --workers=1 --retries=0 --grep 'borrowers retain the checkout until the final stopped session is deleted' --output '<private artifacts>'`.
+An earlier anchored-title attempt, `bde25312-4a1f-417f-bb8c-fab07f764101`, selected no tests and is not a reproduction.
+The owned Linux x86_64 sandbox had a four-CPU quota and 12 GiB memory cap; no other build or test ran inside it. A later
+case's single sample reached 413% CPU and used 4 GiB, but load during the failing borrower and host-wide activity are
+unavailable, so that sample does not establish causation. Recorded tools were Node 22.22.1, Playwright 1.62.0, Python
+3.14.4 and kernel 6.8.0-146-generic; compiler and browser build identities were not captured in this run's manifest. The
+recorded tmux executable was 3.7c with SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Locale
+was `LC_CTYPE=C.UTF-8`, with `LANG` and `LC_ALL` absent. No ambient `FARHELM_*` names were present; the full selection
+supplied recorder-owned `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, and generic reproduction supplied
+only the trace name. The October 8 entry already establishes this timeout on clean main and tracks the associated
+cleanup cascade. The new fixture close can restore configuration after its own trash-cleanup failure, but an earlier
+session-cleanup exception can still skip calling it. Cause remains unknown; the existing Deflake TODO stays open, and no
+test deadline was changed. Full traces and run records remain privately retained on the executing machine without hosted
+expiry.
+
+```text
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-09 — `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (crates/farhelm/tests/e2e)
+
+The deflake sweep's workspace nextest phase (run `cba04f06-39b5-4fd9-bfa7-3b2dcb1df22c`, retained run
+`4d3f498f-ae89-4925-b95f-f313bf716980`) failed this test once on clean commit `42351f3a30de7c4dd807aa517ae91d31d552bc74`
+(a dependency-update stack: refreshed Cargo.lock and tooling pins over main), selection `workspace Rust targets`, four
+nextest slots, zero retries. It failed on its reset assertion after 11.9s; the three classification reruns
+(`24210386-9d75-4b28-a0ca-5ffda7955268`, `b45bc530-d343-458c-8de0-2481a6a8e2ca`,
+`61bfb8d8-ccdf-4e54-a7b2-61df5fba317f`), each the test alone, passed in 13.0 to 13.7s. It was the only failure in the
+phase up to that point. The machine was shared with other agents' work, at load average about 20 shortly after; memory
+pressure and the tests sharing its slot were not recorded. tmux 3.7c, executable SHA256
+`f660bd3c43f0708a8580b64bbab53cc799885d37e56b4e70fa44b2b2a36c05d9`, locale `C.UTF-8`; ambient `FARHELM_*` names were
+scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The trace ring had evicted the early events, so the pause
+and resume timing was not extracted. The test's reset check covers everything delivered from the pause through the
+10-second drain after resume, so a stall past tmux's `pause-after` window anywhere in that drain would cause a correct
+reset; that is a hypothesis, not established. The 2026-09-03 entry for this test was a different failure (an initial
+wait timeout, fixed in #357). Full evidence is retained privately on the executing machine. Disposition: open (TODO.md).
+
+```
+panicked at crates/farhelm/tests/e2e/terminal_backpressure.rs:1739:5:
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-10-09 — `view-changes-do-not-postpone-a-recovery` (e2e/tests/terminal-reconnect.spec.ts)
+
+The browser-only deflake sweep (run `0ca012d4-81ae-4d46-b75d-54892e9c69b0`, retained run
+`a20f2a95-e3d7-4a0a-a340-055ca9547555`, selection `browser suite, both engines`, one browser worker, zero retries)
+failed this test once in WebKit (`webkit-terminal-reconnect`) on clean commit `31200f2c2502ff3f62edda30c2f8810fbb04662b`
+(a dependency-update stack over main, including Playwright 1.64.0 with its WebKit build, newer than the 1.62.0 the suite
+ran on before). It failed fast on its timing assertion: the recovery landed 4185 ms after the socket was closed, against
+a 4000 ms bound with a single 1.5-second reconnect rung. The three classification reruns
+(`b421c4bd-45b0-49d5-a970-9ba0b6323efe`, `a30e12c5-bc71-48df-be05-71c954456dfa`, `85cd1460-b130-4ada-9dc9-ecd6450dd513`)
+passed. The Chromium case passed in the same run. The same battery also failed two tests deterministically for
+unrelated, now-fixed reasons (`buttons.spec.ts` and `composer-word-search.spec.ts`). The machine was shared with other
+agents' work, at load average about 16 shortly after; memory pressure was not recorded. tmux 3.7c, executable SHA256
+`f660bd3c43f0708a8580b64bbab53cc799885d37e56b4e70fa44b2b2a36c05d9`, locale `C.UTF-8`; ambient `FARHELM_*` names were
+scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The bound is wall-clock time taken on the test's side and
+spans four view changes with 250 ms pauses, so test-side latency under load counts against it; that the recovery was not
+actually postponed is a hypothesis, not established, since the trace was not read. No earlier entry exists for this
+test. Full evidence is retained privately on the executing machine. Disposition: open (TODO.md).
+
+```
+Error: the recovery must land on the schedule it was given, not on one the view kept resetting
+expect(received).toBeLessThan(expected)
+Expected: < 4000
+Received:   4185
+```
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-10-10 — `G2-G4 (pre /latest): nothing but /latest was requested` (scripts/test-install-sh.sh)
+
+The first attempt of an on-demand CI run on GitHub (run 38061432384, job `install-script`, job id 114240425122) failed
+this check in the Alpine/BusyBox portability step (`alpine:3` container on the hosted runner): after the installer
+refused a prerelease `/latest`, the fixture server's log held two `"GET ` lines for the case where exactly one was
+expected. It was the only failure of 509 checks and failed fast, not on a timeout. The tested commit was a release-gate
+rehearsal commit on top of a dependency-update stack whose changes do not touch `install.sh` or the harness. The same
+check passed in the GNU leg of the same job, in a rerun of the failed job on the same commit (attempt 2), in the first
+CI run of that stack the previous night, and in two local `alpine:3` runs. The Alpine image's exact version, tmux
+identity (not used by this suite) and runner load are unavailable. The check prints only the count, not the counted
+lines, so which extra request was logged is unknown. The fixture server writes each request's log line before it sends
+the response, which argues against a late line from the preceding case being counted in this one; nothing else was
+established. No earlier entry exists for this check. The hosted job log expires with GitHub's retention. Disposition:
+open (TODO.md).
+
+```
+NOT OK - G2-G4 (pre /latest): nothing but /latest was requested
+    condition failed: [ 2 -eq 1 ]
+509 checks, 1 failed
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-10 — `a-rolled-back-helm-gets-no-automatic-attach` (e2e/tests/terminal-reconnect.spec.ts)
+
+The six changed terminal specs passed 157/157 Chromium cases and 156/157 WebKit cases in recorded run
+`75991cc8-e095-4d86-a1c2-483aac3053db`; this unchanged rollback case was the only failure, timing out after 15 seconds
+with no automatic reconnect attempt. Exact WebKit repetition on the same source, run
+`2a5f5e3b-5aab-42df-a844-6b7e196094fc`, failed once and passed twice in three executions, one worker and zero retries
+(`npx playwright test --project=webkit-terminal-reconnect -g 'a-rolled-back-helm-gets-no-automatic-attach' --workers=1 --retries=0 --repeat-each=3`).
+The failing full-run trace shows an approvals reply carrying the simulated rolled-back build fulfilled about 100 ms
+after socket close, before the configured 200 ms first reconnect rung. The screenshot shows the build-mismatch banner
+and manual-only state: the page correctly withdrew automatic reconnect before the fixture's claimed rollback window was
+established. `feed.notify(1)` precedes the broad API interceptor and does not settle all resulting reads, so a late read
+can acquire that interceptor's rollback header. Tested source was base `d8d43e77` with the terminal-test repair diff
+(fingerprint `09779718`); neither this case nor its helpers changed. Linux x86_64, kernel 6.8, Node 26.11.1, Playwright
+1.64.0, locale `C.UTF-8`, pinned tmux 3.7c with recorded executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`. Ambient `FARHELM_*` was scrubbed; the strict run
+supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, the generic repetition only the latter.
+Exact browser build and concurrent machine load are unavailable; the watchdog recorded ample disk and memory headroom.
+No earlier entry was found for this test. Full failed-run evidence and the repetition's attachments are retained
+privately. Disposition: open (TODO.md); stage the simulated mismatch only after the first witnessed attempt rather than
+repairing this unrelated case as part of the nine-outcome plan.
+
+```
+Error: a ladder that never attempted proves nothing about what it attempted with
+expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+Timeout 15000ms exceeded while waiting on the predicate
+```
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-10 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
+
+The x86_64 Linux release gate for the `v0.26.0` tag (release workflow run 38105057482,
+`build-local-artifacts (x86_64-unknown-linux-musl)`, tested commit `c57bee30` on a clean CI checkout) failed this test
+alone: 2887 of 2888 selected tests passed in recorded run `4ff3f9bf-3e63-436c-a13c-cc2cad787a37`, selection
+`workspace except farhelm and farhelm-desktop`,
+`cargo nextest run --workspace --exclude farhelm --exclude farhelm-desktop`, four nextest slots across binaries, zero
+retries. It failed fast on its assertion after 0.006 s, about a typical pass's duration. Hosted `ubuntu-24.04` runner
+image 20261004.327.1, kernel 6.17 (azure), locale `C.UTF-8`, pinned tmux 3.7c with recorded executable SHA256
+`bd692ebc340ddc1cab7d7de1514005ccb4ed4d42c3e3c1eb9e57402b1ca07815`; ambient `FARHELM_*` was scrubbed by the recorder,
+and other load on the runner is unavailable. The same test passed in the `v0.26.0-rc.2` gate a few hours earlier, and
+neither the test nor `reconcile_archive` changed in between (the test dates from #723). The test removes the checkout
+folder and then creates the "stranger" at the archive destination, so on ext4 the stranger can take the removed folder's
+inode, which this development host's ext4 reuses for an immediately recreated folder in 499 of 500 attempts. Inode reuse
+alone is not enough, because the ownership check also requires the recorded birth time to match; the suspected rest is
+that the kernel stamps a new inode's birth time from a coarse clock, so a folder recreated within the same tick also
+carries the old birth time and passes as the original. That part was not reproduced: the unfixed test passed 100 of 100
+attempts here alone on kernel 6.8 ext4 (hunt `09fa9875-887a-4a1d-b3c9-8bbd3b988872`), and a shell probe saw distinct
+nanosecond birth times, though it runs far slower than the test. The birth-time tests in the same failing run executed
+rather than skipping, ruling out a filesystem without birth times. Fixed in #1845 by creating the stranger while the
+source still exists and renaming it into place, the order its sibling `reconcile_fails_closed_on_an_identity_mismatch`
+already uses; the fixed test passed 50 of 50 attempts here (hunt `016e6648-5d49-49d0-ac2d-bff73e116d39`).
+`a_recreated_checkout_directory_is_a_different_object` removes and recreates a folder the same way and would be exposed
+to the same timing, but has not been seen failing. The hosted failure artifact `test-run-failure-38105057482-1-2`
+expires 2027-01-09.
+
+```
+thread 'working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone' panicked at crates/farhelm-supervisor/src/working_copies.rs:4132:9:
+assertion failed: matches!(reconcile_archive(&conn, &row.id),
+    Err(WorkingCopyError::IdentityMismatch { .. }))
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-10-13: `the_shipped_agent_lifecycle_commands_act_through_the_real_helm` stops its target before the agent launched
+
+`crates/farhelm/tests/e2e/agent_listing_real_stack.rs`. The test creates a target session through the helm and stops it
+with `farhelm agent stop` without waiting for the target's agent to start. Session creation returns once the pane
+exists, not once the agent has passed Farhelm's exec shim, so a stop that lands in between ends the session in the error
+state "the agent was never started: the launch never reached farhelm's exec shim", and the assertion that the stopped
+session has exited fails about 1.4 s in, against a pass of about 2 s. Observed while landing the open-links-in-browser
+stack on a shared x86_64 Linux development machine (load average about 2.5): it failed in the combined Rust run
+(`40b313f5`, alone among the end-to-end tests; the two other failures there were an unrelated fixture problem), then 5
+of 5 times run on its own on the stack (`3917070d`, `d3e9d6ce`, `9cc8d303`, `4d04049c`, `9461222b`), and 1 of 3 times on
+the main commit the stack was based on (`c5909582` failed; `4e5ab86c` and `51dddf44` passed). Each was the exact-test
+nextest selection with four slots and no retries, pinned tmux 3.7c (SHA256 prefix `1f51ad46eb731a90`), clean trees, no
+`FARHELM_*` variables kept; locale unavailable. That the stack failed more often fits it adding a connect-time exchange
+before the local host counts as connected, which shifts the launch's timing; it does not change what stop does. The test
+now waits for the target to report a live status before stopping it; after that it passed 5 of 5 on the stack
+(`80413f72`, `1115c6bf`, `d9a61e36`, `a0779d33`, `1930de58`).
+
+Class: fixture-premise
+
+Cause: confirmed: the stop raced the target's launch; the error state on early stop is correct product behaviour.
+
+Disposition: fixed in #1948.
+
+## 2026-10-14 — `uninstall_host_commands_refuse_setup_units_and_skip_finished_work` (crates/farhelm-helm/src/provisioning.rs)
+
+The existing uninstall command test failed in recorder run `da64f0e2-c88c-4bf0-93d4-19a6749f170e` on Ubuntu 26.04 with
+uutils coreutils 0.8.0, then passed unchanged in the exact four-provisioning-test retry
+`d37147c8-4273-46eb-92fc-c30942bcdb1e` with GNU coreutils 9.4. Both ran on the guarded-permissions dirty tree based on
+`2b33f7f1`, with no changes to provisioning or its fixtures, four nextest slots and zero retries. The broad run selected
+the complete proto, helm and UI packages: 1659 of 1664 passed; a stale permission-word assertion and three process-group
+liveness failures also failed. The latter three passed outside the container, whose PID1 lacked an init reaper. The
+uninstall failure was immediate at the stop step, about 0.24 seconds total; the narrow pass took about 2.25 seconds for
+all four tests. The cleanup recognizes GNU stat's exact missing-path ending, while uutils appends `(os error 2)` and is
+refused. This is a product portability defect, retained open in TODO.md's Tricky bugs bucket. Both runs used recorded
+pinned tmux 3.7c, executable SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`; no ambient
+`FARHELM_*` were retained and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The broad recorder locale had
+`LC_CTYPE=C.UTF-8`, other locale variables absent; the cleanup itself forces C. Other browser validation and builds ran
+concurrently; precise load and compiler identity are unavailable. Full output and traces remain private retained
+records; no repeat series was run.
+
+```text
+called `Result::unwrap()` on an `Err` value: BackendFailure { context: "stopping the supervisor and private tmux server", stderr: "exit status 1; stat: cannot stat '<fixture>/tmux.sock': No such file or directory (os error 2)\n" }
+```
+
+Class: product
+
+Cause: established — the missing-path matcher excludes uutils's errno suffix.
+
+## 2026-10-15 — `guarded choices explain each agent and Cursor keeps its own setting` (e2e/tests/guarded-permissions.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in Chromium, recorder
+run `038d6b7f-5ad7-407a-a20a-db485b857dd8`: the Codex permission explanation was present in the tooltip element, but the
+element remained hidden through the five-second visibility timeout. All three isolated classification selections passed
+unchanged: `880d8bb1-7fa3-4ded-a739-9cf48eb8c6cf`, `d92ab76c-7c69-4210-9e60-3061a1c57a50`, and
+`6c7b79a1-4741-4036-a125-11662bb71031`. Other button and composer tests failed deterministically in the same battery; no
+shared cause is established. The tested tree was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with
+the browser suite on both engines excluding known flakes, one worker and zero retries. Classification selected only this
+test. Recorded tmux was 3.7c, executable SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`;
+locale was `C.UTF-8`. Ambient `FARHELM_*` names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and
+`FARHELM_TEST_TRACE_DIR` were supplied. Concurrent machine load and the tooltip's pointer/focus state were not
+established. Retained evidence is private temporary recorder data and may expire. Disposition: open in TODO.md and
+excluded from future deflake sweeps; no additional reproductions or fix were attempted.
+
+```text
+Locator: locator('body > .farhelm-tooltip')
+Expected: visible
+Received: hidden
+Timeout: 5000ms
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-15 — `closing notifications quiets the bell under a build mismatch` (e2e/tests/notifications.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in Chromium, recorder
+run `038d6b7f-5ad7-407a-a20a-db485b857dd8`: the expected notification-bell entry was absent through the five-second
+count timeout. All three isolated classification selections passed unchanged: `728a8cf1-e084-407f-b557-d88de2950852`,
+`cf6fc642-3539-4257-a84b-4c5699234721`, and `312f0cff-7658-4b59-b59b-08f0b2951269`. Other composer and button failures,
+including a permission-tooltip flake, occurred in the same battery; a shared cause is not established. The tested tree
+was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with the browser suite on both engines excluding
+known flakes, one worker and zero retries. Classification selected only this test. Recorded tmux was 3.7c, executable
+SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`; locale was `C.UTF-8`. Ambient `FARHELM_*`
+names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied.
+Concurrent machine load and the missing entry's cause were not established. Retained evidence is private temporary
+recorder data and may expire. Disposition: open in TODO.md and excluded from future deflake sweeps; no additional
+reproductions or fix were attempted.
+
+```text
+Locator: locator('.session-bell-entry')
+Expected: 1
+Received: 0
+Timeout: 5000ms
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-15 — `plain Replace keeps a newer row's retry key after an older YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in WebKit, recorder run
+`038d6b7f-5ad7-407a-a20a-db485b857dd8`: the actions panel did not finish measuring against its own toggle within five
+seconds. All three isolated classification selections passed unchanged: `71a8b63e-df1d-4f98-b3a9-4d3dd65e0ef1`,
+`120f57ad-3897-4fd2-9c1c-a6b5feee84bd`, and `501877d8-a0d5-4bf3-bb60-1e967bdad165`. Other composer and button failures,
+plus permission-tooltip and notification-bell flakes, occurred in the same battery; a shared cause is not established.
+The tested tree was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with the browser suite on both
+engines excluding known flakes, one worker and zero retries. Classification selected only this test. Recorded tmux was
+3.7c, executable SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`; locale was `C.UTF-8`.
+Ambient `FARHELM_*` names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and
+`FARHELM_TEST_TRACE_DIR` were supplied. Concurrent machine load and the unfinished measurement's cause were not
+established. Retained evidence is private temporary recorder data and may expire. Disposition: open in TODO.md and
+excluded from future deflake sweeps; no additional reproductions or fix were attempted.
+
+```text
+Error: waiting for the actions panel to finish measuring against its own toggle
+Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-15 — resolved: `closing notifications quiets the bell under a build mismatch` (e2e/tests/notifications.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows the notification panel receiving focus, then losing
+it to the terminal when its initial replay finishes. The normal focus-leave path closes the panel and marks its entries
+read. This was a product focus bug: notification controls were missing from the terminal's keyboard-owner guard. Holding
+replay until the panel owns focus reproduces the premature closure in `78cca022-9a70-4ab9-88e1-b9853b57e240` (one
+selected Chromium test, one failure at the post-reveal focus assertion). Adding the list and its expanded opening bell
+to that guard preserves their focus; the same controlled test passed 10 of 10 Chromium repetitions in
+`bb6253a6-fff2-4782-9403-6afe2126de5d`. Focused combined validation `10996a40-3c08-4423-8167-05c312193381` passed all 16
+executions: the three repaired flakes, the sibling concurrent Replace case, notification clear/ordinary-close cases and
+modal/replay rename-focus cases, each on Chromium and WebKit. These runs used one browser worker, zero retries, Linux
+x86_64 kernel 6.8.0-146-generic, pinned tmux 3.7c with recorded executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, and `C.UTF-8` locale. The tested base was
+`bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with this focus correction and the three fixture corrections; the
+negative control omitted the production correction. The recorder scrubbed ambient `FARHELM_*` names and supplied
+`FARHELM_TEST_TRACE_DIR`, plus `FARHELM_PLAYWRIGHT_POLICY_FILE` for the combined run. Other machine load, compiler and
+browser build identities are unavailable. Full evidence is retained privately in the named recorder runs and may expire.
+Disposition: fixed in #2132, with the TODO entry and sweep exclusion removed.
+
+Class: product
+
+Cause: established
+
+## 2026-10-15 — resolved: `guarded choices explain each agent and Cursor keeps its own setting` (e2e/tests/guarded-permissions.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows the launcher retaining scrollTop 346 after its
+phone-width check. Hovering the first form heading moves it to zero, then returning to Guarded restores 346. Ancestor
+scroll intentionally dismisses hover help; that pointer detour could therefore dismiss the tooltip the test was about to
+inspect. Twenty unchanged Chromium repetitions passed in `823950a8-221c-425a-916a-ddafc89cbd54`, so the original timing
+failure was not reproduced. The invalid fixture premise is established separately: asserting that the old hover-away
+heading is fully in view fails with viewport ratio zero in `b8c48db1-8a8c-49ca-87c6-bde5d55a6a37`. The corrected test
+hovers the label beside the permission chip and asserts that label is fully in view first. It passed 10 of 10 exact
+Chromium repetitions in `f388f80c-a805-42d8-bbb9-ca22e10aacf8`, then both engines in the 16-execution focused run
+`10996a40-3c08-4423-8167-05c312193381`. No tooltip behavior, assertion timeout or retry policy changed. Runs used one
+browser worker and zero retries on Linux x86_64 kernel 6.8.0-146-generic, pinned tmux 3.7c executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, with ambient `FARHELM_*` scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied; the combined run also supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+The base was `bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with the three flake corrections in progress; the premise
+probe retained the old heading target. Other machine load, compiler and browser build identities are unavailable.
+Evidence remains in private retained recorder runs and may expire. Disposition: fixed in #2133, with the TODO entry and
+sweep exclusion removed.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-15 — resolved: `plain Replace keeps a newer row's retry key after an older YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows a measured actions menu (opacity 1 and its
+placement variables), followed by dismissal, with the sidebar scrolled 11 pixels. The tall pending YOLO question pushes
+the source rows out of view; revealing the newer toggle or focused menu item then scrolls the sidebar, which
+intentionally dismisses its menu. This retry-key scenario needs both rows visible while that question remains open. A
+geometry assertion on the original viewport fails in the exact WebKit selection `f29cd269-acfe-4e8c-b06e-c27f8d467d59`:
+the older row has viewport ratio 0.288 instead of 1. The corrected fixture reserves a 1280 by 1100 viewport for the
+YOLO-cancellation branch and asserts both rows fully visible before opening the newer menu. The held request, unanswered
+question and retry-key assertions remain in place. It passed 10 of 10 WebKit repetitions in
+`631dd99b-59d1-40fa-b0f5-f34a00542ab3`, then both engines in the 16-execution focused run
+`10996a40-3c08-4423-8167-05c312193381`, including the sibling late-refusal case. No menu behavior, readiness timeout or
+retry policy changed. Runs used one browser worker and zero retries on Linux x86_64 kernel 6.8.0-146-generic, pinned
+tmux 3.7c executable SHA256 `f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, with
+ambient `FARHELM_*` scrubbed and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied; the combined run also supplied
+`FARHELM_PLAYWRIGHT_POLICY_FILE`. The tested base was `bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with the
+notification focus fix and the three fixture corrections; the premise probe omitted the taller viewport. Other machine
+load, compiler and browser build identities are unavailable. Full evidence remains in private retained recorder runs and
+may expire. Disposition: fixed in #2134, with the TODO entry and sweep exclusion removed.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-16 — `client-helm-skew-prompts-reload` (e2e/tests/terminal-reconnect.spec.ts)
+
+The deflake sweep's browser battery failed this test in WebKit (`webkit-terminal-reconnect`) in run
+`b8635849-b577-4ec0-a8df-315fbdb4e5de`: its API route handler fetched a response, then `route.fulfill` rejected it as
+already handled. This was the battery's only failure; Chromium passed the same test. All three isolated classification
+reruns passed both engines unchanged: `77619451-124d-4eee-85cf-44670a49c415`, `22f0678e-5f74-4319-add5-782956071cf1`,
+and `69c22916-c5ad-4c91-81e7-1fc670825542`. The failing WebKit execution took 2.927 seconds; the first passing WebKit
+rerun took 3.321 seconds, so this was not a test deadline expiring. The cause is unknown. Disposition: open, recorded in
+TODO.md and excluded from subsequent sweeps; no extra reproductions or fix were attempted.
+
+```text
+Error: route.fulfill: Route is already handled!
+
+  2189 |   await page.route("**/api/**", async (route) => {
+  2190 |     const response = await route.fetch();
+> 2191 |     await route.fulfill({
+       |                 ^
+```
+
+Evidence: sweep `6833bc66-2ff8-4b3e-a8bc-46032e676243`, clean tested commit `991835f826b25bc93eb088f6d3984477a9dc2fab`,
+Linux x86_64 kernel 6.8.0-146-generic, Node 26.12.0, Playwright 1.64.0. Selection: `browser suite, both engines`,
+narrowed to this exact test for classification; one browser worker, zero retries. The full battery reported 1,851
+passes, one failure and 14 skips; each rerun reported two passes and no skips. Pinned tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_AGENT_ID`,
+`FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were scrubbed; only
+recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Other machine load, compiler
+and browser build identities are unavailable. No earlier entry for this test was found. The quoted excerpt and manifests
+remain in the private recorder directories identified above and may expire.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-17 — `plain Replace keeps a newer same-source key after old header YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+Deflake sweep `46d1a087-c154-4eb6-b578-0efa669129e6` failed this test in WebKit in browser run
+`d01a19ad-811c-4dae-90b8-2c22a70ab473`: the source row's menu was absent after the five-second visibility wait. The
+failing WebKit execution took 12.719 seconds; Chromium passed in 4.528 seconds. Isolated classification reruns
+`213407df-5293-46eb-87ca-d08bbe6b3535`, `46df9503-ab98-4587-a36d-c8392c58183d`, and
+`a4bb8764-8cf4-42f0-aeee-d97ad0267184` failed, passed, and failed, respectively. Nine other browser outcomes failed in
+the battery; a shared cause is not established. The older two-row Replace scenario has a resolved 2026-10-15 entry, but
+this observation does not establish the same cause for the same-source scenario. Disposition: open in TODO.md and
+excluded from future sweeps; no additional reproduction or fix attempted.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('.session-row[data-session-id="<session>"]').locator('.session-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Clean tested commit `7b3d44d6fea3a675af7d5fa0f6152dba7ead8f1d`, Linux x86_64, kernel 6.8.0-146-generic, Playwright
+1.64.0. Selection: browser suite on both engines excluding known flakes, one worker, zero retries; classification
+selected this test. Recorded tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Concurrent
+load, compiler and browser build identities are unavailable. Evidence remains in private temporary recorder directories
+named by the run IDs and may expire.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-17 — `skip session confirmations walks row header interrupted card and tab actions` (e2e/tests/session-confirmations.spec.ts)
+
+Deflake sweep `46d1a087-c154-4eb6-b578-0efa669129e6` failed this test in Chromium in browser run
+`d01a19ad-811c-4dae-90b8-2c22a70ab473`: its 120-second test deadline expired, with a reported duration of 123.544
+seconds. WebKit passed in 15.891 seconds. Isolated classification reruns `c6df2c8c-703b-4aaa-999b-973a7f39e14f`,
+`c700a168-b773-4d9c-876c-ce30419149b6`, and `a9b44f05-c440-4b08-8acd-0e65a27a4979` failed, passed, and failed,
+respectively. Nine other browser outcomes failed in the battery; a shared cause is not established. The retained error
+does not identify the stalled action. Disposition: open in TODO.md and excluded from future sweeps; no additional
+reproduction or fix attempted.
+
+```text
+Test timeout of 120000ms exceeded.
+```
+
+Clean tested commit `7b3d44d6fea3a675af7d5fa0f6152dba7ead8f1d`, Linux x86_64, kernel 6.8.0-146-generic, Playwright
+1.64.0. Selection: browser suite on both engines excluding known flakes, one worker, zero retries; classification
+selected this test. Recorded tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Concurrent
+load, compiler and browser build identities are unavailable. No earlier entry for this test was found. Evidence remains
+in private temporary recorder directories named by the run IDs and may expire.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-17 — confirmation action-tour route drain (e2e/tests/session-confirmations.spec.ts)
+
+The timeout recorded earlier on 2026-10-17 reproduced on clean main `dd365da2a2db2defc834144f52e6ba48cccb2167`: Chromium
+run `ce5912db-9e4d-4fa4-be4d-d9ead3c28b10` failed two of three exact repetitions, with one worker and zero retries. Both
+failures exhausted the 120-second deadline after restart succeeded. The trace shows a status rewrite's `route.fulfill`
+failing with `Route is already handled!`, followed by a stalled `unrouteAll({ behavior: "wait" })`. Playwright 1.64.0
+leaves its internal handling promise unresolved after that channel error; catching the error lets the callback return
+but does not settle the promise its drain is already awaiting. The fix tracks callback work directly, stops admitting
+rewrites, drains that work, and removes the specific handler without Playwright's wait mode. Failed-body cleanup also
+stops every installed status rewrite before the shared teardown. The reason the browser-side request lost ownership is
+not established. Fixed-source run `f03f489d-e1ce-4e76-96ed-34daf140ab0c` passed ten Chromium repetitions; both callers
+are additionally checked on Chromium and WebKit. The exclusion and TODO entry are removed with this fix.
+
+```text
+Test timeout of 120000ms exceeded.
+route.fulfill: Route is already handled!
+```
+
+Linux x86_64, kernel 6.8.0-146-generic; tmux 3.7c executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; the generic recorder supplied `FARHELM_TEST_TRACE_DIR`. Browser build, compiler identity, concurrent load and
+memory pressure were not captured. Failed traces remain in the private recorder directory named above and may expire.
+The fixed run's dirty tree contained the new route helper and its action-tour integration; subsequent changes cover the
+Escape caller, failure cleanup and documentation, leaving the drain mechanism unchanged.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-17 — build-skew rewrite removal (e2e/tests/terminal-reconnect.spec.ts)
+
+The retained WebKit failure for `client-helm-skew-prompts-reload` in run `b8635849-b577-4ec0-a8df-315fbdb4e5de` shows
+interception removed at 7450217.893 ms, then an in-flight rewrite's fulfillment rejected at 7450227.075 ms with
+`Route is already handled!`. Plain `unroute` continued the browser request while the callback was still fetching its
+replacement reply. The test now stops admitting rewrites and drains callback work before removing its own handler,
+including on a failed body. This uses the drain helper introduced for the confirmation fixture in #2259; catching the
+error and then asking Playwright's wait drain to finish would retain that other deadlock. The existing agreeing-reply
+and latched-warning assertions remain. The TODO entry and sweep exclusion are removed with this fix. Original failure
+substrate and classification observations remain in the 2026-10-16 entry; the private trace may expire.
+
+```text
+Route is already handled!
+```
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-17 — staged rollback window (e2e/tests/terminal-reconnect.spec.ts)
+
+The 2026-10-10 failure of `a-rolled-back-helm-gets-no-automatic-attach` showed a synthetic rollback header on an
+approvals reply before the first retry, correctly revoking permission before the fixture had exercised an attempt. The
+rewrite is now installed only after the test witnesses an unattended socket construction. Both ordinary and
+non-displacing socket constructions remain counted from before the original socket closes, through the mismatch and the
+final observation window. The response rewrite drains before removal during cleanup. Original substrate and failure
+evidence remain in the 2026-10-10 entry. A current-source WebKit reproduction on main with the unrelated skew fixture
+fix, run `b0cf298c-32ad-49b5-8ae8-acd4a2c98ef4`, passed five of five attempts; that non-reproduction does not erase the
+established premature-mismatch mechanism. The TODO entry and sweep exclusion are removed with this correction.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-17 — checkout fixture restoration (e2e/tests/github-checkouts.spec.ts)
+
+The timeout and cross-engine cleanup cascade recorded on 2026-10-08 and 2026-10-10 have separate dispositions. The
+borrower test now attempts every owned session cleanup and then fixture closure even if a preceding deletion fails.
+Fixture closure independently attempts hook reset, root reset and Git URL mapping restoration, preserving an earlier
+trash error; a failed root reset retains the scratch tree until the owned stack ends. A timeout that disposes the
+browser request context can therefore no longer skip the filesystem-based mapping restore simply because its API cleanup
+threw. The terminal liveness probe also inserts its unique text in one input event before a real Enter; the attachment
+identity, focus, fresh echo and archival assertions remain. This removes the per-character protocol traffic seen
+consuming 5–10 seconds per probe in the earlier traces without changing the 60-second test deadline.
+
+Original-source Chromium repetition `838990ee-87d2-41d1-b206-83517d8f64f6` passed two of two attempts in 27.7 and 39.3
+seconds on main with the unrelated rollback-test fix. Load average was sampled at 19.44 on the shared Linux x86_64
+machine, with about 48 GiB memory available; it does not identify the cause of either historical timeout. The timeout's
+TODO entry and sweep exclusion remain. These changes fix the established cleanup cascade and remove known probe
+overhead, not every possible reason the test could exhaust its deadline. Original failure excerpts and substrate
+identities remain in the earlier entries; retained private traces may expire.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-17 — same-source Replace pointer race (e2e/tests/replace.spec.ts)
+
+The header-cancellation case recorded earlier on 2026-10-17 failed five of ten exact WebKit attempts in retained run
+`0c25b7f9-40a5-47d2-af94-0c93edf7a331`, on clean main `dd365da2`. Selection was
+`npx playwright test --project=webkit-replace --grep 'plain Replace keeps a newer same-source key after old header YOLO cancellation' --repeat-each=10`,
+one worker, zero retries. All five failures waited five seconds for the source menu to become visible. Trace and code
+review identify the pointer race: the other row has an open menu containing its error; pressing the source toggle
+outside it dismisses that menu, moves the error into the other row and shifts the source toggle before release. The
+click therefore misses. A test-only explicit close was rejected because it would hide the product defect. Reserving
+error space or changing dismissal/input ordering affects layout or focus/cancellation semantics; leave the TODO and
+exclusion open for that decision. This was a shared Linux x86_64 machine; contemporaneous load and browser executable
+identity are unavailable. The recorder verified tmux 3.7c, SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, and only `FARHELM_TEST_TRACE_DIR`
+in the child's `FARHELM_*` environment. Private traces and screenshots were retained with the run and may expire.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: product
+
+Cause: established
+
+## 2026-10-17 — parent-SIGTERM startup-delay experiment (scripts/test-start-stack-cleanup.sh)
+
+The historical leak remains open. Retained run `b9d6942f-1800-40f4-b65d-45f4bd078afa` ran
+`bash scripts/test-start-stack-cleanup.sh` with a child-PATH curl shim delaying only startup `POST /api/sessions` by 25
+seconds. Every cleanup phase passed, including parent SIGKILL and SIGTERM. Watcher TERM-to-trap delays were about 24 and
+26 seconds, confirming bash trap deferral but not the old leak: the check's nominal 20 iterations include command
+latency and still allowed cleanup to complete. No startup-command rewrite is claimed as a fix. Source was `1cf0ef89`,
+with only unrelated rollback-test/flake-record edits dirty; one owned stack phase at a time, zero retries. The shared
+Linux x86_64 run verified the same tmux executable hash and locale as the Replace repetition above, with only
+`FARHELM_TEST_TRACE_DIR` in the child's `FARHELM_*` environment. Contemporaneous load is unavailable. The shim was
+supplied to the child, without mutating a test process's environment. Full markers remain in private retained output and
+may expire; no new failure occurred to quote.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-10-17 — shallow-pause reset attribution (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+Exact-test repetition batch `2304a82c-76fe-466a-a4b7-d7a1ddf66fe1` failed, passed, failed on shared Linux x86_64. The
+failed runs are `6704f6ec-579f-4a5d-99a3-ebc5c7c901d6` and `f1d6e2d1-fc94-4851-95d1-6b74c5a5699a`; the pass is
+`a405fc83-60fc-4adf-a1b6-ab3721bc08b6`. Selection was
+`cargo nextest run -p farhelm --test e2e -E 'test(=terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)'`,
+four-slot budget with only this test selected, zero retries. Test execution lasted about 12.5 seconds in the first
+failure and the pass. Source was `867cbaf0`, dirty only with unrelated checkout-fixture and flake-record edits; tmux
+3.7c, executable SHA256 `f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, child
+`FARHELM_*` names only `FARHELM_TEST_TRACE_DIR`. Contemporaneous load was not sampled. The earlier batch
+`18a485cb-d9da-40a4-9152-6e419dc34b65` was interrupted by its 300-second command budget after compilation/setup; it has
+no assertion result and is retained separately, not counted among these attempts.
+
+The two failures logged reset/replay at 9.450 and 8.300 seconds with the producer still alive. The bounded trace lost
+the pause/resume events, so those timestamps do not establish whether the client pause caused the reset. The test
+rejects every reset throughout its ten-second drain, including a possible legitimate tmux `pause-after=5` recovery under
+load. A fixed record-count seam would be unsound: already-flushed output can precede a queued `%pause`, allowing
+thousands of consecutive records before a pause-caused reset. A sound correction needs a complete filtered trace or
+per-channel test observable attributing every reset, plus proof that flood start to resume was below `pause-after`.
+Leave the assertion, TODO and exclusion unchanged until that distinction exists. Private output and traces remain with
+the batch and may expire.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-10-17 — reconnect timing non-reproduction (e2e/tests/terminal-reconnect.spec.ts)
+
+The exact WebKit case `view-changes-do-not-postpone-a-recovery` passed five of five attempts in retained run
+`6328360c-ab06-4f40-884c-86b979f3a1a9` using
+`npx playwright test --project=webkit-terminal-reconnect --grep view-changes-do-not-postpone-a-recovery --repeat-each=5`,
+one worker, zero retries. Source was `7c586405` with unrelated build-skew fixture and flake-record edits dirty, on
+shared Linux x86_64. The recorder verified the same tmux executable hash and locale as the Replace repetition above;
+child `FARHELM_*` names were only `FARHELM_TEST_TRACE_DIR`. Contemporaneous load and browser executable identity are
+unavailable. The original 4185 ms failure's trace is no longer available. Code review confirms that its test-side
+elapsed time includes driver and terminal-mount latency, so it cannot distinguish a retry deadline rearmed by view churn
+from a delayed observation. A page-clock observable needs a verified churn premise and must account for deferred
+terminal mounting before treating socket construction as timer firing. No budget increase or assertion rewrite was made;
+retain the TODO and exclusion. This run adds non-reproduction evidence, not proof of a fix; no new failure occurred to
+quote. Private retained output may expire.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-10-17 — installer request attribution (scripts/test-install-sh.sh)
+
+The historical Alpine/BusyBox extra GET remains unidentified. GNU baseline run `fd05cf9b-aed3-40b8-8ea4-74f6b5ab1664`
+passed 549 checks and Alpine baseline `877cb943-3346-44d5-a822-0b7581b18670` passed 544. PR #2263 attributes
+refused-latest GETs by the scenario's origin path, still fails on any second GET within that scenario, prints the full
+log window on failure and reports other scenarios' GETs even on success. Every installer fixture URL derives from that
+origin; this preserves the assertion while preventing another scenario's late response from counting against it. It does
+not establish that a late response caused the old failure, so the TODO remains open. Changed GNU run
+`ee5b37ce-1acc-415e-9a7e-37d0d5b235fa` passed 549 checks; changed Alpine run `762f5279-0080-4301-a143-0c57fe644935`
+passed 544, with no failures, runtime skips or other-scenario request notes in either. Both ran the monolithic
+`bash scripts/test-install-sh.sh` harness sequentially, one fixture scenario at a time, zero retries, on shared Linux
+x86_64, source `377bc42a` dirty only with the accounting change, its inventory documentation and TODO update. Alpine ran
+in an isolated `alpine:3` container with a read-only checkout mount; image SHA256
+`294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6`. tmux was not used. Host locale was `C.UTF-8`; the
+container's effective locale and contemporaneous load are unavailable. The recorder child carried only
+`FARHELM_TEST_TRACE_DIR`; each installer child received the harness's explicit isolated environment. Private retained
+output may expire; no new failure occurred to quote.
+
+Class: ambiguous-observable
+
+Cause: unknown
+
+## 2026-10-20 — takeover new-tab banner (e2e/tests/terminal-reconnect.spec.ts)
+
+The Chromium case `a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` failed in a full recorded browser
+run (`13808999-b14a-44ef-a7df-b547a8419a62`, all of `npx playwright test`, three workers each driving its own stack,
+zero retries, source `f0604f6f`, clean tree) at the assertion that the losing view's newly opened tab is refused into
+the take-control state: the tab's `.banner` stayed empty for the full 20 s instead of saying "Detached". It was one of
+two failures in that run; the other, a WebKit Replace cancel in `terminal-restart.spec.ts`, did not reproduce in ten
+repetitions on that tip or fifteen on main, and is not recorded here. The case reproduces alone. On the same tip, ten
+repetitions of the exact case (with ten of an unrelated WebKit case, three workers) failed once
+(`ac532d81-0b4c-4999-98ab-2abf6e8ec1de`). On unmodified main `e6b50141`, dirty only with untracked links to the same
+build output (the run's commit range changed no product code), fifteen repetitions with one worker, the suite's
+configuration on main, failed four times (`8d57653f-2ced-4f0d-a6ad-c669a11d4995`): every failure ran into the same 20 s
+banner wait, about 26 s per attempt against 5–7 s for each pass, so it is not a slow pass and not caused by the parallel
+stacks. Shared Linux x86_64 with other agents' builds and tests running (load average about 10–16, not measured per
+attempt); pinned tmux 3.7c, executable SHA256 `8bf050252e2adc68d8d1044cc30ca7259ab021f04441484b1e5dabad1f570e71`; locale
+`C.UTF-8`; child `FARHELM_*` names `FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`
+(the recorder's browser mode); Playwright 1.64.0. The spec and the terminal code it covers changed on main the same day
+(#2368, #2403, #2411); which change, if any, made the case fail is not established, and the failing attempts' traces
+were not examined. Open; no fix attempted.
+
+The failure on main, verbatim from the retained output (each failing attempt there read the same apart from the tab id):
+
+```text
+Error: the loser's new tab is refused into the take-control state
+
+expect(locator).toContainText(expected) failed
+
+Locator: locator('.terminal-pane[data-terminal="c4656203-e893-4654-a588-39360f00bb45"] .banner')
+Expected substring: "Detached"
+Received string:    ""
+Timeout: 20000ms
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-10-20 — refused YOLO Replace confirmation (e2e/tests/terminal-restart.spec.ts)
+
+The WebKit case `don't ask again on a refused YOLO replace marks the host, then replaces with the override` failed in a
+full recorded browser run (`49c74525-36ad-44e1-825b-878edadfd71c`, all of `npx playwright test`, three workers each
+driving its own stack, zero retries, source `dc977dd7`, clean tree, under heavy load from other agents' work: load
+average 18–28): after the click on the interrupted card's Replace confirmation, the YOLO question never appeared within
+5 s and no replace request was sent. It was one of two failures in that run; the other was the takeover new-tab flake
+recorded above. On unmodified main `9f0fd7e9` (dirty only with untracked links to the same build output; no product code
+differs from the tested tip), the whole WebKit `terminal-restart` file passed four times serially on a quiet machine, so
+this case passed four of four (60 of 60 tests, `e3aec355-0c1a-4faa-ac81-4d01189bfb98`), and in six repetitions of the
+file while a three-worker browser run from another checkout loaded the machine this case failed once in six (one failure
+among 90 tests) (`61cbd3cf-a2ab-4ebc-9b91-cc801ba932dd`), with the same assertion. So it is load-sensitive and predates
+the parallel suite. A WebKit Replace cancel in the same file failed the same way once in an earlier full run
+(`13808999`, the confirm did not close after the Cancel click landed) and did not reproduce in 25 attempts. Hypothesis,
+not confirmed: the spec injects interrupted sessions with ids that lack the host-entry prefix main has required since
+#2368, so the UI's background `GET /api/sessions/<id>` reads of those sessions get 400 replies from the real helm; in
+the failing trace the click landed as one of those failing reads completed, which fits a re-render racing the click.
+Pinned tmux 3.7c, executable SHA256 `8bf050252e2adc68d8d1044cc30ca7259ab021f04441484b1e5dabad1f570e71`; locale
+`C.UTF-8`; child `FARHELM_*` names `FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`;
+Playwright 1.64.0. Open; no fix attempted.
+
+The failure on main, verbatim from the retained output:
+
+```text
+Error: expect(locator).toBeVisible() failed
+
+Locator: locator('.yolo-confirmation')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-10-22 — `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` (crates/farhelm-ui/src/api/save_order.rs)
+
+This unit test failed its final assertion, that at least 30 ms had passed since the wait began, in full `farhelm-ui`
+library runs `b58752ff-a0ec-4ef7-8e37-703505a27267` (739 of 740 passed) and `8c2c8de7-66df-42ba-a20d-a63beb7451e0` (754
+of 755), and once in a 20-attempt repetition of the test alone, batch `d0add185-5ac7-4a46-91c6-a43af09cd9d8` (attempt 8,
+run `25743180-1f33-4ad5-8460-a715f08363a9`; the other 19 passed). The machine's retained runs show three more failures
+on the same line, each the only failure of its run, in another agent's landing validation on clean commits:
+`d8ff6545-9b27-45f8-aa33-7dfac8f07108` (2026-10-20, desktop Rust targets), `68a7a44f-3142-4013-aaef-7d0dc5350e0c`
+(2026-10-21, workspace Rust targets, 4154 of 4155 executed passed, 40 skipped) and
+`825930bd-9b5b-47a2-9d1d-a9b8e3163821` (2026-10-22, desktop Rust targets). Every retained run from 2026-10-19 to
+2026-10-22 that executed the test adds up to 6 failures in 128 executions; many full `farhelm-ui` library runs that day
+passed it, for example `826469b6-70da-4299-a52e-d6b85a3baa4d`, `7770ab3b-3c32-4e89-b472-f6e7f61ba2a5` and
+`e6fedc0b-6163-4076-9ec0-55a59940a1cd`. Every failure was fast: nextest timed the failing attempts at 0.051 to 0.058 s
+(0.135 s once, inside the 4195-test workspace run), against 0.044 to 0.448 s with a median of 0.057 s for the 122
+passes, so the wait ended early rather than stalling. The `matches!` assertion just before it passed, so the wait ended
+through its timeout path and not because the hung save settled. Hypothesis, from reading the code and tokio 1.53.2's
+timer, not from an instrumented run: `remaining` arms its timer with `budget.as_millis()`, which rounds the budget left
+over down to whole milliseconds. With even a few microseconds of the 30 ms already spent, the timer is armed for 29 ms
+from when it is first polled, and its deadline lands up to a millisecond before `started + 30 ms`. Tokio never fires a
+sleep before its own deadline, but it rounds that deadline up only to the end of its millisecond tick, which in nearly
+every run still falls inside the gap. What normally carries the check past 30 ms is how the runtime parks: it sleeps a
+whole number of ticks counted from the current, truncated tick, so it wakes at the deadline's tick boundary plus however
+far into its millisecond it was when it parked, about 30 ms after arming when it parks right away. If a tick boundary
+passes between arming the timer and parking (or a later re-park), the wake lands just past that boundary, inside the
+gap, and the wait reports a timeout early. Preemption on a loaded machine would do that, but which delay occurred has
+not been observed. The timer and the `started.elapsed() >= timeout` check are the only ways the wait can time out, and
+the latter cannot fire early, which is why this is the leading hypothesis rather than one of several. In the product it
+would mean a request queued behind a hung save is reported as timed out up to a millisecond before its budget ends. Open
+in TODO.md and excluded from future sweeps.
+
+The two full runs selected `cargo nextest run -p farhelm-ui --lib`; the repetition added
+`-E 'test(=api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline)'`. All six failing runs used nextest
+0.9.148 with four slots and zero retries, locale `LANG=C.UTF-8`, on one 18-CPU Linux x86_64 machine with kernel
+6.8.0-147-generic. `b58752ff` and the batch tested local, unlanded commit `bcfd39c64ae5ad1aa2c71dabefbc59069a5d095d`
+with uncommitted edits to `crates/farhelm-ui/src/replace.rs` and `crates/farhelm-ui/src/session_view.rs`; `8c2c8de7`
+tested local, unlanded commit `8d31c2243d5b75f950212427b633af0d717a022e` with an uncommitted edit to
+`crates/farhelm-ui/src/list/create_form.rs`. Both commits belong to a stack of GUI fixes, and neither the stack nor the
+edits touch `save_order.rs`, the `sleep_ms` helper in `crates/farhelm-ui/src/reader.rs`, or the error type the test
+matches. The other agent's three runs tested clean commits `0c4be977c498323fbdbefb8fc388f0545064963d`,
+`de5457bb1f618a78eec004828eeb0a278aff25a1` and `17c1142f77a5af8dcc84742b7026f97cf8f2bbd7`, landing candidates that are
+not in this checkout's history. The test does not use tmux. The repetition batch recorded pinned tmux 3.7c executable
+SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, and workspace run `68a7a44f` recorded tmux
+3.7c SHA256 `1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`; the other four ran with tmux checking
+off, so their tmux identity is unavailable. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`,
+`FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned `FARHELM_TEST_TRACE_DIR` reached the
+child. The test ran on a current-thread tokio runtime with real (not paused) time. The machine was shared with other
+agents' builds and tests, and load averages in the 30s were seen that day; the agent running the repetition batch saw
+about 4.8 while it ran. The recorder does not capture load, and load and slot peers at each failing test's start were
+not recorded. No reproduction under added load or with instrumentation was attempted. The test and the code it covers
+were added in #2062 on 2026-10-15 and have not changed since; no earlier entry for this test exists. Retained runs are
+under the local test-runs directory; their lifetime is the machine's temporary-file cleanup.
+
+```
+thread 'api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline' (2121129) panicked at crates/farhelm-ui/src/api/save_order.rs:212:9:
+assertion failed: started.elapsed() >= Duration::from_millis(30)
+```
+
+Class: product
+
+Cause: hypothesis
+
+## 2026-10-24 — agent create request fingerprint (crates/farhelm-supervisor/src/service/core.rs)
+
+`service::core::tests::an_agent_create_is_matched_by_its_request_fingerprint_not_its_launch` timed out after 10.048
+seconds waiting for its owned create reply in the x86_64 Linux job of release run `40161156323`, on clean commit
+`bb1bd73d90cfed4f84b0a98028cc2682e0cfb365` (`v0.32.0-rc.1`). It was the only failure among 3,744 selected tests; 3,743
+passed. The recorder selection was `workspace except farhelm and farhelm-desktop`, with four nextest slots across
+binaries and zero retries. The runner recorded Linux x86_64 kernel `6.17.0-1022-azure`, four CPUs, locale `C.UTF-8`, and
+pinned tmux 3.7c executable SHA256 `05858230f19bf74e014d44d9ae3c979db31edf6c18b28a26d2b6fa2464fee666`. No ambient
+`FARHELM_*` variables were present; only recorder-owned `FARHELM_TEST_TRACE_DIR` reached the child. Load, memory
+pressure and slot peers at failure were not recorded. The test and its ten-second reply helper were already in v0.31.0.
+One exact isolated run and a five-attempt exact-test hunt on the unchanged release tree all passed locally; the first
+test execution took 0.617 seconds. The test uses the real systemd availability probe before reaching its intended
+unwritable launch directory, and that probe allows fifteen seconds, exceeding the reply helper's ten-second deadline.
+The hosted trace contains only the initial boot-id event and does not prove which operation stalled. Disposition: #2720
+uses the existing disabled-scope fixture to remove that unrelated dependency while preserving the permission and retry
+assertions; attributing the observed timeout specifically to systemd remains a hypothesis. The retained hosted recorder
+run is `b7638d65-7495-4cbd-b388-85496b2debeb`, downloadable from the release run's failure artifact while GitHub retains
+it; local reproduction is `4baadc43-f812-4d45-9194-fe1544340466` and the five-attempt batch is
+`90ec8569-3008-421d-84d3-6ffe93732e95`. Private copies remain in the temporary evidence tree until machine cleanup.
+
+```
+owned create reply must arrive: Elapsed(())
+```
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-10-25 — scrollback wheel setup (e2e/tests/terminal-scroll-freeze.spec.ts)
+
+`a plain flood survives a sibling band repeatedly changing height mid-burst` failed its initial wheel setup in Chromium
+in recorded terminal regression run `1406a4ef-1ecc-49d6-ab16-9f23346b3f4f`; WebKit passed. The other 129 executed cases
+passed and nine WebKit clipboard cases skipped for unsupported permissions. The failed case took 26.635 s, including the
+ten-second wheel deadline, versus 23.908 s for its WebKit pass. The trace establishes a stale-baseline assertion: the
+initial viewport and live tail were both 1825, but the first effective wheel left viewport 1895 behind the new tail
+1934. All 26 post-wheel rendered snapshots matched the buffer, and the final viewport 1826 was 3133 lines behind the
+tail. The helper still demanded reaching 1805, twenty lines before its obsolete initial coordinate. It therefore
+rejected an already established scrollback premise before any resize or paint assertion. The exact original test rerun
+`13270595-cac1-4772-a3d4-59557da77f34` reproduced the same Chromium setup failure; WebKit passed again. The correction
+in #2723 requires an initial live-tail snapshot and then a real wheel gesture followed by a gap from the current tail.
+It retains the same deadline and paint assertions. Scheduling or tracing overhead may explain the delay before the first
+effective wheel, but that timing attribution is unproven. Corrected run `16467ed8-2c41-488c-8250-cad52b0f4960` passed
+all three helper callers on both engines (six executions, no skips), using the same runner policy on dirty base
+`ac20773b`; its complete source fingerprint is `1d147589d2a84a9881c7f99ffa7b2919d555c93dc25636ee3911da00c2039930`.
+
+Both runs tested dirty base `d5687fceaefd63a2589645ea7f67f20ca24adc12` with the emoji grapheme add-on, asset wiring, new
+Unicode browser spec, specification, fragment and TODO edits; the failing helper was unchanged. Complete source
+fingerprint: `67f7f920b345b258a78f2d0b6a2e1f3894c956e267c787e1327c5c49d7d04ae0`. The first selection was
+`npx playwright test` with `terminal-unicode`, `terminal-links`, `terminal-link-clicks`, `terminal-files`,
+`terminal-clipboard`, `terminal-scroll-freeze` and `terminal-font` spec patterns. The rerun selected only the exact
+sibling-band title in `terminal-scroll-freeze`. The worker limit was three with one owned stack per worker; the broad
+run used three workers and the isolated run used two, both engines and zero retries. The substrate was 18-CPU Linux
+x86_64, kernel 6.8.0-147-generic, Node 26.12.1 and Playwright 1.64.0. The recorded pinned tmux was 3.7c, executable
+SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`; locale was `C.UTF-8`. Ambient
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. Browser
+build identities, load and memory at the failure instant are unavailable. The machine is shared with other agents; no
+added-load reproduction was attempted. The spec's last earlier change was `18880aaa`; no matching earlier flake entry
+was found. Full private records and traces remain in the local test-runs store until temporary-file cleanup.
+
+```
+Error: scrolling back at least 20 lines at "terminal" did not land within 10000ms; started at viewportY=1825, now at 1826
+```
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-26 — offer retirement releases only its owner (e2e/tests/provisioning.spec.ts)
+
+The WebKit `waiting behind another host` variant timed out while clicking the second host's Uninstall item in full
+browser run `c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, before its held-offer assertions. The menu was detached during click
+stability checks. The retained network trace shows a fallback host read changing a preceding fake host's retry details
+at that boundary, consistent with the intentional movement-dismissal rule. The existing feed stub had no initial
+greeting. PR #2732 greets it with revision 1 while retaining the explicit revision 2 retarget notification, both held
+replies and all owner/focus/release assertions. Both admission variants passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8` (4/4 offer cases). This addresses the fixture premise; the trace does not
+directly identify the callback that closed the menu, and one later pass does not establish causation.
+
+```text
+Error: locator.click: Test timeout of 60000ms exceeded.
+  - waiting for element to be visible, enabled and stable
+  - element was detached from the DOM, retrying
+```
+
+The full run used clean commit `563407f9ac9466fc99038f066f5fb054e8b66657`, fingerprint
+`129ffeca0c4bf90978f24f29ff559d7f537bec6d40418532a5706026b40b4116`, `npx playwright test`, three workers with one owned
+stack each and zero retries. It reported 2679 passes, three failures and 14 skips; the other failures were the cwd-tail
+and automatic-setup cases below. The 18.7 MB raw report and complete console agree, but the recorder's 16 MiB
+report-inspection cap leaves automatic report validation incomplete. The whole failed UUID remains privately retained in
+temporary storage. Linux x86_64, kernel 6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0 and WebKit 27.2; pinned tmux
+3.7c executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale was C.UTF-8. Ambient
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were
+removed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. CPU load
+and unrelated jobs are unavailable; observed memory and disk headroom were healthy. The fixture predates this session
+(commit `e13fcede1`). The narrow run used the same substrate and a dirty tree containing only the feed greeting and
+font-readiness corrections, fingerprint `896092835980c72e4d9798f7f8969513ad5c77c278da9f546cfa7eaf34c62c39`.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-10-26 — a long cwd shows its tail with characters in logical order (e2e/tests/sidebar.spec.ts)
+
+WebKit measured an absolute tail offset of exactly 1px against the strict less-than-1px assertion in full run
+`c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, with the source, substrate and other failures recorded above. Overflow, logical
+path text and both bidi directions had passed. An ordinary failure screenshot showed the suffix in logical order; no
+visible product defect was established. PR #2732 awaits `document.fonts.ready` before settled geometry, retaining the
+strict threshold and all overflow/text/bidi/ellipsis assertions. The exact case passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8` and `2fa75d14-9eb8-4c63-a070-0ac26c415d70` (four passes total). Font readiness is
+a plausible missing premise, not an established cause. The test predates this session (`96c842e6e`); its scratch-path
+setup last changed in `99b69ac2b`. The second narrow run added only the automatic probe-readiness correction below,
+fingerprint `2f66e60e8badfbe9b418f227be292e9665762cc8d1ba4a005213cd88a3fa5d7b`. Whole failed evidence remains retained;
+no tolerance was widened and no product CSS changed.
+
+```text
+Error: the tail must align with the clipper's visible right edge
+expect(received).toBeLessThan(expected)
+Expected: < 1
+Received:   1
+```
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-10-26 — automatic setup refuses forced activation while another host operation is busy (e2e/tests/terminal-multihost.spec.ts)
+
+WebKit could not find the initial local setup error within five seconds in full run
+`c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, before the unrelated retry or forced activation. The source, substrate and other
+failures are recorded above. Initial host/progress discovery consumed most of that assertion window; the expected
+probe's 503 response arrived near its end. The exact unchanged case passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8`. PR #2732 now awaits that initial POST response and asserts its 503 before
+starting the error-rendering assertion. It retains the single-probe count, held unrelated retry, focusable disabled
+command and forced-click guard. Both engines passed after correction in `2fa75d14-9eb8-4c63-a070-0ac26c415d70` (2/2
+automatic-setup cases), on the dirty source fingerprint recorded above. The test predates this session (`7218a7553`).
+Startup timing is the hypothesis; the retained trace does not establish why the error missed the original window. No
+timeout, retry policy or product behavior changed, and the failed run stays retained.
+
+```text
+Error: expect(locator).toContainText(expected) failed
+Locator: locator('[data-host-kind="local"]').locator('.provisioning-error')
+Expected substring: "automatic setup needs retry"
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-10-27 — a long cwd shows its tail with characters in logical order (e2e/tests/sidebar.spec.ts)
+
+The exact 1px WebKit tail offset recurred in full browser run `f6bc51f5-3985-441d-b5ce-17e4bfd8e648`, despite the
+font-readiness wait recorded above. It was the only failed case: 2681 passed and 14 skipped, with no retries or global
+errors. The raw JSON and complete console agree; the report exceeds the recorder's 16 MiB inspection cap, so these are
+manually checked counts. The test passed its overflow, logical-text and bidi premises before the alignment assertion.
+The retained screenshot is after session cleanup and does not show the measured path; it cannot establish whether that
+path looked correct. PR #2732 changes the endpoint from `< 1` to `<= 1` CSS pixel, matching the neighboring
+row-alignment checks, and includes box and scroll measurements in future failure messages. The independent
+front-overflow and text/bidi/ellipsis assertions remain. This corrects an inconsistent test boundary; WebKit
+scroll-origin or fractional layout rounding is only a hypothesis, and no product CSS changed. The exact case then passed
+once per engine in `b03e96d6-56c9-4afc-9fc8-f51d343bed70` (2/2, no skips, 12.3s); this is not proof of the engine
+mechanism or flake absence. The full run tested clean `cef8e2a12524ffd5d9fd5df6153e727dbb5a50fb`, fingerprint
+`4f843a4e98508ec1c09b48c2ad1988e41dcf95c016873df3f209e197634d858e`; the focused run used that head with only this test
+correction, fingerprint `27bdf8253048f41826b806d07988782114ed6fd8328137112564c24819149ec7`. Both used three configured
+workers with one owned stack each (two active workers for the focused run), Linux x86_64, kernel 6.8.0-147-generic,
+Playwright 1.64.0, C.UTF-8 and pinned tmux 3.7c, executable SHA256
+`3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were removed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. CPU load and unrelated jobs are
+unavailable; sampled memory and disk headroom were healthy. The owned full run and a brief read-only consult were
+concurrent; no other owned runtime test or build was active. Whole failed evidence remains privately retained in
+temporary storage. The full command remains failed; the focused pass does not replace it.
+
+```text
+Error: the tail must align with the clipper's visible right edge
+expect(received).toBeLessThan(expected)
+Expected: < 1
+Received:   1
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-10-27 — Templates busy-root keyboard scroll (e2e/tests/templates.spec.ts)
+
+The pre-existing `templates busy root stays keyboard-scrollable at width 1100` failed on Chromium in full browser run
+`63d3564d-44ed-4b38-9b1f-f1c4da69fb7f`, then failed 3 of 10 narrow repetitions in
+`24cba0e9-9ef9-42bf-b98d-60c26d7689db`. The full run also had nine failures involving a remembered sort title or wrapped
+terminal markers; its oversized runner report was not recorder-validated. The narrow run selected only this test with
+`npx playwright test --project=chromium-templates -g 'templates busy root stays keyboard-scrollable at width 1100' --repeat-each=10`,
+three configured workers and zero retries. It tested dirty head `76e935dc7d2c5a1574b49a5a6f44aa35060683a0`, source
+fingerprint `7aa5fa19acbcf9af194723f0b3bfd099389c8ebc2783633e4879c699ba6633d4`: the sidebar restyle, host warnings and
+fixture updates, but this scroll sequence was unchanged. Linux x86-64, kernel 6.8.0-147-generic, Playwright 1.64.0;
+compiler, Node and browser build identities were not retained for this generic repetition. Actual tmux was 3.7c,
+executable SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`. Locale was C.UTF-8 throughout. The
+recorder removed `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`; only its owned `FARHELM_TEST_TRACE_DIR` reached the child. No other owned harness ran concurrently;
+machine load and unrelated work were not measured. Failures exhausted the five-second PageDown poll; passing cases took
+roughly four to five seconds. The full-run trace shows the dialog retaining focus, its controls disabled and one held
+write, while Home moved the real root from 611 to zero. PageDown followed the zero observation in under a millisecond
+and did not move it. Native scroll completion or reconciliation is a hypothesis, not an established cause. PR #2750
+replaces the unsupported immediate reversal with a measured positive offset followed by Home to zero, preserving the
+keyboard-scroll, busy and refused-draft guarantees. The corrected exact Chromium selection passed 10 repetitions in
+`79b2c58e-ebbe-4d87-82d7-456456a559d8`; that does not prove flake absence. The failed UUID directories and traces remain
+private local evidence under the recorder's temporary retention policy. No earlier entry for this test was found.
+
+```text
+Error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+Call Log:
+- Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-10-27 — Templates departure keyboard ownership (e2e/tests/templates.spec.ts)
+
+The pre-existing `unsaved departures support keep editing, discard and save before leaving` failed alone on WebKit in
+browser batch `ea779e79-d750-4bb6-bb4e-9ed32faee243`: 1,412 passed, one failed and eleven skipped, with a complete
+runner report. It then failed 3 of 10 exact WebKit repetitions in `c631be9f-ffaa-45ac-994c-d91ca6971230`, selecting
+`npx playwright test --project=webkit-templates -g 'unsaved departures support keep editing, discard and save before leaving' --repeat-each=10 --retries=0`
+with three workers, one stack each. Both tested dirty head `76e935dc7d2c5a1574b49a5a6f44aa35060683a0`, source
+fingerprint `3b3218f3e0097bda3f1eb3f847d24702e45ff2427f9bad470e55769a2de0c93a`: the sidebar restyle, host warnings and
+fixture repairs, without changes to this focus sequence or the template editor. The failed assertion was the focus
+premise before pressing Enter on the command template's YOLO button. The new template name was already visible, but
+navigation also schedules focus to that name on an animation frame; the test did not wait for this handoff before
+choosing its next keyboard target. A race with that handoff is the suspected cause, not proof that native Enter fails.
+Narrow passes took six to nine seconds and failures eleven to fourteen seconds, including the five-second focus
+expectation. PR #2750 adds an assertion that navigation has focused the new template's name before moving focus to YOLO,
+preserving the Enter, unsaved-draft, saved-data and close-focus assertions. The corrected exact selection passed ten
+repetitions in `3904d54b-caf7-4924-a2c1-d417060346eb`, source
+`249c6d1dbb9c9cc657c2b9bfaea6aaf4dcc473042ec7e7647db8ec7d5d1b9b95`; this does not prove flake absence. The broad run
+used Node 26.12.1 and Playwright 1.64.0 on Linux x86-64, kernel 6.8.0-147-generic. Compiler and browser-build identities
+were not retained for the generic repetitions. Actual tmux was 3.7c, executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`; locale was C.UTF-8 throughout. The recorder removed
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX`; the
+repetitions retained only its owned `FARHELM_TEST_TRACE_DIR`. No other owned harness ran concurrently; machine load and
+unrelated work were not measured. The whole failed UUID directories and copied repetition traces remain private local
+evidence under temporary retention. No earlier entry for this test was found.
+
+```text
+Error: expect(locator).toBeFocused() failed
+Expected: focused
+Received: inactive
+Timeout:  5000ms
+```
+
+Class: pointer-focus
+
+Cause: hypothesis
+
+## 2026-10-28 — build-help rewrite disposal (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar explains the helm and window builds` failed on Chromium in full browser run
+`1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6`, then failed again in the exact-title, both-engine selection
+`b215889b-1d19-49b0-a522-9b287c8b42c2` (one failure, five passes). The trace shows a build-stamp rewrite's fulfillment
+losing route ownership during wait-style interception removal. This matches the build-help entries from 2026-09-03; the
+existing drained-route helper already handles the same Playwright lifecycle for other fixtures. PR #2762 reuses that
+helper and drains callback work in finally before restoring normal replies. All build-help assertions remain. The
+corrected helper's eleven callers and the adjacent takeover and host-menu cases passed 28 checks on both engines in
+`f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`; this is a separate observation, not a full-suite pass or proof of flake absence.
+The full run's other failures were two takeover cases and one exhausted host-menu test budget.
+
+```text
+Error: route.fulfill: Route is already handled!
+```
+
+The full run and unchanged reproduction used commit `e98183606018a86cfc3fb0c6b9a7dcb5756ae4e0`, dirty with the dialog
+return's presentation and fixture corrections, source fingerprint
+`a214363af51126e765745cd7ddf4c419e719742dd4dc707e8b72a187659393c7`. The corrected selection used dirty fingerprint
+`497acae5f91c41aaa81c26f3d8f4e388c658e693ed20d4d29b8ca51d69582cfa`. All used Linux x86-64, kernel 6.8.0-147-generic,
+Node 26.12.1, Playwright 1.64.0, three workers with one stack each, zero retries, and locale C.UTF-8. Actual pinned tmux
+was 3.7c, executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. The recorder scrubbed
+ambient `FARHELM_*` and supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`. Compiler and
+browser build identities and other machine load are unavailable; no other owned build or runtime command overlapped
+these runs. Whole failed UUID directories remain private temporary evidence and may expire. The full JSON exceeded the
+recorder's 16 MiB inspection bound; a separate 32 MiB audit reconciled it without changing its manifest or failed exit.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-10-28 — takeover tab retry premise (e2e/tests/terminal-reconnect.spec.ts)
+
+`a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` failed on both engines in full browser run
+`1c66d7f4-79b2-41bf-b6f1-225f1fc10cf6`, matching the empty-banner symptom already reproduced on main in the 2026-10-20
+entry. Both current traces show the losing tab receiving an ordinary lifecycle Conflict before the ownership check; the
+winner meets the same refusal, retries promptly and reaches replay completion. The fixture instead delays every
+losing-page retry 30 seconds while expecting a final takeover notice within 20 seconds. PR #2762 withholds only future
+agent sockets using the existing fixture helper, retaining the original swallowed takeover notice and unaware-view
+premise, while allowing tab retries every second. The actual losing-tab refusal, reclaim control, closed attachment and
+winner's echoed input remain required. The unchanged exact selection passed both engines in
+`b215889b-1d19-49b0-a522-9b287c8b42c2`; after correction, this case and its recovering-view neighbor passed both engines
+within the 28-case selection `f7e0bf2f-a13f-48c0-bc16-b7beb93179bc`. Neither observation erases the original failure or
+proves general flake absence. The matching TODO entry and sweep exclusion are removed with the correction.
+
+```text
+Expected substring: "Detached"
+Received string:    ""
+Timeout: 20000ms
+```
+
+The full run's other failures were Chromium's build-help route disposal and WebKit's host-menu overall budget. Tested
+commit was `e98183606018a86cfc3fb0c6b9a7dcb5756ae4e0`, dirty with the dialog return's corrections; the full run and
+unchanged selection had fingerprint `a214363af51126e765745cd7ddf4c419e719742dd4dc707e8b72a187659393c7`, and the
+corrected selection had `497acae5f91c41aaa81c26f3d8f4e388c658e693ed20d4d29b8ca51d69582cfa`. Linux x86-64, kernel
+6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0, three workers with one stack each, zero retries, locale C.UTF-8.
+Actual tmux was 3.7c, executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. The recorder
+scrubbed ambient `FARHELM_*` and supplied only `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`.
+Compiler/browser build identities and unrelated machine load are unavailable; no other owned runtime or build
+overlapped. Whole failed UUID directories and socket traces remain private temporary evidence and may expire. The
+oversized full JSON was reconciled in a separately bounded audit; its original recorder summary remains incomplete.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-29 — Restart-with dialog focus (e2e/tests/restart-with.spec.ts)
+
+`restart with keeps gap focus and container Enter uses its enabled action` failed in WebKit in the selected
+named-conversations/restart-with run `ca41e45d-2ea0-486b-a8b1-7f1defad7146`. After clicking YOLO, the action was
+enabled, but `dialog.focus()` did not leave the dialog focused within the five-second assertion window. The case took
+10.522 s; Chromium passed it in 2.993 s. All other 111 cases passed. One exact WebKit retry passed unchanged in 6.0 s,
+run `143efecd-81a2-4e44-8ba1-8275f8fdb7ed`. The Muse plan's landing Decision records the same case failing at earlier
+landings, but those observations were not independently reclassified here. Cause unknown. Open in TODO.md and excluded
+from future deflake sweeps; the focus assertion remains intact.
+
+```text
+Error: expect(locator).toBeFocused() failed
+Locator:  locator('.create-session-form[data-launcher-mode=restart]')
+Expected: focused
+Received: inactive
+Timeout:  5000ms
+```
+
+The tested tree was `dd5009839e4862c7646f94e89f3407ebcd41e494`, dirty only with the Muse structured-launch fixture,
+missing-resume explanation/test and named-conversation expectation corrections. Both runs recorded source fingerprint
+`f815ee88e1ffa1d981fede105c4f6ed5b968c05047fe41dc26be1842038c0fe5`. The selected command was
+`npx playwright test tests/named-conversations.spec.ts tests/restart-with.spec.ts`, both engines, three workers with one
+stack each, zero retries. The retry used `--project=webkit-restart-with` and the unique case title as its grep, one case
+on one worker. An earlier anchored-selector attempt, `53e946eb-c1fc-49c2-aed1-18b75e3f8d9f`, selected no tests and is
+not an assertion observation. No application or test code changed between these runs.
+
+Linux x86_64, kernel 6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0, locale C.UTF-8. Actual tmux was 3.7c,
+executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_*` was scrubbed;
+the selected run supplied `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, and the generic retry supplied
+only the latter. Compiler and browser build identities, contemporaneous load and other agents' activity are unavailable.
+Clippy overlapped the selected run's startup, then finished; no owned build overlapped the retry. The changed Muse
+refusal branch handles a missing resume command, while this case uses a resumable Codex fixture; the focus code was
+unchanged. No cause is inferred from that distinction. Full failed UUID evidence, screenshots and traces remain in
+private temporary storage and may expire.
+
+Class: pointer-focus
+
+Cause: unknown
+
+## 2026-10-29 — native tunnel preview WebKit budget (e2e/tests/header.spec.ts)
+
+`native tunnel preview keeps ports and actions inside a 650px pane` timed out in WebKit at its unchanged 60-second case
+deadline during `cleanupSession` in run `1fc8687c-1044-4c63-83f9-dfddf8da2604`; Chromium passed. One exact WebKit-only
+retry passed unchanged in 58.0 seconds, run `9ebdc54c-8229-4787-a96b-19c2836e083e`. The independent new-terminal-button
+report records two timeouts and an unchanged 58.7-second pass in this same existing case. Those separate observations
+establish recurrence beyond this control change; their raw records were not re-audited here. Cause remains unknown;
+little margin under the deadline is a hypothesis. Open in TODO.md and excluded from future sweeps. No test assertion or
+timeout was changed.
+
+```text
+Test timeout of 60000ms exceeded.
+Error: apiRequestContext.post: Target page, context or browser has been closed
+```
+
+Both local attempts used clean revision `a9b99e3932daaaef453418daa85cd849ae5776c8`, fingerprint
+`a69ea2649e5b60c6881c0086b002799a2e7e6fd314d5ed289274b86b94f45d7e`, after the terminal zoom readout's width correction.
+The test and its helpers were unchanged. The first command selected the exact title from `header.spec.ts` on both
+engines, two workers and zero retries; the retry selected `--project=webkit-header` with that title, one worker and zero
+retries. The retry used generic recording, so its one passing case comes from complete console output rather than strict
+browser-count validation. The first run's only unsuccessful case was this timeout, not a geometry assertion. The earlier
+two-engine overflow in run `cf332c82-504a-49b2-a7f6-66e37482045e` was a separate same-session width regression corrected
+before these attempts, not part of this flake.
+
+Linux x86_64, kernel 6.8.0-147-generic, Python 3.15.2, Node 26.12.1, Playwright 1.64.0, locale C.UTF-8. Actual tmux was
+3.7c, executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_*` was
+scrubbed; the first run supplied `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR`, and the generic retry
+supplied only the latter. No owned build or other test overlapped either attempt; other agents' activity and CPU load
+were not recorded. Available memory was about 55 GB with no swap. Compiler and browser build identities are unavailable.
+Both consoles reached EOF without omissions and all three stacks cleaned up. Complete failed UUID evidence, screenshots
+and traces remain private temporary evidence and may expire.
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-10-29 — save deadline timer quantization (crates/farhelm-ui/src/api/save_order.rs)
+
+The historical early-timeout test passed 20 of 20 exact repetitions in batch `d965328c-213e-4c47-a082-91d061f3a7c3`. A
+deterministic boundary regression then failed in `429c5e8b-27ab-4239-8314-cad2671053b9`: converting a positive
+fractional-millisecond budget to the renderer timer rounded it down. Since timer completion itself expires the request,
+that conversion could end the wait early. Rounding up preserves the deadline; all seven save-order tests passed in
+`0b8d7701-11ee-446d-9025-8edba169edda`, including the original wall-clock test and the new boundary test. The fix
+removes the exclusion; the historical timing failure itself was not reproduced in this session.
+
+```text
+timer 0ns shortens budget 1ns
+```
+
+Evidence: base `25afb5ac0c3a44ae1f5dd6790608d4199258741e`, dirty only with this fix's source/test edits during the
+boundary checks; shared x86_64 Linux, one exact test per baseline attempt and the save-order module after the fix,
+four-slot nextest budget, zero retries. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR`.
+Private evidence lives under the run UUIDs and expires with temporary-file cleanup. Compilation overlapped other owned
+build preparation; the deterministic conversion failure does not depend on elapsed scheduling time.
+
+Class: product
+
+Cause: established
+
+## 2026-10-30 — restart dialog root focus reclaimed by scroll recovery (e2e/tests/restart-with.spec.ts)
+
+`restart with keeps gap focus and container Enter uses its enabled action` failed all three WebKit attempts in
+`2489144b-0b4b-463c-9d6a-9029f0e05375`. Its passive browser timeline showed the form gaining focus after the YOLO
+choice, then Cancel gaining focus 27 ms later without another input action. The scroll region retained its recovery
+claim when focus deliberately moved from a usable control to the root, so later layout reconciliation mistook that
+choice for lost focus. Retiring that claim on the explicit transition preserves container Enter while retaining recovery
+after a disabled or removed control. The unchanged regression passed three times on each engine in
+`3cc496e5-536a-49fc-be5d-01afff8ff781`; its exclusion is removed with the fix.
+
+```text
+Locator: locator('.create-session-form[data-launcher-mode=restart]')
+Expected: focused
+Received: inactive
+Timeout: 5000ms
+```
+
+Evidence: shared x86_64 Linux, base `25afb5ac0c3a44ae1f5dd6790608d4199258741e` before the fix and save-deadline commit
+`b07b920880aa18d1847d1caf258c84c16164af4b` plus the modal change after it. Unrelated confirming-state fixture edits were
+dirty during validation. Three browser workers, one stack each, zero retries. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8. The recorder scrubbed ambient
+`FARHELM_*`; child input was `FARHELM_TEST_TRACE_DIR`. Original traces and screenshots were preserved privately before
+another run; run UUIDs address temporary evidence which expires with cleanup. The same baseline passed the other seven
+selected browser cases three times each. No claim is made that those other exclusions are resolved.
+
+Class: product
+
+Cause: established
+
+## 2026-10-30 — lifecycle badge oracle rejected unread idle output (e2e/tests/terminal.spec.ts)
+
+The confirming-state test passed three ordinary WebKit repetitions in `2489144b-0b4b-463c-9d6a-9029f0e05375`. Pinning
+its real owned session's successful listings to idle with unseen output then reproduced the recorded failure in
+`0b4a2b05-1a78-4fcc-81c9-e3d4c99eba67`: the shared lifecycle matcher rejected the valid `Idle — new output` badge before
+the confirming prompt was tested. That matcher now accepts the qualifier only on Idle. The fixture keeps that state on
+both successful reads, so the test cannot avoid the boundary by luck. The unchanged confirming-prompt assertions passed
+three times per engine in `1f2848c6-dfdf-4a5d-b957-51d20af4e64b`. The test's exclusion is removed; exact
+badge-vocabulary and protocol-status assertions retain their stricter contracts.
+
+```text
+Expected pattern: /^(Running|Waiting|Idle)$/
+Received string: "Idle — new output"
+Timeout: 10000ms
+```
+
+Evidence: shared x86_64 Linux, three owned browser stacks and up to three workers, zero retries. Before-fix selection
+was one WebKit case; after-fix selection was the same case repeated three times per engine. Base was save-deadline
+commit `b07b920880aa18d1847d1caf258c84c16164af4b` with the dialog focus fix and this fixture dirty before the failure,
+then dialog-focus commit `35f8f3cbdba147afe207dec06d8a85045309bfc4` with this test/helper fix dirty after it. The
+product web build was unchanged between those runs. Recorded tmux 3.7c SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`, locale C.UTF-8; child `FARHELM_TEST_TRACE_DIR` only
+after ambient marker scrubbing. Original traces/screenshots were preserved privately before another run. Run UUIDs
+address retained temporary evidence and expire with cleanup.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-10-30 — feedback dialog's disabled Send color (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending` failed on WebKit in two full browser runs of the plans
+landing monitor, on different stacks: `0a494db0-73b5-462c-8e8d-33510baf9df6` (2026-10-29, host-short-names' first
+delivery on main `0f3d4bcd`) and `8f80714f-9f10-46f5-af67-be60e573be31` (2026-10-30, shortcuts-overview and
+settings-gear-shape on main `cb426c6a`). Both failed on the same assertion with the same value: the disabled Send
+button's color was `rgb(155, 165, 184)` where the test expected `rgb(90, 101, 121)`, for the whole 5-second wait, so it
+settled on the wrong color rather than racing. It passed on Chromium in both runs, and five of five alone on WebKit in
+`756ea4b1-29d9-4954-b8a0-31d9cae25dee`. In `0a494db0` it failed beside expanded-host-rail click timeouts that
+host-short-names caused and two other unrelated WebKit failures; in `8f80714f` beside the recorded folder-dropdown flake
+only. Neither stack changed the feedback dialog, its styles or the theme; shortcuts-overview edited only this spec's
+Help-menu test. A review of the first failure saw it follow a color-scheme switch in the test, so a disabled-button
+color sampled before the switched theme's values apply is a hypothesis, not a diagnosis. Older retained runs on
+2026-10-20, 2026-10-27 and 2026-10-28 also show this test failing, but those runs were wrecked or failed a different
+assertion and are not counted. Open, and excluded from deflake sweeps; no fix was attempted.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(90, 101, 121)"
+Received: "rgb(155, 165, 184)"
+Timeout:  5000ms
+```
+
+Evidence: shared x86_64 Linux under other agents' builds (load average about 15 to 20 during the second run). Both full
+runs: Playwright through `scripts/record-test-run.py`, the whole browser suite on Chromium and WebKit, three workers
+with one owned stack each, zero retries, the jj working copy empty on the tested stack (`099aa64b` and `ed001c8e`
+respectively). Recorded tmux 3.7c executable SHA256 `1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`,
+locale C.UTF-8; child `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` after the recorder scrubbed ambient
+`FARHELM_*`. The individual test's duration in the failing attempts was not extracted. Run UUIDs address retained
+temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-10-31 — feedback dialog's disabled Send color, again and alone (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending`, recorded as open on 2026-10-30, failed again on
+WebKit, this time on a Tensorlake sandbox rather than the shared development machine: in the plans landing monitor's
+full browser run for sqlite-wal and tab-output-hangup (stacked on main `e9095ef8`, tested commit `4ae16b11`), it was the
+only failure in run `a4a4ad3b-56c1-426f-8377-149f23f29d12`, the shard of 300 tests that held the feedback spec. It
+failed on the background rather than the text color: the disabled Send button's `background-color` was `rgb(29, 34, 44)`
+where the test expected `rgb(233, 237, 244)`, for the whole 5-second wait. Run alone three times on the same build (run
+`7b4a27da-01e2-4721-aef3-c5c6c201ae50`), it failed once more the same way and passed twice, the first time it has failed
+alone; the earlier five of five alone were on the development machine.
+
+Every failure recorded so far came in the test's light-scheme pass, after `page.emulateMedia({ colorScheme: "light" })`.
+`rgb(29, 34, 44)` is the dark palette's `--bg-1`, and `rgb(155, 165, 184)` from the earlier entry is the dark palette's
+`--fg-2`; each expected value is the light palette's, resolved by a probe element the test creates after the switch. So
+the switch had reached the document and a new element took the light palette, while the Send button that already existed
+kept a dark value through every retry. In the earlier two failures the background had already passed its light check and
+only the text color stayed dark, so whatever is left behind is part of the button's style, not all of it. That narrows
+the earlier hypothesis from a value sampled a moment too early to WebKit leaving an existing element's style on the old
+palette after the emulated color scheme changes. It is still a hypothesis. The stack's only UI change was a desktop
+message; the spec and its color helper last changed on 2026-10-30, when the keyboard shortcuts overview edited only the
+Help-menu test. Open, still excluded from deflake sweeps; no fix was attempted.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(233, 237, 244)"
+Received: "rgb(29, 34, 44)"
+Timeout:  5000ms
+```
+
+Evidence: a Tensorlake sandbox, a 4-vCPU x86_64 Linux virtual machine (Ubuntu 24.04, kernel 7.0.7) running only this
+shard, three Playwright workers with one owned stack each; load average not measured. Both runs through
+`scripts/record-test-run.py --kind development --tmux required` in its generic mode: the full run as
+`npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line` over 22 of the suite's 218 projects, the
+rerun as the same with `--project=webkit-feedback`, `-g` on the test's name and `--repeat-each=3` (12.1 seconds for the
+three attempts; the full run's attempt duration was not extracted). Tracked files matched the tested commit; the tree
+held one untracked changelog fragment from another plan, which no test reads. Node 24.16, with the Playwright and WebKit
+builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8; child `FARHELM_TEST_TRACE_DIR` only,
+with no ambient `FARHELM_*`. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-03 — shutdown racing an in-flight reconciliation (crates/farhelm-helm/src/manager.rs)
+
+`manager::tests::a_shutdown_beats_a_reconciliation_that_is_already_running` was the only failure among 4,528 executed
+cases in release workflow `41708367537`, x86 Linux job `126169955714`, retained run
+`84126a98-f218-47be-b99e-70c7c0d4ff1c`, at clean tag commit `e69d8067569340e0d98d06f790714a13866694e8`. It failed in
+0.013 s, counting two connection attempts where it expected one. The trace shows the peer connection closing, followed
+by another dial; it does not show reconciliation inserting another actor. The manager cancelled the supervising task,
+whose drop guard would cancel its actor only when the runtime polled that task again. Retiring the published client
+could wake the actor first, allowing a retry in that window. The fix in the PR adding this entry also puts a
+cancellation guard on the host's registry handle, requesting cancellation before connection retirement wakes the actor.
+One exact local reproduction and 30 further exact repetitions all passed before the fix, so the scheduling cause is a
+code-based hypothesis rather than a reproduced failure. The release ran the workspace except farhelm and farhelm-desktop
+with four nextest slots and no retries on a four-CPU x86_64 Linux hosted runner (kernel 7.0.0-1017-azure, Python
+3.12.3); load and concurrent test identities are unavailable. Recorded tmux 3.7c executable SHA256 was
+`9aec124826ef267181eeb8fdd3fe3ddd847388addae1dd0304e8444af9e30bc2`, locale C.UTF-8, with only `FARHELM_TEST_TRACE_DIR`
+in the child and no ambient `FARHELM_*` names. The local runs selected this exact test with four available slots and no
+retries; their UUIDs are `4aa8354a-cc03-474f-941c-9d0bf7893bb6` and repetition batch
+`2e57da7e-9d71-4b8a-baa3-7abadefd406d`. Hosted artifacts expire; private local evidence expires with temporary cleanup.
+
+```text
+assertion `left == right` failed: no resurrected actor may still be dialing
+  left: 2
+ right: 1
+```
+
+Class: product
+
+Cause: hypothesis
+
+## 2026-11-04 — trash dialog's PageDown check (e2e/tests/trash-dialog.spec.ts)
+
+`trash header and global confirmation remain reachable at width 1000` and `... at width 360` (Chromium) open the Delete
+all confirmation in a 300-pixel-tall window, focus its Cancel button, press Home, then PageDown, and expect the
+confirmation's scroll area to move down. In the failures it stays at the top for the whole 5-second wait. Seen in the
+plans landing monitor's sandbox runs: once at width 360 in run `1a264a30-cd27-4f6e-bd2c-f3c3853fe0b6` (2026-11-04, round
+170's stack, tested commit `e66294bd`, which did not include launch-progress); at both widths in run
+`e57f9fe2-36de-43f7-aade-46eadb89f6ee` and at width 360 in the host-terminal run `89a737f6-3967-42aa-a519-a90238061970`
+(round 171's stack, `2cdad584`); once in six in `e6e3b26c-8418-4e4a-9cfc-c3c976c4c8bf` (same build, width 1000). Twenty
+runs each (ten per width) on one sandbox: main `5c5af756` passed all (`7ce0fa35-3abc-400d-ab8d-5fc457bb0731`); main with
+vs16-emoji-width and launch-progress (`65c836a5`) failed two, both at width 1000
+(`d30273b9-fc29-4e19-b4c0-036465123b34`); that plus session-summary-beside-list (`5d9a312c`) failed three, all at width
+1000 (`03eda759-efdb-41ff-956b-564f134ad83d`). The same check also failed three times in a discarded pass of round 170
+whose ssh-reached second host never connected. It fails on stacks with and without launch-progress, so it is not that
+plan's alone, but whether launch-progress's waiting status makes it more frequent is not settled. WebKit's copies of the
+test did not fail. The round 170 landing notes called the width-360 failure a cleanup failure; the cleanup failed after
+this check did. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+> 878 |     await expect.poll(() => region.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup. The failing
+attempts took the 5-second poll each; the rest of each run's shard passed.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-04 — feedback dialog's disabled Send color, on Chromium and the other way round (e2e/tests/feedback.spec.ts)
+
+`the dialog refuses blank and over-long messages without sending`, recorded open on 2026-10-30 and 2026-10-31 for
+WebKit, failed on Chromium in the plans landing monitor's sandbox run `e1ea38c4-f840-4bc6-8813-ab0c139a5b56`
+(2026-11-04, round 170's stack, tested commit `e66294bd`): in the dark-scheme pass, the disabled Send button's
+`background-color` was `rgb(233, 237, 244)` (the light palette's `--bg-1`) where the test expected `rgb(29, 34, 44)`,
+for the whole 5-second wait. Every earlier failure was in the light pass keeping a dark value; this one kept a light
+value in the dark pass, on the other engine. That widens the hypothesis from WebKit to both engines: the button can keep
+the palette from before the test's emulated color-scheme switch, whichever way the switch goes. The stack included
+discord-link-in-app, which adds a line to that dialog, but its only stylesheet change lays out the dialog's summary, not
+the Send button. Run alone three times on the same build (`d56a02bc-fb89-4fc5-a2de-cbd08bda9ce9`), it passed all three.
+Open; still excluded from deflake sweeps.
+
+```text
+Error: expect(locator).toHaveCSS(expected) failed
+Locator:  getByRole('dialog', { name: 'Send feedback', exact: true }).getByRole('button', { name: 'Send', exact: true })
+Expected: "rgb(29, 34, 44)"
+Received: "rgb(233, 237, 244)"
+Timeout:  5000ms
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-04 — host-terminal run's startup-session check races its stack (e2e/global-setup.ts)
+
+The browser suite's host-terminal run (`FARHELM_E2E_SUITE_TERMINALS=host`) checks, in global setup, that each stack's
+startup session runs in a terminal host (`expectHostTerminals`, after authenticating the stack). Twice that check found
+no startup session at all ("the stack at ... must list its startup session") and the whole run stopped before any test:
+in the plans landing monitor's sandbox run `9f66f369-97d3-44e9-985c-e92d4fd84753` (2026-11-04, round 170's stack, tested
+commit `e66294bd`; its sixteen projects then passed on their own), and in launch-progress's executor's run
+`1287cb5b-7bcd-4ba4-9628-87100731c260`, recorded in its report. In the first, the stack's own log printed "creating the
+startup session" about a tenth of a second before the check failed and "startup complete" just after it. Hypothesis:
+global setup reaches a stack once its helm answers and its stack-info file exists, before `start-stack.sh` has created
+the startup session, so the check can run first; a setup that waits for the listing to name the session would close it.
+Only the host-terminal run makes this check. Open; it is not a test, so it has no deflake exclusion.
+
+```text
+Error: the stack at http://127.0.0.1:34549 must list its startup session
+   at ../global-setup.ts:131
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. The tracked
+tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh fix, since landed
+in #2981), which no test reads. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-04 — the launcher's YOLO question does not take its answer on WebKit (e2e/tests/helpers/term.ts)
+
+`fillCreateForm` answers a command launch's required "Runs in YOLO mode" question through `answerYolo`, which checks the
+group's "No" radio button. On WebKit, three tests failed at that step with Playwright's "Clicking the checkbox did not
+change its state", each in a different round of the plans landing monitor's sandbox runs:
+`create-intent-key-rebinds-on-host-change: a new target is a new intent` in `e2e/tests/terminal-multihost.spec.ts` (run
+`a865423e-2157-473d-bd78-5bafcce7811e`, 2026-11-04, tested commit `2cdad584`),
+`create-intent-key-rebinds-on-retarget: a moved host is a new intent` in the same file (host-terminal run
+`7033e514-e01f-435e-993c-57b6e4ba5126`, `68510f5e`), and
+`editing the working directory after a failed create mints a new intent key` in
+`e2e/tests/terminal-create-idempotency.spec.ts` (run `55c4bee4-892d-4118-968c-d37cca4c920f`, `bddbbc68`). Each passed
+three re-runs alone on the same build (`de7f9716-ee9c-48b5-8577-9b97467bd32f`, `993cab6d-f635-42e0-9dff-833ce9b554f3`,
+`81ce6bcb-838f-40b3-94c8-65c4f1b3d478`). The first two came before launcher-permission-keywords, which later changed the
+launcher's permission controls, so that plan did not cause it. The step is shared by every test that creates a command
+session through the form, so other tests can fail the same way. Hypothesis: on WebKit the click lands while the launcher
+re-renders the question (a re-render resets the group, or the click reaches a detached element), so the state Playwright
+reads back is unchanged. Open; the three tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: locator.check: Clicking the checkbox did not change its state
+  at answerYolo (e2e/tests/helpers/term.ts)
+  at fillCreateForm (e2e/tests/helpers/term.ts)
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. In rounds 171
+and 172 the tracked tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh
+fix, since landed in #2981), which no test reads; in round 173 it was clean. Run UUIDs address retained temporary
+evidence, which expires with cleanup. Each failure failed fast at the click; the rest of its shard ran on.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-04 — a pending post-clone save's ordering times out on WebKit (e2e/tests/settings.spec.ts)
+
+`a pending post-clone save orders reopened settings before the next save` (WebKit) timed out at 60 seconds waiting,
+after an intercepted save request was already answered, for the browser to report that request finished
+(`reply.finished()`). It failed in the plans landing monitor's sandbox runs in round 172's host-terminal run
+(`d70c7024-ae4f-4172-87da-c21680228f62`, 2026-11-04, tested commit `68510f5e`), in round 173's full suite
+(`ecb2845b-15c7-4d2d-bef1-2db8b4b42936`, `bddbbc68`), and once in three re-runs of that build
+(`f4743ad3-5245-4951-bd1f-d78e374312dc`); round 172's three re-runs (`633348d2-d992-4047-9130-d75f76382776`) passed.
+Neither round's plans touched settings. It fails the way the post-clone carriage-return test does, which an open draft
+PR (#2549) records as a flake, and the way a template popover test did in round 170: WebKit sometimes never reports an
+intercepted, already-fulfilled request as finished. Hypothesis: that Playwright and WebKit behavior, not the product.
+Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+> 1512 |     if (reply) await reply.finished();
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in the host-terminal run) after the recorder scrubbed ambient `FARHELM_*`. In rounds 171
+and 172 the tracked tree differed from the tested commit only in `scripts/tensorlake/run-shard.sh` (the sandbox self-ssh
+fix, since landed in #2981), which no test reads; in round 173 it was clean. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-05 — an update's progress label shows no step name while following (e2e/tests/provisioning.spec.ts)
+
+Several provisioning tests follow a host update and expect its row's label to match `Updating: N/M <step> m:ss`. Three
+of them failed because the label stayed at, for example, "Updating: 0/9 0:04", with no step name, for the whole
+five-second wait, each in a different round of the plans landing monitor's sandbox runs and each passing three re-runs
+alone on the same build: `changed-host advice while following: identity` (Chromium, run
+`8add8072-2ed9-4899-a9ac-d1f5bf3c95d3`, 2026-11-04, tested commit `bddbbc68`; re-run
+`f30c513a-8a65-4a7a-b566-f0d745ec0f86`), `a first identity learned while following: replacement` (Chromium, run
+`4d9291ef-904c-4048-ae81-b527a60f6449`, 2026-11-05, `46088b77`; re-run `a2bc56b8-f28c-4c1e-b7f6-d4a1b21ad011`) and
+`a first identity learned while following: completion` (WebKit, run `541a7a0e-0619-4e57-b9ba-2d345c1279f8`, `8a57ad6e`;
+re-run `26350798-45c1-4214-9580-a064ea065d53`). None of the plans landing in those rounds changed provisioning.
+Hypothesis: under a loaded full-suite shard the first step's name reaches the label later than five seconds after the
+update starts, so the wait ends while the label still shows only the count and timer. Open; the three tests are excluded
+from deflake sweeps; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-05 — quick launch's focus does not return to the page body on Chromium (e2e/tests/quick-launch.spec.ts)
+
+Two quick-launch tests blur the focused element and then poll for `document.activeElement === document.body`; on
+Chromium the poll sometimes never sees the body.
+`a sequence refused at its prefix leaves later sequences their own bindings` failed once (run
+`2d338903-2d70-4c8c-99c4-3d4044d78670`, 2026-11-05, tested commit `9c2fc015`; three re-runs passed,
+`75b17c09-0b63-4b41-b68d-504f176cf3c0`). `typed page refusals are atomic and empty Enter leaves later bindings paired`
+failed in the host-terminal suite twice (runs `ffe0693e-0a67-4039-a8e4-4621365c4561`, `f7dad865`, and
+`4b6e1aad-91ab-4aee-b721-f760fb42b0cf`, `8a57ad6e`) and once in three ordinary re-runs
+(`443ebd09-f5c5-4cd3-8ad1-d27e96a75532`); its other re-runs passed (`479e3dde-6a6a-488f-ac2d-f9cb6a1d29ec`,
+`65431942-c7a7-4344-9529-55d0d7a2b493`). None of the plans landing in those rounds changed quick launch. Hypothesis:
+something in the page (a launcher or terminal focus handoff) takes focus back after the blur, so the body never holds it
+when the poll looks. Open; both tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Expected: true
+Received: false
+> 450 |       await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: pointer-focus
+
+Cause: hypothesis
+
+## 2026-11-05 — the Tensorlake lifecycle spec's activity read misses its own session on WebKit (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+Several lifecycle tests intercept the browser's session activity read and assert that the session the test created is in
+it ("owned agent is present in the activity read"). On WebKit three of them failed because it was absent, each in a
+different round and each passing three re-runs:
+`suspending an agent with unknown status asks before sending the request` (run `4a0618c3-d05d-437b-92c0-1918b3fbfbc7`,
+2026-11-05, tested commit `9c2fc015`; re-run `f7329da0-6ebe-4059-b0dd-1363a1dee94f`),
+`suspending a current idle agent acts immediately` (run `f14c83fa-5bfc-49cc-b78f-415857edbd33`, `46088b77`; re-run
+`399aa780-8b13-47da-b46d-584d26340128`) and `suspending an agent with stale idle status asks before sending the request`
+(run `c57979d2-fb33-4824-a370-dfc0ebe24286`, `f7dad865`; re-run `2974246f-1a72-4475-a170-439dd5a5e91b`). Hypothesis: the
+intercepted read can be one the page issued before the test's session was listed, so the assertion sees an older
+listing. Open; the three tests are excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: owned agent is present in the activity read
+Expected: true
+Received: false
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: unknown
+
+Cause: hypothesis
+
+## 2026-11-05 — shared-checkout lifecycle scenario budget (e2e/tests/github-checkouts.spec.ts)
+
+`borrowers retain the checkout until the final stopped session is deleted` failed three of three WebKit attempts in
+known-flake selection `d22a6787-f6bc-4d36-b7aa-38e2de618d27`; Chromium passed three of three. Each failed at the
+60-second overall deadline near the final borrower's Stop. The retained trace shows successive successful launches,
+attachments, echoes and deletions; no completed test-body call took more than 3.4 seconds. The scenario now allows two
+minutes for its several real launches and fresh terminal attachments, with the existing individual readiness limits and
+all lifecycle assertions retained. Serial rerun `f931e347-7e49-441e-8915-d0a67d80881b` passed three of three per engine
+(Chromium 24.8–24.9 seconds, WebKit 39.2–40.7 seconds). This addresses the observed aggregate-budget failure; it does
+not establish that every historical timeout had the same cause. The TODO entry and sweep exclusion are removed by this
+change.
+
+```text
+Test timeout of 60000ms exceeded.
+```
+
+Evidence: clean baseline `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; the serial rerun had this budget edit and unrelated
+browser-test fixture edits uncommitted. Shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with
+one stack each, zero retries. The baseline selected the 23 already known browser tests with three repetitions per engine
+(135 passed, only these three failed); the rerun selected this exact test with three repetitions per engine. Concurrent
+builds and other browser runs were present on the host; observed load averages during the baseline ranged from about 26
+to 43, and memory pressure was not measured. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8, ambient Farhelm variables scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR`. Private reports, traces and screenshots are retained by run UUID and expire
+with temporary-file cleanup. Earlier overlapping follow-up runs shared the checkout's browser harness files; their
+cleanup/authentication results are discarded as invalid evidence, not classified as product flakes.
+
+Class: budget
+
+Cause: established
+
+## 2026-11-05 — feedback expected-color snapshot races appearance (e2e/tests/feedback.spec.ts)
+
+The disabled Send color failure has a fixture mechanism on both engines: `page.emulateMedia` and the page's media-change
+handler are separate boundaries. Resolving the expected palette token before the handler applies the new appearance can
+pin the old color for the whole assertion. The ordinary known-flake baseline passed three of three per engine. A
+controlled reproduction held the real media-change callback until after sampling that token, then applied the callback:
+run `1b09e852-73fb-4fc2-b192-27efbecc28e9` failed on Chromium and WebKit with the old expected color and new actual
+color. Moving the resolved-appearance wait before sampling passed both engines under the same gate in
+`7c073af5-3796-40a9-a8f0-136071612a5d`. The gate was removed; ordinary final-source validation
+`0877bae7-861b-40a7-b9a3-be836ac6b306` passed three of three per engine. The disabled-state, exact-color, opacity,
+length-limit and zero-send assertions remain. This change removes the TODO entry and sweep exclusion.
+
+```text
+Expected: "rgb(233, 237, 244)"
+Received: "rgb(29, 34, 44)"
+```
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, tmux
+3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8. Base
+`ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; controlled runs had temporary test-only event gating and unrelated fixture
+edits dirty, final validation had the four reviewed browser-test fixes dirty. No product asset changed. Ambient Farhelm
+variables were scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`. Other host workloads were present; load at the
+individual color checks and memory pressure were not measured. Reports and controlled-failure traces remain private,
+addressed by run UUID, and expire with temporary-file cleanup. This establishes the expected-color race; it does not
+attribute every older screenshot without its original timing evidence.
+
+Class: readiness
+
+Cause: established
+
+## 2026-11-05 — settings save cleanup uses backend completion (e2e/tests/settings.spec.ts)
+
+The two open cleanup stalls, `an untouched checkout folder save writes nothing and edited paths are trimmed` and
+`a pending post-clone save orders reopened settings before the next save`, did not recur in the ordinary baseline: each
+passed three of three per engine in `d22a6787-f6bc-4d36-b7aa-38e2de618d27`. Their historical waits on `reply.finished()`
+are now removed. Each owned PUT is forwarded through the route callback's real backend request, and cleanup drains those
+callbacks before restoring configuration. Backend completion establishes the needed ordering without depending on WebKit
+reporting request-finished after an intercepted reply. Reopened-field locking, both save orders, exact submitted bodies
+and independent persisted-state readback remain asserted. After the change, each case passed three of three per engine
+in ordinary run `0877bae7-861b-40a7-b9a3-be836ac6b306` and two of two per engine in host-terminal run
+`6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6`. This removes the recorded blocking dependency; the internal reason WebKit left
+the earlier completion observations pending remains unproved. Both TODO entries and exclusions are removed by this
+change.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one stack each, zero retries;
+verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8.
+Ordinary validation used base `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with the four reviewed browser-test fixes
+dirty; the host run used `e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the remaining fixture fixes dirty. Ambient
+Farhelm variables were scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR`, and the host run retained
+`FARHELM_E2E_SUITE_TERMINALS`. Other workloads were present, but load at these individual checks and memory pressure
+were not measured. No new failure occurred to quote; the 2026-11-04 entries retain the old failure excerpts. Reports
+remain private by run UUID and expire with temporary-file cleanup.
+
+Class: peer-lifecycle
+
+Cause: established
+
+## 2026-11-05 — suspension activity fixture scope and lifetime (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+The three recorded missing-agent cases did not recur in baseline `d22a6787-f6bc-4d36-b7aa-38e2de618d27`: unknown,
+stale-idle and current-idle each passed three of three per engine. Inspection found that the activity fixture asserted
+its agent's presence on every session-list query, including queries that can be filtered to another host, and remained
+installed while cleanup deleted that agent. The fixture now requires the agent in the real host-scoped listing before
+controlling activity, controls only Suspend's host-scoped read, and drains that control before deletion. The assertion
+that the controlled read contains the agent, and the tests' confirmation/no-confirmation outcomes, remain intact.
+Final-source run `0877bae7-861b-40a7-b9a3-be836ac6b306` passed three of three per engine for all five activity variants
+(working, unknown, stale idle, current idle and current waiting). These repairs establish the intended fixture contract;
+the unavailable older traces do not identify which scope/lifetime boundary each historical failure crossed. This change
+removes the three exclusions and their TODO entry.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, locale
+C.UTF-8; verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`.
+Baseline was clean `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; validation used that base with four browser-test fixes
+dirty. Ambient Farhelm variables were scrubbed and `FARHELM_TEST_TRACE_DIR` was recorder-owned. Other host workloads
+were present; case-level load and memory pressure were not measured. No new failure occurred to quote. Private reports
+are addressed by run UUID and expire with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-11-05 — folder dropdown refusal latched build skew (e2e/tests/sidebar.spec.ts)
+
+`composer folder dropdown preserves keyboard launch and grouped history` passed three of three per engine in the
+ordinary baseline but failed both WebKit attempts in host-terminal run `6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6` at the
+unchanged selected-reset visibility check. The selected reset was below the clipped scrollport, and the screenshot also
+showed an unexpected build-mismatch warning. Both controlled launch-refusal replies omitted the serving helm's build
+stamp, which latches that warning and withdraws background readers. They now retain a required real build stamp, and the
+test also checks that the warning remains absent. No selection, focus, scroll or viewport assertion was relaxed; no
+fixture scrolling was added at the failing boundary. The corrected case passed three of three per engine with host
+terminals in `210aac92-24fa-4445-a59e-78927ca391e7` and three of three per engine with ordinary terminals in
+`8734165a-d7cc-4f53-b113-5369df8c71fa`. This corrects the observed fixture-protocol error; it does not prove that every
+historical WebKit viewport failure had the same trigger. The TODO entry and exclusion are removed by this change.
+
+```text
+Error: keyboard navigation must reveal a reset below the scroll cap
+Expected: in viewport
+Received: viewport ratio 0
+Timeout: 5000ms
+```
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three workers with one stack each, zero retries, locale
+C.UTF-8; verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`. The
+failing host run used `e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the other browser-fixture repairs dirty; the
+corrected host run used `a2d05035aac82c7ed06a05646f6c3d5411df151e`, and the corrected ordinary run used
+`7df1a7d6b954298eb428b0b7e156b9404b18fa05`, each with this fixture's stamp and no-skew assertions and unrelated pending
+test/documentation edits dirty. No product asset changed. Ambient Farhelm variables were scrubbed; both runs supplied
+recorder-owned `FARHELM_TEST_TRACE_DIR`, and the host run retained `FARHELM_E2E_SUITE_TERMINALS`. Other workloads were
+present; exact case-level load and memory pressure were not measured. Private reports, screenshots and traces remain
+addressed by run UUID and expire with temporary-file cleanup.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-11-05 — bounded follow-up of the remaining known browser flakes (e2e/tests)
+
+This pass selected already known failures. Ordinary baseline `d22a6787-f6bc-4d36-b7aa-38e2de618d27` ran all 23 then
+excluded browser cases three times per engine. Host-terminal follow-up `6c3945cf-9c27-4f04-b5a1-be4b3ea9d5b6` ran the 16
+cases its configuration admits twice per engine. The checkout-budget and folder-visibility failures from those runs are
+addressed in the separate entries above. The following cases remain open. A pass here is a bounded non-reproduction, not
+evidence that their historical defects are fixed:
+
+- `visit history chooses and remembers the next session after row deletion` (`sidebar.spec.ts`): 0 failures in 5
+  attempts per engine, three ordinary and two host-terminal. No fresh error-status detail was captured.
+- `native tunnel preview keeps ports and actions inside a 650px pane` (`header.spec.ts`): 0/5 per engine. WebKit took
+  45.9–56.6 seconds, still close to its 60-second case budget. No deadline change is claimed as a fix.
+- `don't ask again on a refused YOLO replace marks the host, then replaces with the override`
+  (`terminal-restart.spec.ts`): 0/5 per engine. The earlier raw-session-ID/background-read hypothesis remains unproved;
+  neither clicks nor confirmation assertions were bypassed.
+- `plain Replace keeps a newer same-source key after old header YOLO cancellation` (`replace.spec.ts`): 0/5 per engine.
+  The previously diagnosed pointer/layout race still needs its product decision. Explicitly closing the other menu in
+  the test would hide that race and was not added.
+- Both `trash header and global confirmation remain reachable at width 1000` and the width-360 case
+  (`trash-dialog.spec.ts`): 0/5 each per engine. The same native focus, Home/PageDown and scroll assertions remain.
+- `create-intent-key-rebinds-on-host-change: a new target is a new intent` and
+  `create-intent-key-rebinds-on-retarget: a moved host is a new intent` (`terminal-multihost.spec.ts`), plus
+  `editing the working directory after a failed create mints a new intent key` (`terminal-create-idempotency.spec.ts`):
+  0/5 each per engine. No new missed-checkbox transition was observed; `answerYolo` still uses its real checked-state
+  assertion, without retrying a lost click.
+- `changed-host advice while following: identity`, `a first identity learned while following: replacement` and
+  `a first identity learned while following: completion` (`provisioning.spec.ts`): 0/8 each per engine. The baseline's
+  three attempts were followed by five exact repetitions in `997991b6-0f5d-4c32-b513-8f457a8629f9` (all 30 passed).
+  Inspection suggests a controlled feed could retain an initial all-pending progress snapshot, but no fresh failure
+  established that mechanism. The step-name checks and five-second assertion budgets remain.
+- `a sequence refused at its prefix leaves later sequences their own bindings` and
+  `typed page refusals are atomic and empty Enter leaves later bindings paired` (`quick-launch.spec.ts`): 0/5 each per
+  engine. A delayed focus handoff remains a hypothesis; the body-focus premise was not weakened.
+- `view-changes-do-not-postpone-a-recovery` (`terminal-reconnect.spec.ts`): 0/5 per engine. The original elapsed-time
+  observation includes driver and deferred terminal-mount work, so it still cannot distinguish a rearmed retry from late
+  observation. No timing-budget increase or unproved page-clock rewrite was made.
+
+All fifteen browser exclusions remain. The reconnect case again has a matching TODO entry; its exclusion had outlived
+that board entry. The other open TODO entries now carry these counts. No new failure occurred in these cases to quote;
+the earlier dated entries preserve their original excerpts.
+
+Evidence: shared x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one owned stack each, zero
+retries. Baseline source was clean `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5`; the host follow-up started at
+`e7fb5df7f4f26c315a6845e28c1261de40e91b6a` with the unrelated fixture repairs dirty, and the extra provisioning run used
+`8a48531f8c662f469b6228714f53458be64cc51f` with unrelated pending test/documentation edits. These unresolved cases' code
+and product assets were unchanged. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8. The recorder scrubbed ambient
+Farhelm variables and supplied `FARHELM_TEST_TRACE_DIR`; the host follow-up also retained `FARHELM_E2E_SUITE_TERMINALS`.
+Other builds and browser workloads were active on the shared host; sampled load during the baseline was about 26–43, and
+case-level load and memory pressure were not measured. Private reports and any failure traces remain addressed by UUID
+and expire with temporary-file cleanup. Follow-up browser runs that accidentally overlapped in this checkout are
+excluded from these counts; their shared harness-file interference is not a product flake.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-05 — shallow-pause reset recurs; attribution still incomplete (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+The exact `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` selection passed twice and failed once
+in batch `ef5851af-9d04-48d0-a378-9c256e2c10a7`. The passes were `ff56f4c9-367e-4590-8acf-722d5da587f1` and
+`fa13ce85-b0df-49a8-9075-b662bd7d6808`; failure `dfecb8be-7208-44be-b9bf-047950e05e5c` took 12.1 seconds versus
+12.4–12.5-second passes. The bounded trace reports 48,818 evicted in-memory events and 49,226 rotated persistent events.
+Inspection of its retained head/tail did not recover the pause/resume/reset attribution needed to decide whether the
+client pause or a later legitimate tmux pause caused the reset. The test still rejects every reset over its ten-second
+post-resume drain. A shorter arbitrary window or record-count seam could conceal a queued pause-caused reset, so neither
+was substituted. The 2026-10-17 diagnosis remains open: obtain a bounded per-channel reset-cause observable and prove
+the shallow timing premise before changing the oracle. The exclusion remains, and its missing TODO partner is restored.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Evidence: exact nextest filter `test(=terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)`, four-slot
+runner budget with only this test selected, zero retries, clean base `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with
+unrelated browser-test edits during the batch, no Rust change. Shared x86_64 Linux with other builds/browser workloads;
+load at the failed attempt and memory pressure were not measured. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8; ambient Farhelm variables scrubbed,
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. The failed UUID directory retains its raw trace and JUnit report
+and expires with temporary-file cleanup. Earlier attempts that expired during cold compilation or fixture setup did not
+execute an assertion and are retained separately as incomplete setup, not counted in these three.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-11-05 — older RSS, sentinel and spawner-cleanup reports not reproduced
+
+`terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` (`terminal_backpressure.rs`) and
+`launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`
+(`launch_sentinel_error_status.rs`), both under `crates/farhelm/tests/e2e/`, passed all three exact-selection attempts
+in batch `51c6a652-7437-4d1a-a579-920a936cc00b`: `e781a1c8-ad13-4011-aa21-5d7f80bb66a5`,
+`e6928d5c-c81e-483d-b3d1-5c16bd113c67` and `e4da5b3a-e06d-450c-af2c-34d809e2d09e`. RSS took 21.1–22.0 seconds; the
+sentinel case took 0.77–0.90 seconds. The recorded output contains no runtime `SKIPPED` marker. These passes leave the
+old reports unresolved. The Difficult deflake board now distinguishes them from the already corrected binary-output loss
+and 1x1 READY matcher; the release integration exclusion is unchanged.
+
+The complete `bash scripts/test-start-stack-cleanup.sh` passed in `6f2eff90-c59c-4602-8283-489747b8a36d` in 22.2
+seconds. The sweep canary, spawner SIGKILL, spawner SIGTERM, script SIGTERM, replacement and stale-replacement phases
+all passed while their decoys survived. This is one complete scripted attempt, not a new reproduction of the earlier
+leak; the existing startup/signal markers and open TODO remain. No new failure occurred to quote for any of these cases.
+
+Evidence: shared x86_64 Linux, four nextest slots with zero retries (RSS reserves all four within its invocation), and
+one owned cleanup-script scenario at a time. Other host workloads remained; case-level load and memory pressure were not
+measured. Rust source was `ce630ce7a18a69f8a58fec5786778fdbafd9b3a5` with unrelated browser edits; cleanup used
+`a2d05035aac82c7ed06a05646f6c3d5411df151e` with unrelated test/documentation edits. Matching CLI/web artifacts built
+from the original base were reused because product sources were unchanged. Verified tmux 3.7c executable SHA256
+`ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8; ambient Farhelm variables scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. UUID reports/output remain private and expire with temporary-file
+cleanup; cold setup attempts with no executed assertions remain separate, incomplete observations.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-05 — quick-launch body-focus flake recurs with host terminals (e2e/tests/quick-launch.spec.ts)
+
+`typed page refusals are atomic and empty Enter leaves later bindings paired` failed on Chromium in the full
+host-terminal browser run `b8e18c76-972f-4e97-bf66-828778581c59`, on clean commit
+`0563c44f721b6f55dcb9e1f1b625ac9c5a0206eb`. After blurring the focused element, the test never observed the page body
+holding focus; the failure snapshot instead showed the terminal input focused. This is the same premise failure as the
+earlier quick-launch entry on this date. The WebKit case passed. The console reports 2,114 passed, 75 skipped and this
+one failure across 2,190 selected cases; these are console observations from generic recording, without validated runner
+counts. The failing case took 7.2 seconds, including its five-second focus poll. Open; the existing TODO entry and sweep
+exclusion remain, with no further reproduction or fix attempted.
+
+```text
+Error: expect(received).toBe(expected) // Object.is equality
+Expected: true
+Received: false
+Call Log:
+- Timeout 5000ms exceeded while waiting on the predicate
+> await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+```
+
+Evidence: shared 18-CPU x86_64 Linux, kernel 6.8.0-147-generic, Node 26.13.0, Playwright 1.64.0 and CPython 3.15.2. The
+run used `FARHELM_E2E_SUITE_TERMINALS=host` with `npx playwright test --retries=0`, three browser workers and one owned
+stack each, both engines. Global setup printed `suite terminals: host`. Recorded tmux 3.7c executable SHA256
+`d60bcc711383c8282d560926854f2cb8d2d15e9af72641e1396e32f27af9a802`; locale C.UTF-8. The child retained only
+`FARHELM_E2E_SUITE_TERMINALS` and recorder-owned `FARHELM_TEST_TRACE_DIR` after ambient Farhelm variables were scrubbed.
+Case-level load, memory pressure, a typical passing duration and browser executable identity were not measured. Recorder
+source/lifecycle inspection and console EOF are complete, with no dropped or truncated output. The retained UUID run,
+failure snapshot and browser trace are private temporary evidence and expire with cleanup. The terminal regaining focus
+is observed; which focus handoff caused it remains a hypothesis.
+
+Class: pointer-focus
+
+Cause: hypothesis
+
+## 2026-11-05 — failure-state diagnostics for the open browser flakes (e2e/tests)
+
+The existing `browser-timeline.jsonl` failure attachment now records the active control and document focus at the two
+known quick-launch body-focus checks (`quick-launch.spec.ts`), scroll dimensions and focus at both trash PageDown checks
+(`trash-dialog.spec.ts`), and the stopped session's status and error detail before visit-history cleanup
+(`sidebar.spec.ts`). The three missing-step cases (`provisioning.spec.ts`) make one bounded backend read after the label
+assertion fails, retaining the run and step states before releasing their held update. A failed command YOLO check
+retains the surviving radio labels, checked/disabled/focused states and bounds (`helpers/term.ts`). These use the
+existing bounded timeline; assertions, deadlines, sweep exclusions and production code are unchanged. All these flakes
+remain open. A backend snapshot taken after failure is later evidence, not proof of what the browser received.
+
+Controlled run `365fb1dd-676a-4c62-a487-f26d1eee353f` deliberately failed one focus, scroll and progress-label case per
+engine; all six attachments retained the intended state. The two radio cases in that run passed, as did the two
+checked-property experiments in `7a7eb1e9-a9db-4e97-9d2c-14c9d2d3a843`; those did not exercise failure capture. A forced
+error after the native check in `14fabf6f-8e85-4b86-88d3-59ae85fee1ed` exercised that capture on both engines and
+preserved the original error. These synthetic failures do not reproduce or diagnose the historical flakes. All temporary
+triggers were removed. Final-source run `03682c9d-a013-494a-b3e9-45ed0fa7fc89` passed all 22 cases (the 11 known cases
+once per engine); host-terminal run `957684cf-3b0b-4076-bac0-f7424d3bc523` passed all 16 applicable cases. Neither run
+skipped a selected case. The host-terminal selection omits provisioning, which that configuration does not include. The
+older memory test already records individual RSS samples, and the stack cleanup check already records signal/startup
+markers; neither was changed here.
+
+Evidence: base `8a8c9579`, dirty only with these test diagnostics and the temporary triggers in controlled runs. Shared
+x86_64 Linux, Node 26.13.0, Playwright 1.64.0, three browser workers with one stack each, both engines, zero retries.
+Verified tmux 3.7c executable SHA256 `ba702d3003667a258c423b1516d4fe9de43b20bfefeeae213a3bb1363dccfceb`, locale C.UTF-8.
+The recorder scrubbed ambient Farhelm variables and supplied `FARHELM_TEST_TRACE_DIR` and
+`FARHELM_PLAYWRIGHT_POLICY_FILE`; the host run also retained `FARHELM_E2E_SUITE_TERMINALS`. The web build was refreshed
+for this base; native artifacts were reused because intervening product edits affected only the UI. Case-level load,
+memory pressure and browser executable identities were not measured. Reports were complete with no interrupted cases or
+truncated retained output. Private UUID reports, timelines and traces expire with temporary-file cleanup. No new natural
+failure occurred to quote; earlier entries retain the historical failures.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-06 — settings save cleanup waits for a request-finished event WebKit never sends (e2e/tests/settings.spec.ts)
+
+Two checkout-save tests in `e2e/tests/settings.spec.ts` end by waiting for each intercepted save's browser response to
+report `finished()` before restoring the configuration, and on WebKit that wait sometimes never returns, so the test
+times out at 60 seconds in its cleanup after its own assertions passed. In the plans landing monitor's sandbox runs on
+2026-11-06, tested commit `0958dbcd` (one-press-suspended-checkout, which does not touch Settings),
+`post-clone commands with carriage returns refuse edits but can be cleared` and
+`a pending checkout folder save survives closing settings` both failed that way in one host-terminal run
+(`40e6f124-6214-4bd7-865c-64740aecd10e`), passed three host-terminal re-runs each
+(`cb57caa4-7c10-4a8b-9a8f-157331af8daa`) and failed once each in three ordinary re-runs
+(`b9bc59c5-c98f-4e0d-92fc-6735b2c9fc50`), each time at the same `reply.finished()` line. No other test failed in those
+runs. #3061 found that WebKit can leave request-finished pending for an intercepted save that was already answered, and
+replaced the same wait in two sibling tests with a drained route that owns each backend reply; these two still wait on
+the browser event. Hypothesis: the same WebKit behavior, so the same change would fix them. Open; both tests are
+excluded from deflake sweeps; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+> 1377 |       if (reply) await reply.finished();
+> 1777 |     if (reply) await reply.finished();
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-11-06 — an update's progress label shows no step name in a fourth provisioning test (e2e/tests/provisioning.spec.ts)
+
+`incarnation churn keeps a followed run while a target change detaches it` failed on WebKit in the plans landing
+monitor's sandbox run `269f1dd3-f429-4b1d-9171-523f76ef94d9` on 2026-11-06 (tested commit `0958dbcd`, which does not
+touch provisioning) with the signature recorded on 2026-11-05 for three sibling tests: right after the update starts,
+the row's label held "Updating: 0/9 0:04", the count and timer with no step name, for the whole five-second wait. It was
+the only failure in that shard and passed three re-runs on the same build (`2bbe5a10-4b0f-4673-a93b-c14151d5598b`).
+Hypothesis: as for the siblings, the first step's name reaches the label later than five seconds under a loaded
+full-suite shard. Open; excluded from deflake sweeps with its siblings; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. Recorded tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` (and
+`FARHELM_E2E_SUITE_TERMINALS` in host-terminal runs) after the recorder scrubbed ambient `FARHELM_*`; the tracked tree
+was clean. Run UUIDs address retained temporary evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-07 — a held host-settings save leaves the dialog body without a keyboard stop on WebKit (e2e/tests/modal-layout.spec.ts)
+
+`host-settings scrollports stay reachable while saving` failed on WebKit twice on 2026-11-07, each time once in a full
+browser run of the plans landing monitor on Tensorlake sandboxes, and passed every re-run. The test holds an ssh host's
+destination save, shrinks the viewport to 360x300 so the dialog body overflows, and requires every overflowing scroll
+area to be reachable by keyboard: with all of the body's controls disabled during the save, the body itself must be a
+named, focusable region. Both times the scan found the body scrolling but not reachable. First: run
+`627f4a69-8586-40fa-93f6-395295f760d5` (tested commit `47ca3c1b`, named credentials for Tensorlake hosts, which does not
+change this dialog's scrolling), the only failure in its shard; three repeats passed
+(`2144e44a-3ab6-436b-886e-9360ea84bd6b`). Second: run `0e536f3c-fa3d-4a52-8182-0596188a0e0e` (tested commit `43459022`,
+a trash change with a Stop change on top), beside a recorded quick-launch focus flake and two sidebar failures that the
+Stop change caused; the same spec file passed on both engines without the Stop change
+(`2c518375-6a3f-4bab-9321-28b492f1dc5d`). Chromium passed in both runs. The assertion fails at once, not on a timeout.
+Hypothesis: the body's region attributes or Tab stop follow a re-render after the viewport shrinks, and under a loaded
+shard the scan can run before WebKit has applied them. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+Error: each scrollport has a named Tab stop or an enabled tabbable control
++   "div.dialog-body.host-settings-body (y)",
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested trees pin. The pinned tmux 3.7c the shard runner installs;
+its executable SHA256 was not copied into this entry. Locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` after the recorder
+scrubbed ambient `FARHELM_*`; tracked-tree status was not checked for this entry. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-07 — startup trash recovery checked after runtime shutdown (crates/farhelm-supervisor/src/service/trash_remover.rs)
+
+`startup_recovery_keeps_ownership_after_its_awaiter_disappears` failed alone in the v0.37.0 Linux release gate, run
+`42417367066`, recorder `6945cac9-f00b-44c8-a205-6c4d270d6138`: 4,872 passed, one failed, 63 skipped. The case failed in
+0.043 seconds after dropping its Tokio runtime and finding the original archive still present. The leading explanation
+is that recovery was still queued when shutdown discarded it: the held database mutex proves that a rename cannot
+finish, not that its blocking task has started. One isolated local attempt and a further 20 recorded attempts all passed
+before the change, so that scheduling explanation was not reproduced locally. Fixed in #3143 by keeping the runtime
+alive until detached recovery releases its state-directory claim, then checking the rename and marker as before.
+
+```text
+assertion failed: !original.exists()
+```
+
+Evidence: clean commit `370a33e3498d45eb9643db5d8b06e2fc924d20ec`, hosted x86_64 Linux release runner, workspace nextest
+selection excluding `farhelm` and `farhelm-desktop`, four shared slots and zero retries. Recorded tmux 3.7c SHA256
+`ebb4554aebd8e9112c2b701285c7527ad346ae9c0ec3954fb3cd44b724d54dae`; locale C.UTF-8; no ambient Farhelm variables, with
+only recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. Concurrent machine load and tests sharing the case's slot were
+not measured. The test arrived in #3131. Hosted failure artifact `test-run-failure-42417367066-1-2` was downloaded
+before expiry; isolated run `4e014efb-6b09-47af-ac72-5dbc5149e605` and batch `aa817c08-12a1-469f-8290-a3d6d8504e98`
+retain the local non-reproductions. Raw records expire with their artifact or temporary-file retention; these passes do
+not erase the hosted failure.
+
+After the correction, the three-case trash-remover module passed in `efe8b8f2-ad04-43b2-8675-763d754e427c`, and all 20
+isolated attempts passed in batch `296cce43-f8e5-4d1e-b98c-0232532ad405`. These local checks used main
+`ebaaf6a7d52b91cb083318b3bf5055b9b445c59c` with the test and this log changed, four nextest slots, zero retries, tmux
+3.7c SHA256 `b6072ff2bb37ea68676d41f1ba42681d7b0c26e4755d8aba0a82cbf05eff79a3`, locale C.UTF-8 and only recorder-owned
+`FARHELM_TEST_TRACE_DIR`. No added load was arranged; other work shared the machine without measured load. Passing
+repetitions support the correction but do not establish the hosted failure's scheduling cause.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-11-07 — an update's progress label shows no step name in a fifth provisioning test (e2e/tests/provisioning.spec.ts)
+
+`a progress read failure during an update recovers on retry demand alone` failed on Chromium in the plans landing
+monitor's full browser run `88d8738b-6a0d-43a7-a9e6-d455a1b7775f` on Tensorlake sandboxes on 2026-11-07 (tested commit
+`1de38e6e`, a Stop change that does not touch provisioning), with the signature recorded for four sibling tests on
+2026-11-05 and 2026-11-06: right after the update starts, the row's label held "Updating: 0/9 0:04", the count and timer
+with no step name, for the whole five-second wait. Two other tests failed in the same shard; one, a Delete test, failed
+for a reason of its own that reproduced, and the other is unrelated to provisioning. This test was not re-run; it passed
+in the four other full browser runs the monitor made that day. Hypothesis: as for the siblings, the first step's name
+reaches the label later than five seconds under a loaded full-suite shard. Open; excluded from deflake sweeps with its
+siblings; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. The pinned tmux 3.7c the shard runner installs;
+its executable SHA256 was not copied into this entry. Locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` after the recorder
+scrubbed ambient `FARHELM_*`; tracked-tree status was not checked for this entry. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-07 — an update's progress label shows no step name in a sixth provisioning test (e2e/tests/provisioning.spec.ts)
+
+`changed-host advice while following: destination` failed on Chromium in the plans landing monitor's full browser run
+`29358e1b-1c83-4089-a665-b589f9ada509` on Tensorlake sandboxes on 2026-11-07 (tested commit `d6e394f8`, a Stop change
+that does not touch provisioning), with the signature recorded for five sibling tests on 2026-11-05, 2026-11-06 and
+earlier on 2026-11-07, its own "identity" variant among them: right after the update starts, the row's label held
+"Updating: 0/9 0:04", the count and timer with no step name, for the whole five-second wait. It was the only failure in
+its shard. It was not re-run; it passed in the five other full browser runs the monitor made that day. Hypothesis: as
+for the siblings, the first step's name reaches the label later than five seconds under a loaded full-suite shard. Open;
+excluded from deflake sweeps with its siblings; no fix attempted.
+
+```text
+Expected pattern: /Updating: \d+\/\d+ .+ \d+:\d{2}/
+Received string:  "Updating: 0/9 0:04"
+```
+
+Evidence: Tensorlake sandboxes (4-vCPU x86_64 Linux virtual machines booting systemd, each running only its shard with
+three Playwright workers and one owned stack each; load average not measured), the recorder's generic mode
+(`python3 scripts/record-test-run.py --kind development --tmux required -- npx playwright test --project=<engine>-<spec> ... --retries=0 --reporter=line`),
+Node 24.16 with the Playwright and browser builds the tested tree pins. The pinned tmux 3.7c the shard runner installs;
+its executable SHA256 was not copied into this entry. Locale C.UTF-8, child `FARHELM_TEST_TRACE_DIR` after the recorder
+scrubbed ambient `FARHELM_*`; tracked-tree status was not checked for this entry. Run UUIDs address retained temporary
+evidence, which expires with cleanup.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-07 — the desktop launch lock's brief-holder test checks its release signal too early (crates/farhelm-ui/src/desktop.rs)
+
+`desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder` failed once in the x86_64
+Linux job of release-gate rehearsal run `42434794872` (job `128591313779`) on 2026-11-07, in the "Test the native
+desktop seams" step; the other 1,093 farhelm-ui desktop-feature unit tests in that run passed. It failed after 0.508 s,
+as long as a pass takes (0.506 to 0.608 s in the five other gate runs whose logs were read: the v0.36.0 tag build and
+four rehearsals on 2026-11-07, all of which passed it), on its last assertion and not on a timeout. The tested commit
+was a throwaway rehearsal commit on top of the release-speed PR stack (#3150 to #3156), which does not touch this test
+or the launch lock; the job ran on an 8 vCPU Ubicloud runner, the runner that stack introduces, and the earlier passes
+were on 8 and 16 vCPU Ubicloud runners and on GitHub's 4 vCPU hosted runner. Hypothesis, read from the test and not
+reproduced: the holder thread drops the lock guard and only then sends on its release channel, so the main thread can
+take the freed lock and call `try_recv` before the send happens. That is a race in the test's own observation, not in
+the lock. Sending before the drop would remove it and still catch a lock that does not wait, since the main thread would
+then return before the holder's 200 ms sleep ends. Open; excluded from deflake sweeps; no fix attempted.
+
+```text
+thread 'desktop::tests::the_launch_lock_refuses_beside_an_open_app_and_waits_out_a_brief_holder' panicked at crates/farhelm-ui/src/desktop.rs:2813:14:
+the lock was taken only after the holder let go: Empty
+```
+
+Evidence: a hosted rehearsal job on `ubicloud-standard-8` (x86_64 Linux, 8 vCPU). The step averaged 4.3 busy cores,
+mostly the compile before the tests ran; the resource sampler's five-second interval cannot isolate the test's own
+second, so load at the moment of failure is unavailable. The recorder ran
+`--runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`;
+tmux is not used by this selection. The tested tree was a clean CI checkout; locale unavailable; the recorder scrubbed
+ambient `FARHELM_*` and set `FARHELM_TEST_TRACE_DIR`. The job log stays with the run on GitHub; its test-run failure
+artifact expires with GitHub's artifact retention. The test was last changed in #2873 (2026-11-03); it was not re-run.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-11-08 — shallow-pause observation included later flow control (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+`terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` failed all three attempts in batch
+`08f2a1f0-4479-4839-9b7d-540799af1c77`. The first retained trace attributes a reset at 7.810 seconds to
+`tmux_flow_control`. A bounded, test-only per-channel recovery observer then reproduced the unchanged assertion in
+`4eb03c5f-0b42-47f1-9e8e-7b528e2833b7`, recording a natural flow-control recovery 7.216973212 seconds after the
+half-second pause began. Its two following attempts passed, as did the earlier instrumented attempt
+`1bd8a1c1-18e0-4b7b-85f0-545e48760061`; the failure remains retained. The ten-second drain was checking later,
+legitimate recovery rather than just the shallow-pause seam. The corrected test requires 1,000 new records beyond the
+quiet boundary, no recovery decision or reset through that continuation, and consecutive records across the original
+pause boundary. Detach still fails the shared marker wait. All five corrected attempts passed in batch
+`8524996d-c4d7-47b0-9eda-40efb54f2672`; the exclusion is removed with the correction. The final premise check also
+requires the pause to remain below tmux's five-second threshold and passed in `177216ac-dd27-4bf6-86ca-86e1fec181d5`.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+bounded recovery causes (channel, death-requested, time after pause): [(1, false, Some(7.216973212s))]
+```
+
+Evidence: exact nextest selection `test(terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)`, four
+runner slots, one selected test, zero retries. The earlier three-case selection also included
+`terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` and
+`launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail`, which each passed
+three times. Its third attempt had incomplete console forwarding, so that batch is not a clean pass. The tested source
+was `0ef65075` for the three-case run and `9fd3bdce` for the instrumented and corrected selections, with the uncommitted
+repairs described here and below; the observer alone preceded the assertion correction. Shared x86_64 Linux with other
+builds and test runs active; case-level memory pressure was not measured. Pinned nextest 0.9.148 and verified tmux 3.7c,
+executable SHA256 `39d8d6a031abbdc450145b81026d58ce58f6ea9ae6c0f242eea9c23a5975b480`, C.UTF-8. Ambient `FARHELM_*`
+inputs were scrubbed; only recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied. Private UUID evidence expires with
+temporary-file cleanup. The older memory and sentinel reports remain open; these passes do not justify restoring the
+integration gate.
+
+Class: ambiguous-observable
+
+Cause: established
+
+## 2026-11-08 — known browser flake repairs and bounded reruns (e2e/tests)
+
+All 56 selected cases passed in each of three attempts on Chromium and WebKit, 168 actual passes with no skips, in batch
+`f4198d7e-0aa0-4029-9546-a1e30020ea3b`: `2cb0aeaa-3e46-4d5b-8eca-3641290e7e6a`, `abee6b8f-2f25-4ae5-8540-2989252bb5e3`,
+and `a6e1846e-b79a-45fa-adb7-16d3b4941729`. No historical browser failure was reproduced. Four excluded browser cases
+have targeted corrections: both checkout-save cases in `settings.spec.ts` drain their owned backend writes before
+restoration instead of awaiting WebKit's request-finished notification;
+`host-settings scrollports stay reachable while saving` in `modal-layout.spec.ts` waits for the
+animation-frame-installed region and Tab stop before scanning; and the same-source header YOLO-cancellation case in
+`replace.spec.ts` retains the errored row's height while its menu is open. The maintainer chose that layout correction.
+The test's explicit Escape workaround was removed, and both sidebar and header variants check height invariance across
+the next real click. These four exclusions are removed with their repairs. The historical cleanup and scroll failures
+were not freshly reproduced, so causal attribution to those lifecycle gaps rests on the recorded failure sites and
+source inspection, not a new before/after failure.
+
+The other 18 excluded browser cases passed three attempts per engine without establishing a fix; their assertions and
+exclusions remain. In particular the native tunnel preview took 56.606 seconds on WebKit in the first attempt against
+its unchanged 60-second deadline. The separate stack cleanup command passed every parent/direct termination and
+replacement phase in `2501ef60-3920-4ecf-9a2b-04e88d32fe87`, preserving its decoys; the historical leak remains open.
+The desktop launch-lock test in `crates/farhelm-ui/src/desktop.rs` now publishes its release signal before dropping the
+lock, eliminating the observable unlock-before-send ordering. It passed exact selections in
+`4656ccc3-0d40-4cd4-96b7-203715e12d55` and `15382298-318a-4b45-bfaf-ef87f09ff467`; its exclusion is removed.
+
+Evidence: browser selection below, Playwright 1.64.0, three workers with one real stack each, zero retries, host
+terminals. Source `0ef650750a923292ee3497f6e4711b63f19ca0d4` with the uncommitted UI and test repairs; the later rebase
+onto `9fd3bdce` changes only a separate grid-component font fixture and plan records, so it does not change this
+coverage. The desktop test used four nextest slots and no tmux; cleanup and browser runs verified tmux 3.7c with the
+SHA256 recorded above. C.UTF-8, ambient `FARHELM_*` scrubbed and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied. Other
+builds and tests shared the machine; load average was about 61 during setup, with no per-case load measurement. Private
+UUID reports and output expire with temporary-file cleanup. A browser startup before its CLI build completed
+(`684a0e95-cbdb-441d-90b8-d99b742a25c6`) and two Rust attempts that timed out waiting for Cargo's build lock
+(`8d9dd8f4-eecf-4114-a61e-011b1be7bc19`, `f41bc72c-1e27-49ee-b935-cef7d2477f24`) ran no assertions and remain separate
+incomplete evidence, never flake reproductions or passes.
+
+```sh
+npx playwright test --grep 'visit history chooses and remembers|view-changes-do-not-postpone|plain Replace keeps a newer|don.t ask again on a refused YOLO|native tunnel preview keeps ports|trash header and global confirmation|create-intent-key-rebinds-on|editing the working directory after a failed create|changed-host advice while following|a first identity learned while following|a sequence refused at its prefix|typed page refusals are atomic|expanded setup failure closes|post-clone commands with carriage returns|a pending checkout folder save survives|incarnation churn keeps a followed|host-settings scrollports stay reachable|a progress read failure during an update'
+```
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-08 — reports older than fifteen days dismissed
+
+The maintainer asked to retire active reports whose latest recorded failure was more than fifteen days old. This
+dismisses reconnect timing (`e2e/tests/terminal-reconnect.spec.ts`, 2026-10-09), interrupted-session Replace clicks
+(`e2e/tests/terminal-restart.spec.ts`, 2026-10-20), parent-SIGTERM stack cleanup (`scripts/test-start-stack-cleanup.sh`,
+2026-09-25), stalled-viewer memory growth (`crates/farhelm/tests/e2e/terminal_backpressure.rs`, 2026-09-03), and the
+malformed launch sentinel (`crates/farhelm/tests/e2e/launch_sentinel_error_status.rs`, 2026-09-03). Their active TODO
+reports and the two individual browser exclusions are removed. The older observations remain historical evidence;
+dismissal does not establish a cause or claim that a fix was found. This is a maintainer decision, not a new test run.
+The maintainer also asked to restore the full Rust integration release gate, which is restored with these dismissals.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-11-08 — a credential delivery parking test missed a brief reconnect (crates/farhelm-helm/src/provisioning/credential_delivery_tests.rs)
+
+`actor_hold_cancels_the_real_hook_before_acknowledging_parking` failed once in a plan executor's recorded nextest run
+`ea27aab9-582b-4970-9b7e-1c0809b1b1d1` (x86_64 Linux, 18 CPUs, kernel 6.8): a development selection of the helm's
+`tensorlake::` and `provisioning::` modules plus the prepared-snapshot store and UI tests
+(`cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-ui --lib -E '...'`), four slots, zero retries, at head
+`bf86b15a` with the uncommitted prepared-snapshots change on top (dirty tree; the change later landed as #3203). tmux
+3.7c, the pinned build, executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`; C.UTF-8;
+ambient `FARHELM_*` names scrubbed and the recorder's own `FARHELM_TEST_TRACE_DIR` supplied. The test ran into its
+30-second state wait (30.1 s) rather than failing on an assertion. Five other tests failed in the same run, all new
+prepared-snapshot tests whose fixtures the executor then corrected; none shares this test's seam. Other builds and tests
+shared the machine; load was not measured. The test kills the host's connection, waits to see a state other than
+Connected, then waits for Connected again. Its trace shows the helm dropping the connection, entering Connecting and
+dialing again within about half a millisecond, and the panic reports Connected as the last state seen, so a state poll
+saw Connected on both sides of the reconnect and never the brief Connecting state between. The test code predates the
+plan; the plan's code did not change the reconnect path it observes. Disposition: fixed in #3203, which waits for a new
+dial followed by Connected instead of the brief state. Not reproduced separately; the fixed test passed in the landing's
+helm crate run `de3c2c8a-7885-42df-b5c0-c1714bb9ba80`.
+
+```
+host 2 never reached the expected state; last seen Some(Connected { identity: None, build_version: "peer-build", last_refresh: Ok { sessions: 0 } })
+```
+
+Class: ambiguous-observable
+
+Cause: established
+
+## 2026-11-09 — revealing a host cancelled its pending hover (e2e/tests/host-updates.spec.ts)
+
+`host progress previews only diagnostics that cannot fit beside its current step` failed during landing checks on cloud
+Linux machines: Chromium failed 10 of 10 repetitions (`9640bd72`) and WebKit 2 of 10 (`589e5217`), while the landing
+machine passed 6 of 6 on each engine (`96062ef9`). On the unchanged, clean rebased draft `aeb2b4d5`, an exact Chromium
+selection with `--repeat-each=6 --workers=1 --retries=0`, its child processes restricted to two CPUs, passed five times
+and failed once (`cebeb182-cf4e-4038-b139-1b3cd476bcf3`). The failure took 10.9 seconds against 6.2–7.2 seconds for
+passes, exhausting the five-second visible-card wait after shrinking the window a second time. The same selection with
+bounded event logging and ten repetitions passed six times and failed four (`27210f18-b266-44b8-bbd2-f85f1e85dbce`,
+dirty only for that diagnostic logging). This reproduced the first missing card, later hidden card, and empty computed
+pointer-style result. Event logging established that the attention list's reveal scroll could arrive after pointer
+entry: one failed first entry received pointer-over at 3048.2 ms and its ancestor's scroll at 3050.1 ms, with the same
+connected identity, source and hovered state. That scroll intentionally cancels tooltip display; movement within the
+identity does not start it again. Successful entries delivered the scroll before pointer entry. Fonts were already
+loaded at the failing boundary. The empty one-shot style is consistent with the elapsed clock replacing the cloned card,
+but that particular detached-node state was not recorded. The test now reveals the identity, verifies its full
+intersection and hit point, crosses one animation frame to dispatch the reveal scroll, then enters it. Its pointer-style
+assertion polls the same connected, displayed clone. The corrected case passed 10 repetitions per engine under the same
+two-CPU restriction (`420fd204-7912-479b-897f-8c2d0f6c562c`); these observations precede the separately strengthened
+full-notice glyph assertion and its sizing correction. Fixed in #3272, with normal scroll dismissal and all
+current-step, preview and live-update checks retained.
+
+All local attempts used one browser worker, three owned test stacks, zero retries, and the recorder's generic command
+mode. The only other owned process was the minute resource sampler; builds had finished, memory samples showed about 86
+GB available, and other agents' workload was not measured. Recorded tmux: 3.7c, executable SHA256
+`7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`; process locale `C.UTF-8`, browser locale `en-US`.
+Node 26.13.0 and Playwright 1.64.0 were observed locally; the configured browser revisions were Chromium 1248 and WebKit
+2370, without a separate browser-executable hash. Linux x86_64 kernel 6.8.0-149-generic; Python 3.15.2. The recorder
+removed ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`, retaining only its own `FARHELM_TEST_TRACE_DIR`. The failed UUID records, event log, screenshots and
+traces remain in private temporary evidence and expire with that storage. No other test was selected in these runs.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('.farhelm-tooltip .host-progress-card')
+Expected: visible
+Received: hidden
+Timeout: 5000ms
+```
+
+Class: pointer-focus
+
+Cause: established — reveal scrolling could dismiss the tooltip after pointer entry.
+
+## 2026-11-10 — native tunnel preview exhausts WebKit's case budget again (e2e/tests/header.spec.ts)
+
+`native tunnel preview keeps ports and actions inside a 650px pane` exceeded its unchanged 60-second deadline in WebKit
+during full-browser run `896bd5a1-3017-4c84-b942-687f9676e056`; Chromium passed. The trace reached the final theme/width
+geometry loop before the deadline, then context teardown caused its pending geometry evaluation and cleanup POST to
+fail. No geometry assertion failed, but the remaining assertions did not finish. One exact unchanged WebKit retry passed
+in 32.7 seconds (`1a116c2c-a008-4774-b590-e9d3bd5fcc6f`). The October 29 and November 8 records already establish this
+case's narrow timing margin; this observation does not establish the cause or a fix. Its TODO entry and exclusion remain
+open.
+
+```text
+Test timeout of 60000ms exceeded.
+Error: apiRequestContext.post: Target page, context or browser has been closed
+```
+
+Evidence: clean commit `05bd5c12837afcb7db9a384e97288b5ffe8546d7`, source fingerprint
+`b0798a77fb4aea9c68d5203f477edd87efd554807f128b9e3fbb53fd828d0807`, shared x86_64 Linux kernel 6.8.0-149-generic, Node
+26.13.0, Playwright 1.64.0 and Python 3.15.2. The full command was `npx playwright test` through the controlled
+recorder, both engines, three workers with one stack each and zero retries. It also failed the provisioning reconnect
+response-barrier test recorded below. Console and an independent raw-report parse agree on 3,258 passes, 14 deliberate
+skips and two failures; the 34,867,020-byte JSON exceeds the recorder's 16 MiB inspection cap, so those are not
+recorder-validated counts. Output reached EOF without truncation and all three stacks reported cleanup. The exact retry
+used generic recording around `npx playwright test --project=webkit-header --grep '<exact title>' --retries=0`, with
+complete source/output and cleanup; its pass count comes from the console. Both attempts recorded tmux 3.7c executable
+SHA256 `6180a1c69b39ebb28c6d26c58d91a3bef1abdcac809cd847a4c4ef441f472129` and C.UTF-8. Ambient `FARHELM_*` was scrubbed;
+the full run supplied recorder-owned `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`, the generic retry
+only `FARHELM_TEST_TRACE_DIR`. Per-case load and other agents' work were not measured; the resource sampler reported no
+memory or disk pressure. Browser build identifiers were not recorded here. Failed UUID evidence is retained privately
+and expires with temporary storage.
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-11-10 — reconnect test accepts a host response from before its simulated reconnect (e2e/tests/provisioning.spec.ts)
+
+`incarnation churn keeps a followed run while a target change detaches it` failed on WebKit in full-browser run
+`896bd5a1-3017-4c84-b942-687f9676e056`: the response selected by its wait lacked the reconnect marker. The trace shows
+that request started and its route captured the old phase before the test installed its broad host-response wait and
+sent the feed notification. Its response arrived afterwards and satisfied the wait. The next traced response had the
+requested marker and new incarnation. This is an established fixture synchronization race before the reconnect behavior
+is checked, distinct from this test's older progress-label flake. Three exact unchanged WebKit repetitions passed in
+`d600f92e-e638-4260-83d0-99d8e35f80e6` (17.4 seconds total). The existing TODO entry now names both failures; its
+exclusion remains, and no product or test fix was made in this session-action plan.
+
+```text
+Error: expect(received).toContain(expected)
+Expected substring: "reconnected-marker"
+```
+
+Evidence: the full run's clean source, substrate, collection limit, complete output and companion failure are recorded
+in the preceding entry. The failed case took 9.179 seconds. The narrow command used generic recording around
+`npx playwright test --project=webkit-provisioning --grep '<exact title>' --repeat-each=3 --retries=0`, three workers
+with one independent stack each, on the same source fingerprint and recorded tmux executable. Its output reached EOF
+without truncation, all three cases passed and all stacks cleaned up; these are console counts, not a controlled browser
+report. One earlier anchored-grep attempt (`4423842e-09d3-4b19-b052-5d5f15ca325f`) found no tests and is not a passing
+attempt. No other test was selected in either narrow attempt. The complete failed UUID and trace remain private
+temporary evidence; no additional full-suite run was used to classify it.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-11-11 — corrupt-sentinel fixture accepts an unavailable terminal (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+`launch_sentinel_error_status::a_corrupt_sentinel_defers_reconciliation_but_lists_succeed` failed alone among 6,068
+executed workspace tests in retained run `a6a1f51c-6706-4333-a9af-bbdbb8d1504d`: its absent-terminal premise returned
+`Unknown` instead of `Exited { exit_code: None }` after 0.545 seconds. The test, shared terminal-ending helper and
+listing implementation were unchanged from main. The helper ends a terminal through another connection, which takes over
+the owning runtime's connection, then accepts either `Gone` or `Unavailable`. An unavailable reconnect can end that
+runtime permanently; this in-process fixture has no ticker to readopt it, and listing alone neither readopts nor
+reconciles it. The premise therefore admitted a state its next assertion rejected. Six complete isolated repetitions of
+the old source passed; another attempt passed its assertion but lost console forwarding and is excluded. Fixed in
+[#3330](https://github.com/scode/farhelm/pull/3330/changes): this test shuts down its existing owning runtime within a
+bound and requires confirmed `Gone` before planting the corrupt evidence. Its durable-`Running`, corrupt-file retention,
+repair and final-exit assertions remain. Corrected exact run `40c6da7b-f7f8-4631-9d6b-7b1beecc9f82` passed in 0.543
+seconds. This establishes the fixture-contract defect; it does not attribute the triggering reconnect outcome to load.
+
+```text
+assertion `left == right` failed: fixture premise: the pane is absent before reconciliation
+  left: Unknown
+ right: Exited { exit_code: None }
+```
+
+Evidence: clean failing source `b1640e841c311adb3b630ac378f28ebcc593dfab`, fingerprint
+`74268f54cf7fc698f3e56fdbe6ce18471059a9a537e27adaf1436937d75f58be`; child command
+`cargo nextest run --workspace --exclude farhelm-desktop`, pinned nextest 0.9.148, four slots and zero retries. The
+corrected run used clean `28961fd98249393eb438045bd449090cdbe239b9`, fingerprint
+`cc09eb103e30d13175ef96491fac684b3dd0e625eabb80c25160a5c4640c90a7`, and the same workspace command with
+`-E 'test(=launch_sentinel_error_status::a_corrupt_sentinel_defers_reconciliation_but_lists_succeed)'`. The complete
+old-source repetitions are in batches `c93e6a6b-992d-4054-b7ae-ec038809a8cf` (three complete, one incomplete, six not
+started) and `5a0bf3f6-d589-4642-8ef1-549f33650cbb` (three complete); no added load or browser run overlapped them. The
+failing workspace run had no other owned build or browser run active; other agents' activity and per-case load are
+unavailable. Recorded substrate: x86_64 Linux kernel 6.8.0-149-generic, Python 3.15.2, C.UTF-8 locale, tmux 3.7c with
+recorded executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Ambient `FARHELM_*`
+variables were scrubbed; the child received recorder-owned `FARHELM_TEST_TRACE_DIR`. Full failed output, report and
+traces remain in the private UUID record until temporary-file cleanup. The failed workspace command remains failed; the
+corrected exact pass supplies separate evidence.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-11-11 — busy-row menu retry spends its budget waiting for a dismissed flyout (e2e/tests/provisioning.spec.ts)
+
+`two provisioning-busy rows reconcile independently` failed on WebKit in retained browser run
+`1cd61d98-e960-43ea-b40c-985de6c586c7`, alone among 412 selected cases (411 passed). The test and menu helper were
+unchanged from main. The failed case took 18.317 seconds; its Chromium counterpart passed in 10.737 seconds. The
+retained trace establishes a nested-wait budget defect: the second row's eight-second open-and-read retry spent five
+seconds waiting for a flyout that had closed. Its next attempt reached the measured menu and began checking the correct
+disabled Settings item, but the outer deadline expired; that assertion then passed 35.8 milliseconds later. The first
+flyout's dismissal is consistent with the existing geometry-change contract, but its precise trigger is not established.
+Three exact old-source WebKit repetitions passed in `d6e050cd-a359-43d0-84fe-8d95359e15cc`. Fixed in
+[#3329](https://github.com/scode/farhelm/pull/3329/changes) by bounding the individual menu waits to one second only
+inside this retry. Other callers keep their defaults; native hover/click, measured-menu readiness, both rows' state
+assertions and the eight-second outer bound remain. Corrected run `d1fab191-7f8e-4a7b-85cb-05d4d273f55a` passed the
+exact case on both engines, two actual cases, in 18.2 seconds including stack startup. The failed batch remains failed.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('[data-host-id="61"]').locator('.host-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+Call Log:
+- Timeout 8000ms exceeded while waiting on the predicate
+```
+
+Evidence: failed batch and old-source repetitions used clean `fe085427ccfd53c2c27371f5fb5f49b9c24126ac`, fingerprint
+`c18bdd4c05b26e2e004a0e0c9a342696554048795642efff9b53347eb8ee609b`. The batch selected fifteen whole spec files on both
+engines with `npx playwright test <file-patterns>`, three workers, one stack each and zero retries. Exact repeats used
+generic recording around
+`npx playwright test --project=webkit-provisioning --grep '<exact title>' --repeat-each=3 --retries=0`; their counts
+come from complete console output. Earlier attempt `0d21ef45-78e4-488f-80e7-8261ecf42f79` selected no tests because its
+grep was incorrectly anchored; it is excluded. The corrected controlled both-engine command selected
+`provisioning.spec.ts` and the exact title at clean `d10f932f5f7acd558c0d4aee60a529e7c4882482`, fingerprint
+`4aac83272c0cf621abbc4433b60782f495bcc0685b14c4680b2de831f505867d`. Its report, source and forwarding are complete.
+Recorded substrate: x86_64 Linux kernel 6.8.0-149-generic, Node 26.13.0, Playwright 1.64.0, C.UTF-8 locale, tmux 3.7c
+with executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Browser build identifiers and
+other agents' per-case load are unavailable. No other owned build or runtime check overlapped the failing batch or
+repetitions. Ambient `FARHELM_*` variables were scrubbed; child variables were recorder-owned `FARHELM_TEST_TRACE_DIR`
+and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Full failed output, trace, screenshot and report remain in the private UUID record
+until temporary-file cleanup.
+
+Class: budget
+
+Cause: established
+
+## 2026-11-11 — dead-or-absent gate test ends its terminal through a second connection (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+`launch_sentinel_error_status::the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies` failed
+once among 597 tests on one shard of a workspace run split across Tensorlake sandboxes, during the landing of
+[#3330](https://github.com/scode/farhelm/pull/3330/changes): after ending the session's terminal, reconciliation listed
+the session as `Unknown` instead of the planted `Error`. The test and the helper it used are unchanged from main. The
+helper ends the terminal through another connection, which takes over the owning runtime's connection and can leave that
+runtime unavailable for good; the corrupt-sentinel test in the same file failed the same way and is described in the
+entry above. Fixed in the same PR the same way: the test now shuts its terminal host down through the owning runtime and
+requires confirmed `Gone` before reconciling. That the takeover is what happened here is inferred from the matching
+`Unknown` and the shard's trace (the runtime's connection ended and it was reconnecting), not observed directly.
+
+```text
+assertion `left == right` failed: once the pane is dead-or-absent, the same planted sentinel classifies error: Unknown
+  left: Unknown
+ right: Error { detail: "exec_failed argv0=/nope errno=2" }
+```
+
+Evidence: shard run `b838d783-a0ce-46e1-b1b8-962c281c28ef`, a nextest archive of the whole workspace (minus the desktop
+crate) built on x86_64 Linux and run through the recorder's generic mode on a Tensorlake sandbox (Ubuntu 24.04, systemd
+user manager running, four slots, zero retries), with the real Podman tests skipped on purpose. The archive was built
+from the clean stack tip `058464eda5452cfbc5998c379a1cec6709613f53`, which did not change this test, its helper or the
+reconciliation it checks. The failure took 0.253 seconds; the other 596 tests on that shard passed, as did the same test
+in round 230's run of an earlier tip on the same kind of sandbox. Its pinned tmux, locale and the shard's recorded
+`FARHELM_*` names were not collected for this entry; per-case load is unavailable. Not reproduced: the fix was made
+without a reproduction attempt on the old fixture. After the fix, the whole `launch_sentinel_error_status` module passed
+ten stress iterations of its ten tests locally (run `a3898bfa-35e7-4745-aa83-7f699051f5af`, pinned tmux 3.7c, four
+slots, zero retries). The failed run directory is kept privately until the fix lands.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-11-11 — bulk Stop tab-precondition test reads the session list once, too early (e2e/tests/stop-tabs.spec.ts)
+
+`bulk Stop carries each target's tab precondition with skip false` failed on Chromium in the full browser run of the
+podman-environments landing on Tensorlake sandboxes (run `4b9c5927-2abf-4298-a638-81375806c9da`): after the bulk Stop of
+two sessions, with the dialog answered, one refused for its open tab and the other stopped, the test's single read of
+the session list still showed the stopped session `running`. Repeats with `--grep` and `--repeat-each=15` per engine on
+the same build failed 3 of 30 (two Chromium, one WebKit; runs `124a534b-7d00-41bd-9e40-41a31577b723` and
+`589cf0ea-34ca-4c20-97e7-302ed9fb0665`), once as above and twice with the stopped session's tab still listed. On round
+229's build, which has none of that plan, the same repeats failed 2 of 15 on Chromium and passed 15 of 15 on WebKit
+(runs `5da3ee4c-297d-4393-9895-d8eeb4329fcb` and `5459d195-2b14-48c4-923e-f86b80af02d6`), so the flake predates it. The
+test is unchanged by that plan. Suspected cause: the test waits only for the page's row error and for the selection bar
+to go, then reads the list once, and the helm's listing can lag the stop the request already completed; a poll on the
+stopped session's state and tab count would settle it, if the lag is what this is. Not investigated further.
+
+```text
+Expected: "exited"
+Received: "running"
+  > 334 |       expect(listed.find((entry) => entry.id === ids[1])?.status?.state).toBe("exited");
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=<engine>-stop-tabs --retries=0`), builds of the clean stack tip `058464ed` and of round
+229's tested tip `96b1c3a2`. Pinned tmux 3.7c in each pack; per-case load unavailable. The failed run directories are
+kept privately.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-11-12 — suspended-session banner test's listing route outlives its cleanup (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+`a suspended session banner resumes its host` failed on WebKit in a landing round's narrow browser run of the
+sandbox-suspend-overlap stack on a Tensorlake sandbox (run `9589cbd3-17bf-44bf-afc1-f4714fa27a5a`) with Playwright's
+"Route is already handled". Repeated alone on WebKit with `--grep` and `--repeat-each=60`, it failed 4 of 60 on round
+232's tested tip, which has none of that plan (run `b0544367-4b54-4044-9006-b59410204249`), and 1 of 60 on that plan's
+first fixed tip (run `bdfb7d00-7f84-4adf-8b00-23f6aa2ca134`), every time with the same error, so the flake predates the
+plan. The test installs its `/api/sessions` route with plain `page.route` rather than the suite's drained routes, and
+its cleanup deletes the session while the page is still reading it; the suspected cause is that route's handler
+fulfilling a request after the page was torn down or the request was otherwise settled. A different symptom was seen
+once, in 20 earlier repeats on the plan's tip (run `9ddf3910-4fc9-46c3-ad35-a696c47c1856`): the banner still read
+"Checking localhost…" when the wait for "is suspended" ran out, and it was not seen in 80 runs of the older build (that
+run and `b523d0d4-6107-4f0b-aa6b-077720d84d01`). Not investigated further; open.
+
+```text
+Error: route.fulfill: Route is already handled!
+  > 909 |       if (!response.ok()) return route.fulfill({ response });
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=webkit-tensorlake-lifecycle --retries=0`), packs of round 232's tested tip `4a12d961` and
+of the plan's first fixed tip `8678c79f`. Pinned tmux 3.7c in each pack; per-case load unavailable. The failed run
+directories are kept privately.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-11-12 — long-host header progress test's listing route fails with "Route is already handled" (e2e/tests/restart-replace-progress.spec.ts)
+
+`header progress keeps controls inside a 650px pane with a long host` failed on WebKit in a narrow browser check of the
+tmux-end-old-terminals stack's tip on a Tensorlake sandbox (run `6cfdb804-985a-46f2-8a6f-4580357eae70`) with
+Playwright's "Route is already handled", thrown by the spec's own session-listing route handler in `openSource`. The
+spec's other seven tests passed in that run. Repeated with `--repeat-each=20` on the same build, the whole spec on each
+engine, it failed 1 of 20 on WebKit (run `5ae50998-2b4b-4259-ae15-54a88d7040f9`) and 1 of 20 on Chromium (run
+`4611265d-0a70-4a05-a86b-b010ec11deed`), every other test of the spec passing all 20 times. On main without the stack,
+the test alone repeated 20 times failed 2 of 20 on WebKit (run `e3b624fc-3519-4f74-9420-6c06c328a2ee`) and 0 of 20 on
+Chromium (run `0fee0628-2e30-45f9-9ada-60e5874bc621`), always with the same error, so the flake predates the stack. Each
+failure ended fast, on the route error, not on a timeout; which step of the test was running when it fired was not
+established. `openSource` installs its `/api/hosts` and session-listing routes as plain `page.route` handlers that call
+`route.fetch` and then `route.fulfill`, while the page keeps reading the listing under an installed clock;
+`e2e/tests/helpers/drained-route.ts` documents that a route can lose ownership while `route.fetch` reads its reply and
+treats this error as moot, and this spec does not use it. Two explanations fit and neither is ruled out: a listing read
+the page abandoned while the handler was still fetching, or the established mechanism of the 2026-09-05 and 2026-10-17
+entries for this error (interception removed or the test torn down while a handler was still fetching). Why only this
+test of the eight fails, when all eight share `openSource`'s routes, is open; it is the only one that opens a session
+that is not interrupted and the only one that resizes the viewport. Open. The same error was seen once in
+`restart-with.spec.ts` (`restart with withdraws working-agent consent when its source exits`, Chromium, run
+`63ae0313-7f09-4ed4-b43f-0a535f5793a1`, in a whole-suite run of an earlier tip of the stack, `2d34c0eb`); on the final
+tip that test then passed 20 of 20 on each engine (runs `73835b3f-d372-4a17-93b7-b93fba51b63e` and
+`e5e41d70-9139-43c4-b5aa-2e4151c26d52` repeat the whole spec), so it is noted here and not recorded as its own flake.
+
+```text
+Error: route.fulfill: Route is already handled!
+  > 58 |     await route.fulfill({ response, json: listing });
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=<engine>-restart-replace-progress --retries=0`, plus `--repeat-each=20` and, on main,
+`--grep` for this title). Packs of the stack's tip `399e27c4` (no tracked changes; 19 untracked review-queue files the
+stack deletes) and of main `8928d8b3` (no tracked changes; the stack's untracked changelog fragment
+`end-old-terminals.md`), all inert Markdown. Recorded tmux 3.7c executables, SHA256 `7ffdb77a…` in the tip pack and
+`b0343b76…` in the main pack; locale C.UTF-8; only the recorder's own `FARHELM_TEST_TRACE_DIR`, no ambient Farhelm
+variables; per-case load unavailable. The failed run directories are kept privately.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-11-13 — container boot removes its private setup script (crates/farhelm/tests/e2e/podman_environments.rs)
+
+`podman_environments::real_local_environment_lifecycle_and_owned_image_cleanup` was the only reported failure in the
+x86_64 Linux gate for v0.39.0-rc.2, refusing the initial environment launch after 13.04 seconds. The private setup
+wrapper wrote its script in `/tmp`, which a newly started systemd container can clear before the child shell opens it.
+The wrapper was unchanged from RC1. A focused reproduction using the production managed-base bootstrap and wrapper, with
+a 0.5-second observation window between writing and opening the script, observed the file before that window and its
+absence after in five of five fresh container boots. Moving the private script to `/var/tmp` preserved it and ran it
+successfully in five of five equivalent boots. Fixed in [#3388](https://github.com/scode/farhelm/pull/3388/changes). The
+existing script-byte and success/failure cleanup unit test also passed. The exact boot service that removed the file was
+not traced; the reproduced boundary is the loss of the new `/tmp` file during boot, not an attribution to a particular
+systemd unit.
+
+```text
+real environment launch failed: {"error":"Not launched. container setup failed: sh: 0: cannot open /tmp/farhelm-private-script.<random>: No such file"}
+```
+
+Evidence: release workflow `43436416498`, job `131922894386`, recorder `53af81a8-b32e-4a0c-8c22-28e8f1284856`, clean
+commit `5db1bf47272d837326f14d832236d407c52fba59`; whole workspace except desktop, four nextest slots and zero retries.
+Hosted failure evidence was downloaded before reproducing it and remains private; hosted copies expire. The runner
+reported Ubuntu 24.04, Linux 6.14.0-1017-azure, eight CPUs, Python 3.12.3 and C.UTF-8. Per-case load and runtime Podman
+identity were not retained in that record. Narrow old-wrapper observations are in run
+`219fe0ed-60b3-43b8-bdf3-6af7440f6381`; corrected observations in `0aaaa5ee-2985-4be0-8371-15b19d50c6ea`, on the same
+source with only the wrapper path/docstring changed. These were generic recorder commands around a temporary Deno
+reproducer, one owned container at a time, not nextest case counts. Both orchestration commands exited zero; the five
+old-wrapper child exits were 2 and the five corrected exits were 0. Local substrate: x86_64 Linux 6.8.0-149-generic,
+Podman reporting 4.9.3, systemd cgroup v2, C.UTF-8; each boot used the managed Ubuntu base's pinned digest. The
+corrected observations overlapped compilation of the targeted unit test, whose run
+`bdd985ff-67c0-4e72-9386-ec911bb320d0` passed one selected case. No broader local suite was rerun. All recorder children
+scrubbed ambient Farhelm names and retained only recorder-owned `FARHELM_TEST_TRACE_DIR`. The owned containers and
+custom images were removed after observation.
+
+Class: product
+
+Cause: established
+
+## 2026-11-15 — scripted host's removal refused right after its setup completed (scripts/gui-e2e-smoke.py)
+
+`test_40_the_scripted_backend_sets_up_a_fake_ssh_host` failed in its cleanup on one shared Linux build worker: the
+helm's scripted provisioning backend carried the fake SSH host's setup to the end, the step read the run as `completed`
+through `GET /api/hosts/{id}/provisioning`, and its `DELETE /api/hosts/{id}` straight after was answered 409. It was the
+only failure of each run (the one skip is the Mac-only paste step), and it failed fast on that reply, not on a timeout.
+Three observations were reported, all on that worker; two runs are kept, and the same commit as one of them passed on
+another worker (that run's id is unavailable to this entry). The helm's events log in both kept runs shows every setup
+step through `attach-supervisor` and no removal, and the host stayed registered. The cause is in the helm, not the step:
+a confirmed run's task held the host's provisioning lock until the task itself ended, while the run published its end
+(status, busy marker cleared, feed bumped) a moment before that, and removal refuses with "busy with another operation"
+whenever it cannot take that lock at once. A client that removed the host as soon as it read the run as ended could land
+in that moment, and a loaded machine that parks the task's thread right after publishing widens it. Nothing else took
+the lock in these runs: the host never connected (its name does not resolve), so neither an automatic update nor a
+registry edit was in play. The old browser suite had met the same gap and polled removal through the 409 ("terminal
+progress can precede lock release", in its host-rail warning spec) rather than fixing the order. This is the first entry
+for the step. The step arrived on 2026-11-14 (#3502) and its cleanup's wait for the run to end before removing the host
+came with the area's host-setup work that day and the next; the helm's lock order dates from its first provisioning code
+(2026-08), and the latest helm change near it (#3693, 2026-11-15) bounded how long removal takes to answer without
+touching that order. Fixed in #3744: the run now gives up the lock in the same critical section of the helm's
+provisioning memory that publishes its end (`ProvisioningService::end_run` in
+`crates/farhelm-helm/src/provisioning/service.rs`), for completed, failed, used-as-is and refused-before-the-first-step
+runs, so whoever can read the end can also remove the host. The helm unit test
+`a_host_whose_setup_reads_as_ended_is_removed_at_once` parks the run's task right after it publishes its end and removes
+the host there, for a completed and a failed run. The same change lets go of the lock before publishing at the end of a
+disposable environment's session launch (covered by
+`recipe_session_task_publishes_success_and_cleans_a_connected_create_failure`) and at a Tensorlake add's own failure.
+Two places keep the gap, neither driven by this step: a Tensorlake host's setup not started for a session launch still
+holds the lock a moment past its published end (completed, or failed at a step of its inner install plan), and a session
+launch whose setup takes the inner install plan instead of a prepared clone (a fresh launch normally clones) publishes
+"completed" before its session exists, while still holding the lock. Follow-up, 2026-11-15: the first of those was fixed
+in #3823: a Tensorlake add not started for a session launch now hands its lock to the step that ends its run (the
+prepared clone's attachment, or the inner install plan), which gives it up as it publishes. The helm unit test
+`a_tensorlake_host_whose_setup_reads_as_ended_is_removed_at_once` parks the run right after its end for a prepared clone
+completing and an install plan completing and failing, and removes the host there. The session launch's case remains.
+
+```text
+  File "scripts/gui-e2e-smoke.py", line 744, in test_40_the_scripted_backend_sets_up_a_fake_ssh_host
+    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+urllib.error.HTTPError: HTTP Error 409: Conflict
+```
+
+Evidence: recorder runs `f826a679-2768-4cab-98a6-59b56877aba7` (clean commit `5631ca224c06601b5ebf25f217261368b355eab1`,
+27 steps, 81 s, failing on the same `DELETE`) and `273cb058-91e9-44fc-8554-af9819229aac` (clean commit
+`00c0e67402680798e0002b796a5839c8516db87a`, an area branch's commit, 38 steps, 165 s), both
+`python3 -B scripts/gui-e2e-smoke.py` in the recorder's generic mode with one app run and its steps in order, on an
+eight-CPU x86_64 Ubuntu 24.04 worker (Linux 6.8.0-117, Python 3.12.3, C.UTF-8) shared with other agents' builds and
+tests; load at the time was not recorded. The recorder scrubbed ambient `FARHELM_*` names and kept only its own
+`FARHELM_TEST_TRACE_DIR`. The third observation's run is unavailable. With the fix, the whole smoke passed 5 of 5 on
+that same worker (runs `9c9ead8d-fc21-4a4b-bb22-d5c04ddd2aa0`, `26d23633-15bf-44f0-bad0-c4c8de6c3d8e`,
+`3650eb66-c928-4f88-af79-abb0daf1e023`, `f9c448ae-5e1f-4700-8ea7-7cab3d485966` and
+`4d7696f8-801b-43da-b6b0-cc755d546c83`, 37 steps each, one after another), which shows the fix holds but says little
+about the old rate, since the gap was narrow to begin with. The unit test failed with the 409 under each of two
+mutations that keep the lock past the publication (runs `579e067a-f362-45e0-96ae-46d9053defe3` and
+`1e6d4b1c-dd33-4a31-9193-a1f890441c6a`) and passed without them. Both kept runs and their smoke run directories stay on
+that worker, private, until its `/tmp` ages them out.
+
+Class: product
+
+Cause: established
+
+## 2026-11-16 — killed app's second-launch socket still accepting at lifecycle step 08 (scripts/gui-lifecycle.py)
+
+`step_08_a_relaunch_after_a_kill_reuses_the_supervisor` in `scripts/gui-lifecycle.py` failed its premise four times out
+of four on the 18-CPU x86_64 shared development host at a load average around 23, running
+`python3 -B scripts/gui-lifecycle.py` through the recorder in its generic mode (one app run, launched again in order).
+Steps 01 to 07 passed each time and step 08 failed fast on its first check, after a run of about 400 s; it failed alone,
+nothing else in the run did. The first failing run is `de9b328b-fe23-49b3-b1a3-15a8e479be05` (clean commit `1a97b173` of
+main, Linux 6.8.0-149, Python 3.15.2, C.UTF-8; the recorder scrubbed ambient `FARHELM_*` names and kept only its own
+`FARHELM_TEST_TRACE_DIR`); the other three were a builder's runs, one with the bridge's host-staging change reverted,
+and their ids are unavailable. What else ran on the host is unavailable beyond the load, and so are the Rust toolchain
+version and the pids of the killed app. The script was added on 2026-11-14 (#3630) and changed since only by the
+bridge's host staging (#3926); this test has no earlier entries. A run on an eight-CPU worker at a load of 1.7 (commit
+`c2a9295c`, main with diagnostics added to the step, not recorded) passed all ten steps. Ruled out: a child process
+inheriting the listening socket (the listener is bound with close-on-exec), and the bridge's host-staging change (a
+failing run had it reverted). The suspected cause is in the step's premise: the step waits for the killed app to exit
+through `gui-agent.py`'s `running()`, which counts the process as gone once its main thread is a zombie, while a
+SIGKILLed multithreaded process can reach that state with other threads still tearing down; its open files, the
+second-launch listener among them, close only when the last thread exits, so under load a single connect right after the
+wait could still succeed. That is a hypothesis from the code and the load correlation: no machine-level reproduction was
+made (a synthetic one was too heavy for a shared host and was stopped). Disposition: fixed in the PR that adds this
+entry, which keeps the file-exists check and waits for the socket to refuse connections instead of checking once, and a
+wait that runs out names the killed process's thread count, which tells this race from a socket held open by something
+else; with it, recorded runs `50e2d086-989e-493e-a550-fb9a21342bb3` (its first version, at a load of 0.4) and
+`0df9d4df-46d0-4f7b-bc7f-d88ee903b8ca` (the script as landed, at a load of 3.7) passed all ten steps on eight-CPU
+workers, which shows the step still holds its premise but says nothing about the old rate under load. The failing run
+stays on the shared host and the passing one on that worker, private, until their `/tmp` ages them out.
+
+```
+gui-lifecycle: step_08_a_relaunch_after_a_kill_reuses_the_supervisor ...
+gui-lifecycle: FAILED: premise: after the kill, the socket file is not there refusing connections
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
