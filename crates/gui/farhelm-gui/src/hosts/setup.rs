@@ -458,8 +458,8 @@ impl Render for SandboxPlanBody {
         // The old callout (`.tensorlake-billing`) was one paragraph: an amber-washed block with a three-pixel amber
         // edge, its pricing link inline after the first sentence and the Usage Credits sentence flowing on after it.
         // GPUI has no inline flow for a control inside a paragraph, so the first sentence and the link share a row
-        // that wraps the link to a line of its own where it does not fit, as Add host's SSH help link does, and the
-        // Usage Credits sentence is a paragraph of its own under them, as wide as the callout so it wraps inside it.
+        // that wraps the link when it needs a line of its own. The Usage Credits sentence is a paragraph below them,
+        // as wide as the callout.
         // It must not be a third item of that row: a text item in a wrapping row is never narrower than its whole
         // text, so a sentence longer than the callout ran off its right edge, led by the space that had separated it
         // from the link.

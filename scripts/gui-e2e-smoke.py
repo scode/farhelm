@@ -10,7 +10,7 @@ switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sid
 Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the host
 rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host rail's Add
 host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure and rerun in the
-Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's Help menu and SSH help; 46, the
+Hosts panel; 44, the settings-and-hosts area's Remove host; 45, the other-dialogs area's Help menu and focus return; 46, the
 session list's order menu; 47, the settings-and-hosts area's host Update, its progress, failure and rerun; 48, the
 other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
 view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
@@ -145,10 +145,6 @@ REMOVE_EXPLANATION = "Farhelm will forget this host."
 
 # The Help menu's summary under its "Help" header, drawn only while the menu is open (step 45).
 HELP_MENU_SUMMARY = "Farhelm guides and feedback"
-
-# The SSH help dialog's summary, which the Help menu's SSH item shares as its description: an oracle for the dialog
-# only once the menu has gone (step 45).
-SSH_HELP_SUMMARY = "Start a host's SSH connections yourself"
 
 # The feedback dialog's footer note before anything was sent: text only the open dialog draws (step 48).
 FEEDBACK_NOTE = "Nothing is sent until you press Send"
@@ -1042,24 +1038,21 @@ class Smoke(unittest.TestCase):
 
     # ---- The other-dialogs area's Help menu (45) --------------------------------------------------------------------
 
-    def test_45_the_help_menu_opens_ssh_help_and_returns_to_the_button(self) -> None:
-        """The rail foot's "?" button is the app's way into help, and SPEC.md's "SSH needs 2FA?" item opens SSH help,
-        which, like every dialog the menu opens, hands focus back to the "?" button when it closes (the old app returned
-        focus to its Help toggle). The step seeds and touches no session and opens no link, so nothing leaves the
-        machine. Specified: a click on the "?" button opens the menu with focus on its first item, Send feedback;
-        choosing SSH needs 2FA? closes the menu and opens SSH help; Escape closes SSH help with focus on the "?" button.
-        The menu's summary and then the dialog's are the oracles for open and closed."""
+    def test_45_the_help_menu_opens_and_returns_focus_to_the_button(self) -> None:
+        """The rail's Help button opens the current menu. Send feedback starts focused and Escape returns to Help.
+
+        The menu's summary is the open and close oracle. Check that the removed SSH commands have no entry,
+        since sign-in questions now appear with the host that asks them.
+        """
         self.assertNotIn(HELP_MENU_SUMMARY, self.ok("snapshot"), "premise: the Help menu is not open")
         self.ok("click", "id:app-help-toggle")
         self.ok("wait", "--text", HELP_MENU_SUMMARY)
         self.assertRegex(
             self.ok("snapshot", "-i"), r'menuitem "Send feedback" \[focused\]', "focus starts on the first item"
         )
-        self.ok("click", "id:help-menu-ssh-help")
-        self.ok("wait", "--gone", HELP_MENU_SUMMARY)
-        self.ok("wait", "--text", SSH_HELP_SUMMARY)
+        self.assertNotIn("SSH needs 2FA?", self.ok("snapshot", "-i"))
         self.ok("press", "escape")
-        self.ok("wait", "--gone", SSH_HELP_SUMMARY)
+        self.ok("wait", "--gone", HELP_MENU_SUMMARY)
         self.assertRegex(self.ok("snapshot", "-i"), r'button "Help" \[focused\]', "focus is back on the ? button")
 
     # ---- The session list's order menu (46), on sessions of its own --------------------------------------------------

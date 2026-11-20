@@ -21,10 +21,9 @@
 //!   the window's edge. The panel is a [`focus::scroll_region`], so Up, Down and Tab bring the item they land on into
 //!   view.
 //! - **An item closes the menu first, then acts.** A link item opens its page in the system browser through
-//!   `cx.open_url`, the opener the app's other docs links use; Send feedback and SSH needs 2FA? open their dialogs
-//!   ([`crate::feedback::open`], [`crate::hosts::ssh_help::open`]) with the `?` button as their opener, so closing
-//!   either returns focus to the button, as the old app returned focus to its Help toggle; Check for updates asks the
-//!   updater ([`crate::desktop::updates::check_now`]).
+//!   `cx.open_url`, the opener the app's other docs links use. Send feedback opens its dialog with the `?` button as
+//!   its opener, so closing returns focus to Help. Check for updates asks the updater
+//!   ([`crate::desktop::updates::check_now`]).
 //! - **Keyboard shortcuts** opens the overview ([`crate::shortcuts::open_from_menu`]) with the `?` button as its
 //!   opener, so closing it returns focus there, as SPEC.md's Keyboard shortcuts paragraph asks.
 //! - **Conditional items.** Check for updates is drawn only while an updater runs ([`crate::desktop::updates::runs`]),
@@ -99,8 +98,6 @@ enum Item {
     ReleaseNotes,
     /// The history of announcements this helm has shown; offered only once it has shown one.
     Announcements,
-    /// Commands to start a host's SSH connections by hand, for a host that asks for approval on every login.
-    SshHelp,
     /// The Welcome card again, writing nothing.
     Welcome,
     /// Offered only while an updater runs (SPEC.md, "Installation and updates").
@@ -119,7 +116,6 @@ impl Item {
             Item::KeyboardShortcuts => "Keyboard shortcuts",
             Item::ReleaseNotes => "Release notes",
             Item::Announcements => "Announcements",
-            Item::SshHelp => "SSH needs 2FA?",
             Item::Welcome => "Welcome",
             Item::CheckForUpdates => "Check for updates",
             Item::OpenSourceNotices => crate::desktop::licenses::TITLE,
@@ -135,7 +131,6 @@ impl Item {
             Item::KeyboardShortcuts => "Shows keys and your template bindings",
             Item::ReleaseNotes => "Opens the release notes in your browser",
             Item::Announcements => "Shows previously shown announcements again",
-            Item::SshHelp => "Start a host's SSH connections yourself",
             Item::Welcome => "Shows the welcome card again",
             Item::CheckForUpdates => "Installs a newer Farhelm if there is one",
             Item::OpenSourceNotices => "Licenses of the code and fonts in this app",
@@ -164,9 +159,6 @@ impl Item {
             Item::Announcements => {
                 "Announcements: show the announcements Farhelm has shown you before, newest first, such as serious changes you needed to act on"
             }
-            Item::SshHelp => {
-                "SSH needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every SSH login"
-            }
             Item::Welcome => {
                 "Welcome: show the welcome card with Get started and how to send feedback"
             }
@@ -186,7 +178,7 @@ impl Item {
             Item::ChatOnDiscord => Icon::External,
             Item::Documentation | Item::ReleaseNotes | Item::OpenSourceNotices => Icon::Document,
             Item::Announcements | Item::Welcome => Icon::Info,
-            Item::SshHelp | Item::KeyboardShortcuts => Icon::Terminal,
+            Item::KeyboardShortcuts => Icon::Terminal,
             Item::CheckForUpdates => Icon::Update,
         }
     }
@@ -200,7 +192,6 @@ impl Item {
             Item::KeyboardShortcuts => "help-menu-keyboard-shortcuts",
             Item::ReleaseNotes => "help-menu-release-notes",
             Item::Announcements => "help-menu-announcements",
-            Item::SshHelp => "help-menu-ssh-help",
             Item::Welcome => "help-menu-welcome",
             Item::CheckForUpdates => "help-menu-check-for-updates",
             Item::OpenSourceNotices => "help-menu-open-source-notices",
@@ -223,7 +214,6 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
     if announced {
         items.push(Item::Announcements);
     }
-    items.push(Item::SshHelp);
     items.push(Item::Welcome);
     if updater {
         items.push(Item::CheckForUpdates);
@@ -237,9 +227,9 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
 /// The `?` button's hover help, naming what the menu offers, as the old toggle's did.
 fn button_help(updater: bool) -> &'static str {
     if updater {
-        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, show Welcome, or check for updates"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, show Welcome, or check for updates"
     } else {
-        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or show Welcome"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, or show Welcome"
     }
 }
 
@@ -397,9 +387,6 @@ impl HelpMenu {
             Item::ReleaseNotes => cx.open_url(RELEASE_NOTES_URL),
             Item::Announcements => {
                 let _ = crate::announcements::open_history(opener, mark, window, cx);
-            }
-            Item::SshHelp => {
-                let _ = crate::hosts::ssh_help::open(opener, mark, window, cx);
             }
             Item::Welcome => {
                 let _ = crate::welcome::open(opener, mark, window, cx);

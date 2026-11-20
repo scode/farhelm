@@ -47,8 +47,8 @@ the shared stop's keys are tested in `components::tests::dialog`)
   `help_menu::tests::the_help_button_sits_below_the_gear_with_its_name_and_help`,
   `the_menu_opens_beside_the_button_and_escape_returns_focus_to_it`, `a_second_press_on_the_button_closes_the_menu` and
   `the_items_keep_specs_order_with_the_update_check_and_the_linux_notices_last`, and end to end `gui-e2e-smoke.py`'s
-  `test_45_the_help_menu_opens_ssh_help_and_returns_to_the_button`. The arrow keys and Home and End are a deviation
-  (below, "Menu keys").
+  `test_45_the_help_menu_opens_and_returns_focus_to_the_button`. The arrow keys and Home and End are a deviation (below,
+  "Menu keys").
 - "${label} opens its page through the shared link opener" (three cases):
   `help_menu::tests::the_link_items_open_their_pages_and_close_the_menu`.
 - "the feedback Discord link opens through the shared opener and keeps the draft":

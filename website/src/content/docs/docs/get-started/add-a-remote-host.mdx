@@ -19,15 +19,8 @@ setup, billing and suspension. The rest of this page covers **SSH**.
 - Linux on an x86_64 or ARM (aarch64) machine, with systemd's services for your user account, which most distributions
   have; or an Apple-silicon Mac without the Farhelm desktop app installed. Intel Macs are not supported. Farhelm needs no
   root or sudo on either: everything it installs goes in your home directory.
-- Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
-  Farhelm uses your own ssh setup, so keys, the agent, and the Host names in `~/.ssh/config` all apply. A host that asks
-  for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
-  Farhelm's ssh connections to it by hand. Choose **? → SSH needs 2FA?** for the two commands, or follow the link in
-  **Add host** for the destination you are about to add. Run both on your Mac. Each asks for approval once and stays
-  connected in the background. Run its command again when a connection drops. The dialog also explains when a
-  connection cannot be shared from your [helm](/docs/how-it-works/the-pieces/), the part of Farhelm that shows you your
-  sessions. Adding or updating a host also opens one ssh login of its own, so a key that asks for a touch on each login
-  asks once more then.
+- SSH access from your Mac. Farhelm uses your SSH keys, agent, and the Host names in `~/.ssh/config`. Check your
+  destination by running `ssh <destination> true` in a terminal and completing any sign-in it asks for.
 - Not BusyBox: hosts whose basic command-line tools come from BusyBox are not supported.
 - Your Mac downloads Farhelm for the host and copies it over ssh. The download starts at get.farhelm.io, which hands
   the release files themselves over from GitHub, so your Mac needs to reach both. The host does not: it never needs
@@ -52,6 +45,11 @@ the name Farhelm shows for the host instead of its destination, everywhere excep
 it later in the host's settings. An agent in one of your sessions can also ask to add a host. Its request waits as a
 card, and **Open add dialog** on it opens this same dialog with the agent's destination and alias filled in
 ([Approve what agents do](/docs/using/approve-agent-requests/#host-changes)).
+
+If the host asks for a verification code, a password, or a key passphrase, enter it in **Add host**. An unfamiliar
+host key can also ask you to confirm its fingerprint. Farhelm signs in once to check and set up the host, then signs in
+again for sessions. The second question can appear after **Add host** closes. A security-key touch instruction appears
+when SSH reports it. Keys held by your SSH agent can require a touch without a notice in Farhelm.
 
 If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
 closes. Otherwise Farhelm asks first, listing each step setup would take on the host with the paths it uses. **Copy
@@ -92,8 +90,10 @@ settings behind the gear at the foot of the navigation rail; [Manage hosts](/doc
 
 ## If something goes wrong
 
-- When Farhelm cannot reach the host, the dialog shows ssh's own error. Check that `ssh <destination> true` works in
-  a terminal without a password.
+- If a connection drops, an amber key on the navigation rail and a row above your sessions tell you when the host is
+  asking you to sign in. Choose **Answer** to see the question. If it expired or you cancelled it, choose **Sign in**
+  to try again. To silence the chime, turn off **SSH sign-in** under **Settings → Notifications**.
+- When Farhelm cannot reach the host, check that `ssh <destination> true` works in a terminal.
 - A Linux host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
 - A Mac with the Farhelm desktop app installed cannot be set up, updated or uninstalled over SSH. If Farhelm is already
   running there, adding the host still uses it as it is. If a Mac lacks a command needed for setup, the dialog names the

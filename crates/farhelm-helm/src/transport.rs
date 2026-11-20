@@ -75,6 +75,12 @@ pub trait HostTransport: Send + Sync + 'static {
         Box::pin(std::future::ready(Ok(())))
     }
 
+    /// A batch failure can explain why an interactive prompt was unavailable. This is independent of the reason
+    /// the noninteractive command failed.
+    fn sign_in_unavailable(&self, _host: &HostRow) -> Option<String> {
+        None
+    }
+
     /// Open a connection for `host`. The row is passed whole (not just its
     /// destination) because an ssh row's `remote_farhelm` and
     /// `remote_state_dir` are part of how it is reached, and a test
@@ -226,6 +232,22 @@ impl HostTransport for SystemTransport {
                 )
                 .await
         })
+    }
+
+    fn sign_in_unavailable(&self, host: &HostRow) -> Option<String> {
+        if self.sign_in.is_some()
+            && host
+                .kind
+                .ssh_access()
+                .is_some_and(crate::ssh::SshAccessKind::asks_user)
+        {
+            crate::ssh::sign_in_unavailable(
+                &self.state_dir,
+                crate::ssh::SharedConnection::Supervisor,
+            )
+        } else {
+            None
+        }
     }
 
     fn connect<'a>(

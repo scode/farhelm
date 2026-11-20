@@ -109,7 +109,6 @@ table conflicted across all of it.
 | Operation outcomes              | `crates/gui/farhelm-gui/src/session_list/outcome.rs`                                                                                                                                                                                                                                                   | [reported](#operation-outcomes)          | none                                  |
 | Session age                     | `crates/gui/farhelm-gui/src/session_list/age.rs`                                                                                                                                                                                                                                                       | [reported](#session-age)                 | none                                  |
 | Host settings                   | `crates/gui/farhelm-gui/src/hosts/settings.rs`                                                                                                                                                                                                                                                         | [reported](#host-settings)               | none                                  |
-| SSH help                        | `crates/gui/farhelm-gui/src/hosts/ssh_help.rs`                                                                                                                                                                                                                                                         | [reported](#ssh-help)                    | none                                  |
 | Open-source notices             | `crates/gui/farhelm-gui/src/desktop/licenses.rs`                                                                                                                                                                                                                                                       | [reported](#open-source-notices)         | none                                  |
 | Version readout view            | `crates/gui/farhelm-gui/src/update_readout/view.rs`                                                                                                                                                                                                                                                    | [reported](#version-readout-view)        | none                                  |
 | Trash cue                       | `crates/gui/farhelm-gui/src/trash/cue.rs`                                                                                                                                                                                                                                                              | [reported](#trash-cue)                   | none                                  |
@@ -794,14 +793,6 @@ already there, and the review gate judges it.
 
 Lint exceptions: none.
 
-### SSH help
-
-Extension points: reported, the whole file: owned by the settings-and-hosts area, which built it, and shared with
-other-dialogs, whose Help menu opens it (`open`). Another area's change follows the pattern already there, and the
-review gate judges it.
-
-Lint exceptions: none.
-
 ### Open-source notices
 
 Extension points: reported, the whole file: owned by the desktop-integration-and-linux-packaging area, which built it,
@@ -1261,7 +1252,6 @@ without a conflict marker.
 | Operation outcomes     | `crates/gui/farhelm-gui/src/session_list/outcome.rs`             | `reported`    |
 | Session age            | `crates/gui/farhelm-gui/src/session_list/age.rs`                 | `reported`    |
 | Host settings          | `crates/gui/farhelm-gui/src/hosts/settings.rs`                   | `reported`    |
-| SSH help               | `crates/gui/farhelm-gui/src/hosts/ssh_help.rs`                   | `reported`    |
 | Open-source notices    | `crates/gui/farhelm-gui/src/desktop/licenses.rs`                 | `reported`    |
 | Version readout view   | `crates/gui/farhelm-gui/src/update_readout/view.rs`              | `reported`    |
 | Trash cue              | `crates/gui/farhelm-gui/src/trash/cue.rs`                        | `reported`    |

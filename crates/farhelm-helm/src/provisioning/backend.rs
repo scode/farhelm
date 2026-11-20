@@ -2671,12 +2671,25 @@ impl ProvisioningBackend for SystemBackend {
                 {
                     return Err(BackendFailure::session_limit(reason, stderr.diagnostic()));
                 }
-                Err(BackendFailure::new(
+                let detail = if status.code() == Some(255)
+                    && !stderr.command_started
+                    && let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+                        access,
+                        ..
+                    }) = &target.transport
+                    && access.asks_user()
+                    && let Some(reason) = crate::ssh::sign_in_unavailable(
+                        &self.control_dir,
+                        crate::ssh::SharedConnection::Provisioning,
+                    ) {
+                    // Setup's socket can exceed the limit by one byte while the sessions socket still fits.
+                    format!("SSH could not connect or log in to the host. {reason}")
+                } else {
                     format!(
                         "the supervisor probe closed before hello completion with exit status {status}"
-                    ),
-                    stderr.diagnostic(),
-                ))
+                    )
+                };
+                Err(BackendFailure::new(detail, stderr.diagnostic()))
             }
             result => {
                 let message = match result {

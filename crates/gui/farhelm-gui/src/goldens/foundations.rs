@@ -92,8 +92,8 @@ pub(super) fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElemen
         .into_any_element()
 }
 
-/// The command well (`.ssh-help-command` and `.tensorlake-command` in the old stylesheet) at SSH help's width: a short
-/// command whose BEL shows escaped, and a long one that wraps inside its well, each with Copy centered beside it.
+/// At a common dialog width, a short command shows its BEL escaped, and a long command wraps inside its well.
+/// Both keep Copy centered beside the text.
 pub(super) fn command_wells(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
     let well = |id: &'static str, command: String| {

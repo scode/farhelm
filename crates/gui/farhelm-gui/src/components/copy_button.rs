@@ -1,14 +1,10 @@
 //! The copy control: a button that puts a fixed text on the clipboard.
 //!
-//! The old app had a copy button in a few places only (SPEC.md and the migration's decisions keep exactly those): the
-//! host setup confirmation's Copy plan, SSH help's two commands, the Tensorlake key command and the uninstall notice's
-//! path. Each copies text frozen when the button was drawn, so what lands on the clipboard is what the user was shown.
-//! One shared control so they cannot drift apart: Copy plan uses it directly, and SSH help's commands and the Tensorlake
-//! key command through the well they share ([`super::CommandWell`]).
+//! Copy plan, the Tensorlake key command and the uninstall notice copy text frozen when the button was drawn, so
+//! the clipboard gets what the user was shown. The Tensorlake key command draws it through [`super::CommandWell`].
 //!
-//! NOTE: No "copied" confirmation of its own. Neither the old Copy plan nor SSH help's Copy showed one (reference commit
-//! `24bc0580`). The old Tensorlake key command's Copy did, as a line under the command ("Command copied") that its
-//! section drew, so [`copy_button_then`] tells the owner of each copy and the owner draws the line. The details bar's
+//! Copy plan leaves its label unchanged. The Tensorlake key command draws "Command copied" under the command when
+//! [`copy_button_then`] tells the settings section the clipboard was written. The details bar's
 //! directory and command line confirm too, but they are a different control: a value drawn as itself rather than a
 //! labelled button, which says "✓ Copied" for a moment after each click ([`super::CopyField`]). All of them write the
 //! clipboard through [`write`], so they cannot drift apart on how.

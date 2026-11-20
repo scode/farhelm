@@ -4627,7 +4627,7 @@ impl HostActor {
             }
             return failure(row, error);
         }
-        match tokio::time::timeout(
+        let mut outcome = match tokio::time::timeout(
             self.cadence.attempt_timeout,
             self.attempt(row, &mut progress),
         )
@@ -4651,7 +4651,16 @@ impl HostActor {
                 };
                 self.connection_timeout(row, context)
             }
+        };
+        // A too-long state path still permits ordinary key authentication. Explain its effect on interactive
+        // sign-in only when that batch attempt fails before a supervisor can answer.
+        if progress.stage == ConnectionStage::ConnectingToHost
+            && let AttemptOutcome::Failed { error, .. } = &mut outcome
+            && let Some(unavailable) = self.transport.sign_in_unavailable(row)
+        {
+            *error = format!("{unavailable} {error}");
         }
+        outcome
     }
 
     /// A pre-question deadline and a batch dial deadline are the same retryable connection failure to the user.
