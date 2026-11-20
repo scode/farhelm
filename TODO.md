@@ -284,6 +284,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
+- **First-class shell sessions.** support more directly "just run a shell" (no agent). technically possible already with
+  a custom command but let's make it simple and first class by adding a "shell" type besides agent+command, and to start
+  with supporting bash and zsh. both bash and zsh should be supported as typing shortcuts so you can just type "bash"
+  and hit enter (like you can type claude and hit enter). it automatically means yolo. probably /usr/bin/env bash and
+  /usr/bin/env zsh to remain portable. need to pick what to use for icons.
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
