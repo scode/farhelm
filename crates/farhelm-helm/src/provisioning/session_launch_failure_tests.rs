@@ -78,6 +78,7 @@ impl Fixture {
             preparation_backend: backend,
             payloads,
             delivery: delivery.clone(),
+            setup_sign_in: None,
         };
         let installer = sources.environment_preparer(root.path());
         let tensorlake =

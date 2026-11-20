@@ -54,6 +54,8 @@ linux/host-add-dialog-agent--dark.png a93fb1059a0295108c15f0b83d7381b96e55aa2a
 linux/host-add-dialog-agent--light.png d8229930bb06f7ff0722bbb26da7aee6cd4fb5b9
 linux/host-add-setup-plan--dark.png 64261b4eb80333b94d2a3aced55f31ecf3ed7fd1
 linux/host-add-setup-plan--light.png 7a7f9d6081a5a31ad4bfd0f14aced429bc19ff18
+linux/host-add-ssh-sign-in--dark.png 35477ffc5be18dd44280d384fbef6a7dd3fe7be6
+linux/host-add-ssh-sign-in--light.png 157c4833e1915ce9177dd996703fa32fd10cc26f
 linux/host-add-takeover--dark.png cdb867e519bbddc2a3d9338bf9371c24bca5189b
 linux/host-add-takeover--light.png 7918d597a5a7f5e26f3bd04374089f0d6ba6d6a1
 linux/host-add-tensorlake-creation--dark.png 6335f72bd17ef73604f3245b1f3d7ffe30597203

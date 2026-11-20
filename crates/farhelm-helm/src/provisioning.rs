@@ -36,6 +36,7 @@ mod payloads;
 mod plan;
 mod release_payloads;
 mod service;
+mod setup_sign_in;
 mod snapshot_preparer;
 // What a test's stand-in for `ssh` must do with the helm's pipes; every ssh
 // launcher in these tests goes through it.
@@ -62,6 +63,7 @@ pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_sign
 // tests reuse the same complete launch fixture without widening production APIs.
 pub(crate) use service::session_launch_failure_tests;
 pub(crate) use service::{AutomaticUpdates, ProductionProvisioning, ProvisioningService, RunTask};
+pub(crate) use setup_sign_in::{cancel as cancel_ssh_sign_in, list as ssh_sign_in_completions};
 
 #[cfg(test)]
 mod tests {
@@ -5610,6 +5612,381 @@ mod tests {
         let status = response.status();
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// Setup reaches Attach while the new host's sessions connection is already asking. Attachment must preserve
+    /// that dial, wait past its normal 30-second budget and distinguish answering from cancelling the question.
+    #[farhelm_testtrace::test]
+    async fn attach_waits_for_the_sessions_question_instead_of_retrying_it() {
+        use crate::manager::{ConnectionStage, HostState};
+        use crate::transport::{HostTransport, TransportConnection};
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Asking {
+            host: HostId,
+            fleet: Arc<crate::rest_harness::ScriptedFleet>,
+            release: tokio::sync::Notify,
+            attempts: AtomicUsize,
+            answer: bool,
+            fail_first_hello: bool,
+        }
+
+        impl HostTransport for Asking {
+            fn sign_in<'a>(
+                &'a self,
+                host: &'a crate::store::HostRow,
+                _deadline: Duration,
+                _startup: bool,
+                question: &'a mut (dyn FnMut(bool) + Send),
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+                Box::pin(async move {
+                    if host.id != self.host {
+                        return Ok(());
+                    }
+                    if self.attempts.fetch_add(1, Ordering::Relaxed) != 0 {
+                        // Once the test has answered, the master is live even if the supervisor is not ready yet.
+                        return Ok(());
+                    }
+                    question(true);
+                    self.release.notified().await;
+                    question(false);
+                    if self.answer {
+                        Ok(())
+                    } else {
+                        Err(crate::ssh_sign_in::SignInNeeded.into())
+                    }
+                })
+            }
+
+            fn connect<'a>(
+                &'a self,
+                host: &'a crate::store::HostRow,
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>
+            {
+                if host.id == self.host
+                    && self.fail_first_hello
+                    && self.attempts.load(Ordering::Relaxed) == 1
+                {
+                    return Box::pin(std::future::ready(Err(anyhow::anyhow!(
+                        "supervisor still starting"
+                    ))));
+                }
+                self.fleet.connect(host)
+            }
+        }
+
+        tokio::time::pause();
+        for (answer, fail_first_hello) in [(true, false), (false, false), (true, true)] {
+            let mut harness = harness().await;
+            harness.manager.shutdown();
+            let host = harness
+                .store
+                .add_ssh_host("setup.example", None, None)
+                .await
+                .unwrap();
+            let transport = Arc::new(Asking {
+                host,
+                fleet: Arc::clone(&harness.fleet),
+                release: tokio::sync::Notify::new(),
+                attempts: AtomicUsize::new(0),
+                answer,
+                fail_first_hello,
+            });
+            harness.manager = ConnectionManager::start(
+                harness.store.clone(),
+                transport.clone(),
+                crate::manager::Cadence {
+                    connect_backoff: vec![],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                harness.manager.wait_for_state(host, |state| {
+                    matches!(
+                        state,
+                        HostState::Connecting {
+                            stage: ConnectionStage::WaitingForSignIn,
+                            ..
+                        }
+                    )
+                }),
+            )
+            .await
+            .expect("premise: the first dial asks")
+            .unwrap();
+
+            let root = super::ssh_stand_in::control_root();
+            let mut service = service(
+                &harness,
+                FakeBackend::supervisor(root.path().into()),
+                root.path(),
+            );
+            let sign_in = Arc::new(crate::ssh_sign_in::SignIn::new(
+                root.path().into(),
+                "/bin/true".into(),
+                Arc::default(),
+            ));
+            Arc::get_mut(&mut service).unwrap().setup_sign_in = Some(Arc::new(
+                super::setup_sign_in::SetupSignIn::new(sign_in, "/bin/true".into()),
+            ));
+            let target = ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+                destination: "setup.example".into(),
+                access: crate::ssh::SshAccessKind::UserConfig,
+            });
+            let attach = service.attach_supervisor(host, &target);
+            tokio::pin!(attach);
+            assert!(futures_util::poll!(&mut attach).is_pending());
+            // sleep-ok: cross the old attach deadline while the still-live sign-in holds its question.
+            tokio::time::advance(Duration::from_secs(31)).await;
+            assert!(futures_util::poll!(&mut attach).is_pending());
+            assert_eq!(transport.attempts.load(Ordering::Relaxed), 1);
+            transport.release.notify_one();
+            let result = tokio::time::timeout(Duration::from_secs(5), attach)
+                .await
+                .expect("attachment settles after the answer");
+            if answer {
+                assert!(matches!(result, Ok(ActionOutcome::Completed)));
+                assert!(harness.manager.status(host).unwrap().state.is_connected());
+            } else {
+                let failure = result.unwrap_err().rendered();
+                assert!(failure.starts_with("Sign-in needed"), "{failure}");
+            }
+            assert_eq!(
+                transport.attempts.load(Ordering::Relaxed),
+                1 + usize::from(fail_first_hello)
+            );
+        }
+    }
+
+    /// Add planning returns promptly enough to free the UI's command slot for the answer. Batch discovery starts
+    /// only on the repeated request, after the sign-in attempt confirms its setup socket.
+    #[farhelm_testtrace::test]
+    async fn ssh_setup_preflight_returns_pending_then_allows_the_probe() {
+        use farhelm_proto::ui_channel::{
+            PendingSshSignIn, SshConnectionPurpose, SshQuestionTarget, SshSignInCompletion,
+            SshSignInOutcome,
+        };
+        use std::os::unix::fs::PermissionsExt as _;
+
+        /// The completion for this exact reply id is the oracle for cancellation, timeout and authentication.
+        async fn completed_attempt(
+            router: &axum::Router,
+            feed: &mut tokio::sync::watch::Receiver<u64>,
+            attempt: &str,
+        ) -> SshSignInOutcome {
+            tokio::time::timeout(Duration::from_secs(7), async {
+                loop {
+                    let reply = router
+                        .clone()
+                        .oneshot(
+                            axum::http::Request::builder()
+                                .uri("/api/ssh-sign-in-completions")
+                                .header("host", "127.0.0.1:7433")
+                                .body(Body::empty())
+                                .unwrap(),
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(reply.status(), StatusCode::OK);
+                    let body = to_bytes(reply.into_body(), 16 * 1024).await.unwrap();
+                    let snapshot: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    let completions: Vec<SshSignInCompletion> =
+                        serde_json::from_value(snapshot["completions"].clone()).unwrap();
+                    if let Some(done) = completions.into_iter().find(|done| done.attempt == attempt)
+                    {
+                        return done.outcome;
+                    }
+                    feed.changed().await.unwrap();
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("no completion for setup attempt {attempt}"))
+        }
+
+        let mut harness = harness().await;
+        let root = super::ssh_stand_in::control_root();
+        let program = root.path().join("ssh");
+        // Model the SSH process's two local inspections and its askpass exchange. The marker belongs only to
+        // this fixture and stands for a live setup master that subsequent clients can reuse.
+        std::fs::write(
+            &program,
+            r#"#!/usr/bin/env python3
+import os
+from pathlib import Path
+import signal
+import socket
+import struct
+import sys
+
+master = Path(__file__).with_name("setup-master")
+assert any(arg.startswith('ControlPath="') and arg.endswith('/p%C"') for arg in sys.argv)
+if "-O" in sys.argv:
+    sys.exit(0 if master.is_file() else 255)
+if "-G" in sys.argv:
+    print(f"controlpath {master}")
+    sys.exit(0)
+
+assert "BatchMode=no" in sys.argv and sys.argv[-1] == "true"
+if "offline.example" in sys.argv:
+    Path(__file__).with_name("offline-attempt").touch()
+    signal.pause()
+silent = Path(__file__).with_name("silent-first-attempt")
+if not silent.exists():
+    silent.touch()
+    signal.pause()
+prompt = b"Verification code:"
+with socket.socket(socket.AF_UNIX) as connection:
+    connection.connect(os.environ["FARHELM_SSH_ASKPASS_SOCKET"])
+    connection.sendall(struct.pack("!BH", 0, len(prompt)) + prompt)
+    with connection.makefile("rb") as response:
+        size = struct.unpack("!H", response.read(2))[0]
+        if response.read(size) != b"fixture-code":
+            sys.exit(255)
+master.touch()
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let mut service = service(&harness, backend.clone(), root.path());
+        let questions = Arc::new(crate::askpass::Questions::default());
+        questions.publish_to(Arc::clone(harness.manager.events()));
+        let sign_in = Arc::new(crate::ssh_sign_in::SignIn::new(
+            root.path().to_path_buf(),
+            PathBuf::from("/bin/true"),
+            Arc::clone(&questions),
+        ));
+        Arc::get_mut(&mut service).unwrap().setup_sign_in = Some(Arc::new(
+            super::setup_sign_in::SetupSignIn::new(sign_in, program)
+                .with_timeout(Duration::from_secs(3)),
+        ));
+        let mut state = AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            service,
+        );
+        state.ssh_questions = Arc::clone(&questions);
+        harness.state = Arc::new(state);
+        let router = harness.router();
+        let request = |path: &str, body: serde_json::Value| {
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let probe = || {
+            request(
+                "/api/hosts/probe",
+                serde_json::json!({
+                    "target": {"kind": "ssh", "destination": "setup.example"},
+                    "new_entry":{"alias":"Setup test"},
+                }),
+            )
+        };
+        let mut feed = harness.manager.events().subscribe();
+        let (status, body) = send(&router, probe()).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let abandoned: PendingSshSignIn = serde_json::from_str(&body).unwrap();
+        let silent = root.path().join("silent-first-attempt");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !silent.is_file() {
+                // sleep-ok: poll for the owned SSH stand-in to reach its silent blocking point.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("premise: the first child reached the wait before asking");
+        assert!(questions.list().is_empty());
+        let cancel_path = format!("/api/ssh-sign-in-drafts/{}/cancel", abandoned.attempt);
+        let (status, _) = send(&router, request(&cancel_path, serde_json::Value::Null)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            completed_attempt(&router, &mut feed, &abandoned.attempt).await,
+            SshSignInOutcome::Failed {
+                reason: "SSH sign-in was cancelled".into()
+            }
+        );
+
+        // A different silent destination times out independently of closing the abandoned draft.
+        let (status, body) = send(
+            &router,
+            request(
+                "/api/hosts/probe",
+                serde_json::json!({
+                    "target": {"kind": "ssh", "destination": "offline.example"},
+                    "new_entry": {"alias": "Offline test"},
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let offline: PendingSshSignIn = serde_json::from_str(&body).unwrap();
+        let outcome = completed_attempt(&router, &mut feed, &offline.attempt).await;
+        assert!(
+            root.path().join("offline-attempt").is_file(),
+            "premise: the preflight reached the silent peer"
+        );
+        assert!(questions.list().is_empty());
+        assert_eq!(
+            outcome,
+            SshSignInOutcome::Failed {
+                reason: "the supervisor probe timed out".into()
+            }
+        );
+
+        let (status, body) = send(&router, probe()).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let pending: PendingSshSignIn = serde_json::from_str(&body).unwrap();
+        let question = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(question) = questions.list().into_iter().next() {
+                    break question;
+                }
+                feed.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("the setup SSH process should be waiting for a code");
+        assert_eq!(question.purpose, SshConnectionPurpose::Setup);
+        assert_eq!(question.attempt, pending.attempt);
+        assert_eq!(
+            question.target,
+            SshQuestionTarget::Draft {
+                draft: pending.attempt.clone()
+            }
+        );
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let (status, body) = send(
+            &router,
+            request(
+                &format!("/api/ssh-questions/{}", question.id),
+                serde_json::json!({"action":"send", "answer":"fixture-code"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        let outcome = completed_attempt(&router, &mut feed, &pending.attempt).await;
+        assert_eq!(outcome, SshSignInOutcome::Ready);
+        assert!(questions.list().is_empty());
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let (status, body) = send(&router, probe()).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["result"],
+            "discovered"
+        );
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     /// Spec: `POST /api/hosts/probe` answers within the host reply bound when

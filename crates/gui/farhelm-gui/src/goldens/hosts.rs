@@ -53,11 +53,47 @@ pub(super) fn hosts_shown_with_a_host_chosen_setup(
 /// `host-add-dialog`), with `dev@new-box` in the destination field, which holds focus. The opener is the scene's ring
 /// handle. The fake and the connection are kept for the scene's life, like Settings'.
 pub(super) fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    host_add(state, window, cx, None);
+}
+
+/// Add host owns the setup question inline, with room for the destination, explanation and masked answer.
+pub(super) fn host_add_sign_in_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::ui_channel::{SshConnectionPurpose, SshQuestion, SshQuestionTarget};
+    host_add(
+        state,
+        window,
+        cx,
+        Some(SshQuestion {
+            id: "golden-add-question".into(),
+            attempt: "golden-add-check".into(),
+            target: SshQuestionTarget::Draft {
+                draft: "golden-add-check".into(),
+            },
+            purpose: SshConnectionPurpose::Setup,
+            startup: false,
+            prompt: "Verification code:".into(),
+            notice: false,
+            expires_at: i64::MAX,
+        }),
+    );
+}
+
+fn host_add(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+    question: Option<farhelm_proto::ui_channel::SshQuestion>,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(vec![crate::hosts::tests::hosts(
+    let mut snapshot = vec![crate::hosts::tests::hosts(
         &crate::hosts::tests::reference_hosts(),
-    )]);
+    )];
+    let attempt = question.as_ref().map(|question| question.attempt.clone());
+    if let Some(question) = question {
+        snapshot.push(crate::sign_in::tests::questions(&[question]));
+    }
+    helm.connect(snapshot);
     // The dialog opens only over a live UI session, which the snapshot's connection makes after this setup returns:
     // open once the connection has one, and only once.
     let handle = window.window_handle();
@@ -75,6 +111,11 @@ pub(super) fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx:
             if let Some(dialog) = dialog {
                 let input = dialog.read(cx).destination_input();
                 input.set_text("dev@new-box", window, cx);
+                if let Some(attempt) = &attempt {
+                    dialog.update(cx, |dialog, cx| {
+                        dialog.wait_for_setup_for_golden(attempt, "dev@new-box", window, cx);
+                    });
+                }
             }
         });
     });

@@ -85,13 +85,7 @@ pub(crate) struct ProvisionRequest {
 /// `farhelm-proto`'s, which the GUI decodes; the plan in it is the helm's own.
 pub(super) type ProbeResponse = farhelm_proto::provisioning::ProbeReply<ProvisioningPlan>;
 
-/// Identity returned before a long provision or update continues in the
-/// background.
-#[derive(Debug, Serialize)]
-pub(crate) struct RunAccepted {
-    pub(crate) host_id: HostId,
-    pub(crate) run_id: String,
-}
+pub(crate) use farhelm_proto::provisioning::RunAccepted;
 
 /// A frozen UPDATE or UNINSTALL plan with the helm's step descriptions.
 /// Posting its opaque id back to the same host route consumes it exactly once
@@ -182,8 +176,9 @@ pub(crate) async fn probe_host(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<ProbeRequest>,
 ) -> Response {
-    crate::sessions::within_host_reply_bound_saying(
-        async move {
+    planning_reply(
+        state,
+        move |state| async move {
             let result = if matches!(
                 request.target,
                 ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. }
@@ -257,9 +252,10 @@ pub(crate) async fn update_host(
             Err(error) => provisioning_error(error),
         },
         None => {
-            crate::sessions::within_host_reply_bound_saying(
-                async move {
-                    match state.provisioning.plan_update(host).await {
+            planning_reply(
+                state,
+                move |state| async move {
+                    match state.provisioning.plan_update_for_ui(host).await {
                         Ok(plan) => axum::Json(plan).into_response(),
                         Err(error) => provisioning_error(error),
                     }
@@ -300,8 +296,9 @@ pub(crate) async fn uninstall_host(
             }
         }
         None => {
-            crate::sessions::within_host_reply_bound_saying(
-                async move {
+            planning_reply(
+                state,
+                move |state| async move {
                     match state.provisioning.plan_uninstall(host).await {
                         Ok(plan) => axum::Json(plan).into_response(),
                         Err(error) => provisioning_error(error),
@@ -340,6 +337,17 @@ pub(crate) async fn provisioning_runs(State(state): State<Arc<AppState>>) -> Res
 /// Only the Remove remedy carries a machine-readable header: the response
 /// body can include remote text and is never authority for a UI action.
 pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
+    if let Some(start) = error.downcast_ref::<super::setup_sign_in::Pending>() {
+        let mut reply = (
+            StatusCode::ACCEPTED,
+            axum::Json(farhelm_proto::ui_channel::PendingSshSignIn {
+                attempt: start.attempt.id.clone(),
+            }),
+        )
+            .into_response();
+        reply.extensions_mut().insert(start.clone());
+        return reply;
+    }
     if error.is::<BackendFailure>() {
         return (StatusCode::BAD_GATEWAY, format!("{error:#}")).into_response();
     }
@@ -361,6 +369,28 @@ pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
         return response;
     }
     http_error(error)
+}
+
+/// Keep the existing deadline and owned batch work. An interactive preflight only starts when the pending reply
+/// has won that deadline. A late 504's detached planning task can never strand a question for an unknown draft.
+async fn planning_reply<F>(
+    state: Arc<AppState>,
+    work: impl FnOnce(Arc<AppState>) -> F,
+    timed_out: String,
+) -> Response
+where
+    F: std::future::Future<Output = Response> + Send + 'static,
+{
+    let mut reply =
+        crate::sessions::within_host_reply_bound_saying(work(Arc::clone(&state)), timed_out).await;
+    if let Some(start) = reply
+        .extensions_mut()
+        .remove::<super::setup_sign_in::Pending>()
+        && let Some(setup) = &state.provisioning.setup_sign_in
+    {
+        setup.start(start, Arc::clone(state.manager.events()));
+    }
+    reply
 }
 
 #[cfg(test)]

@@ -125,55 +125,55 @@ and registers the host — no separate host-side setup. The setup question names
 launchd job it will write. On Linux it says the supervisor runs persistently and starts at boot (or at login when
 lingering is refused); on a remote Mac it names the job's label, says it runs now and restarts after a crash, and states
 the measured reboot behavior. The user may choose to skip this setup question for later additions from the same helm;
-that choice is shared by every client and does not change discovery of an already-running supervisor. Passwordless SSH
-is the prerequisite on the HOST side, plus, on the helm's own machine, access to get.farhelm.io or a staged payload
-directory (a developer-facing, best-effort option; see [Supported host setup](#supported-host-setup)). With that in
-place, provisioning and everyday operation just work out of the box — reaching supervisors needs no port forwards, no
-opened firewall ports, and no address configuration beyond the SSH destination. Downloads go directly to get.farhelm.io,
-whose archive links redirect to the project's GitHub releases; there is no other download source to configure. Neither
-get.farhelm.io nor GitHub is a relay or rendezvous service for Farhelm sessions or connections, and the no-relay
-guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all happen as
-the SSH user (user-level systemd on Linux or launchd on a remote Mac, files in user-owned directories). If some optional
-step cannot be done without privileges on a given host, provisioning says so and continues without it rather than
-escalating. Before touching the host for initial setup, the helm states exactly what it is about to do in concrete terms
-— the files it will place and where, the background service it will create, and its persistence behavior — and proceeds
-only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but the user's
-Update click or explicit automatic-update opt-in is the authorization: no plan is shown for confirmation. Update never
-downgrades a host: it installs the helm's own build, so a host whose supervisor reports a newer build is refused with
-both versions named, and the user updates the helm instead. It also refuses a host whose supervisor reports a database
-schema newer than the helm's build can open, which happens after a development build ran there; that host needs a build
-at least that new. A supervisor below this release's upgrade floor is also refused, with a manual recovery remedy: stop
-its Farhelm supervisor service, then remove its dedicated Farhelm installation directory. The remedy names the
-executable the host reported; its parent may be a shared or custom binary directory, in which case only Farhelm-owned
-files are removed and the shared directory stays. Then remove the host from Farhelm and set it up again. Its data
-directory can stay, without a promise that the new release can use every feature's old data, or the user can delete it
-too if they accept losing it. While an update is running, its host row stays folded and shows `Updating…` until a
-progress snapshot is available, then shows the current step, completed-step count, and client-measured elapsed time
-inline in the status spot. Hovering that status opens the same card as a working host in the attention list: the host's
-mark and name, operation and completed-step count with elapsed time, every step with its status and explanation, the
-current step highlighted, and any degraded or failed step's reason. Connection detail follows the steps while the host
-is not connected, including the attempt and last connection error, and the run's own message follows when present. In a
-short window the step list shrinks, keeping the current step in view as it changes. If connection detail or a run
-message cannot fit beside a readable current step, only the oversized text becomes a preview of whole lines from its end
-and the card says `Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts
-through the host identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The
-card uses the shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the
-status label. The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings
-replace the animated indicator with a static one. Remote binary upload appears as a separate step before installation,
-so the user can tell when network transfer is still underway. The row and its hover use the helm's readable names for
-the same steps in the plan, with completed work checked green, the running step pulsing amber (static under reduced
-motion), pending work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's
-reason. Success returns the status spot to its normal label and leaves the row folded unless global details are on.
-Failure or an uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When
-setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark
-until Hosts is opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning,
-and an unrelated successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run.
-Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each
-remote host whose individual Update action is available at the click. A host already busy with setup or another run is
-skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
-progress, and result, so one failure does not hide or delay the others. Having an available Update action does not
-itself mean the host needs an update: the rail's update badge and the attention list's Update rows require a compatible
-older build or a lower protocol, as well as an available remote Update action.
+that choice is shared by every client and does not change discovery of an already-running supervisor. The helm needs SSH
+access to the host and, on its own machine, access to get.farhelm.io or a staged payload directory (a developer-facing,
+best-effort option; see [Supported host setup](#supported-host-setup)). With that in place, provisioning and everyday
+operation just work out of the box — reaching supervisors needs no port forwards, no opened firewall ports, and no
+address configuration beyond the SSH destination. Downloads go directly to get.farhelm.io, whose archive links redirect
+to the project's GitHub releases; there is no other download source to configure. Neither get.farhelm.io nor GitHub is a
+relay or rendezvous service for Farhelm sessions or connections, and the no-relay guarantee below still holds. Nothing
+the supervisor does requires root: install, updates, and operation all happen as the SSH user (user-level systemd on
+Linux or launchd on a remote Mac, files in user-owned directories). If some optional step cannot be done without
+privileges on a given host, provisioning says so and continues without it rather than escalating. Before touching the
+host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it will place and
+where, the background service it will create, and its persistence behavior — and proceeds only on confirmation. Remote
+updates use the same one-use plan mechanism behind the same authority, but the user's Update click or explicit
+automatic-update opt-in is the authorization: no plan is shown for confirmation. Update never downgrades a host: it
+installs the helm's own build, so a host whose supervisor reports a newer build is refused with both versions named, and
+the user updates the helm instead. It also refuses a host whose supervisor reports a database schema newer than the
+helm's build can open, which happens after a development build ran there; that host needs a build at least that new. A
+supervisor below this release's upgrade floor is also refused, with a manual recovery remedy: stop its Farhelm
+supervisor service, then remove its dedicated Farhelm installation directory. The remedy names the executable the host
+reported; its parent may be a shared or custom binary directory, in which case only Farhelm-owned files are removed and
+the shared directory stays. Then remove the host from Farhelm and set it up again. Its data directory can stay, without
+a promise that the new release can use every feature's old data, or the user can delete it too if they accept losing it.
+While an update is running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then
+shows the current step, completed-step count, and client-measured elapsed time inline in the status spot. Hovering that
+status opens the same card as a working host in the attention list: the host's mark and name, operation and
+completed-step count with elapsed time, every step with its status and explanation, the current step highlighted, and
+any degraded or failed step's reason. Connection detail follows the steps while the host is not connected, including the
+attempt and last connection error, and the run's own message follows when present. In a short window the step list
+shrinks, keeping the current step in view as it changes. If connection detail or a run message cannot fit beside a
+readable current step, only the oversized text becomes a preview of whole lines from its end and the card says
+`Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host
+identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the
+shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label.
+The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
+animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
+can tell when network transfer is still underway. The row and its hover use the helm's readable names for the same steps
+in the plan, with completed work checked green, the running step pulsing amber (static under reduced motion), pending
+work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success
+returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or an
+uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update
+fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is
+opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated
+successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never
+opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each remote host
+whose individual Update action is available at the click. A host already busy with setup or another run is skipped
+rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation, progress,
+and result, so one failure does not hide or delay the others. Having an available Update action does not itself mean the
+host needs an update: the rail's update badge and the attention list's Update rows require a compatible older build or a
+lower protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
 helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
@@ -5584,7 +5584,11 @@ when SSH stops waiting for the touch. The host's rail avatar carries an amber ke
 Hosts and the unavailable session card each offer **Sign in**. An open question can play a chime under **Settings →
 Notifications → SSH sign-in**, on by default.
 
-Setup and updates can still use a connection opened using **? → SSH needs 2FA?**.
+Add host shows the setup connection's question inside the dialog, below the destination field. Cancelling this sign-in
+stops the check and keeps the destination and alias. The sessions connection may ask again after the dialog closes.
+Setup, Update and Uninstall can ask for the setup connection through the attention row. If the setup connection expired
+while a confirmation was open, confirming can require another sign-in before work starts. A question gets focus only
+while the user is still waiting on the action that caused it.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to

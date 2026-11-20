@@ -853,6 +853,15 @@ fn api_router(state: Arc<AppState>) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
         .route("/api/ssh-questions", get(askpass::list))
+        .route(
+            "/api/ssh-sign-in-completions",
+            get(provisioning::ssh_sign_in_completions),
+        )
+        // Cancellation dispatch is synchronous; the attempt owns cleanup after the signal.
+        .route(
+            "/api/ssh-sign-in-drafts/{attempt}/cancel",
+            axum::routing::post(provisioning::cancel_ssh_sign_in),
+        )
         // After the bounded body is read, validation and the one-shot reply run in one poll. The SSH attempt
         // owns forwarding or cancellation, so the route has no suspended mutation to hand to an owned task.
         .route(
@@ -1401,11 +1410,20 @@ async fn serve_with_ready(
     }
     // Before the manager: its actors check a Tensorlake host's sandbox
     // through this service before every dial, from their first attempt on.
+    let ssh_questions = Arc::new(askpass::Questions::default());
+    let sign_in = args.ssh_askpass_program.as_ref().map(|cli| {
+        Arc::new(ssh_sign_in::SignIn::new(
+            state_dir.clone(),
+            cli.clone(),
+            Arc::clone(&ssh_questions),
+        ))
+    });
     let sources = provisioning::ProductionProvisioning::new(
         store.clone(),
         &state_dir,
         args.payload_selection(),
         RELEASE_BUILD,
+        sign_in.clone(),
     )?;
     let tensorlake = tensorlake::Tensorlake::production_with_delivery(
         store.clone(),
@@ -1424,10 +1442,6 @@ async fn serve_with_ready(
         sources.environment_preparer(&state_dir),
     ));
     let providers = environment::Providers::new(Arc::new(tensorlake.clone()), podman.clone());
-    let ssh_questions = Arc::new(askpass::Questions::default());
-    let sign_in = args
-        .ssh_askpass_program
-        .map(|cli| ssh_sign_in::SignIn::new(state_dir.clone(), cli, Arc::clone(&ssh_questions)));
     let manager = manager::ConnectionManager::start_with_providers(
         store.clone(),
         Arc::new(manager::SystemTransport::with_store(

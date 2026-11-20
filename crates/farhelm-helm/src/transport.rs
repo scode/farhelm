@@ -116,7 +116,7 @@ pub struct SystemTransport {
     /// Injecting the executable keeps process-ordering tests independent of
     /// the running test process's PATH and the operator's SSH configuration.
     ssh_program: PathBuf,
-    sign_in: Option<crate::ssh_sign_in::SignIn>,
+    sign_in: Option<Arc<crate::ssh_sign_in::SignIn>>,
     /// Production refreshes registry routes per attempt. Row-injected fixtures
     /// can omit the store while using the same command and lifetime machinery.
     store: Option<HelmStore>,
@@ -146,7 +146,7 @@ impl SystemTransport {
         state_dir: impl Into<PathBuf>,
         store: HelmStore,
         places: Arc<crate::environment::podman_probe::PodmanPlaces>,
-        sign_in: Option<crate::ssh_sign_in::SignIn>,
+        sign_in: Option<Arc<crate::ssh_sign_in::SignIn>>,
     ) -> Self {
         Self {
             store: Some(store),
@@ -215,12 +215,12 @@ impl HostTransport for SystemTransport {
                 .destination
                 .as_deref()
                 .context("an SSH host has no destination")?;
+            let attempt = crate::ssh_sign_in::Attempt::for_sessions(host.id, startup);
             sign_in
                 .establish(
                     &self.ssh_program,
                     destination,
-                    host.id,
-                    startup,
+                    &attempt,
                     deadline,
                     on_question,
                 )

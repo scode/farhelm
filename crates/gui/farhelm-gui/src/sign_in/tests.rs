@@ -1,6 +1,7 @@
 //! Drive sign-in through the real window and fake pushed collections so focus and wire behavior share the same test.
 
 use farhelm_helm_client::fake::FakeHelm;
+use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
     Preferences, SshConnectionPurpose, SshQuestion,
@@ -8,7 +9,7 @@ use farhelm_proto::ui_channel::{
 use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
 
-use crate::hosts::tests::{aliased, connected, host, hosts};
+use crate::hosts::tests::{aliased, connected, connecting, host, hosts, progress, run};
 use crate::session_list::host_rail::tests::answer_everything;
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::test_support::{
@@ -48,7 +49,7 @@ pub(crate) fn question(id: &str, host: i64, prompt: &str, notice: bool) -> SshQu
     SshQuestion {
         id: id.to_owned(),
         attempt: id.to_owned(),
-        host,
+        target: farhelm_proto::ui_channel::SshQuestionTarget::Host { host },
         purpose: SshConnectionPurpose::Sessions,
         startup: false,
         prompt: prompt.to_owned(),
@@ -121,6 +122,7 @@ fn open<'a>(
                 remote(3, "bench-box", connected()),
             ]),
             questions(pending),
+            progress(&[]),
         ],
     );
     window.cx.simulate_resize(size(px(1000.), px(700.)));
@@ -128,6 +130,58 @@ fn open<'a>(
     answer_everything(&mut window.helm);
     settle(window.cx);
     window
+}
+
+/// The new host's setup master can ask and finish before the sessions master has any question. The accepted
+/// setup answer carries the Add action to that distinct master while the user is still waiting for it.
+#[gpui::test]
+fn add_run_can_focus_the_sessions_question_after_setup_finishes(cx: &mut TestAppContext) {
+    let mut app = open(cx, &[], connecting(1, None));
+    keys(app.cx, "escape");
+    let mut run = run(2, ProvisioningOperation::Add, RunStatus::Running);
+    let progress_state = |view| {
+        let state = progress(&[view]);
+        CollectionChanges {
+            collection: state.collection,
+            meta: state.meta,
+            upsert: state.entries,
+            remove: Vec::new(),
+        }
+    };
+    app.helm.push(progress_state(run.clone()));
+    settle(app.cx);
+    app.cx.update(|window, cx| {
+        let mark = crate::focus::Mark::take(cx);
+        super::started_run(2, "run-2".to_owned(), true, mark, window, cx);
+    });
+    let mut setup = question(FIRST, 2, "Setup verification code:", false);
+    setup.purpose = SshConnectionPurpose::Setup;
+    publish(&mut app.helm, &[setup], &[], app.cx);
+    assert!(answer_focused(app.cx), "the setup question opened first");
+    keys(app.cx, "7 enter");
+    let command = app
+        .helm
+        .commands()
+        .into_iter()
+        .find(|cmd| cmd.path == format!("/api/ssh-questions/{FIRST}"))
+        .expect("the setup answer was sent");
+    publish(&mut app.helm, &[], &[FIRST], app.cx);
+    run.status = RunStatus::Completed;
+    app.helm.push(progress_state(run));
+    app.helm.reply(command.id, 204, None);
+    settle(app.cx);
+    assert!(!any_open(app.cx), "the sessions question has yet to arrive");
+
+    publish(
+        &mut app.helm,
+        &[question(SECOND, 2, "Sessions verification code:", false)],
+        &[],
+        app.cx,
+    );
+    assert!(
+        answer_focused(app.cx),
+        "the separate master opened on its answer field"
+    );
 }
 
 /// A startup question opens on its answer field before any key or click. Enter sends the exact question id, then

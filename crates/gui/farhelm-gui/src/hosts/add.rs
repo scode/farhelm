@@ -86,7 +86,7 @@ use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::HelmOwnerRefusal;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
-use farhelm_proto::ui_channel::HostView;
+use farhelm_proto::ui_channel::{HostView, SshQuestion, SshQuestionTarget};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, FocusHandle,
     IntoElement, ParentElement as _, Render, Styled as _, Subscription, WeakEntity, Window, div,
@@ -96,7 +96,7 @@ use serde::Deserialize as _;
 use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
-use super::{setup, ssh_help};
+use super::{setup, setup_sign_in, ssh_help};
 use crate::approvals::answers;
 use crate::approvals::host_add::{self, AgentRequest, Answered};
 use crate::components::{
@@ -110,6 +110,7 @@ use crate::layers::{self, Dialog, Dismissal, LayerId, MainAction, Subject};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
+use crate::sign_in_form::{PrepareHandoff, SignInForm};
 use crate::theme::{self, metrics};
 use tensorlake::TensorlakeForm;
 pub(super) use tensorlake::{ACCOUNT_ROUTE, read_plan};
@@ -495,7 +496,7 @@ pub(crate) fn error_line() -> HostSentence {
 /// What a probe's reply means, for the dialog and for a host row's rerun of its setup ([`super::setup::rerun`]).
 pub(super) enum Reply {
     /// The helm registered an answering supervisor: the dialog closes.
-    Added,
+    Added { host_id: i64 },
     /// Why the probe leads nowhere, to show: why setup is manual, a refusal, a reply that cannot be read.
     Show(Problem),
     /// The target answered with another owner. User Add needs its own
@@ -556,7 +557,7 @@ pub(super) fn read_reply(outcome: &Outcome) -> Reply {
     // The plan is the helm's own and never read here (`ProbeReply`'s docs): the setup confirmation shows the steps and
     // confirms by the probe's id, and the helm acts only on the plan it kept under that id.
     match ProbeReply::<IgnoredAny>::deserialize(body) {
-        Ok(ProbeReply::Discovered { .. }) => Reply::Added,
+        Ok(ProbeReply::Discovered { host_id, .. }) => Reply::Added { host_id },
         Ok(ProbeReply::OwnedElsewhere { probe_id, owner }) => Reply::TakeOver { probe_id, owner },
         Ok(ProbeReply::Manual { reason }) => {
             Reply::Show(Problem::Helm(HostText::from_host(reason.as_str())))
@@ -684,10 +685,19 @@ pub(crate) struct AddHostDialog {
     from_agent: bool,
     /// What the dialog shows below its kind choice (the module docs, "The host kind").
     body: Body,
+    /// The question view and replay belong to the exact check from this dialog. Closing releases its operation hold.
+    sign_in: Option<InlineSignIn>,
+    _questions: session::ObservingCurrent,
     /// An agent's dialog's watches: a redraw when the answer bar's pause ends, which makes Add live again; and a close
     /// when an answer from another surface (the card) settles after the request stopped waiting, which settles in the
     /// operation store, not the pushed store the dialog's subject watches.
     _watches: Vec<Subscription>,
+}
+
+struct InlineSignIn {
+    attempt: String,
+    form: Option<(String, Entity<SignInForm>)>,
+    waiting: Entity<setup_sign_in::Waiting>,
 }
 
 impl AddHostDialog {
@@ -747,6 +757,10 @@ impl AddHostDialog {
             cx,
         );
         let key = OpKey::new_host_add();
+        let handle = window.window_handle();
+        let questions = session::observe_current(cx, move |_: &mut Self, cx| {
+            Self::queue_question_refresh(handle, cx);
+        });
         let body = match sandbox {
             Some(seed) => {
                 let (dialog, key, opener) = (cx.weak_entity(), key.clone(), opener.clone());
@@ -769,6 +783,8 @@ impl AddHostDialog {
             accepted: false,
             from_agent,
             body,
+            sign_in: None,
+            _questions: questions,
             _watches: watches,
         }
     }
@@ -825,12 +841,24 @@ impl AddHostDialog {
     /// question before Add host closes (the Tensorlake sandbox's module docs). Otherwise, on an agent's add, answer Deny
     /// and close once the helm took it (or the request was already gone), keeping the dialog with the helm's reason when
     /// it refused; nothing happens while an answer is in flight or answers are paused, as for the card's own buttons.
+    /// A visible SSH question takes dismissal first so the user can cancel the SSH process and keep the draft.
     /// After an accepted Allow, or for an ordinary add, closing is ordinary.
     fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
         if let Some(editor) = self.recipe_editor(cx) {
             return editor.update(cx, |editor, cx| editor.dismissal(window, cx));
         }
+        if let Some((_, form)) = self
+            .sign_in
+            .as_ref()
+            .and_then(|sign_in| sign_in.form.as_ref())
+        {
+            form.update(cx, |form, cx| form.cancel(window, cx));
+            return Dismissal::Stay;
+        }
         let window = window.window_handle();
+        if let Some(sign_in) = self.sign_in.take() {
+            setup_sign_in::cancel_draft(&sign_in.attempt, cx);
+        }
         let Some(request) = self.pending().cloned() else {
             return Dismissal::Close;
         };
@@ -997,12 +1025,26 @@ impl AddHostDialog {
             return;
         };
         let confirming = matches!(command.work(), Work::TakeOverHost { registers: true });
+        let replay = command.clone();
         let dialog = cx.weak_entity();
         let started = operations.update(cx, |operations, cx| {
             operations.start(&self.key, command, cx, move |settled, cx| {
-                let _ = dialog.update(cx, |dialog, cx| {
-                    dialog.settled(settled, confirming, handle, cx)
+                let pending = (!confirming)
+                    .then(|| setup_sign_in::pending(&settled.outcome))
+                    .flatten();
+                let updated = dialog.update(cx, |dialog, cx| {
+                    if let Some(pending) = &pending {
+                        dialog.wait_for_setup(pending.attempt.clone(), replay, handle, cx);
+                    } else {
+                        dialog.settled(settled, confirming, handle, cx);
+                    }
                 });
+                if updated.is_err()
+                    && let Some(pending) = pending
+                {
+                    // The pending reply can arrive after the dialog closes, before it knew what to cancel.
+                    setup_sign_in::cancel_draft(&pending.attempt, cx);
+                }
             })
         });
         match started {
@@ -1013,6 +1055,138 @@ impl AddHostDialog {
             }
             Err(not_started) => tracing::debug!(?not_started, "host add request not sent"),
         }
+    }
+
+    /// Associate the 202 with this opening. Only a successful socket check lets the exact original probe resume.
+    fn wait_for_setup(
+        &mut self,
+        attempt: String,
+        replay: Command,
+        handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        if self.layer.is_none() {
+            setup_sign_in::cancel_draft(&attempt, cx);
+            return;
+        }
+        let dialog = cx.weak_entity();
+        let waiting = setup_sign_in::Waiting::start(
+            attempt.clone(),
+            self.key.clone(),
+            replay.work(),
+            self.probe_mark,
+            {
+                let attempt = attempt.clone();
+                move |result, mark, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| {
+                        if !dialog
+                            .sign_in
+                            .as_ref()
+                            .is_some_and(|current| current.attempt == attempt)
+                        {
+                            return;
+                        }
+                        dialog.sign_in = None;
+                        dialog.probe_mark = mark;
+                        dialog.set_read_only(false, cx);
+                        match result {
+                            Ok(()) => dialog.request(replay, handle, cx),
+                            Err(reason) => dialog.problem = Some(error_line().host(&reason)),
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+            cx,
+        );
+        let Some(waiting) = waiting else {
+            setup_sign_in::cancel_draft(&attempt, cx);
+            self.set_read_only(false, cx);
+            self.problem = Some(
+                error_line().text("SSH sign-in could not continue. Try adding the host again."),
+            );
+            cx.notify();
+            return;
+        };
+        self.sign_in = Some(InlineSignIn {
+            attempt,
+            form: None,
+            waiting,
+        });
+        // The question can already be in the store when the 202 arrives.
+        Self::queue_question_refresh(handle, cx);
+        cx.notify();
+    }
+
+    fn queue_question_refresh(handle: AnyWindowHandle, cx: &mut Context<Self>) {
+        let dialog = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = dialog.update(cx, |dialog, cx| dialog.reconcile_question(window, cx));
+            });
+        });
+    }
+
+    /// Render only a question this draft owns. Long-running or multi-question sign-ins leave both drafts intact.
+    fn reconcile_question(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sign_in) = self.sign_in.as_mut() else {
+            return;
+        };
+        let Some(store) = session::current_store(cx) else {
+            return;
+        };
+        let question = store.read(cx).collections().ordered::<SshQuestion>().into_iter()
+            .find(|question| matches!(&question.target, SshQuestionTarget::Draft { draft } if *draft == sign_in.attempt))
+            .cloned();
+        if sign_in.form.as_ref().map(|(id, _)| id) == question.as_ref().map(|question| &question.id)
+        {
+            return;
+        }
+        let attempt = sign_in.attempt.clone();
+        let waiting = sign_in.waiting.downgrade();
+        let dialog = cx.weak_entity();
+        let handoff: PrepareHandoff = Rc::new(move |mark, window, cx| {
+            let dialog = dialog.clone();
+            let attempt = attempt.clone();
+            let window = window.window_handle();
+            let ready = waiting
+                .upgrade()
+                .map(|waiting| setup_sign_in::Waiting::answer_handoff(&waiting, mark, cx));
+            Box::new(move |accepted, cx| {
+                if let Some(ready) = ready {
+                    ready(accepted, cx);
+                }
+                if !accepted {
+                    return;
+                }
+                let _ = window.update(cx, |_, window, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| {
+                        if let Some(sign_in) = dialog
+                            .sign_in
+                            .as_ref()
+                            .filter(|sign_in| sign_in.attempt == attempt)
+                        {
+                            dialog.probe_mark = mark;
+                            if let Some((_, form)) = &sign_in.form {
+                                focus::focus_in_layer(
+                                    &form.read(cx).first_stop(cx),
+                                    &mark,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                    });
+                });
+            })
+        });
+        sign_in.form = question.map(|question| {
+            let id = question.id.clone();
+            let form = cx.new(|cx| SignInForm::new(question, handoff, window, cx));
+            focus::focus_in_layer(&form.read(cx).first_stop(cx), &self.probe_mark, window, cx);
+            (id, form)
+        });
+        cx.notify();
     }
 
     /// The probe settled: free the fields, then close the dialog for a registered host, show what the helm said, or
@@ -1026,14 +1200,22 @@ impl AddHostDialog {
     ) {
         self.set_read_only(false, cx);
         let reply = read_reply(&settled.outcome);
-        if confirming && !matches!(reply, Reply::Added | Reply::Show(_)) {
+        if confirming && !matches!(reply, Reply::Added { .. } | Reply::Show(_)) {
             self.problem =
                 Some(error_line().text("Farhelm could not confirm that it added the host."));
             cx.notify();
             return;
         }
         match reply {
-            Reply::Added => self.close_later(None, window, cx),
+            Reply::Added { host_id } => {
+                self.close_later(None, window, cx);
+                let mark = self.probe_mark;
+                cx.defer(move |cx| {
+                    let _ = window.update(cx, |_, window, cx| {
+                        crate::sign_in::started(host_id, mark, window, cx);
+                    });
+                });
+            }
             Reply::Show(problem) => self.problem = Some(problem.sentence(error_line())),
             Reply::TakeOver { owner, .. } if self.from_agent => {
                 self.problem = Some(ownership_problem(&owner).sentence(error_line()));
@@ -1122,6 +1304,7 @@ impl AddHostDialog {
             cx.notify();
             return;
         }
+        self.probe_mark = Mark::take(cx);
         let Ok(path) = ApiPath::api(&["hosts", "take-over"]) else {
             return;
         };
@@ -1143,6 +1326,23 @@ impl AddHostDialog {
     #[cfg(test)]
     pub(crate) fn destination_input(&self) -> TextInputState {
         self.destination.input().clone()
+    }
+
+    /// Show a checking draft matched to the fixture's pending question. The golden does not send terminal input
+    /// or run the probe again. The Add dialog tests cover those actions through the real interaction.
+    #[cfg(test)]
+    pub(crate) fn wait_for_setup_for_golden(
+        &mut self,
+        attempt: &str,
+        destination: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(command) = probe_command(destination, "", false) else {
+            return;
+        };
+        self.set_read_only(true, cx);
+        self.wait_for_setup(attempt.into(), command, window.window_handle(), cx);
     }
 
     /// Hold both fields read-only while the probe is out, so the values on screen stay the ones sent.
@@ -1309,6 +1509,10 @@ impl Render for AddHostDialog {
         )
         .tier(Tier::Neutral)
         .on_click(dismiss(weak.clone()));
+        let answering = self
+            .sign_in
+            .as_ref()
+            .is_some_and(|sign_in| sign_in.form.is_some());
         let add_weak = weak.clone();
         let (main, summary) = match &self.body {
             Body::Tensorlake(form) => (
@@ -1336,6 +1540,7 @@ impl Render for AddHostDialog {
         let frame = match editor {
             Some(editor) => DialogFrame::new("add-host", "Add host", body, Vec::new())
                 .notices(crate::settings::RecipeEditor::actions(&editor, cx)),
+            None if answering => DialogFrame::new("add-host", "Add host", body, Vec::new()),
             None => DialogFrame::new("add-host", "Add host", body, vec![cancel, main]),
         };
         frame
@@ -1348,8 +1553,16 @@ impl Render for AddHostDialog {
             ))
             .width(px(WIDTH))
             .close(
-                "Cancel adding host",
-                HoverHelp::tooltip(CANCEL_HELP),
+                if answering {
+                    "Cancel SSH sign-in"
+                } else {
+                    "Cancel adding host"
+                },
+                HoverHelp::tooltip(if answering {
+                    "Cancel this SSH sign-in and keep the draft"
+                } else {
+                    CANCEL_HELP
+                }),
                 false,
                 dismiss(weak),
             )
@@ -1380,6 +1593,12 @@ impl AddHostDialog {
                  before adding it.",
                 palette,
             ))
+            .children(self.sign_in.as_ref().and_then(|sign_in| sign_in.form.as_ref()).map(|(_, form)| {
+                div().flex().flex_col().gap(px(LABEL_GAP))
+                    .child("Sign in for checking and setting up")
+                    .child(help("Farhelm signs in once to check and set up the host, then again for sessions.", palette))
+                    .child(form.clone())
+            }))
             .child(field(
                 "Alias (optional)",
                 TextInput::new(

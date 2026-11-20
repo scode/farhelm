@@ -47,8 +47,7 @@ async fn cancellation_kills_the_owned_process_and_revokes_the_question() {
                     .run(
                         listener,
                         &questions,
-                        17,
-                        true,
+                        &Attempt::for_sessions(17, true),
                         Instant::now() + TEST_WAIT,
                         &mut |_| {},
                     )
@@ -119,9 +118,13 @@ async fn a_silent_peer_expires_without_a_sign_in_question() {
     let mut process = InteractiveChild::new(child);
     let questions = Questions::default();
     let error = process
-        .run(listener, &questions, 17, false, Instant::now(), &mut |_| {
-            panic!("the silent peer should never publish a question");
-        })
+        .run(
+            listener,
+            &questions,
+            &Attempt::for_sessions(17, false),
+            Instant::now(),
+            &mut |_| panic!("the silent peer should never publish a question"),
+        )
         .await
         .expect_err("the unanswered dial reached its deadline");
     let failure = error

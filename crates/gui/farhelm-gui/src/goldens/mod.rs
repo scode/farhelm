@@ -1107,6 +1107,12 @@ static SCENES: &[Scene] = &[
         setup: host_add_dialog_setup,
     },
     Scene {
+        name: "host-add-ssh-sign-in",
+        size: (970., 760.),
+        draw: empty,
+        setup: host_add_sign_in_setup,
+    },
+    Scene {
         name: "host-add-tensorlake-form",
         size: (600., 700.),
         draw: empty,

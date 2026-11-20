@@ -14,11 +14,11 @@ use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, metrics};
 
-/// Capture a possible focus handoff while the answer still owns its field. Run it only after the helm accepts
-/// the reply. The collection can remove the form before that reply comes back.
+/// Capture a possible focus handoff while the answer still owns its field. The receipt can arrive after the
+/// collection removes the form, so the callback belongs to the command.
 pub(crate) type PrepareHandoff = Rc<dyn Fn(Mark, &Window, &App) -> Handoff>;
 
-type Handoff = Box<dyn FnOnce(&mut App)>;
+pub(crate) type Handoff = Box<dyn FnOnce(bool, &mut App)>;
 
 /// The form holds the secret only while this exact question is drawn. Its callback captures the reply id once.
 pub(crate) struct SignInForm {
@@ -50,7 +50,7 @@ impl SignInForm {
         Self {
             question,
             field,
-            cancel: cx.focus_handle(),
+            cancel: cx.focus_handle().tab_stop(true),
             show: false,
             sending: false,
             problem: None,
@@ -66,6 +66,11 @@ impl SignInForm {
             .map_or_else(|| self.cancel.clone(), |field| field.focus_handle(cx))
     }
 
+    /// Dialog-level dismissal shares the same exact-question cancel as the form's own button.
+    pub(crate) fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.submit(true, window, cx);
+    }
+
     fn reveal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(field) = &self.field else {
             return;
@@ -77,7 +82,7 @@ impl SignInForm {
 
     /// Use the exact reply id, even if the host asked something else before the click reached the helm.
     fn submit(&mut self, cancel: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sending {
+        if self.sending || crate::session::current_ui_session(cx).is_none() {
             return;
         }
         let Ok(path) = ApiPath::api(&["ssh-questions", &self.question.id]) else {
@@ -115,10 +120,8 @@ impl SignInForm {
             "SSH sign-in",
             cx,
             move |result, cx| {
-                if result.is_ok()
-                    && let Some(handoff) = handoff
-                {
-                    handoff(cx);
+                if let Some(handoff) = handoff {
+                    handoff(result.is_ok(), cx);
                 }
                 let _ = weak.update(cx, |this, cx| {
                     this.sending = false;
@@ -159,7 +162,7 @@ impl Render for SignInForm {
         .focus(&self.cancel)
         .disabled(self.sending)
         .on_click(move |_, window, cx| {
-            let _ = weak.update(cx, |this, cx| this.submit(true, window, cx));
+            let _ = weak.update(cx, |this, cx| this.cancel(window, cx));
         });
         let field = self.field.as_ref().map(|field| {
             let weak = cx.weak_entity();

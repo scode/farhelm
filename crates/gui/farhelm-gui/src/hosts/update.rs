@@ -61,6 +61,7 @@ use super::identity::display_name;
 use super::listed;
 use super::offers::{self, Update};
 use super::refusal;
+use super::setup_sign_in;
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -194,9 +195,6 @@ fn not_started_line() -> HostSentence {
 
 /// [`start`] for `window`, once no launch holds it back.
 fn start_with(host: i64, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
     let key = OpKey::host(&HostView::key(host));
     let command = match plan_command(host) {
         Ok(command) => command,
@@ -206,31 +204,28 @@ fn start_with(host: i64, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
         }
     };
     let planned = key.clone();
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, move |settled, cx| {
-            match &settled.outcome {
-                Outcome::Done(body) => confirm(host, &planned, body.clone(), cx),
-                // The dialog opens only through the press's mark, which the layer manager refuses once the user has
-                // moved on. Shown there, the refusal is dropped from the store's record under the host's key, so the
-                // row neither shows it again nor opens for it, as the old app kept it in the dialog alone; not shown,
-                // it stays under the row, the one place left to show it.
-                Outcome::Refused(refusal) => {
-                    super::status::failed(host, super::status::Action::Update, cx);
-                    refusal::show_and_forget(
-                        host,
-                        "Update host",
-                        refusal,
-                        &planned,
-                        &mark,
-                        window,
-                        cx,
-                    );
-                }
-                // The plan request is answered 200; an accepted reply would mean the helm started something without a
-                // plan, which it never does for this route.
-                Outcome::Accepted(_) => {}
+    let started = setup_sign_in::plan(key, command, mark, window, cx, move |result, mark, cx| {
+        let settled = match result {
+            Ok(settled) => settled,
+            Err(reason) => {
+                note(&planned, reason, cx);
+                super::status::failed(host, super::status::Action::Update, cx);
+                return;
             }
-        })
+        };
+        match &settled.outcome {
+            Outcome::Done(body) => confirm(host, &planned, body.clone(), mark, window, cx),
+            // The dialog opens only through the press's mark, which the layer manager refuses once the user has
+            // moved on. Shown there, the refusal is dropped from the store's record under the host's key, so the
+            // row neither shows it again nor opens for it, as the old app kept it in the dialog alone; not shown,
+            // it stays under the row, the one place left to show it.
+            Outcome::Refused(refusal) => {
+                super::status::failed(host, super::status::Action::Update, cx);
+                refusal::show_and_forget(host, "Update host", refusal, &planned, &mark, window, cx);
+            }
+            // The pending reply has already been handled by the sign-in continuation.
+            Outcome::Accepted(_) => {}
+        }
     });
     match started {
         // A line about an Update not started belongs to that press; one has started since.
@@ -244,7 +239,14 @@ fn start_with(host: i64, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
 /// The plan request for `host` answered with `body`: send the confirming request naming its plan under `key`. The
 /// store records a refusal of it under the key, where the row shows it, and an accepted one needs nothing: the run is
 /// already pushed. A reply that names no plan says so under the row.
-fn confirm(host: i64, key: &OpKey, body: Option<serde_json::Value>, cx: &mut App) {
+fn confirm(
+    host: i64,
+    key: &OpKey,
+    body: Option<serde_json::Value>,
+    mark: Mark,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
     let plan = match operations::decode::<Plan>(Ok(body), SHOWN) {
         Ok(plan) => plan,
         Err(problem) => {
@@ -267,6 +269,8 @@ fn confirm(host: i64, key: &OpKey, body: Option<serde_json::Value>, cx: &mut App
         operations.start(key, command, cx, move |settled, cx| {
             if let Outcome::Refused(_) = settled.outcome {
                 super::status::failed(host, super::status::Action::Update, cx);
+            } else {
+                setup_sign_in::accepted(&settled.outcome, false, mark, window, cx);
             }
         })
     });

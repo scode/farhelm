@@ -2956,6 +2956,10 @@
       "reference": "host-add-dialog"
     },
     {
+      "golden": "host-add-ssh-sign-in",
+      "title": "Add host showing the SSH verification question inline, with the answer field focused while Farhelm checks the destination"
+    },
+    {
       "golden": "host-add-tensorlake-form",
       "title": "The Add host dialog on the Tensorlake sandbox kind with a key saved: Name holding a sandbox name and focus, Recipe with a recipe chosen and its summary, Cancel and Continue",
       "reference": "host-add-dialog"

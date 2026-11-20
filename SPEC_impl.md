@@ -366,28 +366,29 @@ under "The store, and how views redraw").
 Owner: the UI channel.
 
 Pushed collections are the helm-local data the fleet feed already invalidates: sessions, hosts, templates, preferences,
-notices, approvals, announcements, host progress, recipes, recipe places and SSH questions. Each is read through its GET
-route: sessions keyed by their served id, templates by name, notices by id, approvals by id, hosts by registry id;
-preferences and the announcement queue travel as one entry each; host progress is `GET /api/provisioning`, every run
-this helm process retains, keyed by host id (a host with no run is absent, not idle); recipes are
-`GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe and place
-(`RecipePlaceView::key`). SSH questions come from `GET /api/ssh-questions`, keyed by question id. Their entry types live
-in `farhelm-proto` beside the channel's. The pushed preferences supersede the old client's reread of shared preferences
-before an automatic pick: the GUI picks from the preferences as last pushed, since the helm pushes them together with
-the session changes that prompt a pick. The snapshot sent when a channel opens never waits on a remote host. Every other
-read (directory browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for
-directory browse and repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request
-of the helm client's transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot
-be cancelled on its own. A hover check sent on the channel would keep running after the pointer left the link, and count
-against the channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is
-cancelled by dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a
-replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
-check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
-creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
-they move. A pushed read must start nothing, because it runs after every bump, so none schedules a Podman check: the GUI
-asks for each check with a command of its own. Neither recipe collection follows the clock: a prepared artifact that
-passes its freshness window reads stale at the next re-read, not when it passes. Host progress also lists the failed
-environment launches kept after their host was removed (see "The UI channel").
+notices, approvals, announcements, host progress, recipes, recipe places, SSH questions and SSH sign-in completions.
+Each is read through its GET route: sessions keyed by their served id, templates by name, notices by id, approvals by
+id, hosts by registry id; preferences and the announcement queue travel as one entry each; host progress is
+`GET /api/provisioning`, every run this helm process retains, keyed by host id (a host with no run is absent, not idle);
+recipes are `GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe
+and place (`RecipePlaceView::key`). SSH questions come from `GET /api/ssh-questions`, keyed by question id. The GUI gets
+setup completion from `GET /api/ssh-sign-in-completions`, keyed by attempt id. Their entry types live in `farhelm-proto`
+beside the channel's. The pushed preferences supersede the old client's reread of shared preferences before an automatic
+pick: the GUI picks from the preferences as last pushed, since the helm pushes them together with the session changes
+that prompt a pick. The snapshot sent when a channel opens never waits on a remote host. Every other read (directory
+browse, repository lists, the trash list, launch history) is an ordinary command, a GET or, for directory browse and
+repository lists, a POST, whose reply body is the result. File stat is not: it is an HTTP request of the helm client's
+transfers, `POST /api/sessions/{id}/files/stat` beside download, because a channel command cannot be cancelled on its
+own. A hover check sent on the channel would keep running after the pointer left the link, and count against the
+channel's watchdog meanwhile, while SPEC.md says leaving cancels the check; as its own request, it is cancelled by
+dropping it. Data the old GUI polled stays a query that the GUI issues again; it does not become a replicated
+collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman check's
+readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places, creation
+and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as they move.
+A pushed read must start nothing, because it runs after every bump, so none schedules a Podman check: the GUI asks for
+each check with a command of its own. Neither recipe collection follows the clock: a prepared artifact that passes its
+freshness window reads stale at the next re-read, not when it passes. Host progress also lists the failed environment
+launches kept after their host was removed (see "The UI channel").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -2721,6 +2722,20 @@ interactive command's output after the first question is discarded because the r
 The actor publishes the waiting stage while a question is open. Cancellation, expiry or failure after a question ends
 the attempt and freezes it until Retry or startup. The process group is killed before closing the helper's connection on
 cancel, since OpenSSH can treat a failed helper as an empty answer. A security-key notice ends when its helper exits.
+
+Provisioning uses the same preflight against the separate setup master. After the local admission checks, Add's
+discovery, setup planning and manual Update or Uninstall planning can return a pending attempt with HTTP 202. The
+interactive task starts only if the pending response wins the route's reply deadline, so detached work from a 504 cannot
+open a question for a draft that stopped waiting. The UI channel can then carry the answer while planning holds no slot.
+The GUI matches the setup attempt to the initiating host or Add draft and repeats the same planning request once the
+helm publishes a successful socket check. The result stays in memory for a short time and grants no authority to
+provision. A confirmed run already has progress and performs the same sign-in before revalidating or mutating its host,
+even when the setup master used during planning has expired.
+
+Closing Add before a question appears cancels its setup check by attempt id. An open sessions question during
+provisioning's Attach step keeps its own answer deadline. Attach waits without interrupting that dial and uses its
+ordinary 30-second window for the supervisor once sign-in finishes. A cancelled or expired question ends the run with
+Sign-in needed.
 
 ### Grid streams
 
