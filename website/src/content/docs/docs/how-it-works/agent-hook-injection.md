@@ -309,8 +309,10 @@ next starts if it was not running:
 - `refused` — the report was turned down; the detail carries the error kind and the reason, or `unreadable` and why when
   the saved file itself could not be read (that line names no conversation). A `conflict` about the session's foreground
   means the report came from something other than the agent in your terminal (a separately started or shelled-out agent)
-  or from before the session's last restart, and was meant to be refused. The refusal is final; a later event from the
-  agent may report again.
+  or from before the session's last restart, and was meant to be refused. For Antigravity, a `conflict` saying the
+  transcript does not verify a main conversation is expected each time a subagent starts: Farhelm checked its
+  [conversation log](/docs/agents/antigravity/#gotchas-and-quirks) and kept Restart on your main conversation. The
+  refusal is final; a later event from the agent may report again.
 
 Not every `written` line gets an answer. The supervisor keeps only a session's newest saved report, so a report that a
 newer one replaced before the supervisor looked is never judged, which is normal. Only when the newest `written` line
