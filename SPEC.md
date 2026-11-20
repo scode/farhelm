@@ -3493,10 +3493,11 @@ program. How each kind of item announces itself, and which shortcuts reach it, i
 
 An SSH question from a host's first connection attempt at startup may open its popover on the answer field before the
 first key or click after opening Farhelm. Questions from later attempts, including retries for hosts that were
-unreachable at startup, wait in the sidebar unless the user just started the sign-in or sent an answer while the field
-still had focus and the same sign-in asks again or another question was already waiting. If a security-key touch notice
-is open when it ends, the same sign-in can focus its next question. These handoffs follow the moved-on test. While a
-question is waiting, its attention row can open the popover at any time.
+unreachable at startup, wait in the sidebar, with two exceptions. A sign-in the user just started may open its question.
+And after the user sends an answer while the field still has focus, the field may move to the same sign-in's next
+question or to another question that was already waiting. If a security-key touch notice is open when it ends, the same
+sign-in can focus its next question. These handoffs follow the moved-on test. While a question is waiting, its attention
+row can open the popover at any time.
 
 ### Where focus rests
 

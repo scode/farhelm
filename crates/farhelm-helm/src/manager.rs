@@ -1153,17 +1153,24 @@ impl NudgeReceiver {
         Self { channel, seen: 0 }
     }
 
+    /// Merge everything published since the last read into one request. An unread interrupt (a user retry, a
+    /// retarget) always ends the asking dial, and an unread Attach always gets its fresh retry window, whichever of
+    /// them was published last: Attach waits on that window to see the new supervisor, and a user retry landing in
+    /// the same instant must not shrink it to a single reprobe.
     fn read(&mut self) -> Nudge {
         let mut request = self.channel.borrow_and_update().clone();
+        let unread_attach = request
+            .last_attach
+            .as_ref()
+            .filter(|(revision, _)| *revision > self.seen)
+            .map(|(_, receipt)| Arc::clone(receipt));
         if request.last_interrupt > self.seen {
             request.preserved_attempt = None;
             request.fresh_window |= request.interrupt_fresh_window;
-        } else if let Some((revision, receipt)) = &request.last_attach
-            && *revision > self.seen
-        {
+        } else if let Some(receipt) = &unread_attach {
             request.preserved_attempt = Some(Arc::clone(receipt));
-            request.fresh_window = true;
         }
+        request.fresh_window |= unread_attach.is_some();
         self.seen = request.revision;
         request
     }
@@ -1277,8 +1284,8 @@ impl ActorHandle {
         Ok(())
     }
 
-    /// Wake the actor with an explicit retry policy, replacing any policy
-    /// carried by the previous nudge.
+    /// Wake the actor with an explicit retry policy. The newest request's policy wins, except that an
+    /// interrupt or an Attach the actor has not read yet keeps what it asked for ([`NudgeReceiver::read`]).
     fn nudge(&self, fresh_window: bool, preserved_attempt: Option<Arc<AtomicU64>>) {
         Nudge::send(&self.nudge, fresh_window, preserved_attempt);
     }
@@ -7345,6 +7352,44 @@ mod tests {
         let request = taken_nudge(&mut receiver).expect("a later discovery arrived");
         assert!(!request.fresh_window);
         assert!(Arc::ptr_eq(&request.preserved_attempt.unwrap(), &discover));
+    }
+
+    /// A user's Retry or Sign in can land in the same instant as Attach, before the actor reads either. The retry
+    /// rightly ends the asking dial, but Attach is still waiting for the new supervisor and needs its fresh retry
+    /// window; a single reprobe would fail while the supervisor starts and fail the run after a good install. Both
+    /// orders matter, and so does a discovery registration arriving last.
+    #[farhelm_testtrace::test]
+    fn a_user_retry_cannot_shrink_an_unread_attach_window() {
+        let attach = Arc::new(AtomicU64::new(0));
+        let discover = Arc::new(AtomicU64::new(0));
+        /// One published request: its fresh-window flag and, for a provisioning request, its receipt.
+        type Request<'a> = (bool, Option<&'a Arc<AtomicU64>>);
+        let orders: [&[Request]; 3] = [
+            &[(true, Some(&attach)), (false, None)],
+            &[(false, None), (true, Some(&attach))],
+            &[
+                (false, None),
+                (true, Some(&attach)),
+                (false, Some(&discover)),
+            ],
+        ];
+        for order in orders {
+            let (sender, receiver) = watch::channel(Nudge::default());
+            let mut receiver = NudgeReceiver::new(receiver);
+            for (fresh_window, receipt) in order {
+                Nudge::send(&sender, *fresh_window, receipt.map(Arc::clone));
+            }
+            let request = taken_nudge(&mut receiver).expect("the requests coalesced");
+            assert!(
+                !request.preserves_sign_in(),
+                "the user's retry ends the asking dial"
+            );
+            assert!(request.fresh_window, "Attach keeps its fresh window");
+
+            Nudge::send(&sender, false, Some(Arc::clone(&discover)));
+            let request = taken_nudge(&mut receiver).expect("a later discovery arrived");
+            assert!(!request.fresh_window, "a read Attach is not replayed");
+        }
     }
 
     /// A refusal after Attach's request is current. A numbered dial already running at that boundary counts

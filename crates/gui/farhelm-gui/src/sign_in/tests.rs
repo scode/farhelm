@@ -133,12 +133,14 @@ fn open<'a>(
 }
 
 /// The new host's setup master can ask and finish before the sessions master has any question. The accepted
-/// setup answer carries the Add action to that distinct master while the user is still waiting for it.
+/// setup answer carries the Add action to that distinct master while the user is still waiting for it. The run is
+/// still going when the sessions question arrives: setup's last step waits for the sessions connection, so it
+/// cannot finish while that connection is asking.
 #[gpui::test]
-fn add_run_can_focus_the_sessions_question_after_setup_finishes(cx: &mut TestAppContext) {
+fn add_run_focuses_the_sessions_question_while_setup_waits_for_it(cx: &mut TestAppContext) {
     let mut app = open(cx, &[], connecting(1, None));
     keys(app.cx, "escape");
-    let mut run = run(2, ProvisioningOperation::Add, RunStatus::Running);
+    let run = run(2, ProvisioningOperation::Add, RunStatus::Running);
     let progress_state = |view| {
         let state = progress(&[view]);
         CollectionChanges {
@@ -148,7 +150,7 @@ fn add_run_can_focus_the_sessions_question_after_setup_finishes(cx: &mut TestApp
             remove: Vec::new(),
         }
     };
-    app.helm.push(progress_state(run.clone()));
+    app.helm.push(progress_state(run));
     settle(app.cx);
     app.cx.update(|window, cx| {
         let mark = crate::focus::Mark::take(cx);
@@ -166,8 +168,6 @@ fn add_run_can_focus_the_sessions_question_after_setup_finishes(cx: &mut TestApp
         .find(|cmd| cmd.path == format!("/api/ssh-questions/{FIRST}"))
         .expect("the setup answer was sent");
     publish(&mut app.helm, &[], &[FIRST], app.cx);
-    run.status = RunStatus::Completed;
-    app.helm.push(progress_state(run));
     app.helm.reply(command.id, 204, None);
     settle(app.cx);
     assert!(!any_open(app.cx), "the sessions question has yet to arrive");
@@ -180,7 +180,7 @@ fn add_run_can_focus_the_sessions_question_after_setup_finishes(cx: &mut TestApp
     );
     assert!(
         answer_focused(app.cx),
-        "the separate master opened on its answer field"
+        "the separate master opened on its answer field while the run waits"
     );
 }
 

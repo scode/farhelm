@@ -11,3 +11,6 @@ an amber edge while it needs attention. With reduced motion, the highlight flash
 
 Adding a host can require two sign-ins, one to check and set up the host and another for sessions. If the setup
 connection expires while the confirmation is open, starting setup can ask again.
+
+For curation, not for the entry: the landing also fixed a case where Add host or Update could fail after a good
+install when a Retry or Sign in on the same host arrived at the same moment as setup's last step.

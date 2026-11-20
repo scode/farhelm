@@ -1987,8 +1987,12 @@ async fn a_change_through_the_agent_relays_mutation_path_reaches_the_connected_u
     let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
         panic!("the first message is the snapshot");
     };
-    let before: farhelm_proto::ui_channel::HostView =
-        serde_json::from_value(collections[1].entries[0].value.clone()).expect("a host");
+    let before: farhelm_proto::ui_channel::HostView = serde_json::from_value(
+        snapshot_entries(&collections, Collection::Hosts)[0]
+            .value
+            .clone(),
+    )
+    .expect("a host");
     assert_ne!(before.color, HostColor::Teal, "premise: not teal yet");
 
     crate::hosts::edit_identity_checked(
