@@ -42,6 +42,9 @@ Callout, Highlight = callouts.Callout, callouts.Highlight
 class Shot:
     """A page's named picture: UI steps, crop regions, annotations, and an optional known-safe pointer spot.
 
+    `steps` may return a cleanup callback when a shot temporarily changes the staged fleet. It runs after the image
+    and its crop have been measured, including on a failed capture, so later shots see the original fleet.
+
     `annotations` are Callout and Highlight values drawn onto the picture after capture; the crop always keeps them
     whole, so a callout placed beside its target is never cut off. `max_width` caps the crop's width in logical pixels,
     keeping its left edge, for a region much wider than what matters in it (a full-width list whose rows are all
@@ -210,6 +213,10 @@ class Bridge:
         """Press the named control as a person would, including its focus handoff."""
         self._call("click", self.resolve(target))
 
+    def drag(self, source: str, target: str):
+        """Send a complete drag between two controls, resolving staged identifiers for both ends."""
+        self._call("drag", self.resolve(source), self.resolve(target))
+
     def fill(self, target: str, text: str):
         """Replace a field's value through its input handler so the real UI reacts to it."""
         self._call("fill", self.resolve(target), text)
@@ -252,9 +259,16 @@ class Bridge:
         """Wait for visible text as the shot's readiness oracle, using the bridge's bounded wait."""
         self._call("wait", "--text", text)
 
+    def wait_gone_text(self, text: str):
+        """Wait until a dismissed fixture no longer appears on screen."""
+        self._call("wait", "--gone", text)
+
     def wait(self, target: str):
         """Wait for an element whose stable id establishes that the shot's control is visible."""
-        self._call("wait", self.resolve(target))
+        try:
+            self._call("wait", self.resolve(target))
+        except RuntimeError as error:
+            raise RuntimeError(f"waiting for {target}: {error}") from error
 
 
 def reset(bridge: Bridge):
@@ -378,19 +392,23 @@ def capture_pages(gui, batch, run: Path, pages, out: Path, *, frame: int = 0, ti
             try:
                 reset(bridge)
                 before = session_ids(gui, run) if guard else None
-                shot.steps(bridge)
-                full = run / f"{page}-{shot.name}-full.png"
-                args = [str(full), "--keep-focus"]
-                if shot.park is not None:
-                    args += ["--park", bridge.resolve(shot.park)]
-                if gui.capture(run, record, args):
-                    raise RuntimeError("capture failed")
-                bridge.forget_tree()
-                boxes = [bridge.box(region) for region in shot.regions]
-                window = json.loads(bridge._call("windows", "--json"))[0]
-                kept = annotate(bridge, batch, shot, full, window, frame, title_bar)
-                if guard and session_ids(gui, run) != before:
-                    raise RuntimeError("the shot's steps started, replaced or deleted a session")
+                cleanup = shot.steps(bridge)
+                try:
+                    full = run / f"{page}-{shot.name}-full.png"
+                    args = [str(full), "--keep-focus"]
+                    if shot.park is not None:
+                        args += ["--park", bridge.resolve(shot.park)]
+                    if gui.capture(run, record, args):
+                        raise RuntimeError("capture failed")
+                    bridge.forget_tree()
+                    boxes = [bridge.box(region) for region in shot.regions]
+                    window = json.loads(bridge._call("windows", "--json"))[0]
+                    kept = annotate(bridge, batch, shot, full, window, frame, title_bar)
+                    if guard and session_ids(gui, run) != before:
+                        raise RuntimeError("the shot's steps started, replaced or deleted a session")
+                finally:
+                    if cleanup is not None:
+                        cleanup()
                 target = out / page / f"{shot.name}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 rect = crop_rect(boxes, window, frame, title_bar, shot.max_width, shot.max_height, kept)
