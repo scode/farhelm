@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.42.0 - 2026-11-19
 
-**DRAFT release notes - not yet finalized**
-
 ### 🚀 Added
 
 - Farhelm now better supports remote hosts that have interactive password/2FA/security key flows so long as it goes through ssh's usual SSH_ASKPASS mechanism. You will be prompted/alerted when needed. (#4299, #4300, #4302, #4303, #4308)
