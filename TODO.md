@@ -283,7 +283,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Use the user's proper PATH in the desktop app.** fix the lack of using the users proper PATH in the desktop app.
   (Screenshot: started from the Dock or Finder on macOS, the desktop app runs with the system's minimal default PATH
   rather than the user's shell PATH, so a program the user's ssh config runs, such as a ProxyCommand installed outside
-  the system directories, is not found, and signing in to a host fails with a bare "Connection closed" error.)
+  the system directories, is not found, and signing in to a host fails with a bare "Connection closed" error.) Plan:
+  `plans/queue/desktop-login-shell-path.md`.
 
 ## Mid term
 
