@@ -234,9 +234,9 @@ Grok: the manually configured `SessionStart` selects the UUID, normally leaving 
 sibling `summary.json` both identify the selected UUID. See [the Grok guide](/docs/agents/grok/) for setup, the
 timestamp ordering rule, and the accepted `/new` delivery race.
 
-Antigravity reports after your first prompt. A subagent in the same process can take over the tracked conversation until
-the main conversation reports again. The [Antigravity guide](/docs/agents/antigravity/#gotchas-and-quirks) explains how
-to open the main conversation by ID.
+Antigravity reports after your first prompt. Farhelm checks the first line of its conversation log to give **Restart**
+the main conversation. The [Antigravity guide](/docs/agents/antigravity/#find-a-conversation-id) explains how to open a
+conversation by ID.
 
 ## Turning it off
 
@@ -293,8 +293,7 @@ The hook writes one line each time it runs, saying what it did:
   renaming the field shows up as `missing-session-id` or, for Antigravity, `missing-conversation-id`. Grok adds precise
   reasons for conflicting dual spellings and malformed event, source, timestamp, path, or child fields.
   `subagent-report` means the hook recognized a child marker and dropped that report. The Antigravity CLI sends its
-  subagent reports without a child marker. See
-  [Antigravity's Restart caveat](/docs/agents/antigravity/#gotchas-and-quirks).
+  subagent reports without a child marker, so Farhelm checks their conversation logs after the hook runs.
 - `timeout stdin` — the agent never finished handing the hook its payload within 30 seconds.
 - `panic` — a bug in the hook. Worth reporting, and harmless to the session.
 
@@ -303,8 +302,10 @@ next starts if it was not running:
 
 - `acked` — the supervisor has finished with the report. It may have saved the conversation, confirmed it, or left it
   unchanged: a nested Claude's or Muse's `Stop` and a Codex `Stop` that cannot confirm a conversation can be
-  acknowledged without changing anything. Whether Restart can resume it yet depends on the agent: Codex and Grok wait
-  for the conversation's saved files, and Pi and OMP for their session files (see each agent's guide).
+  acknowledged without changing anything. An Antigravity `Stop` is also acknowledged if Farhelm can't verify the
+  [conversation log](/docs/agents/antigravity/#gotchas-and-quirks). Whether Restart can resume it yet depends on the
+  agent: Codex and Grok wait for the conversation's saved files, and Pi and OMP for their session files (see each
+  agent's guide).
 - `refused` — the report was turned down; the detail carries the error kind and the reason, or `unreadable` and why when
   the saved file itself could not be read (that line names no conversation). A `conflict` about the session's foreground
   means the report came from something other than the agent in your terminal (a separately started or shelled-out agent)

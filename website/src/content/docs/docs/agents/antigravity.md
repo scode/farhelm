@@ -39,16 +39,24 @@ Start a new Antigravity session and run `/hooks` in it to check that both entrie
 after your first prompt, once Antigravity reports the conversation. You can still launch and explicitly open a
 conversation by ID without installing the hooks.
 
+## Find a conversation ID
+
+In the main Antigravity conversation, run `/help` and look for **Conversation** on the **General** tab. Enter that ID in
+the session launcher's **Conversation ID** field when you want to open that conversation directly. See
+[Stop, restart, and resume](/docs/using/stop-restart-resume/).
+
 ## Gotchas and quirks
 
-- If **Restart** never becomes available after your first prompt, the hooks are probably not loaded: check `/hooks` in
-  Antigravity, then the session's log at `<state dir>/hook-log/<session id>.log` (the state directory is usually
-  `~/.local/state/farhelm`); [Agent hook injection](/docs/how-it-works/agent-hook-injection/#when-something-goes-wrong)
-  explains its lines.
-- Antigravity CLI 1.5.12 sends the same hook events for its main conversation and subagent conversations in the same
-  process. **Restart** can resume a subagent's conversation if that subagent reported last, until the main conversation
-  reports again. To open the main conversation directly, enter its ID in the launcher's **Conversation ID** field. See
-  [Stop, restart, and resume](/docs/using/stop-restart-resume/).
+- If **Restart** stays unavailable after your first prompt or opens the previous conversation, check `/hooks` in
+  Antigravity. Then check the session's log at `<state dir>/hook-log/<session id>.log` (the state directory is usually
+  `~/.local/state/farhelm`). [Agent hook injection](/docs/how-it-works/agent-hook-injection/#when-something-goes-wrong)
+  explains its lines. You can also [find the conversation ID](/docs/agents/antigravity/#find-a-conversation-id) and open
+  it directly.
+- When Antigravity reports a conversation, Farhelm checks that the first line of its log records user input. This keeps
+  subagent reports from changing **Restart**. The check was verified with Antigravity CLI 1.5.13. A missing or
+  unreadable log or a first line over 64 KiB can leave **Restart** on the previous conversation or unavailable. A later
+  report can establish the main conversation once its log can be read. A CLI update that changes the format can make
+  Farhelm ignore every new report without a notification.
 - Farhelm shows basic running and idle status by watching whether the screen changes. Antigravity's approval requests
   don't show as waiting in the session list. Read and answer them in the session's terminal.
 - Remove the `farhelm` entry from the hooks file and start a new Antigravity process to turn off reports. The settings
