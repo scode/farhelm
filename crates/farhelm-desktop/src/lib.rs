@@ -516,6 +516,7 @@ fn embedded_helm_args(
     ensure_hosts: Option<PathBuf>,
     ssh_askpass_program: Option<PathBuf>,
     devbuild: bool,
+    login_path_available: bool,
 ) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         // The embedded helm is an internal implementation detail of this
@@ -525,6 +526,7 @@ fn embedded_helm_args(
         port: 0,
         state_dir,
         devbuild,
+        desktop_login_path_available: Some(login_path_available),
         ssh_askpass_program,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
@@ -686,6 +688,7 @@ impl DesktopBootstrap {
         }
         drop(app_lock);
 
+        let login_path_available = session_start_path.is_some();
         let (ready_tx, ready_rx) = mpsc::channel::<farhelm_helm::EmbeddedReady>();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm_state = state_dir.clone();
@@ -693,7 +696,13 @@ impl DesktopBootstrap {
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
                 farhelm_helm::run_embedded(
-                    embedded_helm_args(helm_state, ensure_hosts, Some(farhelm), devbuild),
+                    embedded_helm_args(
+                        helm_state,
+                        ensure_hosts,
+                        Some(farhelm),
+                        devbuild,
+                        login_path_available,
+                    ),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
                     })),
@@ -1854,7 +1863,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(dir.path().join("state"), Some(file), None, false);
+        let args = embedded_helm_args(dir.path().join("state"), Some(file), None, false, true);
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

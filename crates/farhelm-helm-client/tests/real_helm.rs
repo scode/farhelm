@@ -49,6 +49,7 @@ impl Helm {
             port: 0,
             state_dir: state.path().join("state"),
             devbuild: false,
+            desktop_login_path_available: None,
             ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,

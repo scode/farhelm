@@ -366,6 +366,39 @@ fn session_limit_notices_explain_the_two_lists_and_open_feedback(cx: &mut TestAp
     assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
 }
 
+/// The startup notice names the inherited PATH fallback and offers the
+/// ordinary feedback dialog, with the same acknowledgement and focus return.
+#[gpui::test]
+fn desktop_login_path_notice_explains_the_fallback_and_opens_feedback(cx: &mut TestAppContext) {
+    let held = [json!({
+        "id": 1, "host": null, "raised_at": 10, "read": false, "resolved": false,
+        "content": { "kind": "desktop_login_path_unavailable" }
+    })];
+    let (mut fake, cx) = open(cx, &held);
+    cx.simulate_resize(size(px(1200.), px(800.)));
+    test_support::settle(cx);
+    open_panel(cx);
+    let nodes = frame(cx);
+    assert_eq!(
+        node(&nodes, "rail-notice-1-title").and_then(|node| node.label.as_deref()),
+        Some("Could not read your login shell's PATH")
+    );
+    let text = painted(&nodes).join(" ");
+    assert!(text.contains("the PATH the app started with"), "{text}");
+    assert!(text.contains("more than 5 seconds"), "{text}");
+    test_support::click(cx, "rail-notice-send-feedback-1");
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(node(&nodes, PANEL_ID).is_none());
+    assert!(node(&nodes, "feedback-cancel").is_some());
+    assert_eq!(
+        marks(&mut fake, cx, 200),
+        [json!({ "action": "read", "ids": [1] })]
+    );
+    test_support::click(cx, "feedback-cancel");
+    assert_eq!(focused_id(cx).as_deref(), Some(BELL_ID));
+}
+
 // ---- Closing marks what the panel showed read ------------------------------------------------------------------------
 
 /// SPEC.md: "Escape, clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and

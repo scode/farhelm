@@ -280,12 +280,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Use the user's proper PATH in the desktop app.** fix the lack of using the users proper PATH in the desktop app.
-  (Screenshot: started from the Dock or Finder on macOS, the desktop app runs with the system's minimal default PATH
-  rather than the user's shell PATH, so a program the user's ssh config runs, such as a ProxyCommand installed outside
-  the system directories, is not found, and signing in to a host fails with a bare "Connection closed" error.) Plan:
-  `plans/queue/desktop-login-shell-path.md`.
-
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to

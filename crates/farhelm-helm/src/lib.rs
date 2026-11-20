@@ -312,6 +312,9 @@ pub struct HelmArgs {
     /// Devbuilds seed an unset remote-update choice off before any fleet work starts.
     /// The same remote hosts may be in use from a released app.
     pub devbuild: bool,
+    /// Whether this desktop launch read the login shell PATH. `None` leaves
+    /// the existing notice alone when a helm starts without that observation.
+    pub desktop_login_path_available: Option<bool>,
     /// The version-matched Farhelm CLI that OpenSSH runs as the local helper. Test helms can omit interactive SSH.
     pub ssh_askpass_program: Option<PathBuf>,
 
@@ -1416,6 +1419,11 @@ async fn serve_with_ready(
             .await
             .context("defaulting remote updates off for a devbuild")?;
     }
+    if let Some(available) = args.desktop_login_path_available
+        && let Err(error) = store.record_desktop_login_path(available).await
+    {
+        tracing::warn!(%error, "could not record the desktop login PATH notice");
+    }
     // The only producer runs before readiness and serving, so every initial
     // client read sees the complete queue without needing an event-feed path.
     release_announcements::enqueue_builtin(&store).await?;
@@ -1875,6 +1883,7 @@ mod tests {
             port: 0,
             state_dir: std::path::PathBuf::from("/nonexistent/helm-state"),
             devbuild: false,
+            desktop_login_path_available: None,
             ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
@@ -1943,6 +1952,99 @@ mod tests {
                 expected
             );
         }
+    }
+
+    /// The actual serving startup owns one app-wide PATH condition. A
+    /// standalone helm has no observation and a recurrent failure stays
+    /// quiet after resolution and on later failures while still unresolved.
+    #[farhelm_testtrace::test]
+    async fn desktop_login_path_notice_tracks_startup_and_resolution() {
+        use crate::notices::{Notice, NoticeContent};
+
+        // Request shutdown at readiness after applying the startup observation.
+        async fn observe(dir: &std::path::Path, available: Option<bool>) -> Vec<Notice> {
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+            shutdown_tx.send(()).unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                crate::serve_with_ready(
+                    crate::HelmArgs {
+                        state_dir: dir.into(),
+                        desktop_login_path_available: available,
+                        ..base_args()
+                    },
+                    None,
+                    None,
+                    ready_tx,
+                    shutdown_rx,
+                    &mut None,
+                ),
+            )
+            .await
+            .expect("helm reached its serving boundary")
+            .unwrap();
+            ready_rx.try_recv().expect("helm reported readiness");
+            crate::store::HelmStore::open(&dir.join("helm.db"))
+                .await
+                .unwrap()
+                .notices()
+                .await
+                .unwrap()
+                .notices
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        assert!(observe(path, Some(true)).await.is_empty());
+        let first = observe(path, Some(false)).await;
+        assert_eq!(first.len(), 1);
+        let notice = &first[0];
+        assert_eq!(notice.content, NoticeContent::DesktopLoginPathUnavailable);
+        assert_eq!(notice.host, None);
+        assert!(!notice.read && !notice.resolved);
+        assert_eq!(observe(path, Some(false)).await, first);
+        assert_eq!(observe(path, None).await, first);
+
+        let resolved = Notice {
+            read: true,
+            resolved: true,
+            ..notice.clone()
+        };
+        assert_eq!(
+            observe(path, Some(true)).await.as_slice(),
+            std::slice::from_ref(&resolved)
+        );
+        let reopened = Notice {
+            resolved: false,
+            ..resolved.clone()
+        };
+        assert_eq!(
+            observe(path, Some(false)).await.as_slice(),
+            std::slice::from_ref(&reopened)
+        );
+        assert_eq!(observe(path, Some(false)).await, [reopened]);
+        assert_eq!(observe(path, Some(true)).await, [resolved]);
+
+        // The regular Clear resolved command deletes this row. A later
+        // failure must have a new identity and make the bell unread again.
+        let store = crate::store::HelmStore::open(&path.join("helm.db"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .connection_for_test()
+                .lock()
+                .execute(
+                    "DELETE FROM notices WHERE id = ?1 AND resolved = 1",
+                    [notice.id],
+                )
+                .unwrap(),
+            1
+        );
+        let again = observe(path, Some(false)).await;
+        assert_eq!(again.len(), 1);
+        assert!(again[0].id > notice.id && !again[0].read && !again[0].resolved);
     }
 
     /// A second helm on another port refuses before it opens (and so

@@ -32,6 +32,26 @@ pub(crate) const TRASH_ONLY_SCHEMA: &str = "
     ) STRICT;
 ";
 
+/// The schema introduced for session ceilings, before desktop PATH notices.
+/// The older upgrade must keep its historical shape as new kinds are added.
+const SESSION_LIMIT_SCHEMA: &str = "
+    CREATE TABLE notices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (
+            (kind IN ('stuck_trash', 'host_session_limit') AND host_id IS NOT NULL)
+            OR (kind = 'fleet_session_limit' AND host_id IS NULL)
+        ),
+        condition_key TEXT NOT NULL,
+        raised_at INTEGER NOT NULL,
+        read INTEGER NOT NULL CHECK (read IN (0, 1)),
+        resolved INTEGER NOT NULL CHECK (resolved IN (0, 1)),
+        content TEXT NOT NULL,
+        UNIQUE (host_id, kind, condition_key)
+    ) STRICT;
+    CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
+";
+
 /// A host's notices cascade with its registration. The partial unique index
 /// gives the app-wide condition one identity, since NULLs compare as distinct
 /// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
@@ -43,7 +63,7 @@ pub(crate) const SCHEMA: &str = "
         host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
         kind TEXT NOT NULL CHECK (
             (kind IN ('stuck_trash', 'host_session_limit') AND host_id IS NOT NULL)
-            OR (kind = 'fleet_session_limit' AND host_id IS NULL)
+            OR (kind IN ('fleet_session_limit', 'desktop_login_path_unavailable') AND host_id IS NULL)
         ),
         condition_key TEXT NOT NULL,
         raised_at INTEGER NOT NULL,
@@ -65,15 +85,7 @@ pub(crate) fn upgrade_session_limits(tx: &rusqlite::Transaction<'_>) -> anyhow::
         |row| row.get(0),
     )?;
     if needs_rebuild {
-        tx.execute_batch("ALTER TABLE notices RENAME TO notices_trash_only;")?;
-        tx.execute_batch(SCHEMA)?;
-        tx.execute_batch(
-            "INSERT INTO notices SELECT * FROM notices_trash_only;
-             DELETE FROM sqlite_sequence WHERE name = 'notices';
-             INSERT INTO sqlite_sequence (name, seq)
-                 SELECT 'notices', seq FROM sqlite_sequence WHERE name = 'notices_trash_only';
-             DROP TABLE notices_trash_only;",
-        )?;
+        rebuild_notices(tx, SESSION_LIMIT_SCHEMA)?;
     }
     let mut statement =
         tx.prepare("SELECT id FROM hosts WHERE cache_truncated AND host_identity IS NOT NULL")?;
@@ -81,6 +93,32 @@ pub(crate) fn upgrade_session_limits(tx: &rusqlite::Transaction<'_>) -> anyhow::
     for host in hosts {
         reconcile_session_limit(tx, Some(host?), true)?;
     }
+    Ok(())
+}
+
+/// Widen the set of app-wide notice kinds without changing stored history.
+pub(crate) fn upgrade_desktop_login_path_notice(
+    tx: &rusqlite::Transaction<'_>,
+) -> anyhow::Result<()> {
+    rebuild_notices(tx, SCHEMA)
+}
+
+/// Rebuild a notice constraint with the same columns. Drop the old index
+/// before creating its replacement, and carry the allocator high-water mark
+/// so an acknowledgement for a cleared notice cannot name a future one.
+fn rebuild_notices(tx: &rusqlite::Transaction<'_>, schema: &str) -> anyhow::Result<()> {
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS notices_app_condition;
+                      ALTER TABLE notices RENAME TO previous_notices;",
+    )?;
+    tx.execute_batch(schema)?;
+    tx.execute_batch(
+        "INSERT INTO notices SELECT * FROM previous_notices;
+         DELETE FROM sqlite_sequence WHERE name = 'notices';
+         INSERT INTO sqlite_sequence (name, seq)
+             SELECT 'notices', seq FROM sqlite_sequence WHERE name = 'previous_notices';
+         DROP TABLE previous_notices;",
+    )?;
     Ok(())
 }
 
@@ -186,6 +224,18 @@ pub(crate) fn reconcile_session_limit(
         Some(_) => ("host_session_limit", NoticeContent::HostSessionLimit),
         None => ("fleet_session_limit", NoticeContent::FleetSessionLimit),
     };
+    reconcile_condition(tx, host, kind, content, reached)
+}
+
+/// Keep one notice for a condition with no per-item key. Resolving marks
+/// it read, so a recurrence reopens quietly unless history was cleared.
+fn reconcile_condition(
+    tx: &rusqlite::Transaction<'_>,
+    host: Option<HostId>,
+    kind: &str,
+    content: NoticeContent,
+    active: bool,
+) -> anyhow::Result<bool> {
     let previous: Option<(i64, bool)> = tx
         .query_row(
             "SELECT id, resolved FROM notices WHERE host_id IS ?1 AND kind = ?2 AND condition_key = ''",
@@ -194,13 +244,13 @@ pub(crate) fn reconcile_session_limit(
         )
         .optional()?;
     match previous {
-        Some((id, resolved)) if resolved == reached => {
+        Some((id, resolved)) if resolved == active => {
             tx.execute(
                 "UPDATE notices SET resolved = ?2, read = 1 WHERE id = ?1",
-                rusqlite::params![id, !reached],
+                rusqlite::params![id, !active],
             )?;
         }
-        None if reached => {
+        None if active => {
             tx.execute(
                 "INSERT INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
                  VALUES (?1, ?2, '', ?3, 0, 0, ?4)",
@@ -316,7 +366,9 @@ fn record_trash(
         let old = previous.get(&entry.id);
         let known_bytes = old.and_then(|notice| match &notice.content {
             NoticeContent::StuckTrash { bytes, .. } => *bytes,
-            NoticeContent::HostSessionLimit | NoticeContent::FleetSessionLimit => None,
+            NoticeContent::HostSessionLimit
+            | NoticeContent::FleetSessionLimit
+            | NoticeContent::DesktopLoginPathUnavailable => None,
         });
         let content = match &entry.stuck {
             Some(stuck) => NoticeContent::StuckTrash {
@@ -409,6 +461,25 @@ pub(crate) async fn observe_trash(
 }
 
 impl HelmStore {
+    /// Apply the desktop's lookup result before the first client reads its notices.
+    /// One recurrence keeps its identity and any read state until explicitly cleared.
+    pub(crate) async fn record_desktop_login_path(&self, available: bool) -> anyhow::Result<()> {
+        self.conn()
+            .call("desktop login PATH notice task panicked", move |conn| {
+                let tx = conn.transaction()?;
+                reconcile_condition(
+                    &tx,
+                    None,
+                    "desktop_login_path_unavailable",
+                    NoticeContent::DesktopLoginPathUnavailable,
+                    !available,
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+    }
+
     /// Return current notices without consulting host reachability.
     pub(crate) async fn notices(&self) -> anyhow::Result<Notices> {
         self.conn()
@@ -766,6 +837,58 @@ pub(crate) mod tests {
             .expect("the existing cache was already cut");
         assert_eq!(ceiling.host, Some(host));
         assert!(ceiling.id > 100 && !ceiling.read && !ceiling.resolved);
+    }
+
+    /// A version-91 database already has the notice index and may have
+    /// cleared entries. The constraint change must carry the allocator
+    /// and both host and app-wide history into the new schema.
+    #[farhelm_testtrace::test]
+    async fn desktop_path_migration_preserves_history_and_the_next_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let host = rest_harness::local_id(&store).await;
+        {
+            let db = store.connection_for_test();
+            let mut conn = db.lock();
+            conn.execute_batch(&format!(
+                "DROP TABLE notices; {SESSION_LIMIT_SCHEMA} PRAGMA user_version = 91;"
+            ))
+            .unwrap();
+            let tx = conn.transaction().unwrap();
+            assert!(reconcile_session_limit(&tx, Some(host), true).unwrap());
+            assert!(reconcile_session_limit(&tx, None, true).unwrap());
+            assert!(reconcile_session_limit(&tx, None, false).unwrap());
+            assert!(
+                reconcile_condition(
+                    &tx,
+                    None,
+                    "desktop_login_path_unavailable",
+                    NoticeContent::DesktopLoginPathUnavailable,
+                    true
+                )
+                .is_err()
+            );
+            tx.execute(
+                "UPDATE sqlite_sequence SET seq = 100 WHERE name = 'notices'",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let old = store.notices().await.unwrap().notices;
+        drop(store);
+
+        let upgraded = HelmStore::open(&path).await.unwrap();
+        assert_eq!(upgraded.notices().await.unwrap().notices, old);
+        upgraded.record_desktop_login_path(false).await.unwrap();
+        let after = upgraded.notices().await.unwrap().notices;
+        let added = after
+            .iter()
+            .find(|notice| notice.content == NoticeContent::DesktopLoginPathUnavailable)
+            .unwrap();
+        assert!(added.id > 100 && added.host.is_none());
+        assert!(old.iter().all(|notice| after.contains(notice)));
     }
 
     /// Wait for a particular state of a persisted ceiling notice. The
