@@ -17,8 +17,8 @@ use super::SceneState;
 /// `settings-containers`, `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-agent-trust`,
 /// `settings-notifications` and `settings-app`): focus on the section's first switch (on the dialog itself at
 /// Appearance, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications),
-/// naming on because the row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture
-/// shows a switch in each state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with
+/// naming and automatic remote-host updates on because the row stores no choice for either. Agent trust's reads of
+/// each agent's trust, sent as it opens, are answered at once with
 /// the trust off and the hint not dismissed, Checkouts' reads as the reference stack had them: no default folder, no
 /// post-clone command, and a checkout kept ready, Notifications' read of the ntfy settings with the helm's defaults
 /// (off, `https://ntfy.sh`, no topic, Default priority, no token), Credentials' and Tensorlake's reads of the account
@@ -106,7 +106,7 @@ fn settings_scene_with(
             meta: test_support::meta(&[PREFERENCES_KEY]),
             entries: vec![KeyedEntry {
                 key: PREFERENCES_KEY.into(),
-                value: serde_json::json!({ "auto_update_remote_hosts": true }),
+                value: serde_json::json!({}),
             }],
         },
         pushed_state(Collection::Recipes, recipes, |recipe| {

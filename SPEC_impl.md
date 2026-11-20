@@ -4947,9 +4947,10 @@ changes neither. Clients cannot PUT the history. Deleted references remain until
 adds an empty list without inventing visits from a retained legacy selection; the next selection write establishes the
 history-head/last-selection invariant. Older helms refuse the newer schema.
 
-Helm schema 68 adds nullable `preferences.auto_update_remote_hosts`, constrained to booleans. Unset, null and false
-authorize nothing; only true enables automatic remote-host updates. Migration leaves it unset and preserves other
-preferences. The normal newer-schema guard refuses older helms, and the value survives reopening the store.
+Helm schema 68 added nullable `preferences.auto_update_remote_hosts`, constrained to booleans. The original policy
+required a saved true. Schema 91 clears earlier false choices to enroll upgraded installations in automatic updates. The
+current policy permits automatic remote-host updates when the choice is unset or true. A false saved after the migration
+survives reopening and prevents new starts. An explicit null clears that opt-out.
 
 Helm schema 69 adds a durable announcement queue and the database's creation build. Fresh creation records the build
 inside the schema transaction; migration leaves that row absent, so an older database does not acquire a false

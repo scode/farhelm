@@ -31,7 +31,7 @@ way.
 
 ## Hosts
 
-**Update remote hosts automatically** updates your remote hosts while Farhelm is open
+**Update remote hosts automatically** starts on and updates your remote hosts while Farhelm is open
 ([Update a host](/docs/using/manage-hosts/#update-a-host)). **Set up new hosts without asking** and **Remove hosts
 without asking** skip those two questions for SSH hosts when you add or remove one yourself. Turn them off to be asked
 again. [Agents' host requests](/docs/using/approve-agent-requests/#host-changes) still need your approval.

@@ -266,11 +266,11 @@ fn push_run(fake: &mut FakeHelm, view: ProvisioningView, cx: &mut VisualTestCont
     test_support::settle(cx);
 }
 
-/// Push "Update remote hosts automatically" as `on`, and settle.
-fn push_auto(fake: &mut FakeHelm, on: bool, cx: &mut VisualTestContext) {
+/// Replace the saved update choice. `None` lets the default take effect on the next frame.
+fn push_auto(fake: &mut FakeHelm, on: Option<bool>, cx: &mut VisualTestContext) {
     let state = preferences_state(Preferences {
         welcome_seen: Some(true),
-        auto_update_remote_hosts: Some(on),
+        auto_update_remote_hosts: on,
         ..Preferences::default()
     });
     fake.push(CollectionChanges {
@@ -964,8 +964,8 @@ fn update_and_update_all_send_exactly_the_displayed_hosts(cx: &mut TestAppContex
 /// off and a row offers Update; the old cases "Always update requests exactly N displayed hosts" and "is absent when
 /// automatic updates are already enabled". Specified: with the preference off, one update row and a problem row,
 /// Always update shows beside no Update all, and its press sends host 3's plan request and the preference write,
-/// nothing for the problem host; with a new update row it shows again until the preference reads on, when it goes while
-/// the row's Update stays.
+/// nothing for the problem host. With a new update row, it shows again until the stored opt-out is cleared. The row's
+/// Update stays when the default takes effect.
 #[gpui::test]
 fn always_update_asks_for_the_displayed_hosts_and_the_preference(cx: &mut TestAppContext) {
     let mut listed = vec![
@@ -984,7 +984,7 @@ fn always_update_asks_for_the_displayed_hosts_and_the_preference(cx: &mut TestAp
         drawn(cx, "host-attention-always-update"),
         "the premise: offered again"
     );
-    push_auto(&mut fake, true, cx);
+    push_auto(&mut fake, None, cx);
     assert!(!drawn(cx, "host-attention-always-update"));
     assert!(drawn(cx, "host-attention-update-8"));
 }
@@ -1093,7 +1093,7 @@ fn a_failed_always_update_shows_its_line_until_try_again_saves(cx: &mut TestAppC
     test_support::click(cx, "host-attention-try-again");
     test_support::settle(cx);
     assert_eq!(sent(&mut fake), [auto_on_write()]);
-    push_auto(&mut fake, true, cx);
+    push_auto(&mut fake, Some(true), cx);
     assert!(!drawn(cx, "host-attention-save-error"));
 }
 

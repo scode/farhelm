@@ -26,10 +26,10 @@ to be open, because the helm, the program that shows your hosts' sessions and se
 ([The pieces](/docs/how-it-works/the-pieces/)). Host changes (adding, editing or removing a host) always need your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
-setting up or updating a host, including the automatic updates you can turn on, downloads Farhelm's release files from
-get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback service the
-project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks get.farhelm.io for
-new releases and downloads them, checking each one's signature, by itself unless you turn that off
+setting up or updating a host, including the automatic remote host updates that are on by default, downloads Farhelm's
+release files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a
+feedback service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
+get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
 the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's

@@ -1890,7 +1890,7 @@ impl ProvisioningService {
         {
             return Err(anyhow::Error::new(ProvisioningRequestError::UnknownPlan));
         }
-        if self.store.preferences().await?.auto_update_remote_hosts != Some(true) {
+        if self.store.preferences().await?.auto_update_remote_hosts == Some(false) {
             return Ok(None);
         }
         let run_id = {

@@ -3609,6 +3609,8 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_connected_older_build_is_flagged_without_version_skew() {
         let harness = lone_local_helm().await;
+        // This fixture observes the old-build advisory without provisioning the scripted host.
+        harness.state._automatic_updates.stop();
         let (_, added, _) = call(
             &harness,
             "POST",

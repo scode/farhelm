@@ -688,7 +688,13 @@ fn an_unreadable_plan_and_a_refused_confirmation_warn(cx: &mut TestAppContext) {
 fn always_update_requests_the_hosts_then_saves_and_a_failed_save_waits_for_try_again(
     cx: &mut TestAppContext,
 ) {
-    let (mut helm, cx) = main(cx, Preferences::default());
+    let (mut helm, cx) = main(
+        cx,
+        Preferences {
+            auto_update_remote_hosts: Some(false),
+            ..Preferences::default()
+        },
+    );
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
         super::always_update(&[2, 3], mark, window, cx);
@@ -803,7 +809,11 @@ fn always_update_requests_the_hosts_then_saves_and_a_failed_save_waits_for_try_a
 /// pushed on from elsewhere and then off again leaves no error.
 #[gpui::test]
 fn a_newer_choice_in_settings_or_elsewhere_retires_the_failed_save(cx: &mut TestAppContext) {
-    let (mut helm, cx) = main(cx, Preferences::default());
+    let off = Preferences {
+        auto_update_remote_hosts: Some(false),
+        ..Preferences::default()
+    };
+    let (mut helm, cx) = main(cx, off.clone());
     cx.update(|_, cx| super::retry_auto_update(cx));
     settle(cx);
     let write = one_preference_write(&mut helm);
@@ -842,6 +852,6 @@ fn a_newer_choice_in_settings_or_elsewhere_retires_the_failed_save(cx: &mut Test
         ..Preferences::default()
     };
     push_preferences(&mut helm, on, cx);
-    push_preferences(&mut helm, Preferences::default(), cx);
+    push_preferences(&mut helm, off, cx);
     assert!(!save_failed(cx), "another client's choice came since");
 }
