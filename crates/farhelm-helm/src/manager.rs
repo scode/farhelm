@@ -608,11 +608,13 @@ pub enum HostState {
     /// confirms suspension and the host row records Farhelm's completion time.
     Suspended {
         /// When this helm first saw the suspension (unix ms): the "since"
-        /// for a suspension Farhelm did not make. Kept across re-probes.
+        /// for a suspension Farhelm did not make. Kept across re-probes of
+        /// one pause; a pause seen after Running evidence gets a new time.
         observed_at: i64,
         /// Farhelm's confirmed completion time (unix ms), also persisted on
-        /// the host row. Carrying it with the state keeps a host-list read
-        /// from joining a new confirmation to an older registry snapshot.
+        /// the host row. The hosts list reads it from this state alone, and
+        /// a stamp older than the actor's latest Running evidence is dropped,
+        /// since it belongs to a pause that already ended.
         suspended_by_farhelm_at: Option<i64>,
         /// Tensorlake's diagnosis when the sandbox's status is
         /// `resume_failed`; `None` for an ordinary suspension.
