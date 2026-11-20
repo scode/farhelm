@@ -413,3 +413,59 @@ report through the queue script, write a closing entry in its log, and stop the 
 
 You can now start a plain Bash or Zsh shell as a session, just like you can start agents. Typing "bash" or "zsh" in the
 launcher text field is the quickest way to do so.
+
+## Blocked
+
+Blocked while landing on 2026-11-20 (claim 5573f7).
+
+### Landing stopped: six tests fail with shell sessions in place
+
+The plan lets you start a plain Bash or Zsh shell as a Farhelm session, beside agent sessions: #4333 adds the launch and
+#4334 documents it. The landing monitor stopped landing it because the stack breaks six existing tests. Nothing of the
+plan has merged; main holds none of it. The stack was rebased onto main without conflicts (main had only gained the
+Tensorlake pause fix, which does not touch launches), and three PRs are open: #4333 and #4334 as delivered, and #4336, a
+landing fix described below.
+
+#### What fails
+
+`cargo nextest run --workspace --exclude farhelm-desktop` on an arm64 test worker
+(`f7071529-2199-4c53-a7ad-dffedde2b750`) failed 6 of 8164 tests. A narrow run of those six on x86_64,
+`cargo nextest run -p farhelm-gui -p farhelm-helm --lib -E '<the six tests>'` (`6fc8e654-4f59-4478-a0e4-0ba10b54a81a`),
+failed all six again, so this is the change, not the machine. The same workspace suite on main without the plan passed
+in full on 2026-11-20 (`de032654-f2c8-4111-941c-fcbcf26020ae`). The executor's delivery report ran only selected tests,
+which did not include these six.
+
+- A helm test checks that a configured launch prefix wraps every way a session can start or resume
+  (`launches::tests::wrapper_prefix_surrounds_every_agent_start_and_resume`). It also asks the shells for a
+  named-conversation start, which shells do not have. This is most likely the test's assumption, not a bug.
+- Five tests of the desktop app's session launcher fail, and these may be real regressions a user would see:
+  - in two, the launcher is no longer open shortly after it opens
+    (`launcher::view_tests::agent_launch_text_holding_invisible_characters_shows_escaped`,
+    `an_agent_switch_shows_an_unsafe_remembered_prefix_escaped`);
+  - in two, clicking the custom permission flags field no longer puts the cursor there
+    (`launcher::custom_flags_tests::clone_sends_the_stored_words_then_an_edits`,
+    `a_trailing_space_keeps_the_words_and_a_new_word_changes_them`);
+  - in one, editing the launch while it waits on the guarded-mode questions should cancel it, and the launch is sent
+    anyway (`launcher::checkout_tests::an_edit_cancels_the_guarded_answers_waiting_launch`).
+
+  The landing did not find the cause.
+
+#### What the landing already fixed (#4336)
+
+The landing review found shell sessions still described as agent sessions in places. #4336 makes a shell session's main
+terminal tab read "Shell" instead of "Agent" and makes Delete's question name the shell. It also stops SPEC.md from
+calling shells fully supported harnesses: Farhelm cannot tell from a shell's screen whether it is working or idle, so
+that wording would make the shortfall a spec violation. And it adds caveats to the changelog fragment. It passed the
+lints, and its two new tests passed in the worker run above.
+
+Still open from the landing review: while a shell session is being deleted, its row, header and terminal still say
+"Stopping agent…"; the SPEC.md paragraph describes when a shell reads Idle less precisely than the reader behaves; two
+of the fragment's new caveats need rewording; and one new test's description overstates what it checks.
+
+#### The question
+
+Should this go back to an executor to make the six tests pass and close the open review items before it lands? The
+alternatives are that the landing monitor fixes the helm test and sends back only the launcher failures, which saves
+little since the plan goes back either way, or that the monitor debugs the launcher itself, which is more than a landing
+fix and holds the next landings meanwhile. Sending it back costs another executor run before shells reach main. I
+recommend sending it back whole.
