@@ -5292,35 +5292,36 @@ installation it is on, so it follows an open session the sidebar's filter hides
   one of the connection states below, with additional provider states for environment hosts. The refusal states exist
   because folding them into "unreachable" would throw away the only information that makes the situation fixable:
   **connecting** (active retries in progress), **unreachable-reprobing** (the active window is spent, background probes
-  continue forever, no give-up), **sign-in needed** (SSH asked a question and did not connect; an explicit retry or a
-  new helm starts another attempt), **connected**, **version-skew** (the hello was answered and refused; carries both
-  protocol versions, the peer's build, and the remediation text, since SPEC.md demands actionable rather than merely
-  diagnostic errors), **identity-mismatch** (frozen, carrying both identities, connecting nothing until the user adopts
-  or fixes the destination), **identity-unverified** (the peer cannot confirm the recorded identity, so nothing is
-  connected), and **duplicate** (this entry's identity is already another entry's; frozen like identity-mismatch,
-  connecting nothing until a Retry, an edit of the entry, or a helm restart asks again, while the entry stays visible
-  naming the other one), and, for environment hosts, **suspended** (the provider reports suspension or failed resume,
-  with nothing dialed), a reason-bearing changing state during a lifecycle transition, and Podman's distinct
-  stopped/start-failed state (see "Disposable environments" and "Tensorlake hosts"). First contact checks whether
-  another entry holds the reported identity before comparing it with the one this entry recorded, so an entry that
-  recorded one install and now reaches another entry's machine is a duplicate; and an adopt prompt shown before the
-  other entry recorded the identity turns into the duplicate state when its adoption is refused, because the refusal
-  starts the entry's next attempt. The local row's unreachable state additionally distinguishes "no supervisor is
-  running on this machine" from a generic transport failure, because that is the one case whose remedy is something the
-  user does on the machine they are already sitting at — for the desktop app, quitting Farhelm and opening it again,
-  since the app starts that machine's supervisor when it opens — never an offer to install (provisioning is M7's). The
-  GUI's Hosts panel and unavailable-session card give that state the app's sentence alone as its remedy and keep the
-  helm's dial failure only as evidence (the row's evidence line, the card's diagnostics). That dial failure ends at the
-  connection error: `farhelm_supervisor::service::connect` names the socket and no remedy, and the helm adds none for
-  its own machine, whose supervisor the desktop app starts when it opens, so a hand-start command would be the wrong fix
-  there. For a remote host with no supervisor, the row's start command is the helm's own, written from the host entry's
-  program and state directory when `internal stdio` exits 75; `internal stdio` also prints a start command of its own,
-  which shows in the helm's log and to someone running it by hand. A separate state exists that is not about the host at
-  all — **retired** — for an entry whose actor has stopped: a panicked task, or one that outlived its own registry row.
-  Without it, an actor's last published status stands forever after the actor is gone, so a task that died
-  mid-connection would leave the entry reading connected, with a routable client, and nothing left running to ever
-  correct it. Each actor is therefore supervised by the task the manager actually holds, which publishes the retired
-  state (client dropped) when the actor it wraps finishes for any reason other than being cancelled on purpose.
+  continue forever, no give-up), **sign-in needed** (SSH asked a question and did not connect; an explicit retry, an
+  edit of the host's connection settings or a new helm starts another attempt), **connected**, **version-skew** (the
+  hello was answered and refused; carries both protocol versions, the peer's build, and the remediation text, since
+  SPEC.md demands actionable rather than merely diagnostic errors), **identity-mismatch** (frozen, carrying both
+  identities, connecting nothing until the user adopts or fixes the destination), **identity-unverified** (the peer
+  cannot confirm the recorded identity, so nothing is connected), and **duplicate** (this entry's identity is already
+  another entry's; frozen like identity-mismatch, connecting nothing until a Retry, an edit of the entry, or a helm
+  restart asks again, while the entry stays visible naming the other one), and, for environment hosts, **suspended**
+  (the provider reports suspension or failed resume, with nothing dialed), a reason-bearing changing state during a
+  lifecycle transition, and Podman's distinct stopped/start-failed state (see "Disposable environments" and "Tensorlake
+  hosts"). First contact checks whether another entry holds the reported identity before comparing it with the one this
+  entry recorded, so an entry that recorded one install and now reaches another entry's machine is a duplicate; and an
+  adopt prompt shown before the other entry recorded the identity turns into the duplicate state when its adoption is
+  refused, because the refusal starts the entry's next attempt. The local row's unreachable state additionally
+  distinguishes "no supervisor is running on this machine" from a generic transport failure, because that is the one
+  case whose remedy is something the user does on the machine they are already sitting at — for the desktop app,
+  quitting Farhelm and opening it again, since the app starts that machine's supervisor when it opens — never an offer
+  to install (provisioning is M7's). The GUI's Hosts panel and unavailable-session card give that state the app's
+  sentence alone as its remedy and keep the helm's dial failure only as evidence (the row's evidence line, the card's
+  diagnostics). That dial failure ends at the connection error: `farhelm_supervisor::service::connect` names the socket
+  and no remedy, and the helm adds none for its own machine, whose supervisor the desktop app starts when it opens, so a
+  hand-start command would be the wrong fix there. For a remote host with no supervisor, the row's start command is the
+  helm's own, written from the host entry's program and state directory when `internal stdio` exits 75; `internal stdio`
+  also prints a start command of its own, which shows in the helm's log and to someone running it by hand. A separate
+  state exists that is not about the host at all — **retired** — for an entry whose actor has stopped: a panicked task,
+  or one that outlived its own registry row. Without it, an actor's last published status stands forever after the actor
+  is gone, so a task that died mid-connection would leave the entry reading connected, with a routable client, and
+  nothing left running to ever correct it. Each actor is therefore supervised by the task the manager actually holds,
+  which publishes the retired state (client dropped) when the actor it wraps finishes for any reason other than being
+  cancelled on purpose.
 - A host's state and its live connection are read TOGETHER, from one borrow of the actor's published status. The pair
   has an invariant — a client exists exactly while the state is connected — and session routing is built on it, so two
   separate reads straddling a transition would let a caller refuse an operation against a host that is up, or route one
