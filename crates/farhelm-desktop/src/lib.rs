@@ -57,6 +57,8 @@ use state::{APP_STATE_FILE, update_state};
 pub use updater::{UpdaterHandle, UpdaterState, readout};
 
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+/// The devbuild launcher's request to seed its own helm's initial remote-update choice.
+const DEVBUILD_ENV: &str = "FARHELM_DESKTOP_DEVBUILD";
 
 /// Dispatch a file the embedded helm has just published to its default app.
 /// This is separate from hardened webbrowser: local paths are admitted only
@@ -461,7 +463,8 @@ fn desktop_log_filter(
 }
 
 /// The embedded helm's arguments: the app's own state directory, a kernel-chosen loopback port, the payload directory a
-/// development launch hands in, and the hosts an agent build's staged run registers.
+/// development launch hands in, and the hosts an agent build's staged run registers. The devbuild launcher also asks
+/// for a saved opt-out when no remote update choice exists, before the helm connects to shared remote hosts.
 ///
 /// `ensure_hosts` is `None` in every build but an agent build given `FARHELM_DESKTOP_AGENT_ENSURE_HOSTS`
 /// (`agent::ENSURE_HOSTS_ENV`), so an installed app never registers a host the user did not add. Split out of
@@ -470,6 +473,7 @@ fn embedded_helm_args(
     state_dir: PathBuf,
     ensure_hosts: Option<PathBuf>,
     ssh_askpass_program: Option<PathBuf>,
+    devbuild: bool,
 ) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         // The embedded helm is an internal implementation detail of this
@@ -478,6 +482,7 @@ fn embedded_helm_args(
         // stable endpoint before the desktop starts.
         port: 0,
         state_dir,
+        devbuild,
         ssh_askpass_program,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
@@ -520,6 +525,7 @@ impl DesktopBootstrap {
     /// is monitored only until startup is done.
     pub fn start() -> anyhow::Result<Self> {
         let state_dir = desktop_state_dir()?;
+        let devbuild = std::env::var_os(DEVBUILD_ENV).is_some_and(|value| value == "1");
         // The hosts a staged agent run registers before the helm serves (`agent::ENSURE_HOSTS_ENV`). Every other build
         // registers no hosts at startup.
         #[cfg(feature = "agent")]
@@ -644,7 +650,7 @@ impl DesktopBootstrap {
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
                 farhelm_helm::run_embedded(
-                    embedded_helm_args(helm_state, ensure_hosts, Some(farhelm)),
+                    embedded_helm_args(helm_state, ensure_hosts, Some(farhelm), devbuild),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
                     })),
@@ -1300,6 +1306,9 @@ impl SpawnInputs<'_> {
             // from one would silently push this launch's payloads,
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
+            // The devbuild flag names this helm alone. A new app started from
+            // one of its sessions must use its own update default.
+            .env_remove(DEVBUILD_ENV)
             // The scripted provisioning backend's switch, which an agent
             // build's test runs pass (`scripts/gui-agent.py start
             // --scripted-hosts`), is this app's embedded helm's alone for the
@@ -1792,7 +1801,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(dir.path().join("state"), Some(file), None);
+        let args = embedded_helm_args(dir.path().join("state"), Some(file), None, false);
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

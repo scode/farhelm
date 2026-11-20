@@ -309,6 +309,9 @@ pub struct HelmArgs {
     /// arrangement — the local supervisor's socket the reserved local host
     /// row is reached through.
     pub state_dir: PathBuf,
+    /// Devbuilds seed an unset remote-update choice off before any fleet work starts.
+    /// The same remote hosts may be in use from a released app.
+    pub devbuild: bool,
     /// The version-matched Farhelm CLI that OpenSSH runs as the local helper. Test helms can omit interactive SSH.
     pub ssh_askpass_program: Option<PathBuf>,
 
@@ -1396,6 +1399,23 @@ async fn serve_with_ready(
         }
     });
     let store = store::HelmStore::open(&state_dir.join("helm.db")).await?;
+    // Only the serving owner can write this choice, and serving starts after
+    // this point. Respect a saved choice before the first automatic scan.
+    if args.devbuild
+        && store
+            .preferences()
+            .await?
+            .auto_update_remote_hosts
+            .is_none()
+    {
+        store
+            .update_preferences(store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(false)),
+                ..Default::default()
+            })
+            .await
+            .context("defaulting remote updates off for a devbuild")?;
+    }
     // The only producer runs before readiness and serving, so every initial
     // client read sees the complete queue without needing an event-feed path.
     release_announcements::enqueue_builtin(&store).await?;
@@ -1854,10 +1874,74 @@ mod tests {
         crate::HelmArgs {
             port: 0,
             state_dir: std::path::PathBuf::from("/nonexistent/helm-state"),
+            devbuild: false,
             ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
             backstop_refresh_secs: None,
+        }
+    }
+
+    /// A devbuild can share remote hosts with a release. Seed the safe default during
+    /// serving startup, preserving either explicit choice and the regular launch default.
+    #[farhelm_testtrace::test]
+    async fn devbuild_startup_only_seeds_an_unset_remote_update_choice() {
+        for (devbuild, saved, expected) in [
+            (true, None, Some(false)),
+            (true, Some(true), Some(true)),
+            (true, Some(false), Some(false)),
+            (false, None, None),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("helm.db");
+            let store = crate::store::HelmStore::open(&path).await.unwrap();
+            if let Some(on) = saved {
+                store
+                    .update_preferences(crate::store::PreferencePatch {
+                        auto_update_remote_hosts: Some(Some(on)),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(
+                store.preferences().await.unwrap().auto_update_remote_hosts,
+                saved
+            );
+            drop(store);
+
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+            // Request shutdown at the first serving boundary, after all startup work.
+            shutdown_tx.send(()).unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                crate::serve_with_ready(
+                    crate::HelmArgs {
+                        state_dir: dir.path().to_path_buf(),
+                        devbuild,
+                        ..base_args()
+                    },
+                    None,
+                    None,
+                    ready_tx,
+                    shutdown_rx,
+                    &mut None,
+                ),
+            )
+            .await
+            .expect("helm must reach and leave its serving boundary")
+            .expect("helm startup and shutdown succeeded");
+            ready_rx.try_recv().expect("the helm reported readiness");
+            let reopened = crate::store::HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                reopened
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .auto_update_remote_hosts,
+                expected
+            );
         }
     }
 

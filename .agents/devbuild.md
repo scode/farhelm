@@ -44,6 +44,13 @@ check and the host's supervisor reports its database version; the host then need
 installed app, or a target built before schema reporting was added, still lets that Update strand the host until the
 newer build is put back.
 
+On its own state, a devbuild starts with **Update remote hosts automatically** off unless a choice is already saved.
+This protects shared hosts from receiving an unreleased protocol upgrade as soon as the devbuild starts. To enable
+automatic updates for the devbuild, use Settings → Hosts. The choice survives later launches. A devbuild explicitly
+started on the installed app's state uses that state's ordinary update policy. The separate-state default requires both
+the staged binary and its `--run-only` launcher to include this change. Use the launcher from the staged build's
+revision if you have moved the checkout to an older one.
+
 The devbuild's local supervisor keeps running after the app quits (for targets that contain the detached supervisor; an
 older target's app stops it on quit). Its log is `supervisor.log` in the devbuild state directory, not the terminal the
 app runs in. The next devbuild's first launch replaces it, because every build installs a new `farhelm` file. A devbuild
