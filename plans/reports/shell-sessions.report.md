@@ -1,62 +1,77 @@
-# Bash and Zsh shell sessions
+## Since the last review
+
+The landing check found six failures after adding Bash and Zsh sessions. The landing monitor sent the plan back to fix
+each failure at its cause, finish the shell wording, and run the full workspace suite. All six now pass in that run. The
+three existing drafts remain in order. #4333 contains the test fixes, and #4336 keeps the landing monitor's tab and
+Delete wording changes and finishes the remaining review items. The final draft now removes the TODO entry previously
+removed in #4334. The website changes in #4334 are the same.
 
 ## What this was about
 
-Opening a standalone shell used to require a custom command. The launcher now has a **Shells** group on the **Agent**
-tab. Type `bash` or `zsh` in the launcher and press Enter twice to pick and launch it. Shell sessions have their own
-icons and no permission mode. They appear in recent setups and can be saved in launch templates. Clone opens another of
-the same type. Stop ends the shell, and Replace starts a fresh shell. Restart is unavailable because there is no
-conversation to resume.
+Starting a standalone shell used to require a custom command. The launcher now offers Bash and Zsh in a Shells group.
+Type its name and press Enter twice. A shell session has no agent permission mode and no conversation to resume. Replace
+starts a fresh shell. The shell must be on the host's PATH. You can run `farhelm spawn` inside it.
 
 ## Things you should know
 
-The selected program must be on the PATH where the session runs. Farhelm uses the ordinary launch path and applies any
-wrapper prefix. A shell launch needs no YOLO confirmation. An agent's request uses the usual session-creation approval
-rules. If the host asks before YOLO launches, Farhelm asks for explicit approval when an agent supplies a wrapper
-command for a shell. The shell keeps the session's credentials, so `farhelm spawn` still works from inside it.
-
-The helm and supervisor use protocol version 81 for the new launch choices. Use matching builds when trying the feature.
+- The wrapper test now checks named starts only for launch types that offer them. It checks that Bash and Zsh refuse a
+  named start and that a configured wrapper still surrounds a fresh shell start.
+- The Shells row can put some launcher fields below the fold. The tests were clicking the reported coordinates of
+  clipped controls and sometimes hit an action in the pinned footer. The two escaped-text tests now scroll to their
+  controls before checking what the launcher shows and what a key changes. The two custom-flags tests scroll to the
+  field and verify focus before editing. The guarded-launch test scrolls to the prompt and confirms the edit reached the
+  draft before releasing the waiting preview. The launcher's existing scrolling and cancellation behavior needed no
+  product change.
+- Shell sessions show Shell on their main terminal tab. Delete identifies the shell in the confirmation and shows
+  “Stopping shell…” on the row, in the header and over the terminal while it waits. The spec now describes this wording
+  and the shell activity display. Farhelm shows Running while the screen changes and Idle once it has been still a few
+  seconds, even if a quiet command is still running.
+- Protocol 81 adds the two launch types. Verify that the helm and the supervisors on its hosts use matching builds
+  during release testing.
 
 ## Open questions and possible follow-ups
 
-No open decisions. The local tests verified the Zsh launcher and command composition. Zsh process startup remains
-untested because the local test host lacks Zsh.
+If Farhelm is showing only part of the session list and the open shell is left out, Delete shows “Stopping…” in the
+header and over the terminal. That wording describes the operation while the row is unavailable. No decision is needed
+for landing.
 
-## PRs
+The tests verify Zsh selection and command composition. A real Zsh process was not started because Zsh is unavailable on
+the local test host.
 
-- Product behavior, protocol, icons and regression tests. [#4333](https://github.com/scode/farhelm/pull/4333/changes)
-- Documents how to launch, save and manage shell sessions on the Shell sessions, Supported agents, Start a session,
-  Launch templates, Session list and Stop, restart and resume pages. Removes the completed TODO.
-  [#4334](https://github.com/scode/farhelm/pull/4334/changes)
+## Pull requests
+
+- [#4333](https://github.com/scode/farhelm/pull/4333/changes) adds Bash and Zsh sessions and corrects the six test
+  premises.
+- [#4334](https://github.com/scode/farhelm/pull/4334/changes) documents the shell types on the supported-agents, Shell
+  sessions, Start a session, Launch templates, Session list, and Stop, restart and resume pages.
+- [#4336](https://github.com/scode/farhelm/pull/4336/changes) identifies the shell in the tab and throughout Delete,
+  clarifies the spec and release note, and removes the TODO.
 
 ## Checks
 
-- After the rebase, `cargo test --locked -p farhelm-gui --lib -- --test-threads=1 <5 filters>` passed both shell
-  shortcuts, Stop and suspend, and terminal tab restoration after switching sessions or reconnecting
-  (`198d445e-8525-4062-b31d-afe4475e7c87`). `bun run build` in `website/` built all 39 pages and checked every internal
-  link. `cargo fmt --all -- --check` and `dprint check <changed docs>` passed.
-- Reused `<built farhelm-proto libtest> --test-threads=1 <5 filters>` for wire and template behavior
-  (`beb83b36-b707-461d-98bd-3feb2f3bf560`), `<built farhelm-helm libtest> --test-threads=1 <7 filters>` for launch
-  compilation, ordinary approval and launch memory (`dfbc28e0-9e5b-4a76-8819-e839a57b0e02`), and
-  `<built farhelm-gui libtest> --test-threads=1 <14 filters>` for launcher and approval UI, assets and lifecycle wording
-  (`be8a012b-e8c9-4753-a560-8355be843dbc`). These ran on the working tree based on `cb055d21`. Main added remembered
-  terminal tabs and Antigravity conversation verification. Both changes leave shell selection, compilation and
-  permission handling intact, and the post-rebase tests cover tab restoration.
-- Reused `python3 -B scripts/gui-e2e-smoke.py --no-build` on the same pre-rebase tree's just-built binaries. It passed
-  49 of 50 steps (`9f42c9af-3890-492b-99f0-e98afdf001c5`). The clipboard case skipped because the headless compositor
-  provides no clipboard ownership. `python3 scripts/check-gui-goldens.py --update` produced all 298 captures and each
-  matched its recorded image (`03b5c2df-c1cc-4f2f-b030-1cff6942606b`). Main kept the screenshot scenes and reference
-  manifest intact. The captures do not restore a previously chosen tab or handle agent conversation callbacks.
-- Reused
-  `cargo clippy -p farhelm -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm-gui --all-targets -- -D warnings`,
-  `python -B scripts/check-test-sleeps.py` and `python3 releasing/check-changelog.py format` from the pre-rebase tree.
-  Main left this stack's Rust changes, test waits and shell changelog fragment intact.
-- Skipped the full Rust and cross-platform release batteries. The local selections cover the changed launch and
-  lifecycle paths, and the post-rebase checks exercise the overlapping desktop behavior.
+- Ran `cargo nextest run --workspace --exclude farhelm-desktop` through the recorder, run
+  `9c00e455-03d3-4ad7-94bf-e859810bf7ad`, revision `962903a5`. Nextest reported 8,165 passed and 74 skipped by
+  selection. Two setup scripts also passed. No runtime skip messages appeared, and the real local Podman lifecycle test
+  passed. The original workspace and local narrow failures are retained as `f7071529-2199-4c53-a7ad-dffedde2b750` and
+  `6fc8e654-4f59-4478-a0e4-0ba10b54a81a`.
+- Before the final workspace run, a focused Helm and GUI selection passed all ten cases in recorder run
+  `32b0f623-475c-4106-a0d9-b3fa38cda898`, revision `111f69c8`. It covered the six failing tests plus closely related
+  flag editing and Delete cases.
+- Linux GUI screenshot comparison passed all 298 reference images in recorder run
+  `ca93ffba-dff0-4403-88c3-a93b2a0eae93`.
+  `cargo clippy --locked -p farhelm-helm -p farhelm-gui --all-targets -- -D warnings` passed on the same revision.
+- Ran Rust formatting, Markdown formatting checks on the spec and fragment, the changelog format and test-sleep checks,
+  and the stack's whitespace check. The test-sleep checker found zero missing explanations.
+- Rebased the drafts onto `f869aa2a` after checks. Main only gained queue bookkeeping and the desktop PATH plan marker
+  in TODO. The product, tests and website at the rebased tip `e544d3b4` are identical to the tested source.
+- Reused the initial round's website build. The website content is identical to the previously built revision
+  `456803b9`. Skipped another desktop smoke run and separate desktop-package suite. This follow-up changes launcher test
+  interactions, session Delete wording and Markdown. The workspace suite and Linux screenshot comparison cover the
+  changed GUI crate.
 
-## Review gate
+## Review
 
-The required independent review ran for both PRs. The implementation review caught search precedence when a remembered
-model shares a shell's name, a template that tried to set a shell as a command's agent, and surface-specific wording and
-asset omissions. Those were corrected. The docs review corrected the shortcut, template, remembered permission and
-Restart wording. The PR messages passed a separate cold read.
+An independent source reviewer confirmed the launcher tests exercise real scrolling and pointer input and that the final
+draft removes the TODO entry. The review prompted corrections to the Delete spec and Rustdoc, a stronger live-terminal
+test premise, and neutral progress wording if the session row is missing. The revised #4336 title and description passed
+a separate cold read.
