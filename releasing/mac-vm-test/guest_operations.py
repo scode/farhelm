@@ -47,7 +47,7 @@ OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_c
               'update_logs', 'public_latest', 'inspect_state', 'remote_inspect_state', 'terminal_hosts',
               'remote_terminal_hosts', 'host_survival', 'remote_host_survival', 'old_session_after',
               'remote_old_session_after', 'continuity_command',
-              'continuity_before', 'continuity_remote_before', 'continuity_remote_after',
+              'continuity_before', 'continuity_remote_after',
               'continuity_reopen_before', 'continuity_reopen_after', 'prior_receipts', 'window_frame', 'finder_frame')
 # Only the test's session identity columns. Schema introspection drops any
 # absent column, so older releases' databases keep the same observation
@@ -808,22 +808,32 @@ the historical upgrade fixtures expose the same bounded observation contract.
         return result
 
     def continuity(self, operation):
-        """Retain original-process samples and explicit before/after milestones."""
+        """Retain before/after pairs that span the operation each checkpoint proves.
+
+The candidate can update the remote host as soon as it launches. The final
+sample of the earlier continuity-before checkpoint is the remote update's
+baseline, even when that update completes before the next turn observes it.
+"""
         directory = '~/farhelm-brick-test/counter-' + self.task['run_id']
         if operation == 'continuity_command':
             return {'command': 'python3 ~/farhelm-brick-test/continuity.py run ' + directory}
         script = ('from pathlib import Path; import runpy,json; '
                   'm=runpy.run_path(str(Path.home()/"farhelm-brick-test/continuity.py")); '
                   f'print(json.dumps(m["sample"](Path({directory!r}).expanduser())))')
-        sample = json.loads(self.ssh(script)['stdout'])
-        if operation.endswith('_before') and operation != 'continuity_before':
-            key = operation.removeprefix('continuity_').removesuffix('_before')
-            self.state[key + '_before'] = sample
+        if operation == 'continuity_reopen_before':
+            sample = json.loads(self.ssh(script)['stdout'])
+            self.state['reopen_before'] = sample
             return sample
-        before = self.state.get('original_counter') if operation == 'continuity_before' else self.state.get(
-            operation.removeprefix('continuity_').removesuffix('_after') + '_before')
+        if operation == 'continuity_remote_after':
+            if 'remote_version' not in self.completed:
+                raise ObservationNotReady('confirm the connected candidate remote with remote_version first')
+            before = self.prior_value('continuity-before', 'continuity_before')['after']
+        elif operation == 'continuity_reopen_after':
+            before = self.state.get('reopen_before')
+        else:
+            before = self.state.get('original_counter')
         if before is None:
-            before = sample
+            before = json.loads(self.ssh(script)['stdout'])
         from continuity import require_progress
         deadline = time.monotonic() + 10
         while True:

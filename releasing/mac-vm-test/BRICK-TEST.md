@@ -272,6 +272,10 @@ upgrade sources. If they differ, stop planning and use a coordinator checkout wh
 continuing. The portable agreement test checks the two constants within one checkout; it cannot establish this
 candidate-tag comparison for the operator.
 
+Use a coordinator that matches the candidate's default remote update policy too. This procedure observes automatic
+remote updates on candidate relaunch. For candidates from before that default, use the coordinator from before this
+change, which exercises the manual Update action.
+
 ### Resolve permissions during fixture setup
 
 During environment readiness and basic coverage planning, inventory the permissions needed for the **requested scope**
@@ -503,10 +507,10 @@ the session anywhere else cannot be tested this way. Terminal acceptance covers 
 survival, terminal-kind labels and migration-band checks are permanently outside this flow. An older app's installer
 prerequisites do not establish supported terminal behavior in the candidate. The later checks:
 
-- `local-old-session` follows `local-supervisor-agent`; `remote-old-session` follows `remote-supervisor-agent`, whose
-  remote Update upgrades that host's supervisor. Each first runs its side's one-time survival comparison
-  (`host_survival` or `remote_host_survival`), which takes its own samples before the session is touched and compares
-  them with the old fixture's receipts. Each check ends with a final sample (`old_session_after` or
+- `local-old-session` follows `local-supervisor-agent`; `remote-old-session` follows `remote-supervisor-agent`, which
+  observes the candidate's automatic upgrade of that host's supervisor. Each first runs its side's one-time survival
+  comparison (`host_survival` or `remote_host_survival`), which takes its own samples before the session is touched and
+  compares them with the old fixture's receipts. Each check ends with a final sample (`old_session_after` or
   `remote_old_session_after`), refused unless the comparison ran first.
 - The old session must survive the upgrade: same session, same launch generation, still captured, and its terminal host
   and that host's child the same processes (pid and start identity) as at the old fixture, so a replacement that
@@ -580,9 +584,10 @@ evidence as well for combined GUI and command checks. Bind native computer use t
 observations; a screenshot file's existence alone says nothing about whether a product check passed.
 
 Use independent Mac-to-Linux SSH observations for continuity. Retain two advancing pre-update samples for
-`continuity-before`, then before/after samples spanning remote Update and app quit/reopen. Receipts must preserve the
-original `pid`, `start_ticks` and `boot_id`, with a larger `counter`. Do not reboot guests during that check. See
-OPERATIONS for the workload and oracle commands.
+`continuity-before` before candidate relaunch. Use its last sample as the automatic remote update's baseline, then
+sample again at the candidate's connected remote supervisor. Take a separate before/after pair for app quit/reopen.
+Receipts must preserve the original `pid`, `start_ticks` and `boot_id`, with a larger `counter`. Do not reboot guests
+during that check. See OPERATIONS for the workload and oracle commands.
 
 Record `continuity-before`, then `remote-update`, then `reopen`. Every later pair must identify the original process,
 start at or beyond the previous milestone's final counter, and advance further. Saved verdicts recheck this chain;
