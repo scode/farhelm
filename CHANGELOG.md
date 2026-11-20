@@ -2,6 +2,88 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.42.0 - 2026-11-19
+
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- Farhelm now better supports remote hosts that have interactive password/2FA/security key flows so long as it goes through ssh's usual SSH_ASKPASS mechanism. You will be prompted/alerted when needed. (#4299, #4300, #4302, #4303, #4308)
+- In the session list, you can now drag any session into a group, out of one, or between groups, using the grip that appears when you hover over a row. Group members are now indented under their group, and a collapsed group is highlighted when it holds the open session. (#4135, #4143, #4144, #4146, #4147)
+- You can now shift-drag across sessions in the session list to select multiple sessions. (#4199)
+- Settings now has a search field: type part of a setting's name or description to find it in any section, and pick a result to go straight to it. (#4293, #4294)
+- Basic support for Antigravity (agy) is now available. It supports launching and session tracking - but session tracking requires manual installation of Antigravity hooks (see the Antigravity section of the documentation). (#4274)
+
+### 🔄 Changed
+
+- Farhelm now updates your remote hosts automatically instead of waiting for you to click; this applies to existing installations as well as new remote hosts. If you would rather update hosts yourself, turn off Update remote hosts automatically in Settings → Hosts after upgrading. (#4313, #4316)
+- Farhelm now won't automatically "take over" a remote host which you have already added to some other Farhelm installation. Concretely if you for example use "Add host" and Farhelm discovers a pre-existing Farhelm supervisor running on that host, owned by another Farhelm, it will prompt you for whether you intend on taking it over. If you do, the other Farhelm is kicked out - there is only ever one owning Farhelm. (#4187, #4195, #4200)
+- Submenus, such as Mute and Move to group in a session's menu, now open when you hover over them, as in other desktop apps. (#4139)
+- Took a pass over all hover tooltips in the UI - various hovers should now be showing in a much less annoying position. In general, less likely to cover something you care about while hovering. (#4285, #4288, #4289, #4290, #4292)
+
+<details>
+<summary>All other changes</summary>
+
+#### 🚀 Added
+
+- You can now use Emacs Control keys, such as Ctrl+F and Ctrl+B, to move and delete text in Farhelm's text fields, on the Mac and on Linux. On Linux, Ctrl+A now moves to the start of the line instead of selecting all of the field's text. (#4279)
+- In the installed Mac app, Settings → App now shows the Farhelm version you are running and has a **Check for updates** button. (#4233)
+- The session launcher and the template editor now list earlier Sol and Astra models under **Older models**, after the latest ones. Farhelm also recognizes the older model IDs when you type them, and fills in the agent when only one agent offers that model. (#4149, #4152)
+- In the session launcher, you can now type a model family name such as `sol` and press Enter to pick that family's latest model for the chosen agent. A template saved this way keeps that exact model when a newer one arrives. (#4198)
+- The bell on the navigation rail now tells you when a host's session list, or the combined list across all hosts, has hit Farhelm's 500-session limit, and lets you send feedback about it. (#4150)
+- Replace with now says, below Folder, when the replacement will keep working in the source session's managed checkout, changes included. Choosing Managed checkout instead explains that the replacement starts from a fresh clone, and what happens to the old checkout once its last session is deleted. (#4177, #4179)
+- You can now Tab to details on an approval card that are cut off, such as a long folder path, and scroll them with the arrow keys. (#4238)
+- Keyboard shortcuts now explains that pressing a number shortcut during a launch sequence first queues any name you were still typing, then adds the numbered template. (#4262)
+
+#### 🔄 Changed
+
+- After you close a dialog or menu, a quick follow-up Enter now reaches the focused control or terminal instead of being ignored. A quick second Escape after the last dialog closes is still ignored, so it cannot interrupt the agent. (#4231)
+
+#### 🔧 Fixed
+
+- Farhelm now notices within about a minute when the shared SSH connection to a remote host has silently dropped, after a Wi-Fi change or sleep for example, and starts reconnecting sooner. A connection that was already open when you upgraded keeps its old behavior until it is replaced. (#4296)
+- A session whose terminal is gone, for example because the program holding it on its host died, now shows a card with Replace and, when its conversation can be resumed, Restart, instead of staying on "Session unavailable — reconnecting". While the card shows, the session's other terminal tabs are hidden until Restart or Replace brings a terminal back. (#4244)
+- If deleting the last session of a sandbox or container had not finished when Farhelm restarted, Farhelm now retries removing the sandbox or container at startup, even while a Tensorlake sandbox is suspended. Before, a suspended sandbox could stay listed in Hosts and keep accruing snapshot storage charges. If removal fails again, Hosts shows why, with Retry. (#4282)
+- On Linux hosts with systemd, cleaning up an agent or a terminal tab now also stops the Podman containers it started, instead of leaving them running or stuck stopping. Containers started with `--rm` are removed and others are kept in the exited state. The app warns when Podman could not finish, so you can check those containers on their host. (#4281, #4283)
+- Buttons and menus that act on a session (Stop, Delete, Replace, Restart, Restart with, Replace with, Stop and suspend, and the interrupted-session card) now act on the session and the state the app showed when you pressed them. If the open session changed, or its agent started again or a tab opened in the meantime, the press is refused instead of, say, stopping an agent you never saw running. (#4176, #4181, #4193, #4204)
+- Farhelm now refuses to open a terminal link or download a file when a menu, dialog or approval card covers the link's destination details, and explains how to show them again. When an approval card covers them, that explanation now shows above the card instead of under it. (#4180, #4186)
+- A terminal link now ends where a program has hidden part of the text, so a click can no longer open an address you could only partly see. (#4154)
+- The desktop app no longer writes its private connection credential to its logs when trace logging is turned on. (#4151)
+- Choosing a Codex login file in Settings → Credentials now shows its file name and whether it is valid instead of its contents, so its tokens no longer appear on screen, in a screen share say, before you save. Clear returns to the paste box. (#4153)
+- In Settings → Containers, the list of containers that do not belong to this Farhelm no longer offers Delete for a container whose first session is still launching, which could delete the new session along with it. (#4159)
+- If you change a checkout folder or post-clone command from the command line while its editor is open in the app, saving in the app no longer overwrites the newer value; the field reloads it and says why. A save the app refuses, for this reason or for an invalid value such as a relative folder, now drops what you typed and shows the stored value again, so a long post-clone command has to be typed again. (#4160)
+- When you press Enter to start a quick-launch sequence and then press Enter again in the original terminal while it launches, Farhelm now leaves you in that terminal when the launch finishes and shows a Started notice, instead of switching sessions. (#4206)
+- Moving a large number of marked sessions to a group no longer drops the app's connection; the sessions now move one at a time, so on a slow connection they appear in their new places one by one. (#4146)
+- On Linux (Wayland), dropping a file after dragging it across an open session now uses where you released it, so releasing over the sidebar no longer uploads the file to the session you crossed. (#4183)
+- Starting a session, restarting it, or opening a terminal tab in a working folder Farhelm cannot enter now names that folder, instead of failing with an error from systemd-run. (#4188)
+- Editing the folder or name in Clone, an editable command, or Custom flags in the session launcher now keeps invisible characters as they are, instead of turning them into their displayed spelling such as `<U+200B>`. (#4131)
+- When a suspended or stopped host has to be resumed first, Restart with and Replace with now tell you to retry Restart or Replace after resuming it in Hosts, instead of telling you to launch. (#4132)
+- In the session launcher, clicking **New container** again after the last container host has gone away no longer clears the explanation of why the session cannot start. (#4130)
+- When a session's terminal is reopened after its previous view lost its output, keystrokes still queued from the old view no longer arrive after you have started typing in the new one. (#4156)
+- A terminal view that asks for zero rows or columns is now refused, instead of taking over the session's terminal from the view already showing it. (#4190)
+- When a bulk Stop or Delete finishes, or Clear or Escape removes the bar for marked sessions while it has keyboard focus, focus now returns to the open session instead of the sort control. (#4230)
+- A confirmation opened under an action at the top of a session now closes when Farhelm opens a different session, so it no longer looks as if it would act on the newly opened one. (#4240)
+- Close all for a session's port tunnels now finishes closing every tunnel when you switch to another session while it runs. If you come back while it is still running, the list shows its progress and any refusal. (#4242)
+- A slow host opening or closing a shell tab no longer makes the desktop app reconnect and throw away an open session launcher draft. (#4243)
+- If an agent's request expires just as you answer its approval card, Farhelm now says that your answer did not take effect, instead of reporting success. (#4250)
+- Error messages now name the action you chose (Mark read, Mark unread, Suspend, Resume) instead of "Seen" or "Sandbox", a refused file drop or tab attachment no longer tells you to reconnect a terminal that is still connected, and the tooltips on the Retry model catalog and Open add dialog buttons now say what those buttons do. (#4251)
+- When the Mac app replaces its own supervisor, it no longer pauses for about three seconds and warns about removing a program version that a recovered session terminal already protects. (#4236)
+- Retired containerized sessions, which only support Delete, can no longer open port tunnels. (#4234)
+- Agent endpoint URLs can now contain an at-sign in the path, such as `https://api.example.com/@team/v1`; before, Farhelm rejected them as if they held credentials. (#4237)
+- Agent commands shown in the app now quote literal arguments that contain braces, exclamation marks or carets, so they read as Bash would take them. (#4239)
+- The help for automatic remote host updates in Settings no longer says hosts can update with no Farhelm window open; they update while Farhelm is open, including with its window in the background. (#4280)
+- In the Templates dialog, the selected template now has a clearer outline in Dark appearance, and its quick-launch shortcut is easier to read. (#4245, #4246)
+- Long template summaries in Templates and the quick switcher now end with an ellipsis instead of being cut off mid-word. (#4286)
+- Host tooltips on the navigation rail, and the message for a duplicate template name, now keep right-to-left names in their correct reading order. (#4248, #4249)
+- The Close button's tooltip in Settings now says what happens to unsaved recipe edits. (#4254)
+- In Restart with and Replace with, the message shown when a search choice would change a fixed field now starts with a capital letter. (#4247)
+
+#### 🗑️ Removed
+
+- The **SSH needs 2FA?** item is gone from the Help menu, since the desktop app now asks SSH's sign-in questions itself. (#4305)
+
+</details>
+
 ## v0.41.0 - 2026-11-18
 
 ### 🚀 Added
