@@ -43,8 +43,8 @@
 //!
 //! - **Naming the agents.** `farhelm-proto` declares both enums with a
 //!   generated `ALL`: `LaunchHarness` (what the user picked; `launch.rs`) and
-//!   `AgentKind` (the integration that runs; the crate root). Cursor and
-//!   OpenCode run as `AgentKind::Generic`. Muse shares Claude's positional
+//!   `AgentKind` (the integration that runs; the crate root). Cursor, OpenCode,
+//!   and Bash and Zsh shell sessions run as `AgentKind::Generic`. Muse shares Claude's positional
 //!   capture and has its own screen reader for work, rest and workspace trust.
 //! - **When Restart becomes available.** `AgentKind::display_name` and
 //!   `AgentKind::restart_readiness` in the `farhelm-proto` crate root: the

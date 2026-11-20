@@ -770,14 +770,14 @@ impl ProviderUi {
         }
     }
 
-    /// The Suspend question's first sentence, before [`ProviderUi::suspend_help`]: Stop and suspend's (`stop`) keeps
-    /// apart the agent it ends and every other process it freezes.
-    pub(crate) fn suspend_question(self, stop: bool) -> String {
+    /// The Suspend question's first sentence, before [`ProviderUi::suspend_help`]. Stop and suspend names the
+    /// session's program, which ends before the remaining processes are frozen.
+    pub(crate) fn suspend_question(self, stopped_program: Option<&str>) -> String {
         let noun = self.noun();
-        if stop {
+        if let Some(program) = stopped_program {
             format!(
-                "Stop this session's agent and close its terminal tabs, then suspend the whole {noun}? Every other \
-                 process freezes and continues on Resume. The stopped agent and closed tabs do not continue. "
+                "Stop this session's {program} and close its terminal tabs, then suspend the whole {noun}? Every other \
+                 process freezes and continues on Resume. The stopped {program} and closed tabs do not continue. "
             )
         } else {
             format!(
@@ -797,10 +797,10 @@ impl ProviderUi {
     }
 
     /// The Suspend question's Cancel help: what Cancel keeps running.
-    pub(crate) fn suspend_cancel(self, stop: bool) -> String {
-        if stop {
+    pub(crate) fn suspend_cancel(self, stopped_program: Option<&str>) -> String {
+        if let Some(program) = stopped_program {
             format!(
-                "Cancel: keep the agent, its terminal tabs and the {} running",
+                "Cancel: keep the {program}, its terminal tabs and the {} running",
                 self.noun()
             )
         } else {
@@ -810,10 +810,10 @@ impl ProviderUi {
 
     /// The Suspend question's answer help, and Stop and suspend's: the scope includes every other session in the
     /// environment, listed or not.
-    pub(crate) fn suspend_action(self, stop: bool) -> String {
-        if stop {
+    pub(crate) fn suspend_action(self, stopped_program: Option<&str>) -> String {
+        if let Some(program) = stopped_program {
             format!(
-                "Stop this session's agent and close its terminal tabs, then suspend the whole {}",
+                "Stop this session's {program} and close its terminal tabs, then suspend the whole {}",
                 self.noun()
             )
         } else {

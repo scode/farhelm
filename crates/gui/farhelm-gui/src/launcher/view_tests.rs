@@ -1486,6 +1486,22 @@ fn leaving_the_model_field_closes_its_list(cx: &mut TestAppContext) {
 
 // ---- Stored values shown escaped ----------------------------------------------------------------------------------
 
+/// Click a launcher body control after scrolling it clear of the pinned footer. GPUI reports debug bounds for
+/// clipped elements too, so a click at a reported center could otherwise go to a footer action.
+pub(super) fn click_in_body(cx: &mut VisualTestContext, selector: &'static str) {
+    let body = test_support::bounds(cx, "launcher-body");
+    let target = test_support::center(cx, selector);
+    if !body.contains(&target) {
+        super::browse_tests::scroll_body(cx, f32::from(body.center().y - target.y));
+    }
+    let body = test_support::bounds(cx, "launcher-body");
+    assert!(
+        body.contains(&test_support::center(cx, selector)),
+        "the premise: {selector} is visible in the launcher body"
+    );
+    test_support::click(cx, selector);
+}
+
 /// The contract every field shown escaped keeps (`view::stored`): the field in row `field` shows `shown`; a click and
 /// a typed key there change nothing, since editing the escape text would turn it into new launch words; `clear`
 /// empties the field, and the field then takes typing. `input` picks the field off the launcher; the click is checked
@@ -1501,7 +1517,7 @@ pub(super) fn escaped_until_cleared(
         read(cx, |launcher, _, cx| input(launcher).text(cx).to_string())
     };
     assert_eq!(field_text(cx), shown, "{field} shows the escaped spelling");
-    test_support::click(cx, field);
+    click_in_body(cx, field);
     assert!(
         read(cx, |launcher, window, cx| input(launcher)
             .focus_handle(cx)
@@ -1510,9 +1526,9 @@ pub(super) fn escaped_until_cleared(
     );
     keys(cx, "x");
     assert_eq!(field_text(cx), shown, "{field} is read-only");
-    test_support::click(cx, clear);
+    click_in_body(cx, clear);
     assert_eq!(field_text(cx), "", "{clear} emptied it");
-    test_support::click(cx, field);
+    click_in_body(cx, field);
     keys(cx, "x");
     assert_eq!(field_text(cx), "x", "{field} takes typing again");
 }
@@ -1605,9 +1621,9 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
     let wrapper = |cx: &mut VisualTestContext| {
         read(cx, |launcher, _, cx| launcher.wrapper.text(cx).to_string())
     };
-    test_support::click(cx, "launcher-harness-Codex");
+    click_in_body(cx, "launcher-harness-Codex");
     assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
-    test_support::click(cx, "launcher-harness-Claude");
+    click_in_body(cx, "launcher-harness-Claude");
     escaped_until_cleared(
         cx,
         "launcher-wrapper-row",
@@ -1615,7 +1631,7 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
         "env CLAUDE_PROFILE=work<U+202E>",
         |launcher| &launcher.wrapper,
     );
-    test_support::click(cx, "launcher-harness-Codex");
+    click_in_body(cx, "launcher-harness-Codex");
     assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
 }
 
@@ -1674,9 +1690,7 @@ fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestApp
         ),
         "the line goes with the read-only prompt"
     );
-    // After the prompt's Clear, which takes the prompt's help line and button away and so brings the flags row into the
-    // dialog's view.
-    test_support::click(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags-row");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .flags

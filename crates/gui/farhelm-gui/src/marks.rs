@@ -33,6 +33,8 @@ pub enum HarnessGlyph {
     OpenCode,
     Terminal,
     Antigravity,
+    Bash,
+    Zsh,
 }
 
 impl HarnessGlyph {
@@ -52,6 +54,8 @@ impl HarnessGlyph {
         HarnessGlyph::OpenCode,
         HarnessGlyph::Terminal,
         HarnessGlyph::Antigravity,
+        HarnessGlyph::Bash,
+        HarnessGlyph::Zsh,
     ];
 
     /// The stable word naming this mark: the old UI's `data-glyph` value and the key its identity colors were
@@ -69,6 +73,8 @@ impl HarnessGlyph {
             HarnessGlyph::Antigravity => "antigravity",
             HarnessGlyph::OpenCode => "opencode",
             HarnessGlyph::Terminal => "terminal",
+            HarnessGlyph::Bash => "bash",
+            HarnessGlyph::Zsh => "zsh",
         }
     }
 
@@ -86,6 +92,8 @@ impl HarnessGlyph {
             HarnessGlyph::OpenCode => &OPENCODE,
             HarnessGlyph::Muse => &MUSE,
             HarnessGlyph::Terminal => &TERMINAL,
+            HarnessGlyph::Bash => &BASH,
+            HarnessGlyph::Zsh => &ZSH,
         }
     }
 }
@@ -349,6 +357,39 @@ const TERMINAL: HarnessMark = HarnessMark {
         d: TERMINAL_WINDOW,
         paint: Paint::Stroke { width: 1.2 },
     }],
+    bounds: None,
+    transform: Transform::IDENTITY,
+};
+
+/// Farhelm's Bash mark uses the Terminal frame with a drawn dollar prompt.
+/// The frame already sits in the normalized 12-unit box.
+const BASH: HarnessMark = HarnessMark {
+    paths: &[
+        MarkPath {
+            d: "M1.5 2h9v8h-9z",
+            paint: Paint::Stroke { width: 1.2 },
+        },
+        MarkPath {
+            d: "M5.3 4.5H4c-1.1 0-1.1 1.25 0 1.25h.5c1.1 0 1.1 1.25 0 1.25H3.3M4.3 3.9v3.7M6.7 7h1.8",
+            paint: Paint::Stroke { width: 0.8 },
+        },
+    ],
+    bounds: None,
+    transform: Transform::IDENTITY,
+};
+
+/// Farhelm's Zsh mark uses the same frame with a drawn percent prompt.
+const ZSH: HarnessMark = HarnessMark {
+    paths: &[
+        MarkPath {
+            d: "M1.5 2h9v8h-9z",
+            paint: Paint::Stroke { width: 1.2 },
+        },
+        MarkPath {
+            d: "M3.4 4.5h0M5.5 7h0M3.5 7l1.9-2.5M6.7 7h1.8",
+            paint: Paint::Stroke { width: 0.8 },
+        },
+    ],
     bounds: None,
     transform: Transform::IDENTITY,
 };

@@ -1123,6 +1123,32 @@ fn past_models_follow_the_catalogs() {
     );
 }
 
+/// A custom model recalled from history can share a shell's name. A bare
+/// search word keeps the shell shortcut, while a model search still finds
+/// the saved agent choice.
+#[test]
+fn exact_shell_search_takes_priority_over_a_past_model() {
+    let draft = with_history(
+        None,
+        vec![launch("/a", LaunchHarness::Codex, Some("bash"))],
+        &[],
+    );
+    let results = draft.search("bash");
+    assert!(
+        results
+            .rows
+            .contains(&history_model("bash", LaunchHarness::Codex))
+    );
+    assert_eq!(
+        results.rows[results.default],
+        Row::Harness(LaunchHarness::Bash)
+    );
+    assert_eq!(
+        draft.rows("model:bash"),
+        vec![history_model("bash", LaunchHarness::Codex)]
+    );
+}
+
 /// Without a history read (none yet, or none for this host), no saved folder, recent setup or past model is offered,
 /// and a `folder:` word that is not a path says it has no match. Why: these rows belong to the chosen host's history
 /// only; offering a stale one would fill another host's folder.
@@ -1258,7 +1284,8 @@ fn the_exact_template_name_is_preselected_by_unicode_lowercase() {
 /// "Templates"; a template row reads "Template: " and the name, escaped, with the old hover help.
 #[test]
 fn template_rows_sit_between_harnesses_and_models_in_the_old_words() {
-    assert_eq!(Group::Harnesses as u8 + 1, Group::Templates as u8);
+    assert_eq!(Group::Harnesses as u8 + 1, Group::Shells as u8);
+    assert_eq!(Group::Shells as u8 + 1, Group::Templates as u8);
     assert_eq!(Group::Templates as u8 + 1, Group::Models as u8);
     assert_eq!(Group::Templates.label(), "Templates");
     let row = Row::Template("a\u{202e}b".into());

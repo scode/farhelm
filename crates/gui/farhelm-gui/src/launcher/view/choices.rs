@@ -159,8 +159,9 @@ impl Launcher {
         efforts
     }
 
-    /// The Agent tab's choice rows, in the old order: harness (not in Restart with, which holds it), effort and
-    /// permissions. The Custom flags and the last choice's notice sit further down the tab
+    /// The Agent tab puts the shell types immediately after the agent chips.
+    /// The active launch type decides which subsequent choice rows it needs.
+    /// The Custom flags and the last choice's notice sit further down the tab
     /// ([`Self::flags_editor`], [`status_line`]).
     pub(super) fn choice_rows(
         &self,
@@ -169,40 +170,72 @@ impl Launcher {
     ) -> Vec<AnyElement> {
         let mut rows = Vec::new();
         if !self.draft.holds(Field::AgentType) {
-            rows.push(self.harness_row(palette, cx));
+            rows.push(self.harness_row(false, palette, cx));
+            rows.push(self.harness_row(true, palette, cx));
         }
         let harness = self.draft.agent.harness;
         if harness.is_none_or(LaunchHarness::offers_effort) {
             rows.push(self.effort_row(harness, palette, cx));
             rows.extend(self.changed_marker(Changed::Effort, palette));
         }
-        rows.push(self.permission_row(harness, palette, cx));
-        rows.extend(self.changed_marker(Changed::Permissions, palette));
+        if !harness.is_some_and(LaunchHarness::is_shell) {
+            rows.push(self.permission_row(harness, palette, cx));
+            rows.extend(self.changed_marker(Changed::Permissions, palette));
+        }
         rows
     }
 
-    /// The harness chips (`.launch-composer-harness-choice`): every agent type, the chosen one pressed.
-    fn harness_row(&self, palette: &theme::Palette, cx: &mut Context<Self>) -> AnyElement {
+    /// Both chip groups update the same draft choice. Only the group containing
+    /// that choice shows a pressed chip.
+    fn harness_row(
+        &self,
+        shells: bool,
+        palette: &theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let (on_change, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let chips = HARNESS_PICKER_ORDER.iter().fold(
-            RadioGroup::new(
+        let (row_id, id, heading, help) = if shells {
+            (
+                "launcher-shells-row",
+                "launcher-shells",
+                "Shells",
+                "Start a plain shell session",
+            )
+        } else {
+            (
+                "launcher-harness-row",
                 "launcher-harness",
                 "Harness",
-                HoverHelp::tooltip("Harness: the agent this session starts"),
-                Role::GenericContainer,
+                "Harness: the agent this session starts",
             )
-            .chips(),
-            |chips, &harness| {
-                let label = harness_label(harness);
-                chips.option(RadioOption::new(
-                    label,
-                    HoverHelp::tooltip(format!("Use {label} for the session")),
-                    harness,
-                ))
-            },
-        );
+        };
+        let chips = HARNESS_PICKER_ORDER
+            .iter()
+            .filter(|harness| harness.is_shell() == shells)
+            .fold(
+                RadioGroup::new(
+                    id,
+                    heading,
+                    HoverHelp::tooltip(help),
+                    Role::GenericContainer,
+                )
+                .chips(),
+                |chips, &harness| {
+                    let label = harness_label(harness);
+                    chips.option(RadioOption::new(
+                        label,
+                        HoverHelp::tooltip(format!("Use {label} for the session")),
+                        harness,
+                    ))
+                },
+            );
         let chips = chips
-            .chosen(self.draft.agent.harness)
+            .chosen(
+                self.draft
+                    .agent
+                    .harness
+                    .filter(|harness| harness.is_shell() == shells),
+            )
             .on_change(move |harness, window, cx| {
                 let _ = on_change.update(cx, |launcher, cx| {
                     launcher.choose_harness(*harness, window, cx)
@@ -211,7 +244,7 @@ impl Launcher {
             .on_enter(move |window, cx| {
                 let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
             });
-        row("launcher-harness-row", "Harness", chips, palette).into_any_element()
+        row(row_id, heading, chips, palette).into_any_element()
     }
 
     /// Effort (`.launch-composer-effort-choice`): Default and the displayed efforts as segments, or as a select past

@@ -198,7 +198,7 @@ impl SearchPermission {
         match (harness, self.permission()) {
             (None, _) => matches!(self, SearchPermission::Yolo | SearchPermission::Guarded),
             // The agent's own setting is a choice only where omitting the permission is not itself a mode.
-            (Some(harness), None) => harness.omitted_permission().is_none(),
+            (Some(harness), None) => !harness.is_shell() && harness.omitted_permission().is_none(),
             (Some(harness), Some(permission)) => harness.offers_permission(permission),
         }
     }
@@ -255,6 +255,7 @@ pub enum Group {
     Names,
     Hosts,
     Harnesses,
+    Shells,
     Templates,
     Models,
     OlderModels,
@@ -272,6 +273,7 @@ impl Group {
             Group::Names => "Session name",
             Group::Hosts => "Hosts",
             Group::Harnesses => "Harnesses",
+            Group::Shells => "Shells",
             Group::Templates => "Templates",
             Group::Models => "Models",
             Group::OlderModels => OLDER_MODELS,
@@ -290,6 +292,7 @@ impl Row {
         match self {
             Row::Name(_) => Group::Names,
             Row::Host { .. } => Group::Hosts,
+            Row::Harness(harness) if harness.is_shell() => Group::Shells,
             Row::Harness(_) => Group::Harnesses,
             Row::Template(_) => Group::Templates,
             Row::Model { latest: false, .. } => Group::OlderModels,
@@ -313,7 +316,14 @@ impl Row {
                 .text("Set session name: ")
                 .host(&HostText::from_host(name.as_str())),
             Row::Host { label, .. } => sentence.text("Host: ").host(label),
-            Row::Harness(harness) => sentence.text(format!("Harness: {}", harness_label(*harness))),
+            Row::Harness(harness) => {
+                let label = if harness.is_shell() {
+                    "Shell"
+                } else {
+                    "Harness"
+                };
+                sentence.text(format!("{label}: {}", harness_label(*harness)))
+            }
             Row::Template(name) => sentence
                 .text("Template: ")
                 .host(&HostText::from_host(name.as_str())),
@@ -366,6 +376,9 @@ impl Row {
                     .text("\" as the session's name");
             }
             Row::Host { .. } => "Run the session on this host".to_owned(),
+            Row::Harness(harness) if harness.is_shell() => {
+                format!("Start a {} shell", harness_label(*harness))
+            }
             Row::Harness(_) => "Use this agent for the session".to_owned(),
             Row::Template(_) => "Apply this template's settings to the draft".to_owned(),
             Row::Model { .. } | Row::HistoryModel { .. } => {
@@ -741,6 +754,9 @@ fn default_index(
     }
     let priority: &[Group] = match scope {
         Scope::All => &[
+            // The documented bare shell words must stay shortcuts even if
+            // the launch history has a custom model with the same name.
+            Group::Shells,
             Group::Efforts,
             Group::Permissions,
             Group::Models,
@@ -748,7 +764,7 @@ fn default_index(
             Group::Harnesses,
         ],
         Scope::Host => &[Group::Hosts],
-        Scope::Harness => &[Group::Harnesses],
+        Scope::Harness => &[Group::Harnesses, Group::Shells],
         Scope::Model => &[Group::Models, Group::OlderModels],
         Scope::Effort => &[Group::Efforts],
         Scope::Perms => &[Group::Permissions],

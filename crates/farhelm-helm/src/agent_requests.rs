@@ -17238,6 +17238,103 @@ mod tests {
         }
     }
 
+    /// A host that asks before YOLO launches still offers the ordinary card
+    /// for an agent's Bash spawn. The approval authorizes the same plain
+    /// shell command the supervisor receives, with no permission override.
+    #[farhelm_testtrace::test]
+    async fn spawning_a_shell_needs_only_the_ordinary_approval() {
+        use farhelm_proto::{ControlMsg, LaunchHarness};
+
+        let target = session_info("target", SessionStatus::Exited { exit_code: Some(0) });
+        let source = session("source", 3);
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (observed, stop, responder) = own_host_matrix_peer(peer, target.clone());
+        let (h, _local, host) = own_host_matrix_fleet(client, target, source).await;
+        h.store
+            .set_own_sessions_without_asking(host, false)
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(host, false)
+            .await
+            .unwrap();
+        h.store.set_yolo_without_asking(host, false).await.unwrap();
+        let row = host_row(&h, host).await.unwrap();
+        assert!(
+            !row.own_sessions_without_asking
+                && !row.commands_without_asking
+                && !row.yolo_without_asking
+        );
+
+        let _gui = h.manager.ui_seat().hold();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, host);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Create {
+                        host: None,
+                        templates: vec![],
+                        edits: farhelm_proto::launcher::TemplateFields {
+                            agent: Some(LaunchHarness::Bash),
+                            destination: Some(
+                                farhelm_proto::launcher::TemplateDestination::Folder(
+                                    "/srv/t".into(),
+                                ),
+                            ),
+                            ..Default::default()
+                        },
+                        intent_key: None,
+                        confirm_yolo: false,
+                        spawn: Some(farhelm_proto::SpawnPlacement {
+                            parent: Some("asker".into()),
+                            ..Default::default()
+                        }),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        let ApprovalAction::Launch {
+            verb: LaunchVerb::Spawn,
+            launch,
+            ..
+        } = &card.action
+        else {
+            panic!("expected an ordinary Spawn card: {:?}", card.action);
+        };
+        assert!(launch.is_shell());
+        assert_eq!(launch.display_command(), "bash");
+        assert_eq!(launch.yolo(), Some(false));
+        assert!(
+            observed.lock().unwrap().is_empty(),
+            "no create before approval"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            AgentOutcome::Ok {
+                reply: AgentReply::Created { .. }
+            }
+        ));
+        assert!(matches!(
+            &observed.lock().unwrap()[..],
+            [ControlMsg::CreateSession { launch: Some(applied), .. }] if applied == launch
+        ));
+        stop.send(())
+            .expect("peer stayed connected through the create");
+        join_responder(responder, &outcome).await;
+    }
+
     /// Even an otherwise eligible same-host clone needs a direct Allow for
     /// its agent-supplied wrapper. Keeping the target's YOLO permission off
     /// selects the wrapper-specific card instead of a broad launch permission.

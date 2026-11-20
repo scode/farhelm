@@ -276,6 +276,9 @@ fn offers_replace_with(row: &SessionRow) -> bool {
 pub(crate) fn text(row: &SessionRow) -> String {
     let (offer, kind) = (row.info.restart_offer, row.info.agent_kind);
     let lead = match row.info.status {
+        SessionStatus::Interrupted if row.info.launch.is_shell() => {
+            "A host reboot or a Farhelm update ended this session's shell"
+        }
         SessionStatus::Interrupted if offer.can_restart() => {
             "A host reboot or a Farhelm update ended this session's agent; it needs an intentional restart"
         }
@@ -287,7 +290,7 @@ pub(crate) fn text(row: &SessionRow) -> String {
              never started, or could not be found on its host"
         }
     };
-    let clause = restart::offer_clause(offer, kind, true);
+    let clause = restart::offer_clause(row, true);
     let note = restart::feedback_note(offer, true);
     // A legacy session's card offers Replace with, never plain Replace, so its text must not promise that "Replace
     // starts it over".
@@ -499,7 +502,7 @@ pub(crate) fn draw(
         Button::new(
             "session-card-replace",
             "Replace",
-            HoverHelp::tooltip(wait.unwrap_or(replace::MENU_HELP)),
+            HoverHelp::tooltip(wait.unwrap_or_else(|| replace::menu_help(row))),
             Role::Button,
         )
         .help_below()

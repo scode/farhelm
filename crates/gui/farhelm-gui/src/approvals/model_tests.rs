@@ -397,7 +397,10 @@ fn launch_chips_follow_the_session_lists_shield_for_every_mode() {
                 assert_eq!(rows.len(), 1, "{harness:?} {permission:?}");
                 let row = rows[0];
                 assert_eq!(row.kind, expected, "{harness:?} {permission:?}");
-                assert_eq!(row.shield(), crate::permission::permission(&launch, false));
+                assert_eq!(
+                    Some(row.shield()),
+                    crate::permission::permission(&launch, false)
+                );
                 assert_eq!(row.warning(), row.shield() == Shield::Yolo);
                 assert_eq!(
                     row.guarded.is_some(),
@@ -484,7 +487,11 @@ fn launch_and_restart_cards_explain_stored_workspace_trust() {
                     .into_iter()
                     .map(|row| row.trust)
                     .collect();
-                assert_eq!(trust, vec![workspace_trust], "{harness:?}");
+                if harness.is_shell() {
+                    assert!(trust.is_empty(), "shells have no permissions row");
+                } else {
+                    assert_eq!(trust, vec![workspace_trust], "{harness:?}");
+                }
             }
         }
     }

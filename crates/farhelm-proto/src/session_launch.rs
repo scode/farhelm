@@ -121,7 +121,7 @@ pub struct CommandLaunch {
 }
 
 /// What an agent asks the helm to launch (`farhelm agent create`): an
-/// agent type with its choices, which the helm composes into commands
+/// structured agent or shell choice, which the helm composes into commands
 /// exactly as it does for the launcher, or a command launch as written.
 ///
 /// Not a [`SessionLaunch`], because an agent never supplies composed argv:
@@ -139,6 +139,9 @@ impl CommandLaunch {
     /// Admission checks literal shape and placeholder source positions; the
     /// receiving helm and supervisor own the authoritative shell check.
     pub fn validate(&self) -> Result<(), String> {
+        if self.agent.is_some_and(LaunchHarness::is_shell) {
+            return Err("command: choose Bash or Zsh as a shell session instead of declaring it as an agent type".into());
+        }
         self.validate_stored()?;
         crate::command_shell::validate_command_placeholders("command", &self.command)?;
         if let Some(resume) = &self.resume {
@@ -211,6 +214,13 @@ impl LaunchKind {
 }
 
 impl SessionLaunch {
+    /// Whether this was launched as a first-class shell. A command that
+    /// happens to run Bash or Zsh keeps the command launch's own semantics.
+    pub fn is_shell(&self) -> bool {
+        self.agent_selection()
+            .is_some_and(|selection| selection.harness.is_shell())
+    }
+
     /// Check the one-time message independently of reusable launch settings.
     /// Both the helm and supervisor enforce this before any create side effect;
     /// declaring an agent on a custom command does not grant prompt support.
@@ -222,6 +232,9 @@ impl SessionLaunch {
         match self {
             Self::Agent { selection, .. } if selection.harness.supports_initial_prompt(named) => {
                 Ok(())
+            }
+            Self::Agent { selection, .. } if selection.harness.is_shell() => {
+                Err("a shell session does not accept an initial prompt".into())
             }
             Self::Agent { .. } => {
                 Err("this agent does not accept an initial prompt for this start".into())
@@ -640,6 +653,10 @@ mod tests {
             assert_eq!(launch.validate_new(), Ok(()), "{launch:?}");
         }
         let refused = [
+            (
+                command("bash {farhelm_args}", Some(LaunchHarness::Bash), None),
+                "as a shell session",
+            ),
             (command("", None, None), "command is empty"),
             (command("'unterminated", None, None), "command:"),
             (command("{cwd} x", None, None), "cannot be the program"),

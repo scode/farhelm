@@ -359,13 +359,13 @@ fn row_cells(
     let id = |part: &str| SharedString::from(format!("launcher-recent-{index}-{part}"));
     let selection = &entry.selection;
     let explicit = explicit_before_permissions(selection).join(" · ");
-    let guarded_default = uses_guarded_default(selection);
+    let show_permission = !selection.harness.is_shell() && !uses_guarded_default(selection);
     let yolo =
         selection.harness.request_permission(selection.permissions) == Some(LaunchPermission::Yolo);
     // The choices cell's words, for its label; drawn below in parts, so YOLO can take the danger ink.
     let mut words = String::new();
     let mut choices = div().flex().min_w_0().truncate();
-    if explicit.is_empty() && guarded_default {
+    if explicit.is_empty() && !show_permission {
         words.push_str(ALL_DEFAULTS);
         choices = choices.child(ALL_DEFAULTS);
     } else if !explicit.is_empty() {
@@ -375,7 +375,7 @@ fn row_cells(
         words.push_str(&sentence.accessible_name());
         choices = choices.child(sentence);
     }
-    if !guarded_default {
+    if show_permission {
         let lead = if explicit.is_empty() {
             "Permissions: "
         } else {

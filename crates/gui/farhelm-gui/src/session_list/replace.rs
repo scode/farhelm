@@ -55,8 +55,13 @@ use crate::{local_state, session};
 
 /// The menu's Replace item's hover help: the old header Replace button's tooltip, which says what the item's short
 /// description line ("Fresh conversation, same settings") means.
-pub(crate) const MENU_HELP: &str =
-    "Replace: swap this session for a fresh conversation with the same settings";
+pub(crate) fn menu_help(row: &SessionRow) -> &'static str {
+    if row.info.launch.is_shell() {
+        "Replace: start a fresh shell with the same settings"
+    } else {
+        "Replace: swap this session for a fresh conversation with the same settings"
+    }
+}
 
 /// How Replace's consequence ends: what takes the source's place, the one clause that tells this question from
 /// Delete's.
@@ -68,8 +73,21 @@ const SUCCESSOR: &str = "a fresh session with the same settings takes its place:
 /// is killed, an unknown one only that it may be, and an ended one claims no kill. Every arm also says the conversation
 /// is discarded, because that is what Replace costs even when nothing runs; an agent that never started may still have
 /// an earlier run's conversation to resume.
-fn agent_clause(status: &SessionStatus) -> &'static str {
-    match status {
+fn replaced_program(row: &SessionRow) -> &'static str {
+    if row.info.launch.is_shell() {
+        return match row.info.status {
+            SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
+                "still running — replacing stops the shell"
+            }
+            SessionStatus::Unknown => {
+                "status unknown — replacing stops the shell if it is still running"
+            }
+            SessionStatus::Exited { .. } => "the shell exited",
+            SessionStatus::Interrupted => "a host reboot or a Farhelm update ended the shell",
+            SessionStatus::Error { .. } => "the shell never started",
+        };
+    }
+    match row.info.status {
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
             "still running — replacing kills the agent and discards the conversation"
         }
@@ -94,7 +112,7 @@ pub(crate) fn consequence(row: &SessionRow) -> String {
     delete::with_tabs(
         "replacing",
         row.info.tabs.len(),
-        &format!("{}; {SUCCESSOR}", agent_clause(&row.info.status)),
+        &format!("{}; {SUCCESSOR}", replaced_program(row)),
     )
 }
 
@@ -114,7 +132,7 @@ pub(crate) fn launcher_warning(row: &SessionRow) -> (Option<String>, DeleteGuard
         row.info.tabs.len(),
         &format!(
             "{}; the session launched here takes its place.",
-            agent_clause(&row.info.status)
+            replaced_program(row)
         ),
     );
     (Some(warning), delete::guard(row))

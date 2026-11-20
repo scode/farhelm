@@ -240,9 +240,12 @@ impl Action {
 /// whether the conversation can be resumed and why not ([`restart::hover_help`]).
 pub(crate) fn hover_help(action: Action, row: &SessionRow, skipped: bool) -> String {
     match action {
-        Action::Stop => "Stop the agent and close its terminal tabs".to_owned(),
+        Action::Stop => format!(
+            "Stop the {} and close its terminal tabs",
+            crate::session_list::stop::program_word(row)
+        ),
         Action::Restart => restart::hover_help(row),
-        Action::Replace => replace::MENU_HELP.to_owned(),
+        Action::Replace => replace::menu_help(row).to_owned(),
         Action::Clone => menu::CLONE_HELP.to_owned(),
         Action::Delete if skipped => {
             format!("Delete: remove this session and its state ({DELETE_SESSION_SHORTCUT_NAME})")
@@ -365,11 +368,7 @@ impl Choices {
                 let offered = restart::offered(row);
                 let plain = match wait.filter(|_| offered) {
                     Some(wait) => wait.to_owned(),
-                    None => restart::offer_continuation(
-                        &row.info.status,
-                        row.info.restart_offer,
-                        row.info.agent_kind,
-                    ),
+                    None => restart::offer_continuation(row),
                 };
                 Choices {
                     plain_unavailable: !offered || wait.is_some(),
@@ -384,7 +383,11 @@ impl Choices {
                 plain_unavailable: wait.is_some(),
                 with_unavailable: launcher_wait.is_some(),
                 plain_description: wait
-                    .unwrap_or("Swap this session for a fresh conversation with the same settings")
+                    .unwrap_or(if row.info.launch.is_shell() {
+                        "Start a fresh shell with the same settings"
+                    } else {
+                        "Swap this session for a fresh conversation with the same settings"
+                    })
                     .to_owned(),
                 with_description: launcher_wait
                     .unwrap_or("Edit the settings, then swap this session for a new one")
@@ -1465,6 +1468,7 @@ impl Render for CaretMenu {
             self.action.clear();
             return panel;
         };
+        let shell = row.info.launch.is_shell();
         let launcher_wait = menu::launcher_wait(cx);
         let choices = Choices::of(self.split, &self.key, &row, launcher_wait, cx);
         let busy = menu::refused(&self.key, cx);
@@ -1482,6 +1486,7 @@ impl Render for CaretMenu {
         } else {
             match self.split {
                 Split::Restart => "Resume a conversation in this session",
+                Split::Replace if shell => "Start a fresh shell",
                 Split::Replace => "Start a fresh conversation",
             }
         };

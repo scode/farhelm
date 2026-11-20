@@ -259,6 +259,9 @@ pub(crate) fn agent_line(id: SharedString, row: &SessionRow) -> HostSentence {
     let launch = &row.info.launch;
     let mut line = HostSentence::new(id);
     match launch {
+        SessionLaunch::Agent { selection, .. } if selection.harness.is_shell() => {
+            line = line.text(harness_label(selection.harness)).text(" shell");
+        }
         SessionLaunch::Agent { selection, .. } => {
             let permission = selection
                 .harness

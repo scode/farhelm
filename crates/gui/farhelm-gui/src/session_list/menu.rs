@@ -922,7 +922,7 @@ impl RowMenu {
         {
             let unavailable = environment::unavailable(&self.key, environment, cx);
             let captured = self.environment_frame.capture(target, unavailable, window);
-            self.environment_items(environment, unavailable, &captured)
+            self.environment_items(environment, row, unavailable, &captured)
         } else {
             self.environment_frame.clear();
             Vec::new()
@@ -1056,8 +1056,12 @@ impl RowMenu {
             "session-menu-replace",
             Icon::Replace,
             "Replace",
-            launch_wait.unwrap_or(replace::MENU_HELP),
-            "Fresh conversation, same settings",
+            launch_wait.unwrap_or_else(|| replace::menu_help(row)),
+            if row.info.launch.is_shell() {
+                "Fresh shell, same settings"
+            } else {
+                "Fresh conversation, same settings"
+            },
             LifecycleCommand::Replace,
         )
         .disabled(busy || launch_wait.is_some() || frozen);
@@ -1065,9 +1069,13 @@ impl RowMenu {
             "session-menu-stop",
             Icon::Stop,
             "Stop",
-            stop::MENU_HELP,
+            stop::menu_help(row),
             environment.map_or(
-                "Ends the agent and its processes, and closes terminal tabs",
+                if row.info.launch.is_shell() {
+                    "Ends the shell and its processes, and closes terminal tabs"
+                } else {
+                    "Ends the agent and its processes, and closes terminal tabs"
+                },
                 |environment| environment.ui.stop_help(),
             ),
             LifecycleCommand::Stop,
@@ -1276,6 +1284,7 @@ impl RowMenu {
     fn environment_items(
         &self,
         environment: Environment,
+        row: &SessionRow,
         unavailable: bool,
         captured: &crate::prompt::ShownAction<Actionable>,
     ) -> Vec<MenuItem> {
@@ -1334,17 +1343,18 @@ impl RowMenu {
         };
         let mut items = vec![toggle.disabled(unavailable)];
         if !resume {
+            let program = stop::program_word(row);
             items.push(
                 MenuItem::new(
                     "session-menu-stop-and-suspend",
                     Icon::Stop,
                     "Stop and suspend",
-                    HoverHelp::tooltip(environment.ui.suspend_action(true)),
+                    HoverHelp::tooltip(environment.ui.suspend_action(Some(program))),
                     Role::MenuItem,
                 )
-                .description(
-                    "End this session's agent and tabs, then suspend the whole environment",
-                )
+                .description(format!(
+                    "End this session's {program} and tabs, then suspend the whole environment"
+                ))
                 .danger()
                 .disabled(unavailable)
                 .on_click(item(true)),

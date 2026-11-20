@@ -84,7 +84,9 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
         | LaunchHarness::Pi
         | LaunchHarness::Omp
         | LaunchHarness::Antigravity
-        | LaunchHarness::OpenCode => None,
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     }
 }
 
@@ -114,6 +116,7 @@ pub(crate) fn workspace_trust_prompt(
             | LaunchHarness::OpenCode,
         )
         | None => reader.trust_prompt(text),
+        Some(LaunchHarness::Bash | LaunchHarness::Zsh) => false,
     }
 }
 

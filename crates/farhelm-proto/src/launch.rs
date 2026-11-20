@@ -2,8 +2,8 @@
 //!
 //! This module intentionally records choices, not inferred runtime facts. A
 //! missing model, effort, permission, or workspace-trust choice means that the
-//! selected harness receives no corresponding argument and decides its own
-//! default. Even OpenCode may use its configured default; an explicit
+//! selected harness receives no corresponding argument. An agent then uses
+//! its default, while a shell has no agent options. Even OpenCode may use its configured default; an explicit
 //! OpenCode model still has to use its supported Zen provider. The supervisor
 //! later stores the same value beside the resolved argv so clone and history
 //! can preserve the launch without parsing a command line back into intent.
@@ -33,9 +33,9 @@ crate::enum_with_all! {
     ///
     /// This is distinct from [`crate::AgentKind`]. `AgentKind` describes the
     /// supervisor features available after a process starts; this enum preserves
-    /// the harness the user selected. Cursor and OpenCode are launch choices
-    /// without conversation reporting; selecting a harness alone promises no
-    /// integration beyond that harness's own declared capabilities.
+    /// the harness the user selected. Cursor, OpenCode and the plain shells
+    /// share the generic runtime. The launch type still carries their
+    /// distinct choices and permissions.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum LaunchHarness {
@@ -61,11 +61,33 @@ crate::enum_with_all! {
         Grok,
         /// Antigravity CLI. Launch choices work with or without its manual hooks.
         Antigravity,
+        /// An interactive Bash shell on the host's PATH.
+        Bash,
+        /// An interactive Zsh shell on the host's PATH.
+        Zsh,
     }
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl LaunchHarness {
+    /// Plain shells use the same structured launch path as agents, but have
+    /// no agent permission mode or conversation to resume.
+    pub const fn is_shell(self) -> bool {
+        match self {
+            Self::Bash | Self::Zsh => true,
+            Self::Cursor
+            | Self::Codex
+            | Self::Claude
+            | Self::Muse
+            | Self::Goose
+            | Self::Pi
+            | Self::Omp
+            | Self::OpenCode
+            | Self::Grok
+            | Self::Antigravity => false,
+        }
+    }
+
     /// Whether a command-line prompt leaves this harness interactive.
     /// Muse accepts one on a fresh start, but its resume subcommand accepts
     /// only a session reference. Goose's interactive session has no prompt
@@ -74,7 +96,9 @@ impl LaunchHarness {
     /// facts, independent of reporting kind.
     pub const fn supports_initial_prompt(self, named: bool) -> bool {
         match self {
-            LaunchHarness::Goose | LaunchHarness::Pi => false,
+            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                false
+            }
             LaunchHarness::Muse => !named,
             LaunchHarness::Cursor
             | LaunchHarness::Codex
@@ -95,6 +119,9 @@ impl LaunchHarness {
         match self {
             LaunchHarness::Goose => Err("Goose does not accept an initial prompt".into()),
             LaunchHarness::Pi => Err("Pi cannot accept an arbitrary literal initial prompt".into()),
+            LaunchHarness::Bash | LaunchHarness::Zsh => {
+                Err("a shell session does not accept an initial prompt".into())
+            }
             LaunchHarness::OpenCode => Ok(vec![format!("--prompt={prompt}")]),
             LaunchHarness::Antigravity => Ok(vec![format!("--prompt-interactive={prompt}")]),
             LaunchHarness::Cursor
@@ -149,7 +176,10 @@ impl LaunchHarness {
             LaunchHarness::Codex => AgentKind::Codex,
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Muse,
-            LaunchHarness::Cursor | LaunchHarness::OpenCode => AgentKind::Generic,
+            LaunchHarness::Cursor
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => AgentKind::Generic,
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
             LaunchHarness::Omp => AgentKind::Omp,
@@ -176,7 +206,9 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => self.agent_kind(),
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => self.agent_kind(),
         }
     }
 
@@ -196,7 +228,9 @@ impl LaunchHarness {
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => false,
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => false,
         }
     }
 
@@ -219,7 +253,7 @@ impl LaunchHarness {
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Antigravity => true,
-            LaunchHarness::Grok => false,
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => false,
         }
     }
 
@@ -251,7 +285,9 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => Cow::Borrowed(model),
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => Cow::Borrowed(model),
         }
     }
 
@@ -271,7 +307,11 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Antigravity => true,
-            LaunchHarness::Cursor | LaunchHarness::OpenCode | LaunchHarness::Grok => false,
+            LaunchHarness::Cursor
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => false,
         }
     }
 
@@ -279,7 +319,8 @@ impl LaunchHarness {
     ///
     /// Every harness that offers Guarded starts there unless another mode was
     /// chosen. Pi, OpenCode and Goose retain their YOLO defaults;
-    /// Cursor remains under its own configuration. This is an admission rule,
+    /// Cursor remains under its own configuration. Shells have no mode.
+    /// This is an admission rule,
     /// not a way to reinterpret an older stored command: use
     /// [`Self::stored_permission`] for that.
     pub const fn omitted_permission(self) -> Option<LaunchPermission> {
@@ -287,7 +328,7 @@ impl LaunchHarness {
             LaunchHarness::Pi | LaunchHarness::OpenCode | LaunchHarness::Goose => {
                 Some(LaunchPermission::Yolo)
             }
-            LaunchHarness::Cursor => None,
+            LaunchHarness::Cursor | LaunchHarness::Bash | LaunchHarness::Zsh => None,
             LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
@@ -339,6 +380,7 @@ impl LaunchHarness {
     /// current request default: restart, replace and agent copies reuse that
     /// stored command. The older YOLO defaults on the other harnesses retain
     /// their meaning. Unsupported values use the same historical fallback.
+    /// A shell always has no permission mode.
     pub const fn stored_permission(
         self,
         permission: Option<LaunchPermission>,
@@ -355,7 +397,9 @@ impl LaunchHarness {
                 | LaunchHarness::Claude
                 | LaunchHarness::Muse
                 | LaunchHarness::Grok
-                | LaunchHarness::Antigravity => None,
+                | LaunchHarness::Antigravity
+                | LaunchHarness::Bash
+                | LaunchHarness::Zsh => None,
             },
         }
     }
@@ -376,7 +420,9 @@ impl LaunchHarness {
             LaunchHarness::Cursor
             | LaunchHarness::Goose
             | LaunchHarness::Pi
-            | LaunchHarness::OpenCode => &[],
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => &[],
         }
     }
 
@@ -397,6 +443,7 @@ impl LaunchHarness {
             | LaunchHarness::Muse
             | LaunchHarness::Cursor
             | LaunchHarness::OpenCode => true,
+            LaunchHarness::Bash | LaunchHarness::Zsh => false,
         }
     }
 
@@ -414,7 +461,9 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Muse
             | LaunchHarness::Cursor
-            | LaunchHarness::OpenCode => false,
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => false,
         }
     }
 
@@ -432,7 +481,11 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Muse => true,
-            LaunchHarness::Goose | LaunchHarness::Cursor | LaunchHarness::OpenCode => false,
+            LaunchHarness::Goose
+            | LaunchHarness::Cursor
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => false,
         }
     }
 
@@ -483,6 +536,7 @@ impl LaunchHarness {
             LaunchHarness::Pi | LaunchHarness::OpenCode => {
                 matches!(permission, LaunchPermission::Yolo)
             }
+            LaunchHarness::Bash | LaunchHarness::Zsh => false,
         }
     }
 }
@@ -918,7 +972,10 @@ mod tests {
                     super::LaunchHarness::Antigravity => {
                         assert_eq!(args, [format!("--prompt-interactive={text}")])
                     }
-                    super::LaunchHarness::Goose | super::LaunchHarness::Pi => unreachable!(),
+                    super::LaunchHarness::Goose
+                    | super::LaunchHarness::Pi
+                    | super::LaunchHarness::Bash
+                    | super::LaunchHarness::Zsh => unreachable!(),
                     super::LaunchHarness::Cursor
                     | super::LaunchHarness::Codex
                     | super::LaunchHarness::Claude
@@ -1076,9 +1133,8 @@ mod tests {
         assert!(!LaunchHarness::is_ordering_of_all(&extended));
     }
 
-    /// Spec: Grok alone offers no model; Cursor, OpenCode, and Grok offer no
-    /// effort; Pi and OpenCode offer only YOLO (SPEC.md's structured
-    /// launch rules for each harness).
+    /// Spec: the launcher hides unsupported choices, including the model,
+    /// effort and permission fields of both shells.
     ///
     /// Why: these predicates replaced per-harness checks scattered through
     /// the browser and the helm, so a slip here changes what the composer
@@ -1106,6 +1162,8 @@ mod tests {
                 Some(LaunchPermission::Guarded),
                 false,
             ),
+            (Bash, false, false, None, false),
+            (Zsh, false, false, None, false),
         ];
         assert_eq!(expected.len(), LaunchHarness::ALL.len());
         for (harness, model, effort, omitted, only_yolo) in expected {
@@ -1120,9 +1178,8 @@ mod tests {
         }
     }
 
-    /// Spec: Goose offers every explicit permission, OMP offers YOLO and
-    /// Approve, and every other harness offers only YOLO (SPEC.md's
-    /// structured-launch permission rules).
+    /// Spec: each agent offers its own explicit permission modes, and
+    /// Bash and Zsh offer none.
     ///
     /// Why: this is the table both the helm's validation and the launcher's
     /// buttons and normalization read, so a slip here changes what users can
@@ -1144,7 +1201,9 @@ mod tests {
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => {}
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => {}
         }
         let all = [Guarded, Yolo, Custom, Approve, SmartApprove, Chat];
         for (harness, offered) in [
@@ -1161,6 +1220,8 @@ mod tests {
             (LaunchHarness::OpenCode, &[Yolo][..]),
             (LaunchHarness::Grok, &[Guarded, Yolo, Custom][..]),
             (LaunchHarness::Antigravity, &[Guarded, Yolo, Custom][..]),
+            (LaunchHarness::Bash, &[][..]),
+            (LaunchHarness::Zsh, &[][..]),
         ] {
             for permission in all {
                 assert_eq!(

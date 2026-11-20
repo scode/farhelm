@@ -262,7 +262,9 @@ impl TrustAgent {
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => None,
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => None,
         }
     }
 

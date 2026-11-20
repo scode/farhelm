@@ -596,7 +596,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 "--model".to_string(),
                 model.clone(),
             ]),
-            LaunchHarness::Grok => unreachable!("Grok has no supported model"),
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                unreachable!("selection validated without a supported model")
+            }
         }
     }
     if let Some(effort) = selection.effort {
@@ -619,7 +621,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             LaunchHarness::Pi | LaunchHarness::Omp => {
                 argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
             }
-            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
+            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+                unreachable!("selection validated without a supported effort")
+            }
         }
     }
     // OMP carries its effective permission as one explicit approval-mode flag,
@@ -658,7 +662,11 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             // Goose encodes every mode in the environment above; Pi has no
             // approval flag at all; OMP's own approval-mode arm above already
             // wrote its flag.
-            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
+            LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => None,
         };
         if let Some(flag) = flag {
             argv.push(flag.to_string());
@@ -716,7 +724,9 @@ pub(crate) fn workspace_trust_enabled(
         | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
-        | LaunchHarness::Omp => false,
+        | LaunchHarness::Omp
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => false,
     }
 }
 
@@ -755,7 +765,9 @@ fn workspace_trust_arguments(
         | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
-        | LaunchHarness::Omp => &[],
+        | LaunchHarness::Omp
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => &[],
     }
 }
 
@@ -818,7 +830,7 @@ pub(crate) fn with_workspace_trust(
 
 /// What an agent type's resume command adds to its start command to select
 /// the captured conversation, or `None` for an agent type Farhelm cannot
-/// resume (no conversation reporting: Cursor, OpenCode).
+/// resume (Cursor, OpenCode and the plain shells).
 ///
 /// Appended after every start-command choice: each agent type reads these
 /// selectors wherever they stand among its options, and the start commands
@@ -833,7 +845,10 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
         LaunchHarness::Pi => Some(&["--session", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume", CONVERSATION_PLACEHOLDER]),
         LaunchHarness::Antigravity => Some(&["--conversation", CONVERSATION_PLACEHOLDER]),
-        LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+        LaunchHarness::Cursor
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     }
 }
 
@@ -873,7 +888,9 @@ pub(crate) fn named_start(
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity => {
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => {
                 return Err("this agent launch has no resume command".into());
             }
         };
@@ -914,6 +931,8 @@ pub(crate) fn test_agent_launch(selection: LaunchSelection) -> SessionLaunch {
     }
 }
 
+/// The literal program resolved on the host's PATH. A shell session uses the
+/// ordinary program lookup, including when a launcher wrapper is present.
 fn program(harness: LaunchHarness) -> &'static str {
     match harness {
         LaunchHarness::Codex => "codex",
@@ -926,6 +945,8 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Omp => "omp",
         LaunchHarness::Grok => "grok",
         LaunchHarness::Antigravity => "agy",
+        LaunchHarness::Bash => "bash",
+        LaunchHarness::Zsh => "zsh",
     }
 }
 
@@ -956,6 +977,9 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
         return Err("Grok does not currently expose a verified model choice".to_string());
     }
     if let Some(model) = &selection.model {
+        if !selection.harness.offers_model() {
+            return Err("a shell session does not accept a model choice".to_owned());
+        }
         validate_model_id(model)?;
         if selection.harness == LaunchHarness::OpenCode {
             opencode_model_argument(model)?;
@@ -1049,7 +1073,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Goose => GOOSE_EFFORTS,
         LaunchHarness::Pi => PI_EFFORTS,
         LaunchHarness::Omp => OMP_EFFORTS,
-        LaunchHarness::Grok => &[],
+        LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => &[],
         LaunchHarness::Antigravity => ANTIGRAVITY_EFFORTS,
     }
 }
@@ -1064,7 +1088,12 @@ mod tests {
         for harness in LaunchHarness::ALL {
             let launch = super::compile(selection(*harness)).unwrap();
             let before = launch.clone();
-            let named = super::named_start(&launch, "named-target".into()).unwrap();
+            let named = super::named_start(&launch, "named-target".into());
+            if harness.is_shell() {
+                assert!(named.is_err(), "{harness:?}");
+                continue;
+            }
+            let named = named.unwrap();
             assert_eq!(launch, before);
             assert_eq!(named.conversation, "named-target");
             assert_eq!(
@@ -1424,7 +1453,10 @@ mod tests {
                 LaunchHarness::Pi => Some(&["--session"]),
                 LaunchHarness::Omp | LaunchHarness::Grok => Some(&["--resume"]),
                 LaunchHarness::Antigravity => Some(&["--conversation"]),
-                LaunchHarness::Cursor | LaunchHarness::OpenCode => None,
+                LaunchHarness::Cursor
+                | LaunchHarness::OpenCode
+                | LaunchHarness::Bash
+                | LaunchHarness::Zsh => None,
             };
             let expected = suffix.map(|suffix| {
                 let mut resume = start[..start.len() - 1].to_vec();
@@ -1437,10 +1469,44 @@ mod tests {
         }
     }
 
+    /// Both shells resolve as bare PATH programs in the existing terminal.
+    /// Model, permission and resume flags would alter the shell's invocation.
+    #[test]
+    fn shell_launches_compile_to_plain_programs_with_no_permission_mode() {
+        for (harness, program) in [(LaunchHarness::Bash, "bash"), (LaunchHarness::Zsh, "zsh")] {
+            let input = selection(harness);
+            let launch = super::compile(input.clone()).expect("plain shell compiles");
+            assert_eq!(launch.agent_kind(), farhelm_proto::AgentKind::Generic);
+            assert_eq!(
+                launch.start_argv().unwrap(),
+                [program, FARHELM_ARGS_PLACEHOLDER]
+            );
+            assert_eq!(launch.agent_selection().unwrap().permissions, None);
+            assert!(launch.resume_argv().unwrap().is_none());
+            assert_eq!(launch.yolo(), Some(false));
+            assert!(
+                super::compile(LaunchSelection {
+                    model: Some("custom-model".into()),
+                    ..input.clone()
+                })
+                .is_err(),
+                "unsupported options are refused before argv composition"
+            );
+            assert!(
+                super::compile(LaunchSelection {
+                    permissions: Some(LaunchPermission::Yolo),
+                    ..input
+                })
+                .is_err()
+            );
+        }
+    }
+
     /// A wrapper belongs to the stored launch, so every way to start that
-    /// launch must preserve the same raw spelling ahead of the literal agent words.
+    /// launch must preserve its raw spelling ahead of the program and its arguments.
     /// Goose is the sensitive case: its environment-setting `env` executable
     /// is part of the command being wrapped, not a replacement for the prefix.
+    /// Shells still use the wrapper for a fresh start, but refuse a named start.
     #[farhelm_testtrace::test]
     fn wrapper_prefix_surrounds_every_agent_start_and_resume() {
         let prefix = vec![
@@ -1469,8 +1535,17 @@ mod tests {
                 assert_eq!(wrapped_resume[..prefix.len()], prefix, "{harness:?}");
                 assert_eq!(wrapped_resume[prefix.len()..], bare_resume, "{harness:?}");
             }
-            let named = super::named_start(&wrapped, "saved".into()).unwrap();
-            assert_eq!(named.argv[..prefix.len()], prefix, "{harness:?}");
+            let named = super::named_start(&wrapped, "saved".into());
+            if harness.offers_named_conversation() {
+                let named = named.expect("this harness supports a named start");
+                assert_eq!(named.argv[..prefix.len()], prefix, "{harness:?}");
+            } else {
+                assert_eq!(
+                    named.expect_err("this harness cannot start a named conversation"),
+                    "this agent does not offer a named conversation start",
+                    "{harness:?}"
+                );
+            }
         }
     }
 

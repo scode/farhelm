@@ -101,13 +101,6 @@ pub(super) const SUSPENDED_HELP: &str =
 /// The badge's word.
 pub(super) const SUSPENDED: &str = "Suspended";
 
-/// The Stop question's extra answer's help, and its consequence's addition after the provider's Stop help: the old row
-/// and header Stop questions' words.
-const STOP_AND_SUSPEND_HELP: &str =
-    "Stop this session's agent and close its terminal tabs, then suspend the whole environment";
-const STOP_AND_SUSPEND_NOTE: &str = "Stop and suspend freezes the remaining processes; they continue on Resume. The \
-                                     stopped agent and closed tabs do not continue.";
-
 /// The status the helm answers with when the host reply bound passed while the work goes on
 /// (`within_host_reply_bound_saying` in the helm's sessions module): not a failure here (the module docs). It is not the
 /// only 504: a supervisor's own timeout inside the bound (Stop and suspend's Stop half, say) answers it too, and the
@@ -392,6 +385,8 @@ pub(crate) struct Asked {
     pub(crate) host: i64,
     pub(crate) verb: Verb,
     pub(crate) guard: SessionStopRequest,
+    /// A Stop and suspend confirmation names the program from the clicked row.
+    stopped_program: Option<&'static str>,
 }
 
 /// The part of an environment's state that decides which command its controls offer. Keep the provider and phase
@@ -449,6 +444,7 @@ pub(crate) fn begin_shown(
         host,
         verb,
         guard: super::stop::guard(&target.row),
+        stopped_program: stop.then(|| super::stop::program_word(&target.row)),
     };
     if verb == Verb::Resume {
         send(asked, cx);
@@ -530,19 +526,19 @@ pub(crate) fn question(asked: &Asked, ui: ProviderUi) -> Question<Asked> {
         ui.suspend_title(stop),
         Answer::new(
             if stop { "Stop and suspend" } else { "Suspend" },
-            HoverHelp::tooltip(ui.suspend_action(stop)),
+            HoverHelp::tooltip(ui.suspend_action(asked.stopped_program)),
             Tier::Danger,
         ),
         asked.clone(),
     )
     .line(format!(
         "{}{}",
-        ui.suspend_question(stop),
+        ui.suspend_question(asked.stopped_program),
         ui.suspend_help()
     ))
     .cancel_answer(Answer::new(
         "Cancel",
-        HoverHelp::tooltip(ui.suspend_cancel(stop)),
+        HoverHelp::tooltip(ui.suspend_cancel(asked.stopped_program)),
         Tier::Neutral,
     ))
     .keeps_focus_on_empty_click()
@@ -555,16 +551,22 @@ pub(crate) fn confirm(asked: Asked, _: &mut Window, cx: &mut App) {
 
 /// What an environment session's Stop question adds after the ordinary consequence, in `ui`'s words: what plain Stop
 /// leaves running, and what Stop and suspend would do instead (the old row and header Stop questions).
-pub(super) fn stop_note(ui: ProviderUi) -> String {
-    format!("{} {STOP_AND_SUSPEND_NOTE}", ui.stop_help())
+pub(super) fn stop_note(ui: ProviderUi, program: &str) -> String {
+    format!(
+        "{} Stop and suspend freezes the remaining processes; they continue on Resume. The stopped {program} \
+         and closed tabs do not continue.",
+        ui.stop_help()
+    )
 }
 
 /// The Stop question's extra answer for an environment session: "Stop and suspend", with the old answer's help
 /// (`super::stop::question` sends [`stop_and_suspend`] from it).
-pub(super) fn stop_and_suspend_answer() -> Answer {
+pub(super) fn stop_and_suspend_answer(program: &str) -> Answer {
     Answer::new(
         "Stop and suspend",
-        HoverHelp::tooltip(STOP_AND_SUSPEND_HELP),
+        HoverHelp::tooltip(format!(
+            "Stop this session's {program} and close its terminal tabs, then suspend the whole environment"
+        )),
         Tier::Danger,
     )
 }
@@ -579,6 +581,7 @@ pub(super) fn stop_and_suspend(key: &str, host: i64, guard: SessionStopRequest, 
             host,
             verb: Verb::StopAndSuspend,
             guard,
+            stopped_program: None,
         },
         cx,
     );
@@ -593,6 +596,7 @@ pub(crate) fn resume(key: &str, host: i64, cx: &mut App) {
             host,
             verb: Verb::Resume,
             guard: SessionStopRequest::default(),
+            stopped_program: None,
         },
         cx,
     );

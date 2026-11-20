@@ -63,7 +63,8 @@ impl Shield {
 
 /// The shield `launch` itself earns: an agent launch by its stored permission (none is the agent's own setting, and
 /// `farhelm_proto::yolo::selection_is_yolo` is the one rule for what counts as YOLO, custom flags included), a command
-/// launch by its assertion, a legacy launch the question mark.
+/// launch by its assertion, a legacy launch the question mark. The caller
+/// handles a shell before reaching this classification.
 fn launched(launch: &SessionLaunch) -> Shield {
     match launch {
         SessionLaunch::Agent { selection, .. } => {
@@ -104,11 +105,15 @@ pub(crate) fn observed_yolo_mode(
 /// what the launch earns. SPEC.md, "Session list": a definite reading "changes any shield other than YOLO or
 /// asserted-YOLO to the YOLO shield", and "never makes the shield safer than its launch choice", which holds by
 /// construction, since an observation only ever yields the loudest shield. Display only: the stored launch is what
-/// every decision reads.
-pub(crate) fn permission(launch: &SessionLaunch, screen_yolo: bool) -> Shield {
-    if observed_yolo_mode(launch, screen_yolo).is_some() {
+/// every decision reads. A shell has no shield, even if an old or inconsistent
+/// peer sends a screen observation.
+pub(crate) fn permission(launch: &SessionLaunch, screen_yolo: bool) -> Option<Shield> {
+    if launch.is_shell() {
+        return None;
+    }
+    Some(if observed_yolo_mode(launch, screen_yolo).is_some() {
         Shield::Yolo
     } else {
         launched(launch)
-    }
+    })
 }

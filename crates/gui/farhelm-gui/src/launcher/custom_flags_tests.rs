@@ -25,9 +25,9 @@ use super::draft::LaunchDraft;
 use super::launch_tests::{creates, launched_with, press};
 use super::search_view_tests::type_in;
 use super::view_tests::{
-    Field, answer_catalog, draft, fixture_hosts, focused, has_node, launch_help, launcher_on,
-    launcher_over, model_catalog, model_text, name_of, read, search_focused, search_text,
-    shown_refusal,
+    Field, answer_catalog, click_in_body, draft, fixture_hosts, focused, has_node, launch_help,
+    launcher_on, launcher_over, model_catalog, model_text, name_of, read, search_focused,
+    search_text, shown_refusal,
 };
 use super::yolo_tests::refuse_for_yolo;
 use crate::session_list::tests::{listing, open_main, preferences, preferences_state, session};
@@ -375,7 +375,7 @@ fn a_trailing_space_keeps_the_words_and_a_new_word_changes_them(cx: &mut TestApp
     assert_eq!(body["launch"]["permission_flags"], json!(["--mode", "ask"]));
     refuse(&mut helm, cx, first.id);
 
-    test_support::click(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags-row");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags"
@@ -396,7 +396,7 @@ fn a_trailing_space_keeps_the_words_and_a_new_word_changes_them(cx: &mut TestApp
         "the space survived the press"
     );
 
-    test_support::click(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags-row");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags again"
@@ -475,7 +475,7 @@ fn sends_the_stored_words_then_an_edits(
     );
     refuse(&mut helm, cx, first.id);
 
-    test_support::click(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags-row");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags"

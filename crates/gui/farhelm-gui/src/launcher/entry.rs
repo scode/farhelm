@@ -336,6 +336,11 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
     if info.launch.is_retired_container() {
         return Some(RETIRED_CONTAINER_REASON.to_owned());
     }
+    if info.launch.is_shell() {
+        return Some(
+            "This shell has no conversation to resume. Replace starts a fresh shell.".to_owned(),
+        );
+    }
     match &info.launch {
         SessionLaunch::Agent {
             selection, resume, ..

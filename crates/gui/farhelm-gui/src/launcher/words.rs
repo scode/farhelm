@@ -11,7 +11,7 @@ use crate::permission::words::permission_help;
 
 /// The order the launcher's harness chips appear in, as the old launcher drew them. Checked at compile time to name
 /// every agent type exactly once, so a new agent type fails the build here until someone decides where its chip goes.
-pub(super) const HARNESS_PICKER_ORDER: [LaunchHarness; 10] = [
+pub(super) const HARNESS_PICKER_ORDER: [LaunchHarness; 12] = [
     LaunchHarness::Codex,
     LaunchHarness::Claude,
     LaunchHarness::Antigravity,
@@ -22,6 +22,8 @@ pub(super) const HARNESS_PICKER_ORDER: [LaunchHarness; 10] = [
     LaunchHarness::Pi,
     LaunchHarness::Omp,
     LaunchHarness::OpenCode,
+    LaunchHarness::Bash,
+    LaunchHarness::Zsh,
 ];
 const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
 
@@ -52,13 +54,15 @@ pub(super) const fn agent_note(harness: LaunchHarness) -> Option<&'static str> {
         | LaunchHarness::Goose
         | LaunchHarness::Pi
         | LaunchHarness::Omp
-        | LaunchHarness::OpenCode => None,
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
     }
 }
 
 /// The order the launcher lists agent types in its searches and its model list (the old `HARNESS_SEARCH_ORDER`).
 /// It differs from [`HARNESS_PICKER_ORDER`] only in where Grok sits; both orders predate the GPUI app and are kept.
-pub(super) const HARNESS_SEARCH_ORDER: [LaunchHarness; 10] = [
+pub(super) const HARNESS_SEARCH_ORDER: [LaunchHarness; 12] = [
     LaunchHarness::Codex,
     LaunchHarness::Claude,
     LaunchHarness::Antigravity,
@@ -69,5 +73,7 @@ pub(super) const HARNESS_SEARCH_ORDER: [LaunchHarness; 10] = [
     LaunchHarness::Omp,
     LaunchHarness::OpenCode,
     LaunchHarness::Grok,
+    LaunchHarness::Bash,
+    LaunchHarness::Zsh,
 ];
 const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_SEARCH_ORDER));

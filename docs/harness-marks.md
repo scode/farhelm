@@ -40,6 +40,8 @@ draws the mark. Several of the terms below forbid modification, and an unaltered
 | Antigravity | rising chevron and bar    | Farhelm original       | drawn here independently of Google's artwork                                    |
 | OpenCode    | even-odd ring             | official, unaltered    | `packages/ui/src/assets/favicon/favicon-v3.svg` in `anomalyco/opencode` (MIT)   |
 | Terminal    | window with prompt        | Farhelm original       | drawn here                                                                      |
+| Bash        | window with `$_`          | Farhelm original       | drawn here                                                                      |
+| Zsh         | window with `%_`          | Farhelm original       | drawn here                                                                      |
 
 ### Claude — Farhelm original, by constraint
 
@@ -153,6 +155,9 @@ originally vendored the two-path logo file; that design is two-tone, with a mid-
 single even-odd ring, the small-size simplification OpenCode itself uses, so the sidebar now uses that path instead.
 
 ## Colors
+
+Bash and Zsh use the Terminal mark's frame and inherited grey. The prompt characters are stroked paths so they stay
+independent of the UI font.
 
 Color identifies an agent, never its permission mode or activity. The following source and terms re-check was made on
 2026-11-03. The colored marks clear 3:1 against both the sidebar and row hover surfaces in each theme. Light shades

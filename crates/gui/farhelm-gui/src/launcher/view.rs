@@ -1574,6 +1574,7 @@ const fn conversation_label(harness: LaunchHarness) -> &'static str {
         | LaunchHarness::Muse
         | LaunchHarness::Antigravity
         | LaunchHarness::Grok => "Conversation ID",
+        LaunchHarness::Bash | LaunchHarness::Zsh => "Conversation ID",
     }
 }
 
@@ -1717,7 +1718,13 @@ impl Launcher {
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_1))
             .child(line);
-        if self.draft.tab == Tab::Agent {
+        if self.draft.tab == Tab::Agent
+            && !self
+                .draft
+                .agent
+                .harness
+                .is_some_and(LaunchHarness::is_shell)
+        {
             summary = summary.child(self.choices(palette));
         }
         summary.into_any_element()
@@ -2097,14 +2104,19 @@ impl Launcher {
                     "None: declare no agent type; Farhelm does not track or resume the command's agent",
                 ),
             ))
-            .chain(LaunchHarness::ALL.iter().map(|harness| {
-                let label = harness_label(*harness);
-                SelectOption::new(
-                    label,
-                    label,
-                    HoverHelp::tooltip(format!("{label}: the command runs {label}")),
-                )
-            }));
+            .chain(
+                LaunchHarness::ALL
+                    .iter()
+                    .filter(|harness| !harness.is_shell())
+                    .map(|harness| {
+                        let label = harness_label(*harness);
+                        SelectOption::new(
+                            label,
+                            label,
+                            HoverHelp::tooltip(format!("{label}: the command runs {label}")),
+                        )
+                    }),
+            );
             fields.push(
                 row(
                     "launcher-command-agent-row",
@@ -2123,7 +2135,7 @@ impl Launcher {
                         let agent = LaunchHarness::ALL
                             .iter()
                             .copied()
-                            .find(|harness| harness_label(*harness) == value.as_ref());
+                            .find(|harness| !harness.is_shell() && harness_label(*harness) == value.as_ref());
                         let _ = on_agent.update(cx, |launcher, cx| {
                             launcher.draft.choose_command_agent(agent);
                             launcher.changed(cx);
@@ -2391,12 +2403,12 @@ impl Render for Launcher {
             TabStrip::new(
                 "launcher-tabs",
                 "Launch kind",
-                HoverHelp::tooltip("Launch kind: an agent with its choices, or a command line"),
+                HoverHelp::tooltip("Launch an agent, a shell, or a custom command"),
             )
             .tab(TabOption::new(
                 "Agent",
                 HoverHelp::tooltip(
-                    "Agent: start a supported agent with its model, effort and permissions",
+                    "Start a supported agent with its launch choices, or a Bash or Zsh shell",
                 ),
                 Tab::Agent,
             ))

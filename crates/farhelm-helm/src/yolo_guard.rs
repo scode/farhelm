@@ -193,6 +193,47 @@ pub(crate) async fn check_agent_approved(
 mod tests {
     use super::*;
 
+    /// The ordinary launch guard permits either shell on an asking host.
+    /// Keep a YOLO case beside it to prove the host's guard is active.
+    #[farhelm_testtrace::test]
+    async fn shell_launches_do_not_require_yolo_confirmation() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+
+        let harness = crate::rest_harness::idle_helm().await;
+        let host = crate::rest_harness::local_id(&harness.store).await;
+        harness
+            .store
+            .set_yolo_without_asking(host, false)
+            .await
+            .unwrap();
+        let make = |harness, permissions| {
+            crate::launches::compile(LaunchSelection {
+                harness,
+                permissions,
+                permission_flags: None,
+                model: None,
+                effort: None,
+                wrapper_prefix: None,
+                container: None,
+                workspace_trust: None,
+            })
+            .unwrap()
+        };
+        let yolo = make(LaunchHarness::Codex, Some(LaunchPermission::Yolo));
+        assert!(
+            check(&harness.state, host, create_is_yolo(&yolo), false)
+                .await
+                .unwrap_err()
+                .is::<YoloNeedsConfirmation>()
+        );
+        for shell in [LaunchHarness::Bash, LaunchHarness::Zsh] {
+            let launch = make(shell, None);
+            check(&harness.state, host, create_is_yolo(&launch), false)
+                .await
+                .expect("no confirmation for a plain shell");
+        }
+    }
+
     /// A copied pre-upgrade command keeps its own-setting classification:
     /// neither a GUI replace nor an agent clone/inherit may pass it off as a
     /// newly compiled guarded launch on a host that asks first.

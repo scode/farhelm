@@ -149,6 +149,11 @@ fn render(agent: &Command) -> String {
          command come from helm settings.\n\
          An agent launch is --agent TYPE with optional --model, --effort, --permissions\n\
          and --wrapper COMMAND; Farhelm composes its command.\n\
+         To start a plain interactive shell, use --agent bash or --agent zsh. The shell\n\
+         needs to be installed on the target host. It has no model, effort, permission\n\
+         mode or initial prompt, and no conversation for Restart. Shells follow the\n\
+         usual approval rules for create and spawn. A shell may use --wrapper, subject\n\
+         to the wrapper approval rule below.\n\
          A wrapper is Bash text placed before that command, with quotes and escapes\n\
          retained and no Farhelm placeholders. Bash evaluates it on the host or inside\n\
          the container; Farhelm's composed agent arguments remain literal.\n\
@@ -166,7 +171,8 @@ fn render(agent: &Command) -> String {
          launch is --command with the command line to run and --yolo or --no-yolo: your\n\
          statement of whether it bypasses human, classifier and sandbox safety checks. Farhelm believes it and never\n\
          checks the command, so say it truthfully. On a command launch --agent TYPE declares\n\
-         the agent type the command runs; the command must then contain {farhelm_args} as one\n\
+         the agent type the command runs. Bash and Zsh are shell types and cannot be\n\
+         declared there. The command must then contain {farhelm_args} as one\n\
          argument where Farhelm adds its own. --resume-command (needs --agent) is the command\n\
          that resumes a conversation, with {conversation} and {farhelm_args}; without one the\n\
          session cannot be restarted (--no-resume-command drops one a template set). An\n\
