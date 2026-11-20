@@ -73,3 +73,66 @@ the focused Linux fixtures. The live Antigravity CLI timing and log observations
 Both changes passed the independent source review and cold wording check. The source review tightened the
 malformed-record check and pinned tests to the actual hook outcomes. The docs review aligned the hook troubleshooting
 and Restart guides with what Farhelm verifies when it receives a report.
+
+### Landing
+
+#### What landed with it
+
+It landed in the same round as remember-active-terminal, which changes only the app's terminal tabs; nothing else that
+is not bookkeeping reached main since this plan was based. An independent reviewer and I read the two stacks against
+each other and found no interaction.
+
+The review confirmed three things. The check follows the repository's rule that agent-specific behavior lives in each
+agent's own code, not in shared code. It runs before Farhelm saves anything about which conversation Restart opens. When
+a subagent finishes, Farhelm accepts its report silently, but it refuses the report sent when a subagent starts, as
+SPEC.md says. Antigravity support shipped in v0.42.0, so the separate "fixed" changelog entry is right.
+
+#### Fixes made while landing
+
+These went in as a third PR, [#4332](https://github.com/scode/farhelm/pull/4332/changes).
+
+- **The hook log docs misdescribed the new subagent refusal.** The hook log now shows a refusal each time a subagent
+  starts. The docs page that explains hook log lines said such a conflict means a report from some other agent, which
+  reads like something went wrong. The page now says this refusal is expected and means Restart stayed on the main
+  conversation.
+- **SPEC_impl.md said the next verified report "restores" Restart's target**, which is wrong when Farhelm had not
+  recorded a target yet. It now says that report sets the target again, or for the first time.
+
+#### Checks
+
+The round's two plans change the app's terminal tab selection (remember-active-terminal), and how the supervisor decides
+whether to accept an Antigravity report, Farhelm's Antigravity hook, its end-to-end test and the docs
+(antigravity-subagent-check). So the landing ran the whole workspace suite, the end-to-end smoke and the two lint
+(clippy) runs the validation guide calls for on the maintainer's own test machine (an arm64 Linux VM that builds and
+tests the tree itself), and the reference screenshots, the website build and the small checks locally on x86_64.
+
+On both plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine
+  (`de032654-f2c8-4111-941c-fcbcf26020ae`): all 8154 passed, with no runtime skips. This covers both plans' Rust,
+  including the app's tests of the restored tab and the Antigravity hook's end-to-end test.
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on the test machine
+  (`84428fb7-59aa-43a8-8871-4e9269a5203f`): 49 of 50 steps passed, the clipboard paste step skipped as always on Linux.
+  Its steps open terminals, type into them and switch between sessions.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test machine,
+  not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py`, locally (`4677417e-55f9-4e4d-88bf-fcd2fe294035`): passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and the website build
+  (`bun run build`), locally: passed.
+
+The round's landing fixes (#4331 for remember-active-terminal, #4332 for antigravity-subagent-check) change one code
+comment, two specification sentences and one docs paragraph, so the runs above were reused for them; after the fixes,
+`cargo fmt --all -- --check`, `dprint check` on the edited files and the website build passed again locally.
+
+Skipped: the desktop app's own tests and its lint runs (neither plan touches the desktop app's code; the smoke builds
+and runs it), anything on a Mac, and a live Antigravity CLI, which only the executor's probes covered.
+
+#### Things you should know that the report does not say
+
+- The CLI behavior the check rests on (the main conversation's log starts with your input and is readable at every
+  report; a subagent's is missing or starts with a system message) comes from the executor's probes of Antigravity CLI
+  1.5.13 on Linux. Neither the landing review nor any check here reran them.
+- The check has no test of its own. The end-to-end test covers the valid, subagent, missing, malformed and oversized
+  cases through the real hook. No test covers a report that names its log by a relative path; the CLI's hook contract
+  specifies absolute paths, and the code refuses a relative one and leaves the Restart target unchanged.
