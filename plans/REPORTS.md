@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`gui-ux-backend-test-gaps`](reports/gui-ux-backend-test-gaps.report.md) landed 2026-11-19 in #4211, #4213, #4214, #4215, #4218, #4220, #4221, #4222, #4223, #4224, #4225, #4226, #4227, #4228, #4229: Fifteen small supervisor, terminal-host and e2e test fixes from the 2026-11-18 GUI UX triage
 - [`gui-ux-gui-test-gaps`](reports/gui-ux-gui-test-gaps.report.md) landed 2026-11-19 in #4207, #4209, #4212, #4217, #4219: Five small desktop app, helm and release-test fixes from the 2026-11-18 GUI UX triage
 - [`gui-ux-enter-and-focus`](reports/gui-ux-enter-and-focus.report.md) landed 2026-11-19 in #4206, #4231, #4216, #4230: Presses after the user's own action count as moving on; the half-second fence is for Escape only; Confirm-first for trash deletion; focus home after bulk actions
 - [`settings-app-version`](reports/settings-app-version.report.md) landed 2026-11-19 in #4233: Settings → App shows the running version with a Check for updates button that shows a running check
