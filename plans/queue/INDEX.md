@@ -5,4 +5,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 29e719] `shell-sessions.md` — Bash and Zsh as session types beside the agents, with no permission mode (protocol bump)
 - [complete] `remember-active-terminal.md` — Switching back to a session shows the terminal last chosen in it
 - [complete] `antigravity-subagent-check.md` — Live-check Antigravity, then refuse subagent conversation reports so Restart follows the main conversation; docs say where to find a conversation ID
-- [in-flight 60b48b] `tensorlake-pause-attribution.md` — A later Tensorlake pause no longer shows Farhelm's old suspend label and time
+- [complete] `tensorlake-pause-attribution.md` — A later Tensorlake pause no longer shows Farhelm's old suspend label and time
