@@ -113,3 +113,85 @@ Every draft passed the required independent source and wording review in the fir
 retains its original Opus design review. The four amended drafts received independent source review in this round. Setup
 review confirmed that the existing retry channel can keep an open SSH question while setup waits for the sessions
 connection.
+
+### Landing
+
+#### What landed with it
+
+It landed alone in its round, on a main that had gained only plan bookkeeping and TODO.md edits since its base, so
+nothing else interacted with it. This was its second landing attempt: the first stopped on five failing tests, two bugs
+(setup killing or outwaiting the sessions question, and unreachable hosts reporting a sign-in timeout), the startup
+focus exception that never ended, and smaller items. An independent reviewer and I checked this delivery against that
+list. Every item is fixed, and the two bugs and the startup change each have a test that reaches the broken state.
+
+You asked that this delivery be fixed and landed by the landing monitor rather than sent back again, so the fixes below
+went in as a seventh PR, [#4308](https://github.com/scode/farhelm/pull/4308/changes).
+
+#### Fixes made while landing
+
+- **Add host or Update could still fail after a good install when a Retry landed at the same moment.** When setup's last
+  step and a user's Retry or Sign in on the same host reached the host's connection before it read either, the
+  connection dropped setup's request for a fresh retry window. A supervisor that was still starting then made the run
+  fail with "waiting for the provisioned supervisor: timed out". This was the race the report listed as a follow-up,
+  plus a second ordering the report did not name. Setup's window now survives whichever request came last, with a test
+  of each ordering.
+- **The desktop test of a new host's two sign-ins used an ordering that cannot happen.** It finished the run before the
+  sessions question arrived; the run now stays going while that question opens, as in a real Add.
+- **Wording.** SPEC.md's sentence on which later questions may take focus is split so each exception reads on its own;
+  SPEC_impl.md's "sign-in needed" now also names an edit of the host's connection settings as a restart; one more test
+  reads the hosts collection by name rather than position; and the changelog fragment notes the fix for curation.
+
+I also tried ending the startup exception when the window reconnects to a helm, against a helm restarting under an
+untouched window. That cannot happen: the desktop app's helm runs inside the app and the app exits when it ends. I took
+the change back out before landing.
+
+#### Checks
+
+The plan touches the helm, the protocol, the CLI, the desktop app, the GPUI GUI, docs and the website, so the landing
+ran the whole workspace suite, the desktop app's tests, the end-to-end smoke and the four clippy runs on the
+maintainer's own test machine (an arm64 Linux VM that builds and tests the tree itself), and the goldens, the website
+build and the small checks locally on x86_64.
+
+On the plan as delivered, rebased on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine
+  (`7b18720d-8acc-44a8-aa02-34a16fe0fbc1`): all 8145 passed, with no runtime skips.
+- `cargo nextest run -p farhelm-desktop`, on the test machine (`7d811181-8b0f-463a-a3d8-4ff0a1d6c227`): all 176 passed.
+- The end-to-end smoke (`python3 -B scripts/gui-e2e-smoke.py`), on the test machine: 49 of 50 steps passed, the
+  clipboard paste step skipped as always on Linux (`f21ef797-5453-4997-9d0b-027b36f14be2`).
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's two
+  clippy runs, on the test machine: passed.
+- `python3 scripts/check-gui-goldens.py`, locally (`fa0a8c20-e022-478b-a167-f4ffa76a92f2`): passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `python3 -B scripts/test-gui-e2e-smoke.py`, `python3 -B scripts/test-gui-screenshot-batch.py` and the website build
+  (`bun run build`), locally: passed.
+
+On the fixed tree:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop -E 'package(farhelm-helm) | package(farhelm-gui)'`, on the
+  test machine (`b62158f3-65b6-4f02-b3d2-b38b29cfccfc`): all 4985 passed, with no runtime skips. Its tree still held the
+  startup change taken out afterwards; that part of the desktop app is back to the delivered code the workspace run
+  covered.
+- The sign-in tests and the connection's request-merging tests on the final tree, locally
+  (`603dcaa8-cc58-4fbd-9838-62feb2055d12`): all 11 passed.
+- The two default-member clippy runs on the final tree, on the test machine: passed. `cargo fmt --all -- --check`,
+  `dprint check` on the specs and the changelog format check, locally: passed.
+
+The smoke, goldens and desktop app tests were reused for the fixed tree: the fixes change the helm's connection actor,
+tests and documents, nothing the app draws or its startup.
+
+Skipped: anything on a Mac, and a live OpenSSH or Duo exchange through the desktop app, which stay with release
+verification as the report says.
+
+#### Things you should know that the report does not say
+
+- **A new 2FA host whose sessions question expires during a long install now ends its Add run "Sign-in needed"** after
+  the install itself succeeded. That follows the decision that setup must report sign-in needed rather than a timeout;
+  **Sign in** on the host then connects it.
+- **Re-adding a destination whose host is at "Sign-in needed" no longer restarts its sign-in by itself.** The host waits
+  for **Sign in**, which matches SPEC.md's rule that a stopped sign-in waits for an explicit retry.
+- **Smaller follow-ups the review found and the landing left alone:** registration and Update pick between two retry
+  paths by whether setup sign-in is configured, where one path would do; closing Add host cancels its check even when
+  the dialog then stays open (not shown to be reachable); a question from a check whose reply never reached the window
+  can still chime for up to two minutes; and the uninstall resume fix has no test.
