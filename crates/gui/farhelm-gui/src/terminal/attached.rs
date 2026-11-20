@@ -633,7 +633,9 @@ impl AttachedTerminal {
     /// [`AttachedTerminal::new`], reading and opening tunnels through `tunnels` when given: the session's terminal set
     /// hands its tabs the agent terminal's, since tunnels belong to the session, so a tunnel a tab opens shows in the
     /// top row's pill and a remote session's tabs read the list once between them rather than once each.
-    /// `takes_carried` lets a terminal created outside a set receive the lines left by the previous view.
+    /// `takes_carried` says whether this terminal takes its session's carried upload lines itself. A set passes
+    /// `false` and routes them to the terminal it shows; only a lone agent terminal ([`AttachedTerminal::new`], made by
+    /// tests and the goldens) takes them.
     pub(crate) fn sharing(
         session: &Entity<UiSession>,
         target: TerminalTarget,

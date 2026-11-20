@@ -2225,7 +2225,7 @@ tab there is explicitly acceptable. Do not add directory-identity tracking or sy
 A missing or unusable directory still produces a clear error. This does not change the separate agent-restart identity
 check.
 
-The Agent terminal shows the agent's real TUI, live. The session view supports additional terminal tabs: plain shells
+The agent terminal shows the agent's real TUI, live. The session view supports additional terminal tabs: plain shells
 spawned in the session's working directory, for poking at the workspace next to the agent. Tabs survive client
 disconnects and supervisor restarts exactly like the agent terminal, but they are not durable metadata: after a host
 reboot, tabs are gone and the user re-adds them; nothing recreates them automatically. A tab can be closed individually,
