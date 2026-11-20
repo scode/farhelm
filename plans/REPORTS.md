@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`gui-ux-wording`](reports/gui-ux-wording.report.md) landed 2026-11-19 in #4253, #4254, #4255, #4256, #4257, #4258, #4259, #4260, #4261, #4262, #4263, #4264, #4265, #4266, #4267, #4268, #4269, #4270: Comment, spec and docs corrections from the 2026-11-18 GUI UX triage, two spec acceptances and the user's-own-configuration principle
 - [`antigravity-support`](reports/antigravity-support.report.md) landed 2026-11-19 in #4274, #4275: Support Google Antigravity (agy): structured launches, sidebar mark, user-installed hook conversation tracking, and docs (protocol bump)
 - [`emacs-text-field-keys`](reports/emacs-text-field-keys.report.md) landed 2026-11-19 in #4279: Emacs Control-key editing (Ctrl+F/B/N/P/A/E/D/H/K) in text fields on macOS and Linux
 - [`docs-shot-desktop-fixes`](reports/docs-shot-desktop-fixes.report.md) landed 2026-11-19 in #4280, #4286: Settings → Hosts auto-update wording, template summary ellipsis, session row place id for the docs shot
