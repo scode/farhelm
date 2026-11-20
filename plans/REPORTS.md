@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`session-limit-notice`](reports/session-limit-notice.report.md) landed 2026-11-19 in #4150: Rail bell notice when a host or the helm hits the 500-session ceiling
 - [`reserved-resource-names`](reports/reserved-resource-names.report.md) landed 2026-11-19 in #4148: SPEC.md: anything under Farhelm's reserved resource names or ownership labels may be treated as Farhelm's
 - [`secrets-logs-and-screen`](reports/secrets-logs-and-screen.report.md) landed 2026-11-19 in #4151, #4153: The WebSocket trace never logs the desktop credential; the Codex login editor never shows a chosen file
 - [`checkout-settings-stale-save`](reports/checkout-settings-stale-save.report.md) landed 2026-11-19 in #4160: Settings → Checkouts saves refuse a value the command line changed meanwhile, through one shared mechanism
