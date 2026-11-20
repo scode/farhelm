@@ -137,46 +137,46 @@ Linux or launchd on a remote Mac, files in user-owned directories). If some opti
 privileges on a given host, provisioning says so and continues without it rather than escalating. Before touching the
 host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it will place and
 where, the background service it will create, and its persistence behavior — and proceeds only on confirmation. Remote
-updates use the same one-use plan mechanism behind the same authority, but the user's Update click or explicit
-automatic-update opt-in is the authorization: no plan is shown for confirmation. Update never downgrades a host: it
-installs the helm's own build, so a host whose supervisor reports a newer build is refused with both versions named, and
-the user updates the helm instead. It also refuses a host whose supervisor reports a database schema newer than the
-helm's build can open, which happens after a development build ran there; that host needs a build at least that new. A
-supervisor below this release's upgrade floor is also refused, with a manual recovery remedy: stop its Farhelm
-supervisor service, then remove its dedicated Farhelm installation directory. The remedy names the executable the host
-reported; its parent may be a shared or custom binary directory, in which case only Farhelm-owned files are removed and
-the shared directory stays. Then remove the host from Farhelm and set it up again. Its data directory can stay, without
-a promise that the new release can use every feature's old data, or the user can delete it too if they accept losing it.
-While an update is running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then
-shows the current step, completed-step count, and client-measured elapsed time inline in the status spot. Hovering that
-status opens the same card as a working host in the attention list: the host's mark and name, operation and
-completed-step count with elapsed time, every step with its status and explanation, the current step highlighted, and
-any degraded or failed step's reason. Connection detail follows the steps while the host is not connected, including the
-attempt and last connection error, and the run's own message follows when present. In a short window the step list
-shrinks, keeping the current step in view as it changes. If connection detail or a run message cannot fit beside a
-readable current step, only the oversized text becomes a preview of whole lines from its end and the card says
-`Full details in Hosts`. Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host
-identity gives access to the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the
-shared hover delay and beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label.
-The sidebar is too narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the
-animated indicator with a static one. Remote binary upload appears as a separate step before installation, so the user
-can tell when network transfer is still underway. The row and its hover use the helm's readable names for the same steps
-in the plan, with completed work checked green, the running step pulsing amber (static under reduced motion), pending
-work grey, unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success
-returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or an
-uncertain outcome still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update
-fails or has an uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is
-opened or a later run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated
-successful action does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never
-opens by itself. The Hosts header's `Update all` action makes the same authorized Update request for each remote host
-whose individual Update action is available at the click. A host already busy with setup or another run is skipped
-rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation, progress,
-and result, so one failure does not hide or delay the others. Having an available Update action does not itself mean the
-host needs an update: the rail's update badge and the attention list's Update rows require a compatible older build or a
-lower protocol, as well as an available remote Update action.
+updates use the same one-use plan mechanism. An Update click or the enabled automatic-update setting authorizes the
+update without a confirmation prompt. Update never downgrades a host: it installs the helm's own build, so a host whose
+supervisor reports a newer build is refused with both versions named, and the user updates the helm instead. It also
+refuses a host whose supervisor reports a database schema newer than the helm's build can open, which happens after a
+development build ran there; that host needs a build at least that new. A supervisor below this release's upgrade floor
+is also refused, with a manual recovery remedy: stop its Farhelm supervisor service, then remove its dedicated Farhelm
+installation directory. The remedy names the executable the host reported; its parent may be a shared or custom binary
+directory, in which case only Farhelm-owned files are removed and the shared directory stays. Then remove the host from
+Farhelm and set it up again. Its data directory can stay, without a promise that the new release can use every feature's
+old data, or the user can delete it too if they accept losing it. While an update is running, its host row stays folded
+and shows `Updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
+client-measured elapsed time inline in the status spot. Hovering that status opens the same card as a working host in
+the attention list: the host's mark and name, operation and completed-step count with elapsed time, every step with its
+status and explanation, the current step highlighted, and any degraded or failed step's reason. Connection detail
+follows the steps while the host is not connected, including the attempt and last connection error, and the run's own
+message follows when present. In a short window the step list shrinks, keeping the current step in view as it changes.
+If connection detail or a run message cannot fit beside a readable current step, only the oversized text becomes a
+preview of whole lines from its end and the card says `Full details in Hosts`. Messages that fit stay whole. The card
+remains non-interactive; opening Hosts through the host identity gives access to the whole diagnosis. This is the narrow
+exception to full detail on hover. The card uses the shared hover delay and beside-the-sidebar placement, is absent on
+touch, and adds no keyboard stop to the status label. The sidebar is too narrow to show a long step name, let alone the
+rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears
+as a separate step before installation, so the user can tell when network transfer is still underway. The row and its
+hover use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
+pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
+and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
+unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
+remain visible in Hosts. When setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail
+avatar shows a warning mark until Hosts is opened or a later run of that same action succeeds. Starting a retry does not
+acknowledge the warning, and an unrelated successful action does not clear it. Setup recovery by discovery can resolve
+the same failed setup run. Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized
+Update request for each remote host whose individual Update action is available at the click. A host already busy with
+setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
+keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
+Update action does not itself mean the host needs an update: the rail's update badge and the attention list's Update
+rows require a compatible older build or a lower protocol, as well as an available remote Update action.
 
-**Update remote hosts automatically** in Settings is off by default for new and existing installations. While on, the
-helm starts that same authorized Update for each host with an update by the badge's test, including required protocol
+**Update remote hosts automatically** in Settings starts on for new and upgraded installations, including installations
+that turned it off before this change. Turning it off after upgrading saves a persistent opt-out. While on, the helm
+starts that same authorized Update for each host with an update by the badge's test, including required protocol
 updates, while Farhelm is open, even with its window in the background. Enabling it also considers hosts that already
 need an update. The local host, busy hosts and newer builds are excluded; busy hosts are reconsidered when their work
 finishes. Progress and failure are the ordinary Update progress and failure in Hosts. A failed automatic attempt is not
@@ -820,7 +820,7 @@ automatically, on by default; turning it off stops the startup and daily checks 
 on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
 off, the user updates through an on-demand check or by running the installer, as before. None of this applies to a build
 from main, to the desktop app on Linux, or to remote hosts. Remote hosts have their own Update actions and the separate,
-off-by-default **Update remote hosts automatically** setting described under Topology.
+**Update remote hosts automatically** setting described under Topology.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
@@ -2439,11 +2439,11 @@ on. The **Hosts** section has the switches `Set up new hosts without asking` and
 the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same choice
 as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch explains the
 current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts also has
-**Update remote hosts automatically**, off unless explicitly enabled, with help explaining that the helm updates remote
-hosts as soon as updates are available while Farhelm is open, and never updates its own machine this way. This shared
-choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the last
-known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts and
-sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
+**Update remote hosts automatically**, on unless explicitly turned off, with help explaining that the helm updates
+remote hosts as soon as updates are available while Farhelm is open, and never updates its own machine this way. This
+shared choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the
+last known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts
+and sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
 "EXPERIMENTAL:", says Tensorlake support is early and experimental and will change between releases, and makes the user
 responsible for sandboxes not running and billing when they do not want them to; it shows whether or not the section's
 settings load. Its API key is explicitly saved helm configuration, shared by every client and kept outside the
@@ -4844,7 +4844,7 @@ Further requirements:
 - Updates are never forced: the desktop app installs new stable releases in the background by default, but the user can
   turn that off and then update by hand or pin a version with the installer; an installed update takes effect at the
   next start of Farhelm, which Restart to update only brings forward; remote hosts are updated by an explicit Update
-  action or the separate, off-by-default automatic remote-host update setting.
+  action or the separate automatic remote-host update setting, which starts on and can be turned off.
 
 ## Non-goals for v1
 

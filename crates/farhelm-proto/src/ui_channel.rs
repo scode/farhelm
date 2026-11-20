@@ -669,7 +669,7 @@ pub struct Preferences {
     /// until another container launch replaces it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_container_host: Option<i64>,
-    /// Only true authorizes the helm to update eligible remote hosts without a window.
+    /// Only a saved `false` prevents the helm from updating eligible remote hosts without a window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_update_remote_hosts: Option<bool>,
     /// Only true authorizes desktop loopback tunnels; unset and false both disable them.

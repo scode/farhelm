@@ -61,7 +61,7 @@ pub(super) enum Choice {
     NameSessionsOnQuickLaunch,
     /// Sessions: Color terminal frames by host, off by default.
     ColorTerminalFrames,
-    /// Hosts: Update remote hosts automatically, off unless explicitly enabled.
+    /// Hosts: Update remote hosts automatically, on until the user turns it off.
     AutoUpdateRemoteHosts,
     /// Hosts: Set up new hosts without asking, on when the setup confirmation is skipped.
     SkipHostSetupConfirmation,
@@ -143,10 +143,8 @@ impl Choice {
         }
     }
 
-    /// Whether the helm's stored choice is on. `preferences` is `None` when the helm pushed no row, which reads as
-    /// nothing chosen. Every field but naming and the trust hints reads unset as off; naming is a positive choice that
-    /// defaults on, so only an explicit `false` turns it off (the old app: "treating an absent value like the
-    /// confirmation opt-outs would disable it", and SPEC.md: on "including when the helm has never stored a choice").
+    /// Whether the helm's stored choice is on. An absent row and an unset field both use the default. Quick-launch
+    /// naming and automatic remote-host updates stay on until the user stores `false`.
     /// A trust hint's switch shows the hint unless its dismissal is stored `true` (the field's doc: "Unset and false
     /// both allow the hint"). A sound's switch reads as the sounds' owner reads it ([`Switches::from_preferences`]),
     /// so what Settings shows is what plays.
@@ -172,13 +170,14 @@ impl Choice {
             Choice::SoundApproval => sound(Sound::Approval),
             Choice::SoundTurnFinished => sound(Sound::TurnFinished),
             Choice::SoundSshSignIn => sound(Sound::SshSignIn),
-            Choice::NameSessionsOnQuickLaunch => field != Some(false),
+            Choice::NameSessionsOnQuickLaunch | Choice::AutoUpdateRemoteHosts => {
+                field != Some(false)
+            }
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint => field != Some(true),
             Choice::SkipSessionConfirmations
             | Choice::ColorTerminalFrames
-            | Choice::AutoUpdateRemoteHosts
             | Choice::SkipHostSetupConfirmation
             | Choice::SkipHostRemoveConfirmation => field == Some(true),
         }

@@ -523,15 +523,15 @@ pub fn observe_changes<V: 'static>(cx: &mut Context<V>) -> Subscription {
 
 // ---- Always update ---------------------------------------------------------------------------------------------------
 
-/// Whether the helm stores "Update remote hosts automatically" on; unset reads off, as in Settings.
+/// Whether automatic remote-host updates are on, including before the helm pushes a preference row.
 pub fn auto_updates_on(cx: &App) -> bool {
-    session::current_store(cx).is_some_and(|store| {
+    session::current_store(cx).is_none_or(|store| {
         store
             .read(cx)
             .collections()
             .get::<Preferences>(PREFERENCES_KEY)
             .and_then(|preferences| preferences.auto_update_remote_hosts)
-            == Some(true)
+            != Some(false)
     })
 }
 

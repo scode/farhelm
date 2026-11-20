@@ -1431,6 +1431,14 @@ mod tests {
         let service = service(&harness, backend.clone(), root.path());
         *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
         let mut attempted = HashMap::new();
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(false)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         service
             .scan_automatic_updates(&mut attempted)
             .await
@@ -1443,7 +1451,7 @@ mod tests {
         harness
             .store
             .update_preferences(crate::store::PreferencePatch {
-                auto_update_remote_hosts: Some(Some(true)),
+                auto_update_remote_hosts: Some(None),
                 ..Default::default()
             })
             .await
@@ -1831,9 +1839,9 @@ mod tests {
         }
     }
 
-    /// The listener is owned by the helm rather than an interface. A real
-    /// preference notification starts normal provisioning without a router or
-    /// window, and retains the ordinary failed-run progress for clients.
+    /// Automatic updates can start without a window. Clearing a stored opt-out
+    /// through the preference handler restores the default and wakes the listener,
+    /// which retains ordinary failed-run progress for clients.
     #[farhelm_testtrace::test]
     async fn automatic_updates_wake_without_a_window() {
         let (builder, host) = FleetBuilder::new()
@@ -1856,6 +1864,14 @@ mod tests {
         *backend.fail.lock().unwrap() = Some("create-directories".into());
         let service = service(&harness, backend.clone(), root.path());
         *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(false)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(
             harness
                 .store
@@ -1863,7 +1879,7 @@ mod tests {
                 .await
                 .unwrap()
                 .auto_update_remote_hosts,
-            None
+            Some(false)
         );
         let listener = AutomaticUpdates::start(&service);
         let mut scans = listener.completed_scans();
@@ -1876,15 +1892,16 @@ mod tests {
             backend.probe.lock().unwrap().is_some(),
             "the initial off scan did not inspect the host"
         );
-        harness
-            .store
-            .update_preferences(crate::store::PreferencePatch {
-                auto_update_remote_hosts: Some(Some(true)),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        harness.manager.events().bump();
+        let cleared = crate::preferences::put_preferences(
+            State(Arc::clone(&harness.state)),
+            axum::Json(
+                serde_json::from_value(serde_json::json!({"auto_update_remote_hosts": null}))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .into_response();
+        assert_eq!(cleared.status(), StatusCode::NO_CONTENT);
         let failed = wait_finished(&service, host).await;
         assert_eq!(failed.status, RunStatus::Failed);
         assert!(
@@ -3616,6 +3633,8 @@ mod tests {
             )
             .await;
         let harness = builder.start().await;
+        // This test owns the manual update. An older protocol also qualifies for the default-on listener.
+        harness.state._automatic_updates.stop();
         harness
             .manager
             .wait_for_state(host, |state| matches!(state, HostState::VersionSkew { .. }))

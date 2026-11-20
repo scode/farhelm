@@ -103,11 +103,11 @@ pub(super) async fn scan(
     let hosts = service.manager.snapshots();
     let live: HashSet<_> = hosts.iter().map(|host| host.id).collect();
     attempted.retain(|id, _| live.contains(id));
-    if service.store.preferences().await?.auto_update_remote_hosts != Some(true) {
+    if service.store.preferences().await?.auto_update_remote_hosts == Some(false) {
         return Ok(());
     }
     for host in hosts {
-        if service.store.preferences().await?.auto_update_remote_hosts != Some(true) {
+        if service.store.preferences().await?.auto_update_remote_hosts == Some(false) {
             return Ok(());
         }
         let (busy, failed) = {
@@ -131,7 +131,7 @@ pub(super) async fn scan(
             let plan = service.plan_update(host.id).await?;
             // The final policy read and connection check share admission's
             // ordering with a committing opt-out; planning cannot authorize a
-            // later start by retaining an earlier true read.
+            // later start by retaining an earlier enabled read.
             if service
                 .start_automatic_update(
                     host.id,

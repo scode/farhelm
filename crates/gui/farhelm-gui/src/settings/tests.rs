@@ -848,7 +848,7 @@ fn each_switch_saves_its_own_preference_field_under_the_preferences_key(cx: &mut
             Section::Hosts,
             Choice::AutoUpdateRemoteHosts,
             "auto_update_remote_hosts",
-            true,
+            false,
         ),
         (
             Section::Hosts,
@@ -964,28 +964,30 @@ fn a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switc
     );
 }
 
-/// SPEC.md: "Name sessions on quick launch is on by default, including when the helm has never stored a choice", while
-/// every other switch here but the trust hints' and the sounds' reads an unset field as off, and a trust hint's shows
-/// the hint unless its dismissal is stored `true`. Reading naming like the opt-outs would turn naming off on every
-/// upgraded helm. Specified: with no preference row, an empty one, and one storing `false`, naming reads on, on and off;
-/// every other switch but the trust hints' and the sounds' reads off when unset and on when stored `true`; each trust
-/// hint's switch reads on when unset or stored `false`, and off when stored `true`. The sounds' defaults are
-/// `sounds::rules`'s `the_preference_row_reads_unset_fields_as_the_defaults`'s.
+/// The switches must show the same defaults before and after the helm sends an empty row. Naming and automatic remote
+/// updates start on and respect a saved opt-out. Confirmation skips and frame coloring require an explicit opt-in.
+/// Trust hints use the inverse of their saved dismissal, and the sound rules test the sound defaults.
 #[test]
 fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     let empty = Preferences::default();
     let naming = Choice::NameSessionsOnQuickLaunch;
-    assert!(naming.stored(None), "no row");
-    assert!(naming.stored(Some(&empty)), "an empty row");
+    let updates = Choice::AutoUpdateRemoteHosts;
     let off = Preferences {
         name_session_on_quick_launch: Some(false),
+        auto_update_remote_hosts: Some(false),
         ..Preferences::default()
     };
-    assert!(!naming.stored(Some(&off)), "an explicit false");
+    for choice in [naming, updates] {
+        assert!(choice.stored(None), "{choice:?} with no row");
+        assert!(choice.stored(Some(&empty)), "{choice:?} with an empty row");
+        assert!(
+            !choice.stored(Some(&off)),
+            "{choice:?} with an explicit false"
+        );
+    }
     let all_on: Preferences = serde_json::from_value(json!({
         "skip_session_confirmations": true,
         "color_terminal_frames": true,
-        "auto_update_remote_hosts": true,
         "skip_host_setup_confirmation": true,
         "skip_host_remove_confirmation": true,
     }))
@@ -996,7 +998,10 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         Choice::ShowMuseTrustHint,
     ];
     for &choice in Choice::ALL.iter().filter(|&&choice| {
-        choice != naming && !hints.contains(&choice) && !SOUNDS.contains(&choice)
+        choice != naming
+            && choice != updates
+            && !hints.contains(&choice)
+            && !SOUNDS.contains(&choice)
     }) {
         assert!(
             !choice.stored(None) && !choice.stored(Some(&empty)),
@@ -1129,7 +1134,7 @@ fn each_sound_switch_saves_its_own_preference_field(cx: &mut TestAppContext) {
 /// switch would drop a pending save's value and a failure line the user has not read yet. It also pins the rule this
 /// port has for a click while another preference save is in flight (the module docs): the operation store refuses it,
 /// so it sends nothing and changes no switch. Specified: a naming save in flight, Sessions left for Hosts and shown
-/// again still shows the pending value; a click on a Hosts switch meanwhile sends nothing and leaves it off; the naming
+/// again still shows the pending value; a click on the on-by-default Hosts switch sends nothing and leaves it on; the naming
 /// save refused while Hosts is shown, Sessions shows the stored value with the failure line.
 #[gpui::test]
 fn switching_sections_keeps_a_pending_save_and_a_failure_line(cx: &mut TestAppContext) {
@@ -1153,6 +1158,11 @@ fn switching_sections_keeps_a_pending_save_and_a_failure_line(cx: &mut TestAppCo
     );
 
     click(cx, "settings-section-hosts");
+    assert_eq!(
+        switch_on(cx, updates),
+        Some(true),
+        "the premise: updates default on"
+    );
     click(cx, updates);
     assert_eq!(
         sent(&mut helm),
@@ -1161,7 +1171,7 @@ fn switching_sections_keeps_a_pending_save_and_a_failure_line(cx: &mut TestAppCo
     );
     assert_eq!(
         switch_on(cx, updates),
-        Some(false),
+        Some(true),
         "and the switch it came from shows the stored value"
     );
 

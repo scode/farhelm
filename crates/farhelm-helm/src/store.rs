@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 90;
+pub(crate) const SCHEMA_VERSION: i64 = 91;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -2780,6 +2780,8 @@ pub struct HelmStore {
 /// - 87: session groups and their membership.
 /// - 88: host and app-wide session ceiling notices, with trash history preserved.
 /// - 89: the time a sealed environment's destruction was first attempted, retained with its host row.
+/// - 90: the SSH sign-in sound preference, on when unset.
+/// - 91: enroll existing installations in automatic remote-host updates by clearing earlier opt-outs.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3124,7 +3126,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 90;",
+              PRAGMA user_version = 91;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -5003,6 +5005,16 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 90;")
             .context("migrating helm.db to schema version 90")?;
         version = 90;
+    }
+    if version == 90 {
+        // Every stored false at this version predates the new default. Clear it once so only
+        // choices made after this migration can opt out.
+        tx.execute_batch(
+            "UPDATE preferences SET auto_update_remote_hosts = NULL WHERE auto_update_remote_hosts = 0;
+             PRAGMA user_version = 91;",
+        )
+        .context("migrating helm.db to schema version 91")?;
+        version = 91;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -15089,11 +15101,10 @@ mod tests {
         );
     }
 
-    /// Upgrading must never grant remote-mutation permission. The new nullable
-    /// field starts off, preserves unrelated settings and survives reopening;
-    /// sparse writes and null retain the same semantics as other preferences.
+    /// A pre-68 store has no record of an update choice. Preserve that absence and
+    /// the rest of the preference row so the current default can apply.
     #[farhelm_testtrace::test]
-    async fn schema_68_automatic_host_updates_start_off_and_persist() {
+    async fn schema_68_adds_an_unset_automatic_host_update_choice() {
         let (dir, store) = fresh_store().await;
         assert_eq!(
             store.preferences().await.unwrap().auto_update_remote_hosts,
@@ -15153,6 +15164,56 @@ mod tests {
                 .unwrap(),
             SCHEMA_VERSION
         );
+    }
+
+    /// The upgrade clears old opt-outs and preserves other stored values.
+    /// Reopening a migrated database honors an opt-out written after the upgrade.
+    #[farhelm_testtrace::test]
+    async fn schema_91_clears_previous_automatic_host_update_opt_outs_once() {
+        for (previous, migrated) in [(Some(false), None), (Some(true), Some(true)), (None, None)] {
+            let (dir, store) = fresh_store().await;
+            store
+                .update_preferences(PreferencePatch {
+                    auto_update_remote_hosts: Some(previous),
+                    compact: Some(Some(true)),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                store.preferences().await.unwrap().auto_update_remote_hosts,
+                previous
+            );
+            let path = dir.path().join("helm.db");
+            drop(store);
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 90;").unwrap();
+            drop(conn);
+
+            let store = HelmStore::open(&path).await.unwrap();
+            assert_eq!(store.schema_version, SCHEMA_VERSION);
+            let preferences = store.preferences().await.unwrap();
+            assert_eq!(preferences.auto_update_remote_hosts, migrated);
+            assert_eq!(preferences.compact, Some(true));
+
+            store
+                .update_preferences(PreferencePatch {
+                    auto_update_remote_hosts: Some(Some(false)),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            drop(store);
+            let reopened = HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                reopened
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .auto_update_remote_hosts,
+                Some(false)
+            );
+        }
     }
 
     /// An upgrade gains empty visit history without inventing visits from the

@@ -11,8 +11,8 @@
 //! the new desktop app, starting unset (nothing is carried over from the old
 //! app's per-device storage), so SPEC.md's "remembered per device" wording
 //! changes as each one is wired into the app.
-//! Automatic remote-host updates are a helm-owned authorization too: only an
-//! explicit true enables them, and committing a policy write wakes the listener.
+//! The helm updates eligible remote hosts by default. A saved `false` stops new
+//! automatic starts, and committing any change to the choice wakes the listener.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so the window opens in the same
