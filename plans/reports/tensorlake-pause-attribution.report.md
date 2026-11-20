@@ -66,3 +66,60 @@ The independent review gate passed after the scope reassessment. The fixes cover
 Retry, running evidence through an API outage, keeping timestamp cleanup outside the dial deadline, and confirming that
 Resume itself clears the saved time. The product, test and spec diff totals 350 changed lines including removals. The
 commit message passed its cold read.
+
+### Landing
+
+#### What landed with it
+
+Since this plan's work started from main, main gained remember-active-terminal (the app remembers each session's chosen
+terminal tab) and antigravity-subagent-check (Restart stays on Antigravity's main conversation). An independent reviewer
+and I checked both against this plan and found no interaction: neither touches the helm's host connections, its
+Tensorlake code or its saved host data.
+
+The review checked the races the report names. Suspend pauses the helm's connection to the host before it asks
+Tensorlake, so its saved time is later than any Running answer the helm already had. The report's remaining case, a late
+Running reply dropping a newer Suspend's time, can only happen when that pause does not take effect within its wait,
+which makes it rarer than the report suggests, but it is still possible. Clearing an old saved time first checks that
+the saved time is still older than the Running answer, so a late clear cannot erase a newer Suspend's time. When Retry
+restarts the helm's connection to a host, Farhelm still remembers that it saw the sandbox running.
+
+The plan also stopped Hosts from reading the saved Suspend time on its own; Hosts now shows only the time that comes
+with the host's Suspended status. After a helm restart Hosts still shows the saved time, because the first Suspended
+status the helm reports already includes it.
+
+#### Fixes made while landing
+
+One went in as a second PR, [#4335](https://github.com/scode/farhelm/pull/4335/changes): the code comments on the
+suspended state's two times still described Hosts reading the saved time itself. It changes no behavior.
+
+#### Checks
+
+The plan changes only the helm, plus SPEC_impl.md and bookkeeping, so the landing ran the helm package's tests and the
+two lint (clippy) runs the validation guide calls for on the maintainer's own test machine (an arm64 Linux VM that
+builds and tests the tree itself), and the small checks locally on x86_64.
+
+On the plan as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop -E 'package(farhelm-helm)'`, on the test machine
+  (`6c34775e-cee0-4e78-a69c-dd9510a346ab`): all 1776 tests in the helm package passed, a wider run than the report's
+  192-test selection, with no runtime skips.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test machine,
+  not through the recorder: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+The landing fix (#4335) changes one doc comment, so the runs above were reused for it; `cargo fmt --all -- --check`
+passed again locally.
+
+Skipped: the rest of the workspace suite (nothing outside the helm changed, and what the helm sends the app about hosts
+is unchanged), the GUI and desktop checks, and a live Tensorlake run, which the helm's scripted Tensorlake tests stand
+in for.
+
+#### Things you should know that the report does not say
+
+- The report counts "the later pause's noticed time on Retry" among the fixes, but one case of it has no test: a host
+  still shows Suspended, Tensorlake answers Running, and Retry interrupts the connection attempt before it finishes. The
+  next pause should then get a new time rather than the first pause's. Reading the code shows it handles that, but the
+  test meant to show it reaches Suspended from a connected host, where the old time is already gone, so it would pass
+  without the fix. Possible follow-up: a helm test that interrupts the connection attempt with Retry while the host
+  still shows Suspended. I did not add it at landing because it needs new support in the helm's test harness.
