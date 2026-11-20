@@ -17,6 +17,12 @@ consequences.
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
+- [`folder-suggestion-enter-can-submit-launcher.md`](folder-suggestion-enter-can-submit-launcher.md) — Enter on a
+  visible folder suggestion can submit the launcher. A successful Replace with can retire the source session.
+
+- [`quick-switcher-enter-can-run-a-different-template.md`](quick-switcher-enter-can-run-a-different-template.md) — If
+  the template list changes, Enter can start a different saved setup from the one still shown as selected.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -252,6 +258,18 @@ consequences.
 
 - [`macos-terminal-paste-blocks-gui-thread.md`](macos-terminal-paste-blocks-gui-thread.md) — When macOS stalls while
   supplying clipboard contents, pasting into the terminal can freeze the whole Farhelm window.
+
+- [`antigravity-restart-may-stop-without-relaunching.md`](antigravity-restart-may-stop-without-relaunching.md) —
+  Antigravity can stop during Restart and require another Restart to reopen the session.
+
+- [`bulk-mute-can-reset-window.md`](bulk-mute-can-reset-window.md) — Muting or unmuting a large marked set can reset the
+  desktop connection after applying only part of the batch.
+
+- [`gone-terminal-retained-handle-hides-recovery.md`](gone-terminal-retained-handle-hides-recovery.md) — A terminal the
+  supervisor knows is gone can stay in reconnecting state and hide the recovery card.
+
+- [`linux-ctrl-f-leaves-settings-field-at-end.md`](linux-ctrl-f-leaves-settings-field-at-end.md) — Ctrl+F at the end of
+  a Linux Settings field can focus Search and send the next keystroke there.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -2814,3 +2832,51 @@ consequences.
 
 - [`staged-payloads-and-automatic-host-updates.md`](staged-payloads-and-automatic-host-updates.md) — Whether automatic
   host updates can push an operator-staged, unverified payload directory without a per-host action has not been checked.
+
+- [`checkout-use-default-presentation.md`](checkout-use-default-presentation.md) — Use default can clear a freshly
+  loaded checkout-folder override before the editor shows it.
+
+- [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
+  preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
+
+- [`group-divider-can-change-shift-sweep-range.md`](group-divider-can-change-shift-sweep-range.md) — Shift-dragging
+  across group spacing can change the end of the marked session range.
+
+- [`group-toggle-inverts-drawn-action.md`](group-toggle-inverts-drawn-action.md) — Collapse group can expand the group
+  after its shared state changes before the click.
+
+- [`launcher-catalog-moves-model-highlight.md`](launcher-catalog-moves-model-highlight.md) — A model catalog update can
+  move the highlight so Enter picks a different model for the launch draft.
+
+- [`macos-shift-sweep-can-miss-release.md`](macos-shift-sweep-can-miss-release.md) — A macOS Shift sweep can keep
+  scrolling and marking after a release with changed modifiers.
+
+- [`manual-update-check-can-join-already-settled-auto-hold.md`](manual-update-check-can-join-already-settled-auto-hold.md)
+  — A manual desktop update check can join an automatic check that has already decided to keep an older pending update.
+
+- [`mute-menu-expiry-preview-can-go-stale.md`](mute-menu-expiry-preview-can-go-stale.md) — A mute menu left open across
+  the morning cutoff can save a mute that lasts a day longer than the menu shows.
+
+- [`older-catalog-model-overrides-custom-owner.md`](older-catalog-model-overrides-custom-owner.md) — Switching agents in
+  the launcher can keep a custom model because the destination has an older catalog entry with the same name.
+
+- [`session-groups-lose-membership-in-accessibility-tree.md`](session-groups-lose-membership-in-accessibility-tree.md) —
+  The sidebar can omit a session's group membership from screen-reader information.
+
+- [`settings-search-key-hidden-by-open-editor.md`](settings-search-key-hidden-by-open-editor.md) — The Tensorlake key
+  search result can take you back to an open credential editor and keep the key field hidden.
+
+- [`shift-sweep-can-mark-through-sidebar-clip.md`](shift-sweep-can-mark-through-sidebar-clip.md) — In a narrow macOS
+  window, a Shift sweep can keep changing the selection when the pointer is beside the clipped sidebar.
+
+- [`sidebar-order-stays-held-after-shift-sweep.md`](sidebar-order-stays-held-after-shift-sweep.md) — Releasing a Shift
+  sweep outside the sidebar can leave the previous list order visible for up to five seconds.
+
+- [`test-worker-success-loses-evidence.md`](test-worker-success-loses-evidence.md) — An SSH test worker can report
+  success when the results could not be copied back.
+
+- [`test-worker-sync-precedes-lock.md`](test-worker-sync-precedes-lock.md) — A second SSH test request can change the
+  checkout used by the run already in progress.
+
+- [`tunnel-pill-can-show-previous-session-mapping.md`](tunnel-pill-can-show-previous-session-mapping.md) — Tunnel hover
+  help can show the previous session's ports after the open session changes.

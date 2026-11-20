@@ -4,6 +4,16 @@ NOTE: This file is not read during a trailing review and is on no reading list. 
 earlier trailing reviews, newest first, for people who want the history. The current checkpoint and the latest run's
 record are in `review_feedback_queue/TRAILING_REVIEW.md`.
 
+## Checkpoint reset to the v0.40.0 base, without review
+
+**No review ran; the maintainer explicitly instructed this checkpoint move.**
+
+The checkpoint moves from `00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db` to `da8366b7fe746762c5f27ea6da30ce915a68cece`, the
+`main` commit v0.40.0 was cut from (the release commit itself, tagged `v0.40.0`, is not on `main`). The 714 commits in
+`00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db..da8366b7fe746762c5f27ea6da30ce915a68cece` were not trailing-reviewed and will
+not be covered by the next review, which starts after `da8366b7`. The move is not evidence that those commits were
+reviewed.
+
 ## Abbreviated review through 00de0b6c
 
 **Review incomplete; checkpoint advance explicitly authorized by the maintainer despite the unmet completion
