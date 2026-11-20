@@ -274,6 +274,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
+- **Templates dialog can't be closed after scrolling to the bottom.** i can trivially get into a state that requires me
+  to restart farhelm. open templates, pick one template, scroll to the bottom. now hitting esc just changes some scroll
+  state, and hitting esc again changes it back, so hitting esc esc esc esc just toggle back and forth and never exits
+  the menu. clicking the "X" at the top right also doesn't exit the kmenu and i'm hard stuck and have to restart farhelm
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
