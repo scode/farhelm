@@ -1755,4 +1755,4 @@
   with a test. Size gate: about 100 lines of diff (code, tests and docs, not counting TRIAGE_OUTCOMES.md, the queue
   removal or the changelog fragment); over that, execution blocks and brings the item back to the user. Remove the
   feedback file and its index entry in the same change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tensorlake-pause-attribution.md`
