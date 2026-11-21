@@ -1,11 +1,7 @@
 //! Settings → Appearance: System, Dark or Light as one radio group over the helm's `appearance` preference.
 //!
-//! Ported from the old app's `AppearanceSettings` (`appearance.rs` at reference commit `24bc0580`) with its help line,
-//! its "Color theme" legend over the segmented well, and its three choices. The old app kept the choice per device, in
-//! the web view's storage; here it is one field of the helm's preference row like every other Settings choice (the
-//! maintainer decided on 2026-11-13 that appearance is a helm preference), so the help no longer says "for this device"
-//! and says instead that a change from the command line or an agent shows right away. Nothing is carried over from the
-//! old storage: every user starts at System after the switch to this app.
+//! The three tiles are previews of the interface chrome. The terminal in each miniature stays dark, even when the
+//! surrounding interface follows a device in its light appearance.
 //!
 //! The radio saves like a switch does ([`super::SettingsDialog::choose_appearance`]): the field alone, under the
 //! preference row's key, showing the value being saved only while the save is in flight and the helm's stored choice
@@ -17,9 +13,9 @@
 
 use farhelm_helm_client::PathError;
 use farhelm_proto::ui_channel::Preferences;
-use gpui::{App, Div, FontWeight, ParentElement as _, Role, Styled as _, Window, div, px};
+use gpui::{App, Div, ParentElement as _, Role, Styled as _, Window, div, px, relative};
 
-use super::{Refused, choices};
+use super::{Refused, card, choices};
 use crate::components::{HoverHelp, RadioGroup, RadioOption};
 use crate::drafts::Draft;
 use crate::operations::Command;
@@ -37,13 +33,9 @@ pub(super) const ERROR_ID: &str = "settings-appearance-error";
 /// The preference row's field, as the wire names it.
 const FIELD: &str = "appearance";
 
-/// `.appearance-legend`: 13-pixel semibold words, 8 pixels above the well.
-const LEGEND_TEXT: f32 = 13.;
-const LEGEND_GAP: f32 = 8.;
-
-/// The help above the group: the old line, reworded for a choice the helm holds (see the module docs).
-pub(super) const HELP: &str = "Choose the interface colors. This choice applies to this helm; changes from the command line or an \
-                    agent show here right away. System follows each device's own appearance. The terminal stays dark.";
+/// The heading describes what System follows and which part of the app keeps its colors.
+pub(super) const HELP: &str =
+    "System follows each device's own appearance. The terminal stays dark.";
 
 /// The line under the group after the helm refused a save.
 const FAILURE: &str = "Could not save the color theme. Try again.";
@@ -129,9 +121,7 @@ fn shown(draft: &Draft<Preference>, preferences: Option<&Preferences>) -> Prefer
     }
 }
 
-/// The section's content: the help, then the "Color theme" legend over the segmented radios, then the failure line
-/// after a refused save and the line saying why a press sent nothing (`refused`, [`choices::busy_line`]). `on_change`
-/// is what a choice does with the chosen value.
+/// The illustrations sit inside a single keyboard radio group, with error and busy lines just below it.
 pub(super) fn section(
     draft: &Draft<Preference>,
     preferences: Option<&Preferences>,
@@ -139,40 +129,80 @@ pub(super) fn section(
     on_change: impl Fn(&Preference, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
-    let palette = theme::palette(cx);
     let group = CHOICES.iter().fold(
         RadioGroup::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::RadioGroup)
+            .cards()
             .chosen(Some(shown(draft, preferences))),
         |group, &(value, label, help)| {
-            group.option(RadioOption::new(label, HoverHelp::tooltip(help), value))
+            group.option(
+                RadioOption::new(label, HoverHelp::tooltip(help), value)
+                    .preview(preview(value, theme::palette(cx))),
+            )
         },
     );
-    // `.appearance-settings`: the help and the fieldset 14 pixels apart, the same gap the section keeps under its
-    // heading.
     div()
         .flex()
         .flex_col()
-        .gap(px(super::SECTION_GAP))
-        .child(choices::help(HELP, cx))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap(px(LEGEND_GAP))
-                .child(
-                    div()
-                        .text_size(px(LEGEND_TEXT))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::color(palette.fg_0))
-                        .child(LABEL),
-                )
-                .child(group.on_change(on_change))
-                .children(
-                    draft
-                        .refusal()
-                        .map(|_| choices::failure_line(ERROR_ID.to_owned(), FAILURE, cx)),
-                )
-                .children(choices::busy_line(refused, ID, cx)),
+        .gap(px(8.))
+        .child(card::heading(LABEL, Some(HELP), None, cx))
+        .child(card::rows([group.on_change(on_change)], cx))
+        .children(
+            draft
+                .refusal()
+                .map(|_| choices::failure_line(ERROR_ID.to_owned(), FAILURE, cx)),
         )
+        .children(choices::busy_line(refused, ID, cx))
+}
+
+/// The preview borrows actual theme roles so a change in the main palette also reaches its miniature.
+fn preview(preference: Preference, palette: &theme::Palette) -> Div {
+    let swatch = |fill, width, height| {
+        div()
+            .w(relative(width))
+            .h(px(height))
+            .rounded(px(2.))
+            .bg(theme::color(fill))
+    };
+    let sidebar = |palette: &theme::Palette| {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .p(px(6.))
+            .bg(theme::color(palette.bg_1))
+            .child(swatch(palette.accent_fill, 0.88, 6.))
+            .child(swatch(palette.border, 0.65, 5.))
+    };
+    let frame = div()
+        .flex()
+        .h(px(42.))
+        .w_full()
+        .rounded(px(4.))
+        .border_1()
+        .border_color(theme::color(palette.border_dim))
+        .overflow_hidden();
+    match preference {
+        Preference::System => frame
+            .child(sidebar(&theme::LIGHT).flex_1().min_w_0())
+            .child(sidebar(&theme::DARK).flex_1().min_w_0()),
+        Preference::Dark | Preference::Light => {
+            let palette = if preference == Preference::Dark {
+                &theme::DARK
+            } else {
+                &theme::LIGHT
+            };
+            frame.child(sidebar(palette).w(relative(0.38))).child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .p(px(6.))
+                    .bg(theme::color(theme::DARK.bg_0))
+                    .child(swatch(theme::DARK.ok, 0.55, 4.))
+                    .child(swatch(theme::DARK.fg_2, 0.75, 4.)),
+            )
+        }
+    }
 }

@@ -366,16 +366,9 @@ impl SettingsDialog {
         } else {
             scope_line
         };
-        div()
-            .relative()
-            .flex_none()
-            .flex()
+        heading_band(&self.page_scroll, palette)
             .items_center()
             .gap(px(12.))
-            .px(px(22.))
-            .pt(px(14.))
-            .pb(px(12.))
-            .child(page_rule(&self.page_scroll, palette))
             .child(section.tile(true, false, palette))
             .child(
                 div()
@@ -415,6 +408,18 @@ impl SettingsDialog {
             )
             .into_any_element()
     }
+}
+
+/// Search and ordinary pages keep the same pinned edge above their own scroll viewports.
+pub(super) fn heading_band(scroll: &ScrollHandle, palette: &theme::Palette) -> gpui::Div {
+    div()
+        .relative()
+        .flex_none()
+        .flex()
+        .px(px(22.))
+        .pt(px(14.))
+        .pb(px(12.))
+        .child(page_rule(scroll, palette))
 }
 
 /// Paint the heading's edge after layout clamps the page's scroll offset. A wheel event on a short page or a resize

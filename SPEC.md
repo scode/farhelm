@@ -2462,7 +2462,8 @@ The **Search** field above the section list finds settings by section, label or 
 list shows the sections with matches under their group headings and gives each section's count. Cmd+F on a Mac or Ctrl+F
 on Linux moves focus there from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or
 Enter opens a result and reveals its control, or the top of its section for a choice group or help entry. Escape in the
-search field clears the query before it closes the dialog.
+search field clears the query before it closes the dialog. The results are grouped in cards by section, with matching
+words emphasized and the current result marked with the selection fill.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
@@ -2489,7 +2490,8 @@ in Tensorlake the key form shows its own warning, worded for that one key. A sav
 saved-key metadata immediately; each keeps its own unsaved replacement draft. Credentials does not rename or duplicate
 the stored Tensorlake key.
 
-**Appearance** chooses **System**, **Dark** or **Light**, with System as the default. System follows each device's
+**Appearance** chooses **System**, **Dark** or **Light**, with System as the default. The three illustrated choices
+share one keyboard radio group. System's preview shows both palettes. System follows each device's
 current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The choice is a helm
 preference shared by every client of the helm, and a change applies live in the open window (the maintainer decided on
 2026-11-13 that appearance is a helm preference rather than a per-device one; the old app's per-device choice is not
@@ -2531,7 +2533,8 @@ sandboxes are always created with a fixed 30-minute idle timeout. The creation s
 sessions and explains that timeout. The **Terminal** section chooses whether web links open in Farhelm without passing
 the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
 choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
-choice is the helm's and takes effect in every mounted terminal immediately. In the Mac app, where tunnels open (see
+choice is the helm's and takes effect in every mounted terminal immediately. The three choices share one keyboard radio
+group in the **Web links** card. In the Mac app, where tunnels open (see
 [Terminal experience](#terminal-experience)), the **Terminal** section also has tunnel consent; other desktop apps,
 which open no tunnels, leave it out. In every desktop app, the **Terminal** section also has a free-form,
 comma-separated **File types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to
@@ -2540,8 +2543,9 @@ This field requires an explicit, acknowledged save, but its value lives in the s
 one prominent warning beside the field for each listed type outside `md`, `txt`, `json`, `log` and the image types in
 that default; HTML-like types have a browser-specific warning, and all other unrecognized types have a generic warning.
 The warnings follow the draft as typed, including when another entry is malformed. A refused save leaves the draft and
-current helm policy unchanged and shows the reason inline. Under **Notifications**, sounds has three switches, shared
-helm preferences (see Status), and **ntfy alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`),
+current helm policy unchanged and shows the reason inline. Under **Notifications**, **Sounds** has four switches
+that save separate helm preferences (see Status). Each row has its own play button for hearing that sound once.
+**ntfy alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`),
 topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These ntfy settings are
 explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear inline.
 The stored token is never returned: the form shows whether one exists and allows replacing or clearing it. Changing to

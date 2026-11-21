@@ -43,8 +43,7 @@ use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{App, Div, FocusHandle, ParentElement as _, Role, Styled as _, Window, div, px};
 
-use super::Refused;
-use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::{Refused, card, choices};
 use crate::components::{Checkbox, HoverHelp, RadioGroup, RadioOption};
 use crate::drafts::Draft;
 use crate::host_text::{HostSentence, HostText};
@@ -62,8 +61,7 @@ pub(super) const ERROR_ID: &str = "settings-terminal-links-error";
 const FIELD: &str = "terminal_link_click";
 
 /// The help above the group: the old line, with "when they reload" made live (see the module docs).
-pub(super) const HELP: &str = "Clicking a web link in a terminal: this choice applies to this helm. Changes from the command line \
-                    or an agent show here right away. This web-link choice does not change file downloads.";
+pub(super) const HELP: &str = "This choice does not change file downloads.";
 
 /// The line under the group after the helm refused a save, the old app's words.
 const FAILURE: &str = "Could not save how terminal links are clicked. Try again.";
@@ -131,18 +129,14 @@ pub(super) fn command(choice: LinkClick) -> Result<Command, PathError> {
     choices::patch(FIELD, serde_json::Value::String(choice.word().to_owned()))
 }
 
-/// The link choices as two of the section's children, which the section spaces like any other (`.host-settings-section`
-/// put its help and its group 14 pixels apart): the help, then the stacked radio group with each choice's description
-/// and, after a refused save, the failure line under it, then the line saying why a press sent nothing (`refused`,
-/// [`choices::busy_line`]). `on_change` is what a choice does with the chosen value. The group shows the value being
-/// saved while its save is in flight and the stored one otherwise, as a switch does ([`choices::Switch::shown`]).
+/// The three link behaviors share one keyboard radio group. A failed choice leaves its explanation beside the group.
 pub(super) fn links(
     draft: &Draft<LinkClick>,
     preferences: Option<&Preferences>,
     refused: &Refused,
     on_change: impl Fn(&LinkClick, &mut Window, &mut App) + 'static,
     cx: &App,
-) -> [Div; 2] {
+) -> Div {
     let shown = if draft.is_saving() {
         *draft.value()
     } else {
@@ -150,6 +144,7 @@ pub(super) fn links(
     };
     let group = CHOICES.iter().fold(
         RadioGroup::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::RadioGroup)
+            .radio_rows()
             .chosen(Some(shown)),
         |group, &(value, label, description)| {
             // The description line is the option's accessible description, so the hover help repeats it, as the old
@@ -160,18 +155,18 @@ pub(super) fn links(
             )
         },
     );
-    let choice = div()
+    div()
         .flex()
         .flex_col()
-        .gap(px(FAILURE_GAP))
+        .gap(px(8.))
+        .child(card::heading("Web links", Some(HELP), None, cx))
         .child(group.on_change(on_change))
         .children(
             draft
                 .refusal()
                 .map(|_| choices::failure_line(ERROR_ID.to_owned(), FAILURE, cx)),
         )
-        .children(choices::busy_line(refused, ID, cx));
-    [choices::help(HELP, cx), choice]
+        .children(choices::busy_line(refused, ID, cx))
 }
 
 // ---- Tunnel consent ------------------------------------------------------------------------------------------------
@@ -194,7 +189,7 @@ pub(super) const TUNNEL_TOOLTIP: &str = "Open a remote session's localhost links
 
 /// The help under the switch, the old words.
 pub(super) const TUNNEL_HELP: &str = "Open a remote session's localhost links through this Mac. Turning this off closes every \
-                           open tunnel. The next tunnel asks again. This choice applies to this helm.";
+                           open tunnel. The next tunnel asks again.";
 
 /// The tunnel switch's state in the open dialog (see the module docs for its two directions).
 pub(super) struct TunnelConsent {
@@ -249,21 +244,17 @@ pub(super) fn tunnel_switch(
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
-    let switch = div()
-        .text_size(px(LABEL_TEXT))
-        .line_height(px(LABEL_LINE_HEIGHT))
-        .child(
-            Checkbox::new(
-                TUNNEL_ID,
-                TUNNEL_LABEL,
-                HoverHelp::tooltip(TUNNEL_TOOLTIP),
-                Role::Switch,
-            )
-            .switch()
-            .checked(state.shown(preferences))
-            .focus(&state.focus)
-            .on_toggle(on_toggle),
-        );
+    let switch = Checkbox::new(
+        TUNNEL_ID,
+        TUNNEL_LABEL,
+        HoverHelp::tooltip(TUNNEL_TOOLTIP),
+        Role::Switch,
+    )
+    .switch()
+    .content(card::switch_copy(TUNNEL_LABEL, TUNNEL_HELP, cx))
+    .checked(state.shown(preferences))
+    .focus(&state.focus)
+    .on_toggle(on_toggle);
     // The old line was the helm's words alone (`display_peer(error)`), with no words of the app's before them.
     let failure = state.failure.as_ref().map(|reason| {
         choices::host_failure_line(
@@ -275,10 +266,17 @@ pub(super) fn tunnel_switch(
     div()
         .flex()
         .flex_col()
-        .gap(px(GROUP_GAP))
+        .gap(px(8.))
         .min_w_0()
-        .child(switch)
-        .child(choices::help(TUNNEL_HELP, cx))
-        .children(failure)
-        .children(choices::busy_line(refused, TUNNEL_ID, cx))
+        .child(card::heading("Tunnels", Some("Mac only"), None, cx))
+        .child(card::rows(
+            [div()
+                .flex()
+                .flex_col()
+                .gap(px(FAILURE_GAP))
+                .child(switch)
+                .children(failure)
+                .children(choices::busy_line(refused, TUNNEL_ID, cx))],
+            cx,
+        ))
 }

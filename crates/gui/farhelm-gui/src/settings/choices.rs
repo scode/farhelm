@@ -25,7 +25,8 @@ use gpui::{
 use serde::de::DeserializeOwned;
 
 use super::Refused;
-use crate::components::{Button, Checkbox, HoverHelp, Tier};
+use crate::assets::Icon;
+use crate::components::{Button, Checkbox, HoverHelp, IconButton, Tier};
 use crate::drafts::Draft;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
@@ -314,28 +315,25 @@ impl Choice {
     }
 
     /// The help under the switch, which for the two host switches explains the behavior the shown value gives
-    /// (SPEC.md: "Each switch explains the current behavior"). Empty for the trust hints' and the sounds' switches,
-    /// which had none in the old app (the sounds share one paragraph under their sub-heading); [`group`] then draws no
-    /// paragraph.
+    /// (SPEC.md: "Each switch explains the current behavior"). A sound uses its tooltip as its description.
     pub(super) fn help(self, on: bool) -> &'static str {
         match self {
             Choice::ShowWhatsNew if on => {
-                "Show highlights at the next upgrade. This choice applies to this helm."
+                "Show highlights at the next upgrade. All windows on this helm use this choice."
             }
-            Choice::ShowWhatsNew => "Skip upgrade highlights. This choice applies to this helm.",
+            Choice::ShowWhatsNew => {
+                "Skip upgrade highlights. All windows on this helm use this choice."
+            }
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash \
-                 confirmations still follow their own rules. This choice applies to this helm; changes from the \
-                 command line or an agent show here right away."
+                 confirmations still follow their own rules."
             }
             Choice::NameSessionsOnQuickLaunch => {
-                "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This \
-                 choice applies to this helm; changes from the command line or an agent show here right away."
+                "Offer to name a quick-launched session while its agent starts. Enter keeps its default name."
             }
             Choice::ColorTerminalFrames => {
                 "Match the thin frame around every session's terminal to its host icon color. The terminal \
-                 background stays the same. This choice applies to this helm; changes from the command line or an \
-                 agent show here right away."
+                 background stays the same."
             }
             Choice::AutoUpdateRemoteHosts => {
                 "Update remote hosts as soon as an update is available, while Farhelm is open. This never updates \
@@ -356,11 +354,22 @@ impl Choice {
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
-            | Choice::ShowAntigravityTrustHint
-            | Choice::SoundWaiting
+            | Choice::ShowAntigravityTrustHint => "",
+            Choice::SoundWaiting
             | Choice::SoundApproval
             | Choice::SoundTurnFinished
-            | Choice::SoundSshSignIn => "",
+            | Choice::SoundSshSignIn => self.tooltip(),
+        }
+    }
+
+    /// The manual preview goes to the installed player without observing session state or changing the switch.
+    fn preview(self) -> Option<Sound> {
+        match self {
+            Self::SoundWaiting => Some(Sound::Waiting),
+            Self::SoundApproval => Some(Sound::Approval),
+            Self::SoundTurnFinished => Some(Sound::TurnFinished),
+            Self::SoundSshSignIn => Some(Sound::SshSignIn),
+            _ => None,
         }
     }
 
@@ -578,18 +587,25 @@ pub(super) fn labelled(
     field: impl IntoElement,
     edited: Option<&theme::Palette>,
 ) -> Div {
+    field_with_caption(
+        id,
+        field,
+        div()
+            .text_size(px(LABEL_TEXT))
+            .line_height(px(LABEL_LINE_HEIGHT))
+            .child(super::editing::caption(label, edited)),
+    )
+}
+
+/// Keep the field's measured target stable when its owner chooses a different caption style.
+pub(super) fn field_with_caption(id: &'static str, field: impl IntoElement, caption: Div) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(px(LABEL_GAP))
         .w_full()
         .min_w_0()
-        .child(
-            div()
-                .text_size(px(LABEL_TEXT))
-                .line_height(px(LABEL_LINE_HEIGHT))
-                .child(super::editing::caption(label, edited)),
-        )
+        .child(caption)
         .child(
             div()
                 .w_full()
@@ -639,6 +655,50 @@ pub(super) fn group(
 ) -> Div {
     let choice = switch.choice;
     let shown = switch.shown(preferences);
+    let sound = choice.preview();
+    let copy = super::card::switch_copy(choice.label(), choice.help(shown), cx);
+    let toggle = Checkbox::new(
+        choice.id(),
+        choice.label(),
+        HoverHelp::tooltip(choice.tooltip()),
+        Role::Switch,
+    )
+    .switch()
+    .checked(shown)
+    .focus(&switch.focus)
+    .on_toggle(on_toggle);
+    let row = if let Some(sound) = sound {
+        let label = format!("Preview {}", choice.label());
+        let preview = IconButton::new(
+            format!("{}-preview", choice.id()),
+            Icon::Play,
+            label.clone(),
+            HoverHelp::tooltip(label),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .square(px(24.))
+        .on_click(move |_, _, cx| crate::sounds::play(sound, cx));
+        // Leave room before the switch's mark for the preview button. It has its own hitbox over the row, so
+        // the label and description still toggle the sound while a press on Play only previews it.
+        div()
+            .relative()
+            .child(toggle.content(copy.pr(px(26.))))
+            .child(
+                div()
+                    .absolute()
+                    .right(Checkbox::SWITCH_MARK_WIDTH + px(8.))
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .block_mouse_except_scroll()
+                    .child(preview),
+            )
+            .into_any_element()
+    } else {
+        toggle.content(copy).into_any_element()
+    };
     let failure = switch
         .draft
         .refusal()
@@ -648,28 +708,7 @@ pub(super) fn group(
         .flex_col()
         .gap(px(GROUP_GAP))
         .min_w_0()
-        .child(
-            div()
-                .text_size(px(LABEL_TEXT))
-                .line_height(px(LABEL_LINE_HEIGHT))
-                .child(
-                    Checkbox::new(
-                        choice.id(),
-                        choice.label(),
-                        HoverHelp::tooltip(choice.tooltip()),
-                        Role::Switch,
-                    )
-                    .switch()
-                    .checked(shown)
-                    .focus(&switch.focus)
-                    .on_toggle(on_toggle),
-                ),
-        )
-        .children(
-            Some(choice.help(shown))
-                .filter(|text| !text.is_empty())
-                .map(|text| help(text, cx)),
-        )
+        .child(row)
         .children(failure.map(|failure| failure_line(choice.error_id(), failure, cx)))
         .children(busy_line(refused, choice.id(), cx))
 }

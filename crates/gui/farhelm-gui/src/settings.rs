@@ -61,6 +61,7 @@
 mod agent_trust;
 mod app;
 mod appearance;
+mod card;
 mod checkout_field;
 mod checkouts;
 mod choices;
@@ -115,7 +116,7 @@ use farhelm_helm_client::PathError;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Role, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
 };
@@ -157,8 +158,6 @@ const WIDTH: f32 = 760.;
 const HEIGHT: f32 = 780.;
 /// The search shortcut is scoped to the Settings frame, including its header and footer.
 pub(crate) const SEARCH_CONTEXT: &str = "Settings";
-/// Search keeps its own heading until its results adopt the page layout.
-const HEADING_TEXT: f32 = 18.;
 /// `.host-settings-section`'s gap between a section's heading and its groups.
 const SECTION_GAP: f32 = 14.;
 
@@ -182,12 +181,9 @@ const FOOTER_NOTE: &str = "Switches save at once; forms save with Save below.";
 /// Both close buttons and Escape go through the same draft check.
 const CLOSE_HELP: &str = "Close Settings. Unsaved changes ask first.";
 
-const HOST_CHOICES_HELP: &str = "The host choices apply to every host on this helm. Changes from the command line or \
-                                 an agent show here right away.";
 const SOUNDS_ID: &str = "settings-sounds";
 const SOUNDS_LABEL: &str = "Sounds";
-const SOUNDS_HELP: &str = "These choices apply to this helm; changes from the command line or an agent show here \
-                           right away. The session open in an active window stays quiet.";
+const SOUNDS_HELP: &str = "The session open in an active window stays quiet.";
 
 /// Open Settings at Sessions with focus on its first switch, on top of everything else in `window`: the gear's entry
 /// point (SPEC.md: "The gear always opens sessions and focuses its first switch").
@@ -1258,40 +1254,32 @@ impl SettingsDialog {
         .into_any_element()
     }
 
-    /// Notifications' Sounds sub-heading: its heading, the paragraph the three switches share, and the switches for the
-    /// status sounds (SPEC.md, "Status"), in the old app's order (`SoundSettings` in `sounds.rs` at the reference
-    /// commit). They save like every other switch here; the sounds' owner reads the same fields
-    /// ([`crate::sounds::StatusSounds`]).
-    ///
-    /// The paragraph is the old one reworded: the old app kept these switches on the device ("These choices apply only
-    /// to this device"), and here they are shared helm preferences (the maintainer's decision of 2026-11-13), so it says
-    /// what the other shared switches' help says.
+    /// The four status sound preferences share one card. Each row carries its own description and preview.
     fn sounds(&self, preferences: Option<&Preferences>, cx: &Context<Self>) -> AnyElement {
-        let palette = theme::palette(cx);
         div()
             .id(SOUNDS_ID)
             .role(Role::Region)
             .aria_label(SOUNDS_LABEL)
             .flex()
             .flex_col()
-            .gap(px(SECTION_GAP))
+            .gap(px(6.))
             .min_w_0()
             .child(
                 div()
                     .id("settings-sounds-heading")
                     .role(Role::Heading)
                     .aria_label(SOUNDS_LABEL)
-                    .text_size(px(choices::LABEL_TEXT))
-                    .line_height(px(choices::LABEL_LINE_HEIGHT))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(SOUNDS_LABEL),
+                    .child(card::heading(SOUNDS_LABEL, Some(SOUNDS_HELP), None, cx)),
             )
-            .child(choices::help(SOUNDS_HELP, cx))
-            .child(self.switch(Choice::SoundWaiting, preferences, cx))
-            .child(self.switch(Choice::SoundApproval, preferences, cx))
-            .child(self.switch(Choice::SoundTurnFinished, preferences, cx))
-            .child(self.switch(Choice::SoundSshSignIn, preferences, cx))
+            .child(card::rows(
+                [
+                    self.switch(Choice::SoundWaiting, preferences, cx),
+                    self.switch(Choice::SoundApproval, preferences, cx),
+                    self.switch(Choice::SoundTurnFinished, preferences, cx),
+                    self.switch(Choice::SoundSshSignIn, preferences, cx),
+                ],
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1304,9 +1292,15 @@ impl SettingsDialog {
     ) -> Vec<AnyElement> {
         match section {
             Section::Sessions => vec![
-                self.switch(Choice::SkipSessionConfirmations, preferences, cx),
-                self.switch(Choice::NameSessionsOnQuickLaunch, preferences, cx),
-                self.switch(Choice::ColorTerminalFrames, preferences, cx),
+                card::rows(
+                    [
+                        self.switch(Choice::SkipSessionConfirmations, preferences, cx),
+                        self.switch(Choice::NameSessionsOnQuickLaunch, preferences, cx),
+                        self.switch(Choice::ColorTerminalFrames, preferences, cx),
+                    ],
+                    cx,
+                )
+                .into_any_element(),
             ],
             Section::Appearance => {
                 let weak = cx.weak_entity();
@@ -1326,10 +1320,15 @@ impl SettingsDialog {
                 ]
             }
             Section::Hosts => vec![
-                self.switch(Choice::AutoUpdateRemoteHosts, preferences, cx),
-                choices::help(HOST_CHOICES_HELP, cx).into_any_element(),
-                self.switch(Choice::SkipHostSetupConfirmation, preferences, cx),
-                self.switch(Choice::SkipHostRemoveConfirmation, preferences, cx),
+                card::rows(
+                    [
+                        self.switch(Choice::AutoUpdateRemoteHosts, preferences, cx),
+                        self.switch(Choice::SkipHostSetupConfirmation, preferences, cx),
+                        self.switch(Choice::SkipHostRemoveConfirmation, preferences, cx),
+                    ],
+                    cx,
+                )
+                .into_any_element(),
             ],
             Section::Containers => self
                 .containers
@@ -1338,24 +1337,33 @@ impl SettingsDialog {
                 .collect(),
             Section::Terminal => {
                 let weak = cx.weak_entity();
-                let mut body: Vec<AnyElement> = terminal::links(
-                    &self.link_click,
-                    preferences,
-                    &self.refused,
-                    move |&choice, _, cx| {
-                        let _ = weak.update(cx, |dialog, cx| dialog.choose_link_click(choice, cx));
-                    },
-                    cx,
-                )
-                .into_iter()
-                .map(IntoElement::into_any_element)
-                .collect();
+                let mut body = vec![
+                    terminal::links(
+                        &self.link_click,
+                        preferences,
+                        &self.refused,
+                        move |&choice, _, cx| {
+                            let _ =
+                                weak.update(cx, |dialog, cx| dialog.choose_link_click(choice, cx));
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                ];
                 // Below the link choices, as in the old desktop app, and only where tunnels open.
                 if terminal::shown_on(self.platform) {
                     body.push(self.tunnel_switch(preferences, cx));
                 }
                 // Last, as in the old desktop app, and in every desktop app.
-                body.extend(self.file_types.clone().map(IntoElement::into_any_element));
+                body.extend(self.file_types.iter().map(|form| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(card::heading("Downloaded files", None, None, cx))
+                        .child(card::rows([form.clone()], cx))
+                        .into_any_element()
+                }));
                 body
             }
             Section::Checkouts => {
@@ -1388,13 +1396,11 @@ impl SettingsDialog {
             Section::AgentTrust => self
                 .trust
                 .iter()
-                .enumerate()
-                .map(|(index, trust)| {
+                .map(|trust| {
                     let agent = trust.agent;
                     let weak = cx.weak_entity();
                     agent_trust::block(
                         trust,
-                        index == 0,
                         &self.refused,
                         move |on, _, cx| {
                             let _ = weak.update(cx, |dialog, cx| {
@@ -1414,24 +1420,12 @@ impl SettingsDialog {
                     .into_any_element()
                 })
                 .collect(),
-            // Sounds above ntfy alerts, with the old sections' rule between them (`.host-settings-section +
-            // .host-settings-section`: a top border and 20 pixels above the next heading).
-            Section::Notifications => {
-                let palette = theme::palette(cx);
-                std::iter::once(self.sounds(preferences, cx))
-                    .chain(self.ntfy.iter().map(|form| {
-                        div()
-                            .border_t_1()
-                            .border_color(theme::color(palette.border_dim))
-                            .pt(px(20.))
-                            .child(form.clone())
-                            .into_any_element()
-                    }))
-                    .collect()
-            }
+            Section::Notifications => std::iter::once(self.sounds(preferences, cx))
+                .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
+                .collect(),
             Section::App => {
                 let weak = cx.weak_entity();
-                app::section(
+                let rows = app::section(
                     &self.app,
                     move |on, _, cx| {
                         let _ = weak.update(cx, |dialog, cx| {
@@ -1447,8 +1441,8 @@ impl SettingsDialog {
                 .chain(
                     crate::desktop::updates::upgrade_notes(cx)
                         .map(|_| self.switch(Choice::ShowWhatsNew, preferences, cx)),
-                )
-                .collect()
+                );
+                vec![card::rows(rows, cx).into_any_element()]
             }
             Section::Credentials => {
                 let conflict = self.key_conflict.then(|| {
@@ -1516,7 +1510,6 @@ impl Render for SettingsDialog {
                 .flex_1()
                 .min_w_0()
                 .min_h_0()
-                .p(px(14.))
                 .bg(theme::color(palette.settings_page))
                 .child(self.search.pane(window, cx))
                 .into_any_element()

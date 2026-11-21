@@ -707,7 +707,7 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
     }
     if let Some(input) = settings::draft_input_for_opened(section, cx) {
         let text = match section {
-            Section::Terminal => "md, txt, json, png, jpg, log",
+            Section::Terminal => "md, txt, json, png, jpg, html",
             Section::Checkouts => "~/work/managed",
             Section::Notifications => "farhelm-lab",
             Section::Recipes => "rust-tools",
@@ -726,8 +726,8 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             input.edit_for_golden(text, window, cx);
             if step == DraftStep::OpenNotifications {
                 settings::show_for_opened(Section::Notifications, window, cx);
-            } else if section == Section::Notifications {
-                // The clean scene shows the top of Sounds. Scroll this version to show the topic and its footer.
+            } else if matches!(section, Section::Terminal | Section::Notifications) {
+                // Keep the edited field, its explanatory copy, and the pinned actions in view together.
                 window.dispatch_event(
                     gpui::PlatformInput::Scroll(gpui::ScrollEvent {
                         position: point(px(500.), px(415.)),

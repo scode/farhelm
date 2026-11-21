@@ -59,7 +59,7 @@ pub(super) fn label(platform: Platform) -> &'static str {
 
 /// The old words.
 pub(super) const HELP: &str = "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening \
-                    downloaded files; downloads still save. This choice applies to this helm.";
+                    downloaded files; downloads still save.";
 const SAVED: &str = "File types saved";
 pub(super) const HTML_HEADING: &str = "An agent-written page may run in your browser";
 pub(super) const HTML_TEXT: &str = "An agent-written page can run scripts in your browser and open web addresses outside \
@@ -77,8 +77,6 @@ const MAX_WARNINGS: usize = 32;
 const FIELD_GAP: f32 = 8.;
 const WARNING_PAD: (f32, f32) = (10., 12.);
 const WARNING_GAP: f32 = 6.;
-/// A warning's line height: `.open-extensions-warning p`'s 1.5 at the Settings rows' text size.
-const WARNING_LINE_HEIGHT: f32 = choices::LABEL_TEXT * 1.5;
 
 /// The list a field shows for the stored choice: the stored text, or the default when nothing was ever saved.
 fn shown(stored: Option<&str>) -> &str {
@@ -260,28 +258,6 @@ impl FileTypes {
         cx.notify();
     }
 
-    /// The field under its label (`.open-extensions-label`: semibold, over the field), as wide as the section.
-    fn labelled(
-        label: &'static str,
-        input: TextInput,
-        edited: Option<&theme::Palette>,
-    ) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(choices::LABEL_GAP))
-            .w_full()
-            .min_w_0()
-            .child(
-                div()
-                    .text_size(px(choices::LABEL_TEXT))
-                    .line_height(px(choices::LABEL_LINE_HEIGHT))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(super::editing::caption(label, edited)),
-            )
-            .child(div().w_full().debug_selector(|| ID.to_owned()).child(input))
-    }
-
     /// One standing warning for `extension` (`.open-extensions-warning`): its heading line, with the warning sign, and
     /// what the risk is.
     fn warning(extension: &str, kind: WarningKind, cx: &Context<Self>) -> Stateful<Div> {
@@ -306,22 +282,21 @@ impl FileTypes {
             .py(px(WARNING_PAD.0))
             .px(px(WARNING_PAD.1))
             .bg(theme::color(palette.danger_bg_dim))
-            .border_2()
+            .border_l_2()
             .border_color(theme::color(palette.danger_strong))
             .rounded(metrics::RADIUS_MD)
             .text_color(theme::color(palette.fg_0))
-            .text_size(px(choices::LABEL_TEXT))
-            .line_height(px(WARNING_LINE_HEIGHT))
+            .text_size(metrics::TEXT_SM)
+            .line_height(px(17.))
             .child(
                 div()
                     .flex()
                     .gap(px(4.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(
-                        div()
-                            .text_color(theme::color(palette.danger_strong))
-                            .child("⚠"),
-                    )
+                    .text_size(metrics::TEXT_MD)
+                    .line_height(px(18.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::color(palette.danger_strong))
+                    .child("⚠")
                     .child(heading),
             )
             .child(div().child(text))
@@ -374,10 +349,14 @@ impl Render for FileTypes {
             .gap(px(FIELD_GAP))
             .w_full()
             .min_w_0()
-            .child(Self::labelled(
-                label,
+            .child(choices::field_with_caption(
+                ID,
                 input,
-                (self.edit_state() != super::editing::EditState::Clean).then_some(palette),
+                super::card::caption(
+                    label,
+                    self.edit_state() != super::editing::EditState::Clean,
+                    palette,
+                ),
             ))
             .child(choices::help(HELP, cx))
             .children(warnings)
