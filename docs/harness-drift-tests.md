@@ -27,7 +27,9 @@ configuration overlay.
 The test uses the vendor's existing credentials. Antigravity and Grok also need the manual hooks described in the
 [Antigravity setup guide](../website/src/content/docs/docs/agents/antigravity.md) and
 [Grok setup guide](../website/src/content/docs/docs/agents/grok.md). Sign in and install or update the hooks yourself
-before retrying cases that need them. Tests use private Farhelm state and leave hook files alone.
+before retrying cases that need them. Tests use private Farhelm state and leave hook files alone. An agent running this
+suite never signs in or accepts a vendor update (`.agents/real-agent-tui.md`) and never installs or edits hooks; it
+reports the case as COULD NOT RUN and leaves those steps to the maintainer.
 
 ## Reading the result
 
