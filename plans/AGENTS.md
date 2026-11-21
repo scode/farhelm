@@ -71,6 +71,17 @@ Every plan has a source that references it, so nobody plans or executes the same
 `` planned in `plans/queue/<slug>.md` ``. Having a plan does not move an entry between TODO.md buckets; in particular it
 has nothing to do with the `Planned` bucket, which means something else (see TODO.md's own header).
 
+## Follow-up TODO entries
+
+Every TODO.md entry that comes out of a plan goes in the `### Plan follow-up` subsection of TODO.md's `## Near term`
+bucket, and nowhere else. That covers a TODO entry the maintainer asks for while reviewing a report, a leftover from a
+report or landing notes turned into an entry, and work a plan's goal file says to defer into TODO.md, whatever bucket
+the work would otherwise seem to belong in. The maintainer wants plan follow-ups kept apart from the rest of the
+near-term work (2026-11-21), and moves an entry out of the subsection when they decide it belongs elsewhere. The one
+exception is the landing monitor's record of the judgment calls it makes when it answers a block: those go in the
+`## Plan decisions to revisit` bucket (`plans/.agents/landing.md`, "Answering blocks"), since they are decisions to
+revisit rather than work to do.
+
 ## Editing rules
 
 The rules that follow from `plans/.agents/queue.md`, "States, and the script that moves them":
