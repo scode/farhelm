@@ -17,13 +17,11 @@ A stable release is cut from main. The changelog section and any selected announ
 FIRST, in the changelog PR; the release branch is cut after it merges, so the bump commit keeps its three-file shape and
 main is the only place the notes ever live. The section lands as a draft, and the procedure does not wait for the
 maintainer to approve its wording: the tag builds, and the release can be signed and brick tested, while they review it.
-The approved text then replaces the draft on main and on the GitHub release (step 3). The maintainer asked for this on
-2026-10-13. Nothing that ships reads the notes (the app's What's new item opens the docs website, which builds from
-main), so what the wait bought was that the GitHub release and the tag's own copy of `CHANGELOG.md` never held a draft.
-The draft notice covers the release page (and the notification GitHub sends repository watchers) until finalization; the
-tag's copy keeps the draft for good, which nothing reads. Main holds the draft too until finalization, so a docs website
-deployed in that window shows it on the Release notes page, which is where the app's What's new item lands. When asked
-to deploy the website while the notes are still a draft, say so before deploying.
+The approved text then replaces the draft on main and on the GitHub release (step 3). The tag keeps its original copy.
+The installed app gets its upgrade highlights from the website's `/whats-new.json`, which includes only finalized notes.
+That lets the build and brick test run during notes review. Promotion in step 8 waits for the website to serve the new
+release's highlights. The human-readable Release notes page can still show a draft if the site is deployed during
+review.
 
 The version, announcements and any upgrade-floor raise are settled when the stable release is requested, and from then
 on nothing waits for the maintainer until the tag's build is running. Apply `releasing/AGENTS.md`, "Rules for every
@@ -237,35 +235,44 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
    (SPEC.md, "Upgrade compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual
    checks as material for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live
    feedback send and bonus coverage separately; bring those results to the maintainer without deciding whether a P1
-   failure blocks promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight
-   to promotion. Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
-   - Pass: the maintainer moves `/latest`, which no agent does. Hand them exactly this line, with the version filled in,
-     to run from their release management location (outside this repository; agents never run it):
+   failure blocks promotion. Say whether the notes are finalized when you hand over the test. Wait for the maintainer's
+   verdict. An unavailable test requires the maintainer's decision below.
+   - Pass: finish step 3. If the release has screenshots and the verdict left it unclear whether the release is going
+     out, notify the maintainer and ask for that confirmation. Once confirmed, finish any remaining screenshot work and
+     land its PR using the normal validation and landing rules. That confirmation authorizes the merge. Land it before
+     the deployment because the feed gets its screenshot links from that PR.
+
+     Send the urgent notification specified in `releasing/AGENTS.md`, "Notifying the maintainer", and ask the maintainer
+     to deploy the website from main. Wait for them to deploy it. The maintainer owns this deployment.
+
+     Check the published data read-only, filling in `X.Y.Z` without the `v`. The feed must report format version 1 and
+     list the exact release being promoted.
+
+     ```sh
+     notes=$(curl -fsS --max-time 20 -H 'Cache-Control: no-cache' https://farhelm.io/whats-new.json) &&
+       jq -e --arg version 'X.Y.Z' '.formatVersion == 1 and any(.releases[]; .version == $version)' <<<"$notes"
+     ```
+
+     If the feed cannot be read or the release is absent, keep the handover pending and tell the maintainer what the
+     check found. Once the check passes, hand the maintainer exactly this line with the version filled in. They run it
+     from their release management location outside the repository.
 
      ```
      ./bin/set-latest.sh vX.Y.Z && ./bin/deploy.sh
      ```
 
-     Once the maintainer confirms this release is good and going out, land its prepared screenshot PR using the normal
-     validation and landing rules. Do not ask for separate merge permission after that confirmation. If the PR is not
-     ready yet, finish its outstanding work now; do not report the full release work complete with it still pending.
-     This authorizes no website deployment and changes nothing about who runs the promotion command.
-
-     The maintainer asked for this line on 2026-10-18, so that promoting a release costs them only running it, the same
-     as step 7's publish line. If the notes are still not finalized when they report the pass, remind them before they
-     run it, since promoting would send every ordinary install to a release whose page still reads DRAFT. Once they say
-     it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and go on.
+     Once the maintainer says it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z` and go on.
    - Fail: `/latest` stays on the previous release and the release is never promoted. Fix forward
      (`releasing/.agents/fixing-forward.md`, "Fixing forward") and cut the next patch version. Whether to take the
      staged version off get.farhelm.io is the maintainer's call.
    - Could not run: ask the maintainer whether to fix the test environment and run it again, or to promote without it.
-     Only the maintainer decides to skip the test.
+     If they approve promotion without the test, follow the full Pass sequence, including finalization, screenshot
+     landing and the deployed feed check.
 9. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 10. `cargo clean` again (see `releasing/.agents/build-outputs.md`, "Build outputs").
 
-The procedure is not finished until step 3's finalization has run, or the maintainer has said to leave it for later.
-When everything else is done and the notes are still a draft, say so plainly in the final report rather than reporting
-the release as complete.
+Step 8 needs finalized notes because the installed app waits for that release to appear in the feed. If wording review
+is still open, the release can stay staged until the maintainer approves the notes and deploys the website.
 
 A failure anywhere in this procedure, from the pre-tag checks through the brick test, is fixed forward without asking
 (`releasing/.agents/fixing-forward.md`, "Fixing forward"). A failed tag build publishes nothing, and a release that

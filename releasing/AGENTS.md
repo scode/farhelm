@@ -117,7 +117,8 @@ the kinds the procedures have, each only when its procedure actually makes it:
   not asked about), an earlier-base release path, a fix forward that is the maintainer's call, an inferred editorial
   rule, a brick test that could not run.
 - A line or task only the maintainer can do, once the procedure waits on it: the RC or dev signing-and-install line, the
-  stable publish line, the brick test, the line that moves `/latest`.
+  stable publish line, the brick test, deploying the website for stable upgrade highlights, the line that moves
+  `/latest`.
 - An approval or verdict the procedure waits for: the notes approval once it is all that is left, the brick test
   verdict, the confirmation that the release is good and going out. Handing over the release-note review page is not a
   stop, because the procedure goes on without waiting for it.
@@ -257,9 +258,8 @@ Before step 1 of `releasing/.agents/stable.md`, "Cutting a stable release" (the 
 Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`. On rehearsing the
 release gate, read `.agents/run-all-tests.md`.
 
-Fence: every rule in `releasing/AGENTS.md`, "Rules for every release"; agents never run the maintainer's signing or
-publish line and never move `/latest`; the procedure is not finished until the notes are finalized or the maintainer
-said to leave that for later.
+Fence: every rule in `releasing/AGENTS.md`, "Rules for every release". The maintainer signs, publishes, deploys the
+website, and moves `/latest`. Hand over the promotion line after the deployed highlights feed lists the new release.
 
 ### RC release ("cut an rc", "cut an rc with this stack")
 
