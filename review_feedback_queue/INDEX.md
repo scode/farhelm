@@ -16,10 +16,6 @@ consequences.
 - [`folder-suggestion-enter-can-submit-launcher.md`](folder-suggestion-enter-can-submit-launcher.md) — Enter on a
   visible folder suggestion can submit the launcher. A successful Replace with can retire the source session.
 
-- [`guarded-delete-replace-omits-surviving-shell-work.md`](guarded-delete-replace-omits-surviving-shell-work.md) —
-  Delete or Replace can end surviving main-shell work after a confirmation that mentions only extra tabs or says nothing
-  is running.
-
 - [`shell-lifecycle-approval-names-wrong-program.md`](shell-lifecycle-approval-names-wrong-program.md) — Agent-requested
   Stop or Delete can ask approval to terminate an agent even though accepting the card terminates the shell and its
   work.
@@ -34,14 +30,7 @@ consequences.
 - [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
   down before it saves command history configured to write on exit.
 
-- [`tabs-only-stop-ends-surviving-shell-jobs.md`](tabs-only-stop-ends-surviving-shell-jobs.md) — A Stop confirmation
-  that only names extra tabs can also end background work left by the main shell.
-
 ## High priority: material UX degradation
-
-- [`late-bound-agent-host-misses-adoption.md`](late-bound-agent-host-misses-adoption.md) — If an interrupted terminal
-  starts only after its replacement supervisor finishes both startup scans, the agent can keep running while Farhelm
-  cannot open its terminal. Another supervisor restart is needed to find it.
 
 - [`retired-runtime-retains-restart-seed-reply.md`](retired-runtime-retains-restart-seed-reply.md) — An input/paste
   reserved before retirement can remain retained with no receipt; the same late-send lifetime on the runtime's control
@@ -106,9 +95,6 @@ consequences.
   Farhelm can treat two SSH entries for the same machine and account as usable container places even while its ordinary
   host connection refuses the duplicate.
 
-- [`macos-terminal-paste-blocks-gui-thread.md`](macos-terminal-paste-blocks-gui-thread.md) — When macOS stalls while
-  supplying clipboard contents, pasting into the terminal can freeze the whole Farhelm window.
-
 - [`bulk-mute-can-reset-window.md`](bulk-mute-can-reset-window.md) — Muting or unmuting a large marked set can reset the
   desktop connection after applying only part of the batch.
 
@@ -137,16 +123,6 @@ consequences.
 
 - [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
   leftover sandbox whose name has no helm tag is labelled as another helm's.
-
-- [`canonical-folder-history-contract-conflict.md`](canonical-folder-history-contract-conflict.md) — Host canonical-path
-  replies become remembered folder text, despite a product rule saying those replies must not choose remembered
-  defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are
-  established, arbitrary path substitution is not.
-
-- [`fresh-claude-trust-birthtime-contract-conflict.md`](fresh-claude-trust-birthtime-contract-conflict.md) — Initial
-  fresh-checkout creation can edit Claude trust without the no-birth-time check stated elsewhere. Fresh-creation rules
-  may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
-  replacement-folder grant.
 
 - [`plan-deferral-survives-replacement-question.md`](plan-deferral-survives-replacement-question.md) — After the
   maintainer answers one large plan question, a later ordinary question from that plan can remain excluded from
@@ -182,9 +158,6 @@ consequences.
 
 - [`anonymous-container-volumes-survive-removal.md`](anonymous-container-volumes-survive-removal.md) — Removing a
   container can leave its anonymous image volumes behind; whether Farhelm promises to remove them is unresolved.
-
-- [`automatic-update-planning-serializes-hosts.md`](automatic-update-planning-serializes-hosts.md) — One host's planning
-  or wait for its provisioning lock can delay automatic updates for later hosts.
 
 - [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
   completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
@@ -242,9 +215,6 @@ consequences.
 - [`uri-spare-capacity-missing-from-memory-budget.md`](uri-spare-capacity-missing-from-memory-budget.md) — Hyperlink
   allocations can be larger than the terminal memory estimate counts, although the logical storage counter still obeys
   its cap.
-
-- [`host-restart-history-painter-omits-palette.md`](host-restart-history-painter-omits-palette.md) — Restart into a
-  fresh terminal host changes retained scrollback colors when the previous program redefined terminal colors.
 
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
@@ -329,10 +299,6 @@ consequences.
 
 - [`stable-recut-removes-retained-announcement-anchor.md`](stable-recut-removes-retained-announcement-anchor.md) — A
   different-version stable re-cut can remove the website anchor still targeted by carried announcements.
-
-- [`recovery-gap-notice-lifetime-contract-conflict.md`](recovery-gap-notice-lifetime-contract-conflict.md) —
-  Same-supervisor recovery exposes contradictory product and implementation promises for the missing-output notice's
-  lifetime.
 
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
@@ -467,10 +433,6 @@ consequences.
 
 - [`devbuild-rustup-active-name.md`](devbuild-rustup-active-name.md) — Mac devbuild misparses Rustup 1.28.0's multiline
   active-toolchain output and aborts preflight even with the compiler installed; current one-line output is unaffected.
-
-- [`stopped-host-update-floor-unresolved.md`](stopped-host-update-floor-unresolved.md) — A stopped host running Farhelm
-  below the minimum update version can still be updated without checking its installed version. Whether the
-  minimum-version rule is intended to cover stopped supervisors remains unresolved.
 
 - [`overdue-plan-protection-ages-out.md`](overdue-plan-protection-ages-out.md) — The plan picker can forget that a
   repeatedly skipped plan is overdue when older claims leave its bounded history.
@@ -848,10 +810,6 @@ consequences.
   Primary-selection writes cannot suppress drag-copy guidance (predates range). Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md`](trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md)
-  — Retiring the byte renderer removes overline support from served terminals. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
   typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
 
@@ -911,9 +869,6 @@ consequences.
 - [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
   preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
 
-- [`older-catalog-model-overrides-custom-owner.md`](older-catalog-model-overrides-custom-owner.md) — Switching agents in
-  the launcher can keep a custom model because the destination has an older catalog entry with the same name.
-
 - [`session-groups-lose-membership-in-accessibility-tree.md`](session-groups-lose-membership-in-accessibility-tree.md) —
   The sidebar can omit a session's group membership from screen-reader information.
 
@@ -925,9 +880,6 @@ consequences.
 
 - [`test-worker-sync-precedes-lock.md`](test-worker-sync-precedes-lock.md) — A second SSH test request can change the
   checkout used by the run already in progress.
-
-- [`auto-sign-in-uses-session-anchor.md`](auto-sign-in-uses-session-anchor.md) — If the sidebar Answer button is below
-  the fold, an automatic sign-in popover can open beside the selected session’s card instead.
 
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
@@ -1011,23 +963,8 @@ consequences.
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
 
-- [`notice-panel-marks-offscreen-rows.md`](notice-panel-marks-offscreen-rows.md) — Opening and closing Notifications can
-  mark an off-screen PATH warning as read. Clear resolved can also remove unseen history.
-
 - [`desktop-path-notice-first-read-untested.md`](desktop-path-notice-first-read-untested.md) — The startup tests can
   pass if the first client misses the login PATH warning.
-
-- [`shell-status-samples-visible-tail.md`](shell-status-samples-visible-tail.md) — A visibly active shell can show Idle
-  when its output changes above the sampled area. This can also suppress the extra Suspend warning.
-
-- [`shell-main-tab-spec-still-says-agent.md`](shell-main-tab-spec-still-says-agent.md) — The session-view spec still
-  tells Bash and Zsh users to look for an Agent tab instead of Shell.
-
-- [`shell-idle-spec-omits-sampling-cadence.md`](shell-idle-spec-omits-sampling-cadence.md) — The shell description can
-  understate how long a quiet shell takes to show Idle on a host with many sessions.
-
-- [`shell-recovery-spec-omits-replace.md`](shell-recovery-spec-omits-replace.md) — The Status spec omits Replace as a
-  way to recover an interrupted Bash or Zsh session.
 
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.
@@ -1072,18 +1009,3 @@ consequences.
 - [`retired-terminal-comment-names-agent-recipient.md`](retired-terminal-comment-names-agent-recipient.md) — The
   terminal retirement comment still sends maintainers looking for notices on Agent even when they follow the selected
   shell.
-
-- [`tensorlake-lifecycle-loses-running-evidence.md`](tensorlake-lifecycle-loses-running-evidence.md) — A later outside
-  pause can be credited to an old Suspend after an explicit host operation already saw the sandbox running.
-
-- [`tensorlake-timestamp-clear-delayed-by-dial.md`](tensorlake-timestamp-clear-delayed-by-dial.md) — Quitting during
-  supervisor connection retries can preserve an old Suspend time that Farhelm already knows is obsolete.
-
-- [`tensorlake-reprobe-moves-observed-time.md`](tensorlake-reprobe-moves-observed-time.md) — An interruption in
-  Tensorlake status checks can make the same suspension appear to have started later.
-
-- [`tensorlake-stale-registry-skips-timestamp-clear.md`](tensorlake-stale-registry-skips-timestamp-clear.md) — A failed
-  registry refresh can prevent a successful reconnect from clearing an old Suspend timestamp.
-
-- [`tensorlake-quit-rewrites-cleared-suspend-time.md`](tensorlake-quit-rewrites-cleared-suspend-time.md) — Quitting
-  while Suspend finishes can put back an old timestamp that Farhelm had already cleared.

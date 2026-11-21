@@ -607,9 +607,10 @@ pub enum HostState {
     /// Explicit Suspend also publishes this under its hold after Tensorlake
     /// confirms suspension and the host row records Farhelm's completion time.
     Suspended {
-        /// When this helm first saw the suspension (unix ms): the "since"
-        /// for a suspension Farhelm did not make. Kept across re-probes of
-        /// one pause; a pause seen after Running evidence gets a new time.
+        /// Observation time (Unix ms) for the "noticed" wording. Re-probes
+        /// reuse it while the actor still shows Suspended and has seen no
+        /// newer Running evidence. A probe that rediscovers the same pause
+        /// after an unreachable state can give it a new time.
         observed_at: i64,
         /// Farhelm's confirmed completion time (unix ms), also persisted on
         /// the host row. The hosts list reads it from this state alone, and
