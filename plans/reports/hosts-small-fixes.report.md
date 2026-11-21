@@ -66,3 +66,71 @@ to a sharper Tensorlake menu assertion, a corrected lock handoff during Delete a
 accessibility test covers two hosts with aliases in ready and waiting states. The sidebar and Hosts use the same
 host-name formatter. An optional additional case would check that a host without an alias is announced by its full
 address in the sidebar.
+
+### Landing
+
+#### What landed with it
+
+templates-list-bolt-and-key (the Templates list's bolt and number keys) landed right after this plan in the same round.
+Since the executor last rebased this plan onto main, main had gained only the terminal's Connecting color fix and TODO
+entries. An independent reviewer and I read both plans against each other; they change no file in common. Each of the
+four fixes meets its triage outcome. The Tensorlake recipe check uses the same per-provider rule the rest of Farhelm
+uses to decide which recipes a provider can run. On a repeated Delete of a host already known to be sealed, the helm
+records the failure before it lets go of the host, so the automatic cleanup that finishes sealed deletions cannot
+overwrite it.
+
+#### Fixes made while landing
+
+One went in as a fifth PR, [#4430](https://github.com/scode/farhelm/pull/4430/changes):
+
+- Marking incompatible container recipes unavailable in the Tensorlake Add host form had also changed every recipe's
+  hover help to just its name, repeating the label. The hover help on a recipe Tensorlake can run is back to "Create the
+  sandbox from the recipe ..."; an unavailable one keeps its name, since its reason already shows beside it.
+- SPEC.md (twice) and SPEC_impl.md still said a late failure of a whole-sandbox or whole-container Delete reaches only
+  the helm's log. They now make the exception this plan created: for a host already known to be sealed when that Delete
+  began, the host keeps showing as being deleted, with the failure's reason and Retry.
+
+#### Checks
+
+This round landed two plans together: hosts-small-fixes (the helm's host deletion and the desktop app's Hosts, Add host
+and attention list) and templates-list-bolt-and-key (the Templates list, a shared button style and four reference
+pictures). The landing ran the helm crate's and the desktop app GUI's test suites, the app's end-to-end smoke test and
+the main lint (clippy) on a separate arm64 Linux test machine, and the screenshot comparisons and small checks locally
+on x86_64, on both plans stacked together on main:
+
+- `cargo nextest run -p farhelm-helm`, on the test machine (recorder run `049389f8-eae4-4d17-88ce-879c0fcf4801`): all
+  1790 tests passed. The two skipped tests need a real Mac host and are always skipped in this run.
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `c296b28a-18cb-4854-a8a3-11b58412dd4b`): all
+  3227 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `e99d643b-a6fc-4676-ada5-f59e1299049b`):
+  every step passed but paste, which skips on Linux as it always does. Its steps include the Hosts attention list and
+  host menus.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `149c1a19-7377-4aa8-b6a0-dd70d3d438c1`): passed, with templates-list-bolt-and-key's four re-captured Templates
+  pictures.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+After hosts-small-fixes' landing fix (#4430), which changes one hover text in the Tensorlake Add host form and three
+spec sentences:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `db8c7155-3cde-46b1-a498-179efe457023`): all
+  3227 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine: passed. `cargo fmt --all -- --check` and
+  `dprint check`, locally: passed.
+
+The helm, smoke and screenshot runs above still apply to the fix, since it changes no helm code and no hover text is in
+a picture. Skipped: the rest of the workspace suite, since nothing outside the helm and the GUI changed; and Mac runs,
+since nothing here is Mac-specific.
+
+#### Things you should know that the report does not say
+
+- No test covers the case where a recipe saved from the inline editor cannot run on Tensorlake and so is not chosen
+  automatically; the plan did not require one.
+- The report's open question (a Delete chosen just before Farhelm learns the environment is sealed can retry on its own
+  and skip showing the first failure) stands; the reviewer confirmed it predates this plan.
+
+#### What you should still do
+
+Nothing.

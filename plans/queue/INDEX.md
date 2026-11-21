@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 88a0f7] `hosts-small-fixes.md` — disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
 - [landing aac53e] `templates-list-bolt-and-key.md` — center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
 - [complete] `menu-shortcut-hints.md` — show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
 - [in-flight 9adac2] `whats-new-on-upgrade.md` — after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
