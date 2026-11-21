@@ -15,7 +15,8 @@ use farhelm_grid_model::{
     ViewRow, Viewport, display_text, position_of,
 };
 use farhelm_proto::grid::{
-    Cursor, CursorShape, GRID_MAX_LINE_NUMBER, MouseMode, Row, Run, ScreenRow, Style, TerminalState,
+    Cursor, CursorShape, ExitState, GRID_MAX_LINE_NUMBER, MouseMode, Row, Run, ScreenRow, Style,
+    TerminalState,
 };
 
 /// Build a row with explicit cell widths; a test never guesses Unicode width.
@@ -141,7 +142,7 @@ fn viewport_anchors_survive_output_and_clamp_after_eviction() {
 }
 
 /// Relayout and history reset can reuse numbers for different text. Alternate
-/// screens retain primary history internally but must not offer it for navigation.
+/// screens retain primary history internally but hide it while the program runs.
 #[test]
 fn viewport_resets_on_relayout_and_hides_primary_history_on_alt_screen() {
     let mut model = opened(8, 3, 4);
@@ -223,12 +224,20 @@ fn the_notice_line_sits_above_history_that_starts_at_line_zero() {
     assert!(view.scroll_lines(&model, 1));
     assert_eq!(top_line(&view, &model), 0);
     assert_eq!(model.line(0).unwrap().1.text(0, 1), "A");
-    // The alternate screen offers no history, and so no notice.
+    // A live alternate screen hides history and its notice. A final frame on that same screen is part of the log.
     state.alt_screen = true;
     send(&mut model, GridOutput::State(state));
     sync_view(&mut view, &mut model);
     assert_eq!(view.notice(&model), None);
     assert_eq!(view.first(&model), view.bottom(&model));
+    state.exit = Some(ExitState::Signal(15));
+    send(&mut model, GridOutput::State(state));
+    sync_view(&mut view, &mut model);
+    assert_eq!(view.top(&model), view.bottom(&model));
+    assert_eq!(view.notice(&model), Some(view.first(&model)));
+    assert!(view.scroll_lines(&model, i64::MIN));
+    assert_eq!(view.row_at(&model, view.top(&model)), ViewRow::Notice);
+    assert_eq!(view.row_at(&model, view.top(&model) + 1), ViewRow::Line(0));
 }
 
 /// A recovery that kept no history at all still has its notice, one row above the screen's first line (numbered 0),
@@ -819,7 +828,7 @@ fn selection_word_and_line_ranges_match_cell_owned_text() {
 
 /// A single soft-wrapped program line can fill the history cap. Word lookup
 /// must retain its cell budget, and logical-line lookup its independent row cap;
-/// alternate-screen lookup must not wander into the retained primary buffer.
+/// live alternate-screen lookup must not wander into the retained primary buffer.
 #[test]
 fn selection_searches_bound_long_wraps_and_hide_primary_history_on_alt() {
     let mut model = opened(8, 2, 4000);
@@ -862,6 +871,53 @@ fn selection_searches_bound_long_wraps_and_hide_primary_history_on_alt() {
             .start
             .line,
         model.screen_base()
+    );
+}
+
+/// Primary history uses its own wrap markers. Revealing it after an alternate-screen
+/// exit enables selection and links without joining the history to the final frame.
+#[test]
+fn exited_alternate_history_keeps_its_links_and_ends_at_the_screen_break() {
+    let mut model = opened(20, 2, 4);
+    send(
+        &mut model,
+        rows(vec![(0, row(false, &[(0, 9, "evil.test")]))]),
+    );
+    send(&mut model, frame(1, 20, 2, 0));
+    send(
+        &mut model,
+        history(
+            0,
+            20,
+            vec![
+                row(true, &[(0, 20, "12345678901234567890")]),
+                row(false, &[(0, 8, "finished")]),
+                row(true, &[(0, 20, "https://example.test")]),
+            ],
+        ),
+    );
+    assert_eq!(model.screen_base(), 3);
+    let pos = |line, col| Position { line, col };
+    let mut state = model.state().unwrap();
+    state.alt_screen = true;
+    send(&mut model, GridOutput::State(state));
+    assert!(model.link_at(pos(2, 1)).is_none());
+    assert!(model.line_range(pos(2, 1)).is_none());
+
+    state.exit = Some(ExitState::Code(0));
+    send(&mut model, GridOutput::State(state));
+    assert_eq!(
+        model.link_at(pos(2, 1)).unwrap().uri,
+        "https://example.test"
+    );
+    assert!(model.link_at(pos(3, 1)).is_none());
+    let range = model.line_range(pos(2, 1)).unwrap();
+    assert_eq!((range.start.line, range.end.line), (2, 2));
+    let range = model.line_range(pos(3, 1)).unwrap();
+    assert_eq!((range.start.line, range.end.line), (3, 3));
+    assert_eq!(
+        model.selection_text(pos(0, 0), pos(3, 9), SelectionMode::Linear),
+        "12345678901234567890finished\nhttps://example.test\nevil.test"
     );
 }
 

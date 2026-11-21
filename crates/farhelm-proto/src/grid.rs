@@ -1077,15 +1077,14 @@ pub enum CursorShape {
     Bar,
 }
 
-/// Which mouse events the program asked for, and so which ones the client
-/// sends.
+/// Which mouse events the program asked the client to send while it runs.
 ///
 /// Also decides when a plain drag goes to the program instead of making a
 /// local selection: under anything but `Off`, only Shift-drag (or Option-drag
-/// on a Mac) selects locally. One exception to "sends only what the program
-/// asked for": while [`TerminalState::alt_screen`] is true and this is `Off`,
-/// the client still sends `wheel` messages, which the supervisor turns into
-/// arrow keys, so a full-screen program without mouse support still scrolls.
+/// on a Mac) selects locally while the program is running. On a live
+/// [`TerminalState::alt_screen`] with reporting off, the client still sends
+/// `wheel` messages. The supervisor turns them into arrow keys so a full-screen
+/// program without mouse support still scrolls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseMode {
@@ -1123,11 +1122,10 @@ pub struct TerminalState {
     /// The program asked for focus in/out reports (mode 1004); the client
     /// sends `focus` input only while this is true.
     pub focus: bool,
-    /// The alternate screen shows. The client shows no history while it
-    /// does: scrolling a full-screen program's view is the program's
-    /// business, so wheel steps go to the program, as mouse reports when
-    /// mouse reporting is on and as arrow keys (made by the supervisor)
-    /// when it is off.
+    /// The alternate screen shows. While the program runs, it owns the wheel:
+    /// steps go to it as mouse reports or as arrow keys made by the supervisor
+    /// when reporting is off. After exit, the client shows the final screen
+    /// with retained primary history reachable above it.
     pub alt_screen: bool,
     /// `None` for the theme's foreground, or the direct color a program set
     /// with OSC 10. Never a palette index or `-1`.

@@ -225,8 +225,10 @@ pub fn wheel_pixels(delta: f64, unit: WheelUnit, alt: bool, shift: bool, mac: bo
     }
 }
 
-/// Normal-screen wheel without reporting scrolls local history; alternate-screen
-/// wheel goes as `Mouse::Wheel` and the supervisor emits cursor keys for it.
+/// Whether effective modes give the wheel to the program. The caller passes
+/// reporting off and alternate false for a final frame so the wheel browses
+/// history. On a live alternate screen without reports the supervisor turns
+/// wheel messages into cursor keys.
 pub fn wheel_goes_to_program(mode: MouseMode, alternate_screen: bool) -> bool {
     mode != MouseMode::Off || alternate_screen
 }

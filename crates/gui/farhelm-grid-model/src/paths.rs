@@ -329,7 +329,7 @@ impl GridModel {
     /// Whether shown line `number` soft-wraps onto the next; `false` for a line that is not shown.
     fn wraps(&self, number: u64) -> bool {
         self.selection_line(number)
-            .is_some_and(|(_, row)| row.wraps)
+            .is_some_and(|(_, row)| self.wraps_after(number, row))
     }
 
     /// Append `line`'s cells to `into`, a blank for each uncovered column and nothing for the emulator's unused
@@ -426,7 +426,8 @@ impl GridModel {
     fn cut_path_link(&self, head: u64) -> Option<TerminalLink> {
         let tail = head.checked_add(1)?;
         // The old client asked whether the row after the tail continues it, which a missing row never does.
-        if head.checked_sub(1).is_some_and(|above| self.wraps(above))
+        if self.has_screen_break_after(head)
+            || head.checked_sub(1).is_some_and(|above| self.wraps(above))
             || self.wraps(head)
             || (self.wraps(tail) && self.selection_line(tail + 1).is_some())
         {

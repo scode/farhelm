@@ -255,7 +255,7 @@ use farhelm_input_mapping::{
     map_key, pasted_text,
 };
 use farhelm_proto::DetachCode;
-use farhelm_proto::grid::{GridInput, MouseEventKind};
+use farhelm_proto::grid::{GridInput, MouseEventKind, MouseMode, TerminalState};
 use farhelm_proto::host_appearance::HostColor;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::{
@@ -1473,7 +1473,7 @@ impl AttachedTerminal {
     /// commit; `wheel_goes_to_program`): with mouse reporting on, or on the alternate screen, it is the program's, as
     /// one wheel message per event that moves at least a line (a mouse report, or arrow keys the supervisor makes on
     /// the alternate screen without reporting); otherwise it scrolls the terminal's own history. A wheel the program
-    /// owns goes out only while the terminal is live; scrolling history works on any shown screen.
+    /// owns goes out only while the terminal is live. After exit the wheel scrolls retained output locally.
     fn wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(view) = self.committed.clone() else {
             return;
@@ -1487,9 +1487,7 @@ impl AttachedTerminal {
             ScrollDelta::Lines(delta) => (WheelUnit::Lines, f64::from(delta.y)),
         };
         let modifiers = event.modifiers;
-        let state = view.read(cx).state;
-        let mouse = state.map_or(farhelm_proto::grid::MouseMode::Off, |state| state.mouse);
-        let alternate = state.is_some_and(|state| state.alt_screen);
+        let (mouse, alternate) = program_mouse_state(view.read(cx).state);
         if wheel_goes_to_program(mouse, alternate) {
             let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
                 return;
@@ -1509,7 +1507,7 @@ impl AttachedTerminal {
             let button = if delta > 0.0 { 0 } else { 1 };
             // A wheel report resets the deduper's comparison like any report (the next move in this cell is sent);
             // on the alternate screen without reporting it is an arrow key, which the deduper never sees.
-            if mouse != farhelm_proto::grid::MouseMode::Off {
+            if mouse != MouseMode::Off {
                 self.mouse_dedupe
                     .admit(MouseEventKind::Wheel, button, x, y, mods);
             }
@@ -1592,7 +1590,7 @@ impl AttachedTerminal {
 
     /// Shift+PageUp (`direction` -1) or Shift+PageDown (1): scroll the shown screen a page less a line, the old app's
     /// step, so the line at one edge stays in view as a landmark. Reaching the live screen follows it again. The
-    /// alternate screen can scroll past any clipped rows while its primary history stays hidden.
+    /// live alternate screen hides primary history. After exit the same page keys reach that history.
     fn scroll_page(&mut self, direction: i64, cx: &mut Context<Self>) {
         let Some(view) = self.committed.clone() else {
             return;
@@ -3709,6 +3707,16 @@ fn modifier_bits(modifiers: Modifiers) -> u8 {
     .bits()
 }
 
+/// The modes that let a running program take pointer input. A retained exit frame
+/// can still carry its last modes, but browsing and selection now belong to the view.
+fn program_mouse_state(state: Option<TerminalState>) -> (MouseMode, bool) {
+    state
+        .filter(|state| state.exit.is_none())
+        .map_or((MouseMode::Off, false), |state| {
+            (state.mouse, state.alt_screen)
+        })
+}
+
 impl AttachedTerminal {
     /// Send the program a mouse report of `kind` for `button` at the cell under `position`, if its mouse reporting
     /// mode asks for that kind (`mode_reports`: presses and releases in every mode, moves with a button held from drag
@@ -3726,10 +3734,7 @@ impl AttachedTerminal {
         let Some(view) = &self.committed else {
             return;
         };
-        let mode = view
-            .read(cx)
-            .state
-            .map_or(farhelm_proto::grid::MouseMode::Off, |state| state.mouse);
+        let (mode, _) = program_mouse_state(view.read(cx).state);
         if !mode_reports(mode, kind, button) {
             return;
         }
@@ -3953,7 +3958,7 @@ impl AttachedTerminal {
     /// double click the word, a triple click the soft-wrapped line, Alt off a Mac a rectangle, and Shift with a
     /// selection already there extends it (the old app's `startSelection`, from xterm.js 6.0.0's `SelectionService`;
     /// MIT, notices in `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a press without the forcing
-    /// modifier, of any button, is the program's ([`AttachedTerminal::report_press`]) and selects nothing.
+    /// modifier, of any button, is the running program's ([`AttachedTerminal::report_press`]) and selects nothing.
     fn press(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // A refused click's explanation stays until the next press in the terminal, as the old app's did.
         if let Some(id) = self.refusal_pill.take() {
@@ -3971,10 +3976,8 @@ impl AttachedTerminal {
         let Some(view) = self.committed.clone() else {
             return;
         };
-        let tracking = view
-            .read(cx)
-            .state
-            .is_some_and(|state| state.mouse != farhelm_proto::grid::MouseMode::Off);
+        let (mode, _) = program_mouse_state(view.read(cx).state);
+        let tracking = mode != MouseMode::Off;
         let forced = forces_selection(event.modifiers);
         let link = if event.button == MouseButton::Left {
             self.pressed_link(event.position, cx)
@@ -4246,8 +4249,8 @@ impl AttachedTerminal {
         self.send_user(attachment, keys, cx);
     }
 
-    /// Select everything the terminal shows, history included ([`actions::SelectAllInTerminal`], Cmd+A on a Mac).
-    /// Selecting is not copying, as in the old app: Cmd+C copies it.
+    /// Select the screen and all reachable history ([`actions::SelectAllInTerminal`], Cmd+A on a Mac).
+    /// Cmd+C copies the selection.
     fn select_all(
         &mut self,
         _: &actions::SelectAllInTerminal,

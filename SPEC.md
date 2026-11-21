@@ -3293,11 +3293,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   supervisor rebuilds the terminal from it. That output is held in memory only, never on disk. A viewer that attaches or
   reconnects is sent the current screen and then the whole scrollback once, oldest first; from then on it is sent only
   what changes: the screen as it is now, and the lines that entered the scrollback, appended. The scrollback stays while
-  a full-screen program shows and is there when the program exits. When the scrollback changes in a way an append cannot
-  show (a resize rewraps it, the program erases it or redefines one of the terminal's palette colors, or lines the
-  viewer was still owed fell off the scrollback's far end), the viewer is sent the whole scrollback again once the
-  change has settled, so a window dragged to a new size sends it once, or for a long drag once during it and once when
-  it stops, not at every step.
+  a full-screen program shows and is there when the program exits. The terminal shows how the program ended below its
+  last row. Every retained line can still be scrolled to and selected, including the history above a full-screen
+  program's final frame. The notice of lost output can also be reached by scrolling.
+
+  When the scrollback changes in a way an append cannot show (a resize rewraps it, the program erases it or redefines
+  one of the terminal's palette colors, or lines the viewer was still owed fell off the scrollback's far end), the
+  viewer is sent the whole scrollback again once the change has settled, so a window dragged to a new size sends it
+  once, or for a long drag once during it and once when it stops, not at every step.
 
   At launch, `TERM_PROGRAM_VERSION` agrees with the terminal's version reply. After a supervisor update, a surviving
   program keeps its original environment and new version queries are answered by the current supervisor's emulator.
@@ -3476,7 +3479,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   lapse in it. Farhelm assumes the host's system clipboard works. Copies may be dropped while it is broken, hung or
   slow. A paste the user starts on macOS may stall the window while the system clipboard supplies its contents. Farhelm
   must stay responsive during other clipboard operations. On Wayland, keys typed while Farhelm is still fetching pasted
-  text from the system clipboard may reach the terminal before that text.
+  text from the system clipboard may reach the terminal before that text. After the program exits, the wheel, clicks and
+  drags act on the terminal itself even if the program was reporting mouse input.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the

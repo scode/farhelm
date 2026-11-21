@@ -194,7 +194,7 @@ impl<'a> Identities<'a> {
         let Some((cols, row)) = self
             .model
             .selection_line(previous)
-            .filter(|(_, row)| row.wraps)
+            .filter(|(_, row)| self.model.wraps_after(previous, row))
         else {
             return false;
         };
@@ -285,14 +285,15 @@ impl GridModel {
                     .any(|link| link.as_ref() == key.as_ref())
             };
             while line - first < 128
-                && first
-                    .checked_sub(1)
-                    .is_some_and(|above| carries(identities.row(above)))
+                && first.checked_sub(1).is_some_and(|above| {
+                    !self.has_screen_break_after(above) && carries(identities.row(above))
+                })
             {
                 first -= 1;
             }
             let mut last = line;
             while last - line < 128
+                && !self.has_screen_break_after(last)
                 && last
                     .checked_add(1)
                     .is_some_and(|below| carries(identities.row(below)))
@@ -399,7 +400,9 @@ impl GridModel {
         if !row.text(0, cols).starts_with(' ') {
             let mut count = 0;
             while let Some(above) = first.checked_sub(1) {
-                let Some((cols, row)) = self.selection_line(above).filter(|(_, row)| row.wraps)
+                let Some((cols, row)) = self
+                    .selection_line(above)
+                    .filter(|(_, row)| self.wraps_after(above, row))
                 else {
                     break;
                 };
@@ -416,7 +419,11 @@ impl GridModel {
         }
         let mut count = 0;
         loop {
-            if count >= 2048 || !self.selection_line(last).is_some_and(|(_, row)| row.wraps) {
+            if count >= 2048
+                || !self
+                    .selection_line(last)
+                    .is_some_and(|(_, row)| self.wraps_after(last, row))
+            {
                 break;
             }
             let Some(next) = last.checked_add(1) else {

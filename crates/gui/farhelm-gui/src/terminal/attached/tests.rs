@@ -2997,6 +2997,80 @@ fn a_held_app_shortcut_never_reaches_the_program(cx: &mut TestAppContext) {
 
 // ---- Scrollback ----------------------------------------------------------------------------------------------------
 
+/// A full-screen program keeps its final frame below primary history when it exits. The painted rows and Select All
+/// must agree about which output is reachable, including when recovery left a gap before the oldest retained line.
+#[gpui::test]
+fn an_exited_alternate_screen_can_scroll_and_select_its_primary_history(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_below_history(
+        (0..40).map(|i| text_row(&format!("h{i}"), false)).collect(),
+        serde_json::json!([
+            [0, text_row("screen", false)],
+            [2, text_row("final frame", false)]
+        ]),
+    );
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let mut state = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).state.unwrap());
+    state.alt_screen = true;
+    state.history_trimmed = true;
+    h.fake().output(GridOutput::State(state));
+    settle(h.cx);
+    keys(h.cx, "shift-pageup");
+    assert!(
+        h.following(),
+        "primary history is hidden while the program runs"
+    );
+
+    state.exit = Some(ExitState::Signal(15));
+    h.fake().output(GridOutput::State(state));
+    settle(h.cx);
+    assert!(h.cx.debug_bounds("terminal-exit").is_some());
+    assert!(h.following(), "exit leaves the last frame at the bottom");
+    let first_visible = h.read(|owner, cx| {
+        let view = owner.committed.as_ref().unwrap().read(cx);
+        usize::from(owner.placement(view, cx).unwrap().lifted_rows)
+    });
+    assert!(
+        h.text()
+            .unwrap()
+            .lines()
+            .skip(first_visible)
+            .any(|row| row == "final frame"),
+        "the final frame is visible below the clip"
+    );
+    keys(h.cx, "shift-pageup");
+    assert!(!h.following());
+    keys(h.cx, "shift-pagedown");
+    assert!(h.following());
+
+    let assert_oldest_painted = |h: &mut Harness<'_>| {
+        let painted = h.text().unwrap();
+        let mut visible = painted.lines().skip(first_visible);
+        assert_eq!(visible.next(), Some(crate::terminal::TRIMMED_TEXT));
+        assert_eq!(visible.next(), Some("h0"));
+    };
+    let bar = test_support::bounds(h.cx, "terminal-scrollbar");
+    h.click_at(point(bar.center().x, bar.top() + px(2.)));
+    assert_oldest_painted(&mut h);
+    h.wheel(-1000.);
+    assert!(h.following(), "the wheel can return to the bottom");
+    h.wheel(1000.);
+    assert_oldest_painted(&mut h);
+
+    h.cx.dispatch_action(actions::SelectAllInTerminal);
+    settle(h.cx);
+    h.cx.dispatch_action(actions::CopyTerminalSelection);
+    settle(h.cx);
+    let copied = h.clipboard().unwrap();
+    assert!(copied.starts_with("h0\nh1\n"), "{copied:?}");
+    assert!(
+        copied.contains("\nh39\nscreen\n\nfinal frame"),
+        "{copied:?}"
+    );
+    assert_eq!(h.sent(), []);
+}
+
 impl Harness<'_> {
     /// The fake's attach opens and replays a complete screen ("screen" on its first row) with `lines` history lines
     /// above it ("h0" oldest), then goes live.
@@ -3138,9 +3212,8 @@ fn the_page_keys_page_through_history_and_send_nothing(cx: &mut TestAppContext) 
     assert_eq!(h.sent(), [], "the program hears nothing of the page keys");
 }
 
-/// On the alternate screen the wheel is the program's (the supervisor turns it into arrow keys when the program has
-/// not asked for mouse reports): one wheel message per event, up for a notch toward older lines, at the cell under the
-/// pointer, and the view does not scroll (the alternate screen has no history).
+/// On a live alternate screen the program owns the wheel. The supervisor turns each message into arrow keys
+/// when reporting is off. It carries the cell under the pointer, and the view keeps primary history hidden.
 #[gpui::test]
 fn the_wheel_goes_to_the_program_on_the_alternate_screen(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -3171,10 +3244,8 @@ fn the_wheel_goes_to_the_program_on_the_alternate_screen(cx: &mut TestAppContext
     assert!(h.following());
 }
 
-/// The cell a pointer report names is the one drawn under the pointer, also when the screen is lifted to make room
-/// for its exit line: the lift moves every row up, so the top of the grid's area shows a lower row than row 0. A
-/// report that ignored the lift would name a row the user did not point at. A point exactly on a boundary belongs to
-/// the cell before it, as in the old app.
+/// Pointer coordinates follow the drawn row even when the exit line has lifted the screen. The grid's top then
+/// shows a row below row zero, and a point exactly on a cell boundary still belongs to the cell before it.
 #[gpui::test]
 fn the_pointer_names_the_cell_drawn_under_it_on_a_lifted_screen(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -3798,6 +3869,40 @@ fn under_mouse_reporting_only_the_forcing_modifier_selects(cx: &mut TestAppConte
     );
     h.drag(from, to, forcing);
     assert_eq!(h.clipboard().as_deref(), Some("hello"));
+}
+
+/// A retained exit frame can still say it reports mouse motion. A plain drag must copy locally, and a subsequent
+/// bare pointer move must keep both the selection and the position the user scrolled to.
+#[gpui::test]
+fn a_plain_drag_and_pointer_motion_stay_local_after_exit(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let mut state = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).state.unwrap());
+    state.mouse = MouseMode::Motion;
+    state.exit = Some(ExitState::Code(0));
+    h.fake().output(GridOutput::State(state));
+    settle(h.cx);
+    assert!(h.cx.debug_bounds("terminal-exit").is_some());
+    h.wheel(1000.);
+    assert!(!h.following());
+    let first = h.read(|owner, cx| {
+        let view = owner.committed.as_ref().unwrap().read(cx);
+        owner.placement(view, cx).unwrap().lifted_rows
+    });
+    let (from, to) = (h.at_cell(0, first), h.at_cell(2, first));
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(h.clipboard().as_deref(), Some("h0"));
+    let selected = h.selection().expect("the drag made a local selection");
+    let before = h.text();
+    let pointer = h.at_cell(8, first + 1);
+    h.cx.simulate_mouse_move(pointer, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.selection(), Some(selected));
+    assert_eq!(h.text(), before);
+    assert!(!h.following());
+    assert_eq!(h.sent(), []);
 }
 
 /// A stalled viewer keeps a non-live snapshot (decided by the migration's orchestrator on 2026-11-15), and a snapshot

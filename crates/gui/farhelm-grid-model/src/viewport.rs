@@ -55,11 +55,11 @@ impl Viewport {
         reset
     }
 
-    /// The first content position. Primary history is hidden on
-    /// alt-screen. When recovery lost some history, that is the notice line's
+    /// The first content position. Primary history is hidden on a live
+    /// alternate screen. When recovery lost some history, that is the notice line's
     /// ([`Viewport::notice`]), one before the oldest retained line.
     fn first_content(&self, model: &GridModel) -> u64 {
-        if model.state().is_some_and(|state| state.alt_screen) {
+        if model.hides_primary_history() {
             return self.bottom(model);
         }
         let oldest = model
@@ -92,12 +92,10 @@ impl Viewport {
         position_of(model.screen_base())
     }
 
-    /// The notice line's position, when recovery lost some history and the
-    /// primary screen is shown.
+    /// The notice line's position when there is a recovery gap above reachable output.
     pub fn notice(&self, model: &GridModel) -> Option<u64> {
-        let trimmed = model
-            .state()
-            .is_some_and(|state| state.history_trimmed && !state.alt_screen);
+        let trimmed = !model.hides_primary_history()
+            && model.state().is_some_and(|state| state.history_trimmed);
         trimmed.then(|| self.first_content(model))
     }
 
