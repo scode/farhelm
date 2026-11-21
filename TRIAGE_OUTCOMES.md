@@ -15,7 +15,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## orphan-cleanup-overlay-forgets-failed-discovery.md
 
@@ -30,7 +30,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## credential-push-misses-retired-lifetime.md
 
@@ -44,7 +44,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-new-container-proxy-snapshot-capability-cache.md
 
@@ -59,7 +59,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## omitted-session-row-drops-live-tabs.md
 
@@ -74,7 +74,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## interrupted-upload-notice-lost-on-session-removal.md
 
@@ -88,7 +88,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## session-delete-shortcut-ignores-composition.md
 
@@ -104,7 +104,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## wayland-terminal-paste-ignores-file-list.md
 
@@ -119,7 +119,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## linux-ctrl-f-leaves-settings-field-at-end.md
 
@@ -134,7 +134,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## untagged-sandbox-leftover-labelled-another-helm.md
 
@@ -147,7 +147,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## valid-ssh-uri-short-label-parsing.md
 
@@ -164,7 +164,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## sandbox-termination-poll-exceeds-phase-deadline.md
 
@@ -178,7 +178,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## sandbox-status-diagnosis-bypasses-cleaning.md
 
@@ -195,7 +195,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## unreadable-sandbox-ssh-key-reports-ready.md
 
@@ -209,7 +209,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## terminal-attachment-trace-retains-raw-session-id.md
 
@@ -224,7 +224,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md
 
@@ -239,7 +239,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-environment-history-admits-agent-origin.md
 
@@ -255,7 +255,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md
 
@@ -272,7 +272,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-ui-deleting-environment-retains-running-reconnect-promise.md
 
@@ -288,7 +288,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md
 
@@ -300,7 +300,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-provisioning-shared-environment-preparation-progress.md
 
@@ -317,7 +317,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-environment-provisioning-probe-omits-stdin-watchdog.md
 
@@ -332,7 +332,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-podman-dial-kind-advances-before-process-marker.md
 
@@ -347,7 +347,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-agent-create-cwd-help-omits-recipe-home-default.md
 
@@ -360,7 +360,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## ime-commit-bypasses-quick-launch-capture.md
 
@@ -377,7 +377,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## checkout-status-bypasses-host-text.md
 
@@ -392,7 +392,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## working-attention-row-hides-warning-edge.md
 
@@ -411,7 +411,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-template-approval-misstates-permission.md
 
@@ -428,7 +428,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## suspend-treats-failed-session-refresh-as-complete.md
 
@@ -445,7 +445,7 @@
 - Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## folder-suggestion-enter-can-submit-launcher.md
 
@@ -465,7 +465,7 @@
   was dropped in the same frame. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## quick-switcher-enter-can-run-a-different-template.md
 
@@ -480,7 +480,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## deferred-template-changes-unpresented-launch.md
 
@@ -496,7 +496,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## filtered-tab-reset-can-route-input-before-display.md
 
@@ -510,7 +510,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## checkout-use-default-presentation.md
 
@@ -527,7 +527,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## launcher-catalog-moves-model-highlight.md
 
@@ -542,7 +542,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## add-host-close-reads-live-sign-in.md
 
@@ -557,7 +557,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## antigravity-historical-restart-can-target-child.md
 
@@ -572,7 +572,7 @@
   execution: "yes we definitely need to batch these in a much smaller set of plans. please try to separate them by area
   of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## guarded-delete-replace-omits-surviving-shell-work.md
 
@@ -588,7 +588,7 @@
   plans. please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Add to SPEC: a Stop, Delete or Replace prompt for a session whose main program has ended covers
   its leftover background jobs, and teardown reaps them. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## bash-stop-loses-unsaved-history.md
 
@@ -608,7 +608,7 @@
   comparing kinds at the call site. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## tabs-only-stop-ends-surviving-shell-jobs.md
 
@@ -622,7 +622,7 @@
   plans. please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Add to SPEC: a Stop, Delete or Replace prompt for a session whose main program has ended covers
   its leftover background jobs, and teardown reaps them. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## shell-lifecycle-approval-names-wrong-program.md
 
@@ -640,7 +640,7 @@
   kind (carry the launch kind on the card; a protocol field is accepted). Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shared-environment-delete-omits-live-shell.md
 
@@ -658,7 +658,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-main-tab-spec-still-says-agent.md
 
@@ -672,7 +672,7 @@
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the spec passage as the Assessment describes, following the shell-naming principle.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## shell-recovery-spec-omits-replace.md
 
@@ -686,7 +686,7 @@
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the spec passage as the Assessment describes, following the shell-naming principle.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## shell-wrapper-help-names-agent.md
 
@@ -701,7 +701,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## host-suspend-warning-calls-shell-agent.md
 
@@ -716,7 +716,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shell-approval-command-facts-untested.md
 
@@ -732,7 +732,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## suspended-shell-card-names-agent.md
 
@@ -746,7 +746,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-stop-and-suspend-wording-untested.md
 
@@ -761,7 +761,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-tab-label-omitted-row.md
 
@@ -775,7 +775,7 @@
   need to batch these in a much smaller set of plans. please try to separate them by area of code so there is a good
   chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## shell-stop-suspend-error-names-agent.md
 
@@ -790,7 +790,7 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## late-bound-agent-host-misses-adoption.md
 
@@ -808,7 +808,7 @@
 - Completion criteria: Apply the recommendation with no code change: Covers it. Fix spec (widen the wording to "left
   untracked or unattachable until the supervisor next starts"), then discard. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## canonical-folder-history-contract-conflict.md
 
@@ -824,7 +824,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: Yes. Fix spec: add the managed-trust canonical-path
   exception to the "never from host replies" rule. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## fresh-claude-trust-birthtime-contract-conflict.md
 
@@ -841,7 +841,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: Fix spec. Say the creating launch of a fresh
   checkout is exempt, since the folder was just created. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## automatic-update-planning-serializes-hosts.md
 
@@ -860,7 +860,7 @@
 - Completion criteria: Apply the recommendation with no code change: Allow it. Fix spec with one sentence saying
   background automatic-update starts may be serialized with bounded waits as long as interactive service to other hosts
   is unaffected. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## host-restart-history-painter-omits-palette.md
 
@@ -877,7 +877,7 @@
 - Completion criteria: Apply the recommendation with no code change: Fix spec to say carried-over colors are the
   program's color references, shown in the new terminal's default palette. Few agents redefine the palette. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## recovery-gap-notice-lifetime-contract-conflict.md
 
@@ -894,7 +894,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: fix spec. Narrow SPEC.md to "while the supervisor
   keeps that terminal connected (at most until it restarts)". Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## stopped-host-update-floor-unresolved.md
 
@@ -912,7 +912,7 @@
 - Completion criteria: Apply the recommendation with no code change: Fix the spec: the floor gates observed versions,
   and an unobserved version is not evidence, matching the dev-build exemption. Discard the code change. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md
 
@@ -927,7 +927,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: fix spec (name rare SGR decorations such as
   overline among the accepted gaps), then discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## older-catalog-model-overrides-custom-owner.md
 
@@ -945,7 +945,7 @@
 - Completion criteria: Apply the recommendation with no code change: fix spec (destination catalog rows win; custom
   ownership clears only spellings the destination does not know), no code change Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## auto-sign-in-uses-session-anchor.md
 
@@ -961,7 +961,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: fix spec, no code change Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## notice-panel-marks-offscreen-rows.md
 
@@ -979,7 +979,7 @@
 - Completion criteria: Apply the recommendation with no code change: fix spec (define it as listed in the open panel;
   the code already does this) and discard the code change. Rail notices are few, and history beyond the viewport is a
   minor loss. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## shell-status-samples-visible-tail.md
 
@@ -997,7 +997,7 @@
 - Completion criteria: Apply the recommendation with no code change: fix spec (say shell activity is the generic
   best-effort reading of the lower screen and may miss changes elsewhere) and discard the code change. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## shell-idle-spec-omits-sampling-cadence.md
 
@@ -1011,7 +1011,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: fix spec (drop "a few seconds" or say it grows with
   sessions per host). Or discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## tensorlake-lifecycle-loses-running-evidence.md
 
@@ -1028,7 +1028,7 @@
 - Completion criteria: Apply the recommendation with no code change: fix spec (generalize the existing "This affects
   wording" limitation to failed operations, quits and stale reads) and discard code changes for all five Tensorlake
   items. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## tensorlake-timestamp-clear-delayed-by-dial.md
 
@@ -1043,7 +1043,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## tensorlake-reprobe-moves-observed-time.md
 
@@ -1057,7 +1057,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code). The overstated
   comment at ~612 could be reworded in the spec PR. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## tensorlake-stale-registry-skips-timestamp-clear.md
 
@@ -1073,7 +1073,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## tensorlake-quit-rewrites-cleared-suspend-time.md
 
@@ -1087,7 +1087,7 @@
   concurrently."
 - Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## retired-runtime-retains-restart-seed-reply.md
 
@@ -1106,7 +1106,7 @@
   back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md
 
@@ -1126,7 +1126,7 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-podman-rebuild-retires-fallback-before-success.md
 
@@ -1148,7 +1148,7 @@
   it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
   the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## tensorlake-lifecycle-falls-back-to-unowned-name.md
 
@@ -1168,7 +1168,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## bulk-mute-can-reset-window.md
 
@@ -1190,7 +1190,7 @@
   back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## gone-terminal-retained-handle-hides-recovery.md
 
@@ -1212,7 +1212,7 @@
   complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## automatic-update-counts-busy-as-failure.md
 
@@ -1234,7 +1234,7 @@
   complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## shell-switch-can-submit-hidden-conversation-id.md
 
@@ -1255,7 +1255,7 @@
   back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## anonymous-container-volumes-survive-removal.md
 
@@ -1274,7 +1274,7 @@
   back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## finished-task-handle-published-after-host-purge.md
 
@@ -1294,7 +1294,7 @@
   significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## abbreviated-ipv4-short-label-scope-ambiguity.md
 
@@ -1314,7 +1314,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## uri-spare-capacity-missing-from-memory-budget.md
 
@@ -1334,7 +1334,7 @@
   significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## wide-wrap-placeholder-loses-final-cell-style.md
 
@@ -1353,7 +1353,7 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## partial-wide-erasure-loses-second-cell-background.md
 
@@ -1372,7 +1372,7 @@
   complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## successful-suspend-flashes-connecting.md
 
@@ -1392,7 +1392,7 @@
   and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## package-repair-does-not-wait-for-dpkg-lock.md
 
@@ -1413,7 +1413,7 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## mac-setup-confirmation-misses-installed-app.md
 
@@ -1435,7 +1435,7 @@
   bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md
 
@@ -1458,7 +1458,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-agent-environment-missing-local-ssh-key-preflight.md
 
@@ -1481,7 +1481,7 @@
   straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md
 
@@ -1501,7 +1501,7 @@
   significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
   brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-ui-stopped-container-waiting-place-offers-suspend.md
 
@@ -1521,7 +1521,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## trailing-podman-account-observation-exec-guesses-root-home.md
 
@@ -1541,7 +1541,7 @@
   straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-delete-held-gone-host-skips-adopted-process-confirmation.md
 
@@ -1565,7 +1565,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## gui-command-debug-includes-secret-body.md
 
@@ -1587,7 +1587,7 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## untouched-host-alias-save-restores-old-value.md
 
@@ -1609,7 +1609,7 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## tunnel-listener-stops-on-single-accept-error.md
 
@@ -1629,7 +1629,7 @@
   the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## launcher-stale-search-selection-fails-silently.md
 
@@ -1648,7 +1648,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## session-groups-lose-membership-in-accessibility-tree.md
 
@@ -1667,7 +1667,7 @@
   complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
   to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## sidebar-order-stays-held-after-shift-sweep.md
 
@@ -1688,7 +1688,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-template-clears-dormant-prompt.md
 
@@ -1709,7 +1709,7 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shell-picker-split-by-model.md
 
@@ -1727,7 +1727,7 @@
   be straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shell-template-hides-incompatible-permissions.md
 
@@ -1747,7 +1747,7 @@
   additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shell-stop-tab-only-help.md
 
@@ -1766,7 +1766,7 @@
   straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md
 
@@ -1788,7 +1788,7 @@
   straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-podman-environment-d-drops-explicit-empty-proxy.md
 
@@ -1800,7 +1800,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## upload-path-pastes-into-restarted-agent.md
 
@@ -1813,7 +1813,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## provisioning-waits-use-fleet-slots.md
 
@@ -1828,7 +1828,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## desktop-relaunch-sleep-depends-on-path.md
 
@@ -1841,7 +1841,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## desktop-path-handoff-exceeds-linux-entry-limit.md
 
@@ -1854,7 +1854,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## repeated-resizes-clear-missing-history-notice.md
 
@@ -1868,7 +1868,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## empty-history-clear-keeps-missing-history-notice.md
 
@@ -1882,7 +1882,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## restored-capped-title-loses-boundary-whitespace.md
 
@@ -1894,7 +1894,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## reconnect-replay-keeps-obsolete-event-count-fence.md
 
@@ -1909,7 +1909,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## mixed-input-acknowledgements-misattribute-written-bytes.md
 
@@ -1925,7 +1925,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## retired-connection-leaves-suspend-progress-stuck.md
 
@@ -1940,7 +1940,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## tunnel-control-exit-can-open-new-ssh-connection.md
 
@@ -1954,7 +1954,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## snapshot-cleanup-races-new-host-registration.md
 
@@ -1967,7 +1967,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## cancelled-ssh-capture-can-retain-local-readers.md
 
@@ -1982,7 +1982,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## package-name-trailing-minus-requests-removal.md
 
@@ -1995,7 +1995,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## recipe-destination-refuses-absolute-dns-name.md
 
@@ -2007,7 +2007,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## apt-regex-fallback-can-accept-package-typo.md
 
@@ -2020,7 +2020,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## snapshot-state-races-build-admission.md
 
@@ -2034,7 +2034,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## automatic-update-opt-out-can-roll-back.md
 
@@ -2049,7 +2049,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## mac-uninstall-unresolved-loaded-plist.md
 
@@ -2064,7 +2064,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## cleanup-retry-omits-recovery-step-times.md
 
@@ -2077,7 +2077,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trailing-shared-recipe-container-base-summary-raw-presentation.md
 
@@ -2091,7 +2091,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md
 
@@ -2105,7 +2105,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md
 
@@ -2119,7 +2119,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## wayland-drop-lost-before-file-list-arrives.md
 
@@ -2133,7 +2133,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## linux-second-launch-lost-during-quit.md
 
@@ -2147,7 +2147,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## group-divider-can-change-shift-sweep-range.md
 
@@ -2160,7 +2160,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## macos-shift-sweep-can-miss-release.md
 
@@ -2174,7 +2174,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## mute-menu-expiry-preview-can-go-stale.md
 
@@ -2187,7 +2187,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## settings-search-key-hidden-by-open-editor.md
 
@@ -2203,7 +2203,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## shift-sweep-can-mark-through-sidebar-clip.md
 
@@ -2215,7 +2215,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## session-sign-in-suppresses-connection-diagnosis.md
 
@@ -2229,7 +2229,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## sidebar-sign-in-hides-launch-refusal.md
 
@@ -2242,7 +2242,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## new-host-attention-cue-can-be-lost.md
 
@@ -2254,7 +2254,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## desktop-ignores-empty-login-path.md
 
@@ -2268,7 +2268,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## shell-idle-plays-agent-turn-finished.md
 
@@ -2281,7 +2281,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## late-tab-restore-hides-upload-notice.md
 
@@ -2294,7 +2294,7 @@
   ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md
 
@@ -2307,7 +2307,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## host-permission-copy-quotes-retired-labels.md
 
@@ -2321,7 +2321,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## codex-wrapper-guides-omit-isolation-purpose.md
 
@@ -2336,7 +2336,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## runtime-recorder-guidance-conflict.md
 
@@ -2351,7 +2351,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## restart-unwind-omits-tree-sweep-failure.md
 
@@ -2368,7 +2368,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## input-test-comments-overstate-termination-coverage.md
 
@@ -2382,7 +2382,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## steady-block-cursor-contract-conflict.md
 
@@ -2397,7 +2397,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## host-lock-table-contradicts-startup-span.md
 
@@ -2410,7 +2410,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## joined-link-spec-omits-cursor-tail-exception.md
 
@@ -2427,7 +2427,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## version-agreement-lifetime-doc.md
 
@@ -2441,7 +2441,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## host-flood-stall-window-claim.md
 
@@ -2454,7 +2454,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## mac-host-start-same-build-contract.md
 
@@ -2469,7 +2469,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## orphan-cleanup-promises-unheld-provisioning-lock.md
 
@@ -2483,7 +2483,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md
 
@@ -2496,7 +2496,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md
 
@@ -2511,7 +2511,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-spec-terminal-switch-point-names-deleted-terminal-type.md
 
@@ -2524,7 +2524,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-old-terminal-create-refusal-qualified-rollback-wording.md
 
@@ -2538,7 +2538,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-spec-shim-container-execution-branch-retired.md
 
@@ -2551,7 +2551,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-shift-enter-unconditional-pty-write-guarantee.md
 
@@ -2566,7 +2566,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-spec-report-discard-on-terminal-disappearance.md
 
@@ -2582,7 +2582,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## trailing-agent-launch-placement-docs-obsolete-caller-contract.md
 
@@ -2596,7 +2596,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md
 
@@ -2610,7 +2610,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-sealed-delete-comment-hold-versus-seal-record.md
 
@@ -2623,7 +2623,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-create-history-current-claim-comment-contradiction.md
 
@@ -2636,7 +2636,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md
 
@@ -2650,7 +2650,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md
 
@@ -2662,7 +2662,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md
 
@@ -2676,7 +2676,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-ssh-provisioning-test-private-server-coverage-docstring.md
 
@@ -2689,7 +2689,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-clone-protocol-docs-omit-environment-hostless-contract.md
 
@@ -2703,7 +2703,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md
 
@@ -2717,7 +2717,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-agent-clone-wire-docs-unconditional-host-requirement.md
 
@@ -2730,7 +2730,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-launch-comment-terminal-host-inherits-tab-marker.md
 
@@ -2743,7 +2743,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-tab-settle-gate-bare-link-out-of-scope.md
 
@@ -2755,7 +2755,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-restart-definitive-comment-promises-no-external-effects.md
 
@@ -2767,7 +2767,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-restart-reply-stale-tab-rediscovery-comment.md
 
@@ -2779,7 +2779,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md
 
@@ -2793,7 +2793,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-host-scan-lock-map-forbids-required-host-io.md
 
@@ -2807,7 +2807,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md
 
@@ -2820,7 +2820,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md
 
@@ -2832,7 +2832,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md
 
@@ -2844,7 +2844,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-stop-comment-falsely-bans-retaining-original-final-screen.md
 
@@ -2858,7 +2858,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-sampler-docs-promise-deleted-capture-failure-reset.md
 
@@ -2871,7 +2871,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md
 
@@ -2884,7 +2884,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md
 
@@ -2897,7 +2897,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md
 
@@ -2909,7 +2909,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md
 
@@ -2922,7 +2922,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md
 
@@ -2935,7 +2935,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md
 
@@ -2947,7 +2947,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md
 
@@ -2960,7 +2960,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## linux-docs-capture-follow-ups.md
 
@@ -2975,7 +2975,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## systemd-isolation-comments-point-to-active-ledger.md
 
@@ -2989,7 +2989,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## retired-terminal-comment-names-agent-recipient.md
 
@@ -3002,7 +3002,7 @@
   separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## retargeted-ssh-alias-can-forget-live-container.md
 
@@ -3022,7 +3022,7 @@
   account identity when a container is bound, refuse to accept "absent" as proof of deletion under a different identity,
   and refuse twin container hosts that reach the same machine and account. Update SPEC accordingly. Both identity items
   may land together. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## podman-place-probe-bypasses-host-identity-refusal.md
 
@@ -3038,7 +3038,7 @@
   account identity when a container is bound, refuse to accept "absent" as proof of deletion under a different identity,
   and refuse twin container hosts that reach the same machine and account. Update SPEC accordingly. Both identity items
   may land together. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## macos-terminal-paste-blocks-gui-thread.md
 
@@ -3055,7 +3055,7 @@
   please try to separate them by area of code so there is a good chance of them running concurrently."
 - Completion criteria: SPEC: a paste the user asked for may wait on a slow macOS clipboard; everything else keeps the
   no-stall rule. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-text.md`.
 
 ## automatic-update-misses-development-builds.md
 
@@ -3074,7 +3074,7 @@
   not required. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or
   a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## plan-deferral-survives-replacement-question.md
 
@@ -3091,7 +3091,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## stale-plan-answer-clears-new-question.md
 
@@ -3107,7 +3107,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard. Or a small fix: bind the answer to a hash of the question.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## closed-conflicting-pr-does-not-wake-executor.md
 
@@ -3122,7 +3122,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard (a manual drain or any queue change recovers).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## old-executor-close-resets-new-holder-bookmarks.md
 
@@ -3138,7 +3138,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## browser-shard-failure-sweeps-running-siblings.md
 
@@ -3157,7 +3157,7 @@
   reference: Fix together with browser-shard-failures-exit-successfully.md and
   worker-evidence-deleted-after-download-failure.md as one small runner PR (`allSettled` before the sweep). Narrow the
   item to the Rust runner.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## browser-shard-failures-exit-successfully.md
 
@@ -3172,7 +3172,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix (one line).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## worker-evidence-deleted-after-download-failure.md
 
@@ -3187,7 +3187,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix together with the two items above, or discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## worker-allocation-precedes-ownership-ledger.md
 
@@ -3203,7 +3203,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard (the remaining case is rare, and the reserved prefix makes leftovers easy to spot).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## reflow-property-timeout-retains-workers.md
 
@@ -3219,7 +3219,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix code: print a message and `std::process::abort()` on timeout.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## mac-process-lookup-truncates-live-host-command.md
 
@@ -3235,7 +3235,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix code: treat `omitted_bytes != Some(0)` as an error.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## blocking-test-cleanup-prevents-async-listener-release.md
 
@@ -3253,7 +3253,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix code: an explicit async shutdown of the stand-in that unlinks its socket before the state directory
   drops.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## desktop-smoke-misparses-space-bearing-run-path.md
 
@@ -3268,7 +3268,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: No. Discard; the scratch-space convention (`/tmp/farhelm-tmp/<uuid>`) never has spaces.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## resize-measurement-discards-arrival-timestamps.md
 
@@ -3282,7 +3282,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix code: keep the last arrival on `Link`. Or discard, since the benchmark is manual.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## stable-recut-removes-retained-announcement-anchor.md
 
@@ -3301,7 +3301,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard. The link still reaches the page. If fixed, an alias anchor for the spent version is the smallest
   change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## brick-recovery-truncates-checkpoint-budget.md
 
@@ -3320,7 +3320,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code + doc. Base the deadline on the effective first-turn timeout and reconcile the two BRICK-TEST.md
   sentences.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## capture-failed-stop-erases-recovery.md
 
@@ -3336,7 +3336,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code, small (keep the directory and report the failure when the stop is not confirmed). Discard is also
   reasonable.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## reboot-concurrency-early-release.md
 
@@ -3352,7 +3352,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard. It matters only for an unusual diagnostic run mode and leaks nothing.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## fixture-private-ipv6-url-guard.md
 
@@ -3370,7 +3370,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code in one small PR together with capture-scrubber-misses-multiple-at-signs and
   fixture-url-guard-consumes-adjacent-at-sign.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## capture-startup-metadata-cleanup.md
 
@@ -3387,7 +3387,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard. The window is tiny and the run directory stays for manual recovery. Or fix with a try/except if
   bundled with capture-local-program-path.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## capture-local-program-path.md
 
@@ -3402,7 +3402,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code: resolve the path once. One line.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## capture-scrubber-misses-multiple-at-signs.md
 
@@ -3418,7 +3418,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code, in the same PR as fixture-private-ipv6-url-guard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## fixture-url-guard-consumes-adjacent-at-sign.md
 
@@ -3434,7 +3434,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code, in the same PR.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## landing-tests-import-unregistered-module.md
 
@@ -3450,7 +3450,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code. Two lines, and the documented validation path is broken.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## outer-recorder-deletes-nested-failure-evidence.md
 
@@ -3468,7 +3468,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code. AGENTS.md requires keeping failed run directories, and this silently breaks that.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## rust-sandbox-runner-passes-empty-selection.md
 
@@ -3484,7 +3484,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code. A false pass claim is the worst kind of tooling bug, and the guard is tiny.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## rust-sandbox-pack-ignores-cargo-target-dir.md
 
@@ -3499,7 +3499,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (small). At minimum, refuse with a clear message.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## rust-sandbox-staging-misquotes-checkout-path.md
 
@@ -3514,7 +3514,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (tiny), or discard if checkouts with spaces are not a supported case for this runner.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## mac-fixture-cleanup-stop-budget.md
 
@@ -3530,7 +3530,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (tiny): use the same timeout.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## centos-rustup-missing-pin.md
 
@@ -3546,7 +3546,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (one line, mirroring devbuild-mac). Otherwise discard, since current Rustup is unaffected.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## devbuild-rustup-active-name.md
 
@@ -3561,7 +3561,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (take the first line). Otherwise discard, since current Rustup is unaffected.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## overdue-plan-protection-ages-out.md
 
@@ -3576,7 +3576,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard. The worst case is a plan picked a little early or late.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## plan-pass-count-includes-precreation-claims.md
 
@@ -3590,7 +3590,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## plan-pass-pagination-follows-moving-main.md
 
@@ -3604,7 +3604,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## dependency-block-counts-held-plan-time.md
 
@@ -3619,7 +3619,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-environment-test-responders-heartbeat-control-decode.md
 
@@ -3636,7 +3636,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code by copying the 3-line non-Control skip into the remaining responder.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-podman-tests-nested-build-module-registration.md
 
@@ -3651,7 +3651,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md
 
@@ -3667,7 +3667,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md
 
@@ -3684,7 +3684,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard (explicit old-release selection is rare, and the old app gives its own actionable refusal)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md
 
@@ -3699,7 +3699,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md
 
@@ -3714,7 +3714,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md
 
@@ -3729,7 +3729,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-old-server-guard-loses-directory-in-consumed-restart.md
 
@@ -3747,7 +3747,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard (failure-path only, maintainer-only leak; the old_terminals tests are themselves transitional), or
   fix if cheap
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-rust-worker-trims-explicit-payload-directory.md
 
@@ -3763,7 +3763,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard (nobody names directories with trailing whitespace). A fix is also trivial (strip only the trailing
   newline) if preferred.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## failed-demo-rollback-can-remove-previous-preview.md
 
@@ -3779,7 +3779,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## test-worker-success-loses-evidence.md
 
@@ -3794,7 +3794,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (fail or warn on copy failure; clear or check the old summary)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## test-worker-sync-precedes-lock.md
 
@@ -3812,7 +3812,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (check or take the lock before syncing, or stage per run)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## devbuild-state-comparison-uses-wrong-path.md
 
@@ -3828,7 +3828,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## docs-shot-cleanup-hides-primary-error.md
 
@@ -3844,7 +3844,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## docs-shot-guard-ends-before-cleanup.md
 
@@ -3858,7 +3858,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## docs-group-shot-lacks-drawn-membership-check.md
 
@@ -3873,7 +3873,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## docs-group-shot-wait-exceeds-budget.md
 
@@ -3888,7 +3888,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## test-summary-ledger-boundary-crosses-files.md
 
@@ -3904,7 +3904,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## brick-test-deferral-reuses-continuity-files.md
 
@@ -3925,7 +3925,7 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (keep the exported continuity names attempt-local and add a test that defers after a real earlier
   pair)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## test-summary-asserts-total-instead-of-flake-classes.md
 
@@ -3940,7 +3940,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (assert each class is 1)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## test-summary-partial-test-ignores-usable-run-count.md
 
@@ -3955,7 +3955,7 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (assert the seeded run is still counted)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## stalled-input-test-accepts-discarded-bytes.md
 
@@ -3971,7 +3971,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: assert `discarded == 0` and that the child is alive.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## preclient-output-test-connects-during-wait.md
 
@@ -3987,7 +3987,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: wait on a marker file the child writes after printing, then connect.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## late-output-test-does-not-distinguish-flush-order.md
 
@@ -4004,7 +4004,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: feed a new BEGIN plus text after the deadline and assert that "held" is visible while the new text is
   still held.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## refused-input-test-can-credit-earlier-bytes.md
 
@@ -4020,7 +4020,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch with a distinct sentinel frame.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## shift-enter-test-lacks-reader-readiness.md
 
@@ -4036,7 +4036,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Narrow the test's docstring so it does not claim the write boundary (tiny), or discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## paste-receipt-test-checks-before-ack-processing.md
 
@@ -4052,7 +4052,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch with an output-record fence before asserting pending.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## stop-wait-test-releases-exit-before-wait-witness.md
 
@@ -4069,7 +4069,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: witness Stop pending before releasing the exit record.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## foreign-host-refusal-test-cannot-observe-shutdown.md
 
@@ -4085,7 +4085,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: add a shutdown counter to the stand-in and assert it is zero.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## seed-cancellation-test-accepts-lost-emulator.md
 
@@ -4101,7 +4101,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: require the inner result to be `Ok`.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## cancellation-test-releases-encoder-before-abort-witness.md
 
@@ -4116,7 +4116,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch: await a cancelled JoinError before opening the gate.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## child-hangup-masks-missing-stop-tree-sweep.md
 
@@ -4132,7 +4132,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch by switching Stop's test to the hangup-immune tree.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## restart-test-counts-zombie-as-running-agent.md
 
@@ -4149,7 +4149,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix code: check process state (Z counts as gone) in the wrapper.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## restart-screen-captured-before-prompt-settles.md
 
@@ -4166,7 +4166,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix code: wait for the prompt after the echo before capturing.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## oversized-paste-test-cancels-before-pump-can-run.md
 
@@ -4182,7 +4182,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix in a batch with a witnessed pump opportunity before overflow.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## emulator-lock-test-accepts-expired-holder.md
 
@@ -4200,7 +4200,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code, tiny (assert that the holder was released, not that it timed out). Discard is also reasonable.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## tab-retry-test-measures-observation-time.md
 
@@ -4219,7 +4219,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard. A correct fix needs timestamps at the retry-scheduling boundary or a deterministic clock, which is more work
   than the gap is worth.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## last-output-fixture-readiness-precedes-trap.md
 
@@ -4236,7 +4236,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Move the trap ahead of the marker in the fixture script (a one-line reorder).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## host-preservation-test-can-select-starter-pid.md
 
@@ -4254,7 +4254,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code, small (wait until exactly one matching process remains, or match the daemon specifically).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## restart-test-types-before-safe-prompt-barrier.md
 
@@ -4272,7 +4272,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code. Wait for the documented `> ` barrier before typing.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## upload-failure-test-lacks-pipe-holder-witness.md
 
@@ -4290,7 +4290,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard. The test covers a defensive shape, and making it a strong oracle takes nontrivial fixture work.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## suspended-plan-test-erases-its-suspension-premise.md
 
@@ -4308,7 +4308,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard unless it shows up as a flake. Otherwise fix the fixture so its paths match the planned ones.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## tunnel-fixture-assumes-simple-short-temporary-root.md
 
@@ -4325,7 +4325,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## redirect-regression-omits-location-header.md
 
@@ -4342,7 +4342,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code, tiny (add a Location to a sentinel route and assert that route is never hit). It guards a security-relevant
   policy.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## grid-text-omits-blank-columns.md
 
@@ -4361,7 +4361,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: rebuild the gaps from run columns and correct the doc. This is the shared root of
   grid-row-is-not-program-line and argv-grid-wrap-witness, and a coordinate-aware helper would also remove their routes.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## stop-annotation-exit-witness.md
 
@@ -4379,7 +4379,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: one line, `wait_for_dead_agent` before the assertion.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## kicked-input-test-local-filter.md
 
@@ -4399,7 +4399,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code. The test is meant to guard a security property (the supervisor enforcing input ownership regardless of
   the client), and it no longer does. Use a raw connection as the file describes.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## final-stack-drop-claim-window.md
 
@@ -4416,7 +4416,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: use the existing `retire_supervisor` helper. Tiny.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## mac-uninstall-test-lacks-live-host-premise.md
 
@@ -4433,7 +4433,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code (small): assert that host is alive after Stop.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-http-golden-omits-populated-environment.md
 
@@ -4451,7 +4451,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: add one populated Tensorlake or Podman row to the golden. Discarding is also defensible, since the
   shared serde type protects the GUI.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-nonfinal-environment-delete-cache-survivor-oracle.md
 
@@ -4467,7 +4467,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: one assertion that the cache equals ["starter"].
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md
 
@@ -4483,7 +4483,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code (wait for a settled failure, or use a one-attempt cadence). Discarding is also reasonable.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-host-phase-vocabulary-test-omits-stopped.md
 
@@ -4499,7 +4499,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code: add the two fixtures.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-cancelled-trash-observation-test-misses-fleet-publication.md
 
@@ -4514,7 +4514,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code (capture the revision before and assert after). Discarding is also reasonable.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md
 
@@ -4531,7 +4531,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code (assert the raw hold or incarnation, or narrow the docstring). Discarding is also reasonable.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-podman-probe-dedup-test-asserts-before-spawned-task.md
 
@@ -4547,7 +4547,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, or batch into one test-hardening PR if the maintainer values it
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md
 
@@ -4563,7 +4563,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch (or narrow the comment)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-podman-delete-lifecycle-test-equal-membership-oracle.md
 
@@ -4579,7 +4579,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, or narrow the comment in the doc batch
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-podman-lost-session-create-test-misses-presend-store-witness.md
 
@@ -4595,7 +4595,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch (or narrow the comment)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md
 
@@ -4611,7 +4611,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch (parse the rows, or narrow the comment)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md
 
@@ -4626,7 +4626,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md
 
@@ -4642,7 +4642,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code if any test hardening is accepted (it guards a teardown timeout); otherwise discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md
 
@@ -4659,7 +4659,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-checkout-status-borrower-reload-keeps-origin-runtime.md
 
@@ -4675,7 +4675,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, or batch (abort the origin runtime before reload and fix the comment)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md
 
@@ -4691,7 +4691,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md
 
@@ -4707,7 +4707,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md
 
@@ -4725,7 +4725,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (add a tab to an existing failed-replacement fixture and check its shell pid/identity survives)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md
 
@@ -4743,7 +4743,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (add a key, assert listed and reservation still pending)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-deleted-startup-error-artifact-readonly-oracle.md
 
@@ -4760,7 +4760,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (terminal-independent reload test: false leaves files, true removes them)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md
 
@@ -4777,7 +4777,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (wait for both pids gone before asserting) or discard as low value; leaning fix, it is small
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md
 
@@ -4794,7 +4794,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard unless a parked-at-admission seam is cheap. The final count still catches most early decisions.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md
 
@@ -4811,7 +4811,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (drain client output up to the echo before the negative assertion). Cheap.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md
 
@@ -4828,7 +4828,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (return the host owner with the prepared tuple)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-test-one-shot-sample-before-host-catch-up.md
 
@@ -4846,7 +4846,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (bounded wait for caught_up before the pass)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-removed-completed-keyed-create-reboot-replay-oracle.md
 
@@ -4863,7 +4863,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (restore the deleted sequence minus the kind fields)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md
 
@@ -4879,7 +4879,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (UPDATE the existing row to sealed=2 and match the CHECK error). Tiny.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md
 
@@ -4895,7 +4895,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (port to a host tab without auto-reap)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## secret-handling-tests-omit-output-assertions.md
 
@@ -4912,7 +4912,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or narrow. Add frame and log negative checks only where a secret is actually typed (masked input, credentials
   editor).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## moved-on-confirmation-test-accepts-wrong-focus.md
 
@@ -4928,7 +4928,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (one assertion).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## delete-shortcut-test-misses-early-request.md
 
@@ -4944,7 +4944,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (assert zero DELETEs before Enter and exactly one after).
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## notice-docs-link-test-accepts-plain-text.md
 
@@ -4962,7 +4962,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## update-restart-failure-test-follows-status-id.md
 
@@ -4978,7 +4978,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## terminal-input-replays-accept-empty-fixtures.md
 
@@ -4995,7 +4995,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (two one-line count pins following the line-97 precedent), or discard if test-only polish is out
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## wrapped-link-test-misses-second-open.md
 
@@ -5011,7 +5011,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## connection-refusal-tests-release-port-too-early.md
 
@@ -5028,7 +5028,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard (or fix: keep a bound non-listening socket, a few lines each)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## devbuild-startup-test-misses-first-scan.md
 
@@ -5044,7 +5044,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## automatic-update-wake-test-accepts-host-refresh.md
 
@@ -5060,7 +5060,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## dialog-scroll-focus-loses-regression-check.md
 
@@ -5077,7 +5077,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (one test on the Trash or shared dialog fixture)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## attention-cue-tests-miss-witnesses.md
 
@@ -5094,7 +5094,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## attention-baseline-test-never-cues.md
 
@@ -5110,7 +5110,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard (or fix the opening state; tiny)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## sign-in-reveal-test-misses-first-frame.md
 
@@ -5125,7 +5125,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## sign-in-focus-test-accepts-either-host.md
 
@@ -5140,7 +5140,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## sign-in-handoff-test-uses-connected-fixtures.md
 
@@ -5156,7 +5156,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## inline-sign-in-tests-conflate-identifiers.md
 
@@ -5172,7 +5172,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## test-summary-archive-test-bypasses-cli.md
 
@@ -5188,7 +5188,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## ssh-chime-test-accepts-pending-draft.md
 
@@ -5207,7 +5207,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (after the reply, push a different stored value and assert the switch follows it)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## sign-in-notice-test-omits-unrelated-focus-case.md
 
@@ -5225,7 +5225,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (add an unrelated-attempt question at the notice-removal boundary)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## antigravity-first-refused-pin-test.md
 
@@ -5245,7 +5245,7 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (add a first-callback child transcript, then assert no pin or identity and that a later main Stop still
   captures). Discard is also reasonable, since Antigravity is not a first-class harness.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## desktop-path-notice-first-read-untested.md
 
@@ -5261,7 +5261,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard (no defect, and the test would cost more than a tiny assertion)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## shell-session-e2e.md
 
@@ -5278,7 +5278,7 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (one e2e case per shell: launch, Running/Idle, missing-program Error)
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## desktop-startup-update-duplicates.md
 
@@ -5294,7 +5294,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## terminal-grid-row-traversal-duplicated.md
 
@@ -5309,7 +5309,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## gui-controls-repeat-shared-rendering.md
 
@@ -5324,7 +5324,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## gui-focus-checks-repeat-drawn-predicate.md
 
@@ -5339,7 +5339,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## approval-views-repeat-status-lookups.md
 
@@ -5353,7 +5353,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## gui-command-paths-repeat-reply-classification.md
 
@@ -5367,7 +5367,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## hosts-menu-and-settings-repeat-operation-logic.md
 
@@ -5381,7 +5381,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## launcher-repeats-choices-and-summary-formatting.md
 
@@ -5397,7 +5397,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## gui-screenshot-scenes-repeat-fixture-wiring.md
 
@@ -5413,7 +5413,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## session-list-actions-repeat-admission-and-progress.md
 
@@ -5427,7 +5427,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## session-pane-repeats-last-known-status.md
 
@@ -5441,7 +5441,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## settings-repeat-preference-and-focus-wiring.md
 
@@ -5455,7 +5455,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## templates-repeat-lookup-and-control-wiring.md
 
@@ -5469,7 +5469,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## terminal-repeats-modifier-mapping.md
 
@@ -5484,7 +5484,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trash-repeats-animation-and-focus-wiring.md
 
@@ -5498,7 +5498,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## control-tests-repeat-simulated-key-events.md
 
@@ -5514,7 +5514,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## session-list-tests-repeat-frame-and-request-helpers.md
 
@@ -5531,7 +5531,7 @@
 - Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
   retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
   without the queue files. Then remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-bookkeeping.md`.
 
 ## trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md
 
@@ -5549,7 +5549,7 @@
   asks for an explicit confirmation and then settles the pending marker, so the recipe can be deleted and its container
   host removed or retargeted. Medium; the maintainer accepted the new confirmation path. Remove the feedback file and
   its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-podman.md`.
 
 ## trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md
 
@@ -5568,7 +5568,7 @@
   per-host results). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## late-delete-loses-checkout-archive-notice.md
 
@@ -5586,7 +5586,7 @@
 - Completion criteria: When a session Delete finishes after its helm reply timed out, publish its checkout-archive
   notice (unarchived, and where) through the notifications feed, so SPEC's "must never be silent" holds. Medium;
   accepted. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## stop-and-suspend-hides-timeout-reason.md
 
@@ -5605,7 +5605,7 @@
   timeout failures. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-primary-write-notice-filter-drag-guidance.md
 
@@ -5626,7 +5626,7 @@
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## remembered-terminal-restore-keeps-unavailable-tab.md
 
@@ -5646,7 +5646,7 @@
   as SPEC (~2299) says. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## attention-cue-loses-reduced-motion-flash.md
 
@@ -5667,4 +5667,4 @@
   under reduced motion). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-gui-misc.md`.
