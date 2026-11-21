@@ -658,8 +658,8 @@ pub struct TemplateContext<'a> {
     pub catalog: &'a [LaunchCatalogModel],
     /// The install identities of the hosts the launcher can target.
     pub known_hosts: &'a [String],
-    /// Saved recipe names the caller can launch. Agent callers supply no
-    /// recipes; GUI callers use their current catalog rather than guessing.
+    /// Saved recipe names supplied by the GUI and non-spawn agent creates.
+    /// An ordinary create can still apply a recipe template earlier in its stack.
     pub known_recipes: &'a [String],
     /// Registered places, independent of transient provider availability.
     pub known_places: &'a [crate::Place],

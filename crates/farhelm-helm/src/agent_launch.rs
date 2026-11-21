@@ -146,9 +146,9 @@ pub(crate) fn resolve(
 /// install identities a template may name, and the recipes and container
 /// places a template or the flags may target.
 ///
-/// Ordinary creates and spawns pass no recipes or places, so a template
-/// carrying a recipe target is refused as unavailable there; only the
-/// environment-launch path ([`resolve_environment`]) passes them.
+/// Non-spawn creates use [`resolve_placed`]. Even an ordinary create can
+/// resolve an earlier recipe template before a later one replaces its target.
+/// Spawn template resolution uses [`resolve`], with only the ordinary host catalog.
 pub(crate) struct Placement<'a> {
     pub(crate) known_hosts: &'a [String],
     pub(crate) known_recipes: &'a [String],
@@ -180,7 +180,7 @@ pub(crate) fn resolve_placed(
     resolve_with(stored, templates, edits, placement, false, host_given)
 }
 
-/// The shared body of [`resolve`] and [`resolve_environment`].
+/// Apply launch templates with the placement choices the caller can honor.
 fn resolve_with(
     stored: &[LaunchTemplate],
     templates: &[String],

@@ -1052,15 +1052,12 @@ mod tests {
     /// An update removes the bundled tmux from Farhelm's own directory even
     /// when the registered binary lives in a shared bin directory.
     ///
-    /// Why it matters: the registered binary is often `~/.local/bin/farhelm`
-    /// (where the install script puts it), and `~/.local/bin/tmux` beside it
-    /// is the user's own tmux, not anything Farhelm installed. Deriving the
-    /// removal from the binary's directory would delete it. Spec: the binary
-    /// goes to its registered path, the plan ensures the private directory,
-    /// and the removal names `~/.local/lib/farhelm/tmux`, where earlier
-    /// releases always put their tmux. Every step names the paths it
-    /// touches, and progress repeats the same list the plan asks the user to
-    /// authorize.
+    /// Why it matters: a registered binary can live in `~/.local/bin`.
+    /// Releases before 0.18.0 could install tmux there, but a user may have
+    /// put their own tmux beside it. The update targets the registered
+    /// Farhelm binary and removes only Farhelm's private
+    /// `~/.local/lib/farhelm/tmux`. Progress repeats the paths the plan
+    /// asks the user to authorize.
     #[farhelm_testtrace::test]
     fn update_plan_removes_the_bundled_tmux_from_the_private_directory_only() {
         let root = tempfile::tempdir().unwrap();
@@ -14342,9 +14339,9 @@ master.touch()
         );
     }
 
-    /// Real SSH UPDATE preserves a session in a terminal host; UNINSTALL then
-    /// ends its terminal hosts and the private server while retaining the
-    /// host's data.
+    /// Real SSH UPDATE preserves a session in a terminal host. UNINSTALL
+    /// stops the supervisor and retains its data. The localhost fixture
+    /// also checks that the terminal-host sockets stop listening.
     ///
     /// Destination-agnostic on purpose. By default it dials `localhost` into
     /// fixture-owned paths, which is what a laptop and the Ubuntu CI runner
