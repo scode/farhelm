@@ -60,3 +60,89 @@ The independent source reviewer found no production defect. The review added a r
 fixture check, and corrected a stale spec quotation in the summary-card test. Independent Opus visual review passed both
 appearances. The reviewer accidentally overwrote two derived review previews. Both were restored and verified against
 the intact renders before the references were published.
+
+### Landing
+
+#### What landed with it
+
+The plan's PR merged with a landing fix, #4524, as the last of four plans landed together in this round, after the helm
+and Podman triage plans and the exited-terminal scrollback fix. None of those, nor the per-agent Settings and hook setup
+plan that landed on main since the executor based this one, touches the sidebar's help or its marks. The only scene this
+plan changed (light and dark), the session row's hover help, is not shown by any scene the other plans touch.
+
+An independent reviewer read the PR against the plan and the specs. It found every acceptance criterion met and no
+blocker: the rule lives where status marks are drawn, so no place that shows a status mark can turn the outline back on,
+and every other kind of help keeps its outline.
+
+#### Fixes made while landing
+
+In [#4524](https://github.com/scode/farhelm/pull/4524/changes), text only:
+
+- **SPEC.md.** The plan left a blank line inside the paragraph on session-row hover help, which split it so that the
+  next sentence's "it" no longer pointed at the hover. The paragraph is whole again.
+- **Desktop parity notes.** They still named the test the plan replaced and described the session row's picture as
+  showing an outline. They now name the two tests that replaced it, one for status marks without an outline and one for
+  row controls with one.
+
+#### Checks
+
+The round landed four plans together: the helm triage, the Podman triage, the exited-terminal scrollback fix and the
+status-mark hover change. The landing ran their checks once, on all four stacked on main. The Rust workspace suite, the
+desktop app's tests, the lint runs and the end-to-end smoke test ran on a separate arm64 Linux test worker. The goldens,
+the website build and the small checks ran locally on x86_64. The workspace run used four build jobs, as in the last
+round, since runs with more had run out of memory on the worker; this round it had no memory or disk trouble.
+
+On the four plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four build jobs, on the test worker (recorder run
+  `8ba93f1d-d933-483b-a90a-eeac88311d3a`): all 8252 passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `890a2d33-0c71-410b-9498-3a792708a974`): all
+  184 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker, not through the recorder: failed on one lint in a new
+  Podman test, fixed in #4522.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `c732c6cc-ba70-4b34-853a-fe7961b6d297`): every
+  step passed but paste, which skips on Linux as it always does.
+- `python3 scripts/check-gui-goldens.py`, the full comparison, locally (recorder run
+  `2372fd39-11ef-4468-84d3-f1c70cdf9f7e`): failed only on the two pictures of the recipe Delete anyway question, which
+  the Podman plan had captured before main's Settings sidebar changed. Fixed in #4522.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed because that new scene was missing from the
+  screenshot scene list. Fixed in #4522.
+- `python3 -B scripts/test-check-gui-goldens.py` (recorder run `952eb6e8-4c50-4a08-bc89-870dd1358b6d`),
+  `python3 -B scripts/gui-goldens.py --self-test`, `python3 -B scripts/test-docs-shots.py` (recorder run
+  `6c988518-9a04-4428-b87d-f5a1d49ede50`), `python3 -B scripts/test-gui-agent.py` (recorder run
+  `430497e6-e6fd-4d35-8648-4082a3b33d33`), the website build (`bun install --frozen-lockfile && bun run build`) with its
+  link check, `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment),
+  `dprint check`, `python3 scripts/check-agents-md.py` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After the landing fixes (#4521 to #4524):
+
+- `python3 scripts/check-gui-goldens.py --update`, locally (recorder run `6d8fe2d8-8886-45e5-a8f7-c1902f41d10c`):
+  re-rendered every picture and changed only the two Delete anyway pictures, which were then published.
+- `python3 scripts/check-gui-goldens.py --scene 'settings-recipe-*' --scene 'session-row-*'`, locally (recorder run
+  `9282ca4e-8230-435c-8d5d-20380af3477c`): passed.
+- `cargo nextest run -p farhelm-helm --lib`, on the test worker (recorder run `2b0cfd85-3205-4a06-97c1-d028a7ae46db`):
+  all 1801 passed.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and the same with `--features agent`, on the test
+  worker: passed. They had not run on the first pass, which stopped at the failing lint run.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+The rest of the first runs still applies after the fixes, which change only a Podman test's lint, a test comment, two
+pictures and the scene list, a code comment on the helm's notices table, SPEC.md wording, the desktop parity notes and a
+changelog note. Skipped: the Podman suite's opt-in real-engine and real-SSH variants, which neither triage plan needed
+beyond the real Podman environment test, which ran in the workspace run on the worker (about two minutes, not skipped);
+macOS, since no Mac was part of this landing and the pictures used the Linux renderer only; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+- The code that turns the outline off for status marks lists the three positions a hover help card can take that draw an
+  outline, and ignores every other. A position added later that draws an outline would make status marks show it again
+  without any compile error. Listing every position explicitly would make the compiler catch that; it is a small
+  follow-up, not needed now.
+- The changelog note leads with "Status icons and timestamps keep their hover help", which is not what changed. Release
+  curation should lead with the visible change: hovering a status icon or timestamp no longer draws an outline, so
+  outlines now mark only things you can press.

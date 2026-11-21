@@ -9,4 +9,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
 - [pending] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
 - [pending] `agent-trust-every-folder.md` — make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live (after `agent-hook-setup.md`)
-- [landing 587b6e] `status-mark-hover-ring.md` — stop drawing the hover ring around status icons (agent mark, idle time and the like) while controls keep it
