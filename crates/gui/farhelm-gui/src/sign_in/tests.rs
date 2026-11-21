@@ -3,8 +3,8 @@
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
-    Preferences, SshConnectionPurpose, SshQuestion,
+    Collection, CollectionChanges, CollectionState, ConnectionStage, HostStateView, HostView,
+    KeyedEntry, Preferences, SshConnectionPurpose, SshQuestion,
 };
 use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
@@ -107,6 +107,15 @@ fn open<'a>(
     pending: &[SshQuestion],
     remote_state: HostStateView,
 ) -> MainWindow<'a> {
+    open_with_remote_states(cx, pending, [remote_state, connected()])
+}
+
+/// A startup handoff can begin while both remote connections are waiting for a user's answer.
+fn open_with_remote_states<'a>(
+    cx: &'a mut TestAppContext,
+    pending: &[SshQuestion],
+    [build, bench]: [HostStateView; 2],
+) -> MainWindow<'a> {
     let mut window = open_main(
         cx,
         vec![
@@ -118,8 +127,8 @@ fn open<'a>(
             }),
             hosts(&[
                 host(1, "local", connected()),
-                remote(2, "build-box", remote_state),
-                remote(3, "bench-box", connected()),
+                remote(2, "build-box", build),
+                remote(3, "bench-box", bench),
             ]),
             questions(pending),
             progress(&[]),
@@ -190,7 +199,12 @@ fn add_run_focuses_the_sessions_question_while_setup_waits_for_it(cx: &mut TestA
 fn startup_opens_the_question_and_send_can_focus_the_next_one(cx: &mut TestAppContext) {
     let first = startup_question(FIRST, 2, "Verification code: ", false);
     let second = question(SECOND, 3, "Confirm user presence for key", true);
-    let mut app = open(cx, &[first, second.clone()], connected());
+    let waiting = HostStateView::Connecting {
+        attempt: 0,
+        stage: ConnectionStage::WaitingForSignIn,
+        last_error: None,
+    };
+    let mut app = open_with_remote_states(cx, &[first, second.clone()], [waiting.clone(), waiting]);
     assert!(answer_focused(app.cx));
     assert_eq!(label(app.cx, ANSWER).as_deref(), Some("Answer"));
 
@@ -272,6 +286,23 @@ fn a_touch_and_answer_only_hand_focus_to_the_same_attempt_or_already_waiting_hos
         !any_open(app.cx),
         "a later reconnect needs fresh intent even on the same host"
     );
+
+    // Completing a touch notice can hand focus only to the same attempt.
+    let touch = question("another-touch", 2, "Confirm user presence for key", true);
+    publish(&mut app.helm, &[touch], &["later-drop"], app.cx);
+    click(app.cx, ANSWER);
+    assert_eq!(focused_id(app.cx).as_deref(), Some("ssh-sign-in-cancel"));
+    publish(
+        &mut app.helm,
+        &[question("unrelated", 2, "Password:", false)],
+        &["another-touch"],
+        app.cx,
+    );
+    assert!(
+        !any_open(app.cx),
+        "the unrelated attempt waits in the sidebar"
+    );
+    assert_eq!(label(app.cx, ANSWER).as_deref(), Some("Answer"));
 }
 
 /// A pending action can be laid out below the visible attention region. The automatic popover must wait until it
@@ -424,4 +455,9 @@ fn explicit_sign_in_waits_for_the_requested_hosts_question(cx: &mut TestAppConte
         app.cx,
     );
     assert!(answer_focused(app.cx));
+    // Both hosts use the same field selector. The distinct prompt identifies the focused form while Retry is out.
+    assert_eq!(
+        label(app.cx, "ssh-sign-in-question-0").as_deref(),
+        Some("Verification code:")
+    );
 }

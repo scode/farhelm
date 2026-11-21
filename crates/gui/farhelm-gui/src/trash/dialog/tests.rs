@@ -612,8 +612,8 @@ fn notices_go_only_when_a_readable_registry_drops_their_host(cx: &mut TestAppCon
 /// SPEC.md, "Reaching everything by keyboard": "A region whose content holds nothing focusable gets its own tab stop
 /// with an accessible name", and the old app's "trash list stays keyboard-scrollable while every list action is
 /// disabled". While a host's measured read is out every entry's Delete is unavailable, so nothing in the list can take
-/// focus; the old list was a stop of its own named "Archived checkouts". Specified: with the measured reads out and the settle pause over, the body draws its stop under
-/// that name; once the reads are answered and the Deletes are available again, it draws none.
+/// focus. The list provides a stop named "Archived checkouts" for keyboard scrolling. Once the reads make Delete
+/// available again, the stop disappears, and someone using it must be able to keep tabbing inside Trash.
 #[gpui::test]
 fn the_archive_list_has_its_own_stop_while_every_action_is_unavailable(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = open_button(
@@ -634,6 +634,11 @@ fn the_archive_list_has_its_own_stop_while_every_action_is_unavailable(cx: &mut 
         test_support::label(cx, "checkout-trash-dialog-body-stop").as_deref(),
         Some("Archived checkouts")
     );
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("checkout-trash-dialog-body-stop")
+    );
 
     answer(
         &mut helm,
@@ -651,6 +656,9 @@ fn the_archive_list_has_its_own_stop_while_every_action_is_unavailable(cx: &mut 
         test_support::label(cx, "checkout-trash-dialog-body-stop"),
         None
     );
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-1"));
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-entry-delete-1-a"));
 }
 
 // ---- Confirmed deletes ---------------------------------------------------------------------------------------------

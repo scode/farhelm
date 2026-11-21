@@ -64,6 +64,10 @@ fn cue_reasons_follow_one_sign_in_and_distinguish_retrying_from_identity_failure
         sign_in: Some(crate::sign_in::Status::Waiting),
         ..idle()
     };
+    let needed = HostStatus {
+        sign_in: Some(crate::sign_in::Status::Needed),
+        ..idle()
+    };
     let warned = HostStatus {
         warned: true,
         ..idle()
@@ -84,6 +88,10 @@ fn cue_reasons_follow_one_sign_in_and_distinguish_retrying_from_identity_failure
             |_| question,
         )
     };
+    // Reconnect starts with a cue-eligible problem. The same row can cue on a later transition in the next check.
+    let mut reconnect = Memory::default();
+    assert!(cue(&mut reconnect, &identity, &quiet, None).is_empty());
+    assert!(cue(&mut reconnect, &identity, &quiet, None).is_empty());
     assert!(cue(&mut memory, &retrying, &quiet, None).is_empty());
     assert_eq!(
         cue(&mut memory, &identity, &quiet, None),
@@ -105,7 +113,7 @@ fn cue_reasons_follow_one_sign_in_and_distinguish_retrying_from_identity_failure
     assert!(cue(&mut memory, &identity, &quiet, None).is_empty());
     assert!(cue(&mut memory, &identity, &waiting, Some(&another_code)).is_empty());
     assert_eq!(
-        cue(&mut memory, &needs_retry, &quiet, None),
+        cue(&mut memory, &needs_retry, &needed, None),
         HashSet::from([2])
     );
     assert_eq!(

@@ -344,16 +344,17 @@ mod tests {
         });
     }
 
-    /// Reduced motion paints a stationary flash, expires by the scheduler even without drawing, and leaves
-    /// the rest of the layer stack empty.
+    /// A visible cue waits for window activation, then paints a stationary flash under reduced motion. The timer
+    /// clears it even without a further draw.
     #[gpui::test]
-    fn reduced_motion_expires_the_stationary_flash(cx: &mut TestAppContext) {
+    fn activation_paints_and_expires_the_stationary_flash(cx: &mut TestAppContext) {
         let anchor = Rc::new(RefCell::new(None));
         let record = anchor.clone();
         let cx = open(cx, move |window, cx| {
             crate::test_support::anchor_element("cue-static-target", &record, window, cx)
                 .into_any_element()
         });
+        cx.deactivate_window();
         cx.update(|window, cx| {
             ticker::set_reduced_motion(true, cx);
             assert!(request(
@@ -361,13 +362,22 @@ mod tests {
                 window,
                 cx
             ));
-            let owner = stack(window, cx).expect("layer stack");
-            assert!(matches!(
-                owner.read(cx).cues.entries[0].motion,
-                Motion::Playing { moving: false, .. }
-            ));
+            assert!(stack(window, cx).unwrap().read(cx).cues.draw(cx).is_none());
+            window.activate_window();
         });
         settle(cx);
+        cx.update(|window, cx| {
+            let flash =
+                gpui::Background::from(theme::color(theme::palette(cx).warn_bright).opacity(0.24));
+            let target = anchor.borrow().as_ref().unwrap().visible.get().unwrap();
+            let center = target.scale(window.scale_factor()).center();
+            assert!(
+                window
+                    .painted_quads()
+                    .iter()
+                    .any(|quad| { quad.background == flash && quad.bounds.contains(&center) })
+            );
+        });
         cx.executor().advance_clock(STATIC_FLASH);
         settle(cx);
         cx.update(|window, cx| {
@@ -394,6 +404,7 @@ mod tests {
                 )
                 .into_any_element()
         });
+        cx.deactivate_window();
         cx.update(|window, cx| {
             let anchor = anchor.borrow();
             let anchor = anchor.as_ref().expect("target");
@@ -402,7 +413,6 @@ mod tests {
                 anchor.visible.get().is_some(),
                 "the target starts inside the clip"
             );
-            ticker::set_active_override(Some(false), cx);
             assert!(request(anchor, window, cx));
         });
         cx.executor().advance_clock(TOTAL * 2);
@@ -422,15 +432,19 @@ mod tests {
                 anchor.visible.get().is_none(),
                 "the target moved outside the clip"
             );
-            assert!(!request(anchor, window, cx));
-            ticker::set_active_override(Some(true), cx);
-            owner.update(cx, |owner, cx| owner.cues.activate(cx));
+            window.activate_window();
         });
         redraw(cx);
         cx.update(|window, cx| {
             let owner = stack(window, cx).expect("layer stack");
             assert!(owner.read(cx).cues.entries[0].clipped.get());
             assert!(owner.read(cx).cues.draw(cx).is_none());
+            let fresh = anchor.borrow().as_ref().unwrap().clone();
+            owner.update(cx, |owner, _| owner.cues.clear());
+            assert!(
+                !request(&fresh, window, cx),
+                "the clip alone refuses an unowned target"
+            );
         });
     }
 }
