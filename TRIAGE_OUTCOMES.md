@@ -98,7 +98,7 @@
   repository-loading case, and with a case showing that the negative message still appears when not loading. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launcher-repository-search-loading.md`.
 
 ## sticky-parent-guard-contradicts-own-docs.md
 
@@ -131,7 +131,7 @@
   same files are touched and the test docstring is still corrected.) Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/sticky-tmp-parent-refusal.md`.
 
 ## folder-refusal-classifier-matches-path-text.md
 
@@ -154,7 +154,7 @@
   not exist: " phrase, and an unusable refusal whose path contains another phrase, each asserting its true problem. Size
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launcher-folder-refusal-order.md`.
 
 ## host-remove-doc-overstates-second-answer-guard.md
 
@@ -226,7 +226,7 @@
   tests through the repository's recorded test-run path. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/brick-test-guard-oracles.md`.
 
 ## installer-prerequisite-test-conflates-two-guards.md
 
@@ -248,7 +248,7 @@
   unit tests through the repository's recorded test-run path. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/brick-test-guard-oracles.md`.
 
 ## invalid-folder-style-overrides-focus-ring.md
 
@@ -321,7 +321,7 @@
   witnesses the wait. Optional confirmation: make the wait ignore `starting_launches` and check that the test now fails.
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/stop-wait-starting-launch-witness.md`.
 
 ## installer-file-symlink-test-masks-nofollow-removal.md
 
@@ -342,7 +342,7 @@
   `open_folder`/`entry_kind`. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-symlink-file-oracle.md`.
 
 ## legacy-expectation-is-parsed-as-cli-option.md
 
@@ -369,7 +369,7 @@
   matching `FARHELM_INSTALL_EXPECT` that asserts the install succeeds and the record gains an id. Size gate: about 100
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it,
   block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-expect-hyphen-value.md`.
 
 ## removal-destination-collapses-distinguishing-spaces.md
 
@@ -1215,7 +1215,7 @@
 - Completion criteria: at execution, fix the test only if the fix is obvious and trivial (one clear shape, about 30
   lines or less, no new test mechanism); otherwise treat this as a discard and say so in the execution record. Either
   way, remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/spare-builder-fifo-release.md`.
 
 ## replacement-test-supervisor-spawns-before-pid-publication.md
 
