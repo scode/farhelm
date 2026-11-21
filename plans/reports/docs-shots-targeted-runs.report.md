@@ -60,3 +60,98 @@ Both PRs are open drafts ready for landing review. #4446 is based on main and #4
 Each draft passed its source review and commit-message cold read. Review led to a path-component guard before cleanup,
 tests for stale draft output in a reused destination, waiting for all member results before cleanup, and parking
 messages that preserve the useful end of long target names and hover refusals.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs, #4446 and #4447, merged together with a landing fix, #4453. Nothing else landed in this round. Since
+the executor based the plan, main had gained only a fix to the release workflow's list of archives, which shares no
+files or behavior with the screenshot tooling. An independent reviewer and I read the plan's two PRs against the plan.
+Neither of us found a problem in any of these:
+
+- how a run reads its page and shot names;
+- the refusal of unknown names before anything starts or is deleted;
+- the cleanup of old pictures, which before cleared a whole page and now clears only the selected shots;
+- the boat sandbox runner keeping a page's shots on one sandbox;
+- the parking report's limit and order.
+
+#### Fixes made while landing
+
+All three went in as the third PR, [#4453](https://github.com/scode/farhelm/pull/4453/changes), which changes no product
+code. I read it myself and had its commit message cold-read. Nobody else reviewed it: it is two lists, a test, an error
+message and two sentences of documentation.
+
+- The two failing GUI harness tests that the report leaves as a follow-up are fixed. The harness is the script that
+  drives the app for the docs screenshots, the README pictures and the end-to-end smoke test. The shell-sessions plan,
+  which I landed on 2026-11-20, added Bash and Zsh as launch choices, and both tests compare lists in the harness with
+  the app's source. I did not run them at that landing, because shell-sessions changed no harness file. First, the
+  scripted app states the harness starts from may now include a recent launch of Bash or Zsh. Second, the harness keeps
+  replacing every agent program with a fake agent, so that no vendor's real program runs. It now leaves the two shells
+  alone. A shell session started in one of those runs therefore runs the machine's own shell, with the run's private
+  home folder, which holds nothing of yours.
+- The report asked whether such shell sessions should run the real shells or fake ones. I chose the real shells: no
+  current screenshot or test starts a shell session, a fake `bash` placed ahead of the real one would also catch every
+  script inside a session that runs `bash`, and faking them would be a new mechanism nobody has asked for. One
+  consequence: Ubuntu's default prompt shows the account and host name. The capture's leak check refuses any screenshot
+  that draws either, so a future shot of a shell session would fail rather than publish them, but it would need a
+  neutral prompt first. A change of mind is a follow-up.
+- Naming a published release picture with `--only` is refused. The refusal said to use `--recapture-release-shot`
+  instead, but adding that option beside the same `--only` is refused too: a published release picture can only be
+  retaken in a full run or with the whole `--only release-notes` page. The message now says that.
+- The boat sandbox guide now says that a boat screenshot run first clears the pictures it is about to replace in its
+  output folder, and for a selected run the publish record. That happens even if the run then fails, so a failed run
+  leaves those pictures missing until it is run again. This is how the plan built it, and only scratch output is
+  affected.
+
+#### Checks
+
+The plan changes only the docs screenshot tooling, the app-driving harness that captures them, the boat sandbox runner,
+their tests and the instructions that describe them, none of which ships. The landing ran the harness and tooling tests
+locally and one live capture on a separate arm64 Linux test machine.
+
+On the plan as delivered, stacked on main:
+
+- `python3 -B scripts/test-docs-shots.py` (recorder run `a1b54104-6ff3-4fa5-a193-59daaf7626d1`): all 28 passed.
+- `python3 -B scripts/test-gui-agent.py` (recorder run `f8a72983-6260-4595-baab-009c6ffb4dac`): 92 of 94 passed; the two
+  failures are the shell-list tests that also fail on main, fixed below.
+- `python3 -B scripts/test-readme-video.py` (recorder run `876b2505-a010-488a-b832-13ec382ba32f`): all 6 passed, since
+  the README video uses the same capture.
+- `scripts/docs-screenshots.sh --local` with `--only start-a-session/checkout-setup`, `--only launch-templates` and
+  `--only start-a-session/checkout-setup` a second time, on the test machine (recorder run
+  `c369a1f7-d0c5-4362-88ce-7f994634719f`): passed, seven pictures in one app start, the shot named twice taken once.
+- `scripts/docs_shots.py --check-selection` against the real pages: a mix of a page and shots passed, and a frozen
+  release shot, an unknown shot, an unknown page and `..` were each refused with a message naming them.
+- `deno check` and `deno test -A` on `scripts/boat/boat-tests.ts`, `shellcheck` on the boat sandbox scripts and the
+  capture commands, `bash -n`, `dprint check` and `python3 scripts/check-agents-md.py`: passed. These are the tooling's
+  own static checks and tests, run directly rather than through the recorder.
+
+After the landing fix (#4453):
+
+- `python3 -B scripts/test-gui-agent.py` (recorder run `2e1f16e1-2299-499f-b2c0-4bba876d6e61`): all 94 passed.
+- `python3 -B scripts/test-docs-shots.py` (recorder run `007f58f4-1b8e-42a7-9f83-5b3892edae40`): all 28 passed with the
+  reworded refusal, and the real `--check-selection` shows it.
+- `dprint check` and `python3 scripts/check-agents-md.py`: passed.
+
+Reused from the plan as delivered: the live capture, the README video tests and the boat harness checks. The fix changes
+only which programs a staged run leaves unwrapped (the two shells, which no capture starts), the names a staged recent
+launch may use, one error message and documentation, none of which those runs go through.
+
+Skipped: the Rust suites, the goldens and the end-to-end smoke, since nothing that builds the app changed; a boat run,
+since the boat runner's changes are covered by its own tests; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The executor ran no live capture. The landing did, on the test machine. It named one Start a session screenshot that
+  is not the first on its page, twice, plus the whole Launch templates page. It took one app start, captured exactly
+  those seven pictures and listed each once. So a shot can be taken on its own, without the shots before it on its page.
+- Nothing ran the boat path for real: no sandbox was started. Its tests cover how shots are grouped by page and what a
+  run clears.
+- Tests that read the app's source, like these two, fail whenever a change to the app's launch choices skips them. A
+  landing that changes launch choices or agent programs should run the GUI harness tests even when no harness file
+  changed. I will do that from now on.
+- A comment in the docs screenshot publishing script still says "one-page capture" where any selected capture is now
+  meant. What it describes is still right, so I left it.
+- goldens-fast-and-targeted, the plan in flight that makes the GUI's golden screenshot comparisons faster and lets a run
+  name single scenes, will meet small text conflicts in `TODO.md` and in the list of checks a full test run uses, where
+  both plans edit neighboring lines. Its landing keeps both sides.
