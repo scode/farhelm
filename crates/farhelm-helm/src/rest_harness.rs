@@ -1878,13 +1878,9 @@ impl WsTestClient {
         let _ = self.stream.write_all(&frame).await;
     }
 
-    /// Send several complete masked client frames, as `(opcode, payload)`,
-    /// in one write.
-    ///
-    /// For the tests about what a server does with a message that arrives
-    /// together with the ones after it: written one at a time, the later
-    /// messages may or may not be there yet when the server reads the
-    /// first, and the test would depend on that race.
+    /// Build adjacent masked client frames in one buffer so a test can
+    /// start sending the sequence without waiting for an intermediate reply.
+    /// The peer can receive a prefix before the rest is written.
     pub(crate) async fn send_frames(&mut self, frames: &[(u8, &[u8])]) {
         let mut bytes = Vec::new();
         for (opcode, payload) in frames {

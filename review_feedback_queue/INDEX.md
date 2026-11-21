@@ -182,9 +182,6 @@ consequences.
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
 
-- [`input-test-comments-overstate-termination-coverage.md`](input-test-comments-overstate-termination-coverage.md) — The
-  test comments claim stronger coverage and transport guarantees than the tests establish.
-
 - [`steady-block-cursor-contract-conflict.md`](steady-block-cursor-contract-conflict.md) — Grid terminals deliberately
   blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
   unless the program says otherwise.
@@ -296,10 +293,6 @@ consequences.
 - [`package-repair-does-not-wait-for-dpkg-lock.md`](package-repair-does-not-wait-for-dpkg-lock.md) — The repair step
   does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
   package-manager trigger remains unverified after investigation.
-
-- [`terminal-attachment-trace-retains-raw-session-id.md`](terminal-attachment-trace-retains-raw-session-id.md) —
-  Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
-  presentation copy.
 
 - [`capture-failed-stop-erases-recovery.md`](capture-failed-stop-erases-recovery.md) — When the real-agent
   inspection/capture tool cannot confirm its terminal host stopped, it hides that failure and still removes the run
@@ -553,10 +546,6 @@ consequences.
 
 - [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md)
   — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md)
-  — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)

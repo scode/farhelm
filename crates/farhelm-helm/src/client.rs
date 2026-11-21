@@ -170,7 +170,7 @@ const GRID_RESUME_EVENTS: usize = GRID_PAUSE_EVENTS / 4 * 3;
 /// this bound stay sized for the interactive traffic it exists to serve
 /// instead of growing to fit a megabyte-scale producer that would then
 /// sit in front of every keystroke.
-const SUPERVISOR_WRITER_QUEUE: usize = 64;
+pub(crate) const SUPERVISOR_WRITER_QUEUE: usize = 64;
 
 /// How long the writer task may make NO byte progress before declaring
 /// the supervisor gone.
@@ -6689,10 +6689,9 @@ mod tests {
     /// ends the attachment, and nothing is forwarded after that, whoever
     /// sends it.
     ///
-    /// Why: the WebSocket test of the same rule shows the helm's handler
-    /// stops reading; this shows the client refuses on its own, so the rule
-    /// does not rest on the handler's loop, or on which message it reads
-    /// first. Spec: a 40 KiB message reaches the
+    /// The WebSocket test observes detach, socket close and no forwarding.
+    /// This one calls the client directly after the refusal to establish
+    /// that the client itself enforces the rule. Spec: a 40 KiB message reaches the
     /// supervisor as one identical data frame; one of 64 KiB + 1 is refused
     /// with a reason beginning "terminal input failed", the supervisor
     /// receives a `Detach`, and the stream ends with that reason; a small

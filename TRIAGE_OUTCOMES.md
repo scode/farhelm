@@ -180,21 +180,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## terminal-attachment-trace-retains-raw-session-id.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed. `farhelm-helm/src/terminal.rs` `TracedAttachment` logs `session = %traced.session` raw. The tab
-  field next to it is already escaped via `peer_text`. `bare_session_id_problem` rejects only `char::is_control` (Cc),
-  so U+200B and U+202E are admitted. Basis: SPEC_impl.md, "Session IDs in logs": "Session IDs must not inject log lines
-  or use invisible or direction-changing characters to disguise the ID shown in logs." The fix is to escape the trace
-  copy with `peer_text`, exactly as the tab field is. The spec names this as the simple option.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
 ## trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md
 
 - Outcome: `fix code`.
@@ -1086,20 +1071,6 @@
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tooling.md`.
-
-## input-test-comments-overstate-termination-coverage.md
-
-- Outcome: `fix code`.
-- Assessment: None. Test comments claim the WebSocket test proves the reader stops and that two frames arrive together.
-  The tests prove only the specified detach, close and no forwarding. Verified: Accepted from the file's source
-  citations (client.rs docstring around 6783, terminal.rs around 2191-2196, rest_harness `send_frames`). Not re-read
-  line by line; production behavior is not in dispute.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## steady-block-cursor-contract-conflict.md
 
@@ -3170,22 +3141,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch
 - Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md
-
-- Outcome: `other`.
-- Assessment: None. The terminal detach-timeout test treats any Pending as writer backpressure and never asserts the
-  grace elapsed, so removing the timeout could go undetected. Verified: still at `crates/farhelm-helm/src/terminal.rs`
-  around :1052-1056 (`poll_fn` "parked" assert), with no elapsed-grace assertion.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code if any test hardening is accepted (it guards a teardown timeout); otherwise discard
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md
 
