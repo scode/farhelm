@@ -52,3 +52,52 @@ None.
 The required independent review confirmed that the menu and shortcut share the Delete request and flagged the Help chip
 when preferences were unavailable. It also found a duplicate import. Both findings were addressed, and a test now covers
 the Help case. The review gate passed. A fresh reader checked the commit wording and PR text.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since the executor last rebased this plan onto main, main had gained the previous
+round's hosts-small-fixes plan (Hosts, Add host and sidebar attention list fixes) and templates-list-bolt-and-key plan
+(the Templates list's bolt and number keys), plus two TODO entries about Antigravity session reporting. An independent
+reviewer and I read this plan against them. The Templates list's number-key menu uses the same shared menu row this plan
+extended, but without a shortcut, which draws exactly as before, so the Templates reference screenshots main gained
+still match. The landing made no fixes of its own to this plan.
+
+The Delete label appears only when the menu's Delete and the shortcut do the same thing. They differ only for a session
+that is not in a disposable environment, has ended with nothing still running, and has the **Skip confirmations**
+setting off: the menu deletes it at once while the shortcut asks first. The report describes this as an ended session
+without terminal tabs; the setting narrows it further. Keys cannot be rebound, so the labels cannot go stale, and a
+screen reader is given the plain item name with the shortcut passed separately.
+
+#### Checks
+
+The plan changes only the desktop app's GUI (the session row menu, the Help menu, a shared key label and menu item), its
+reference pictures, SPEC.md and a changelog fragment. The landing ran the desktop app's GUI test suite, the app's
+end-to-end smoke test and the main lint (clippy) on a separate arm64 Linux test machine, and the screenshot comparisons
+and small checks locally on x86_64, on the plan stacked on main:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `82860c4e-687f-46d1-900a-6bcbbc6a1550`): all
+  3227 tests passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `491f9ae3-c278-4a09-85b3-fadea750e2d8`):
+  every step passed but paste, which skips on Linux as it always does. Its steps open row menus and the Help menu.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `7462ef77-e04c-4ccd-a37c-0137b691eaeb`): passed, with the plan's new Help menu and session row menu pictures and the
+  Templates pictures main gained in the previous round.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+Skipped: the workspace suite, since only the GUI changed; and Mac runs, since the Mac's key labels come from the same
+shortcut table the Linux tests check.
+
+#### Things you should know that the report does not say
+
+The shortcut is handed to assistive technology as the label's own text (for example "Ctrl+L" on Linux) rather than in
+the standard form screen readers document (such as "Control+L"). The accessibility layer accepts that, but no test
+checks it and nobody has listened to what a screen reader announces. A small follow-up could switch to the standard form
+and add a test, if that matters to you.
+
+#### What you should still do
+
+Nothing is required.
