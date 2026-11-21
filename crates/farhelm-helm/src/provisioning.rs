@@ -1368,9 +1368,9 @@ mod tests {
         service_with_payloads(harness, backend, root, Arc::new(FixedPayloads(payload)))
     }
 
-    /// The same wiring as [`service`] with the payload source supplied —
-    /// for the one test that drives a REAL source (the verified downloader)
-    /// through the service instead of a double.
+    /// Drive a real payload source through planning and execution with a
+    /// scripted host transport. Payload selection stays independent of how
+    /// the test carries out actions on the host.
     fn service_with_payloads(
         harness: &Harness,
         backend: Arc<FakeBackend>,
@@ -1404,6 +1404,140 @@ mod tests {
         })
         .await
         .expect("provisioning run did not finish")
+    }
+
+    /// Staged archives require a manual Update even with a saved opt-in and
+    /// both kinds of eligible host. A direct automatic admission must leave
+    /// a valid plan usable by the same service's manual confirmation.
+    #[farhelm_testtrace::test]
+    async fn staged_payloads_require_manual_updates() {
+        let (builder, older) = FleetBuilder::new()
+            .await
+            .ssh(
+                "older.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    identity: Some("test-identity".into()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let (builder, skewed) = builder
+            .ssh(
+                "skewed.example",
+                HostScript {
+                    protocol: farhelm_proto::PROTOCOL_VERSION - 1,
+                    build: "1.0.0".into(),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness.await_refreshed_as(older, "test-identity", 0).await;
+        harness
+            .await_state(older, |state| {
+                matches!(state, HostState::Connected { build_version, .. } if build_version == "1.0.0")
+            })
+            .await;
+        harness
+            .await_state(skewed, |state| {
+                matches!(state, HostState::VersionSkew { peer_protocol, our_protocol, peer_build, .. }
+                    if peer_protocol < our_protocol && peer_build == "1.0.0")
+            })
+            .await;
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                auto_update_remote_hosts: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            harness
+                .store
+                .preferences()
+                .await
+                .unwrap()
+                .auto_update_remote_hosts,
+            Some(true)
+        );
+
+        let root = tempfile::tempdir().unwrap();
+        let staged = tempfile::tempdir().unwrap();
+        let archive = farhelm_archive_for(PayloadTarget::LinuxX86_64);
+        let bytes = b"staged farhelm payload";
+        write_release_archive(
+            staged.path(),
+            archive.package,
+            archive.target,
+            archive.member,
+            bytes,
+        );
+        let payloads = Arc::new(DirectoryPayloads::new(
+            staged.path().to_path_buf(),
+            root.path().join(DIRECTORY_PAYLOAD_CACHE),
+        ));
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        backend
+            .stateful
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
+            identity: Some("test-identity".into()),
+            dial_farhelm: root.path().join("farhelm"),
+            dial_state_dir: Some(root.path().join("state")),
+        });
+        let service = service_with_payloads(&harness, backend.clone(), root.path(), payloads);
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+
+        let mut attempted = HashMap::new();
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert!(attempted.is_empty());
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        {
+            let memory = service.memory.lock().await;
+            assert!(memory.plans.is_empty() && memory.runs.is_empty());
+        }
+
+        let plan = service.plan_update(older).await.unwrap();
+        let host = harness.manager.status(older).expect("connected earlier");
+        let declined = service
+            .start_automatic_update(
+                older,
+                host.entry_uuid,
+                host.incarnation,
+                ProvisionRequest {
+                    probe_id: plan.probe_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(declined.is_none());
+        assert!(service.memory.lock().await.runs.is_empty());
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(backend.operations.lock().unwrap().is_empty());
+
+        service
+            .start_update(
+                older,
+                ProvisionRequest {
+                    probe_id: plan.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let finished = wait_finished(&service, older).await;
+        assert_eq!(
+            finished.status,
+            RunStatus::Completed,
+            "{:?}",
+            finished.message
+        );
+        assert_eq!(std::fs::read(plan.plan.farhelm_path).unwrap(), bytes);
     }
 
     /// A refused automatic plan consumes this incarnation's attempt, but an

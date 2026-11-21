@@ -186,8 +186,9 @@ progress and failure in Hosts. A failed automatic attempt is not retried until t
 changes after failure or the helm restarts; switching the preference off and on does not clear this memory. A planning
 refusal starts no run: the helm logs the reason and remembers that failed attempt under the same no-retry rule. The
 badge remains, and a manual Update from the host menu can show the refusal. There is no separate automatic failure
-surface. Turning the switch off prevents new automatic starts, including planning still in flight; it does not cancel an
-accepted run.
+surface. Turning the switch off prevents new automatic starts, including planning still in flight. Accepted runs
+continue. When Farhelm uses a locally staged host build directory, automatic updates skip all hosts. Updates you start
+yourself, including Update and Update all, still use that directory.
 
 V1 provisioning targets Linux hosts with a usable systemd user manager on x86_64 or aarch64, and Apple-silicon Macs over
 SSH. An Intel Mac has no payload and cannot be set up this way. On Linux the distribution is not a requirement — nothing

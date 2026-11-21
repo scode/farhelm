@@ -4965,8 +4965,10 @@ history-head/last-selection invariant. Older helms refuse the newer schema.
 
 Helm schema 68 added nullable `preferences.auto_update_remote_hosts`, constrained to booleans. The original policy
 required a saved true. Schema 91 clears earlier false choices to enroll upgraded installations in automatic updates. The
-current policy permits automatic remote-host updates when the choice is unset or true. A false saved after the migration
-survives reopening and prevents new starts. An explicit null clears that opt-out.
+current policy permits automatic remote-host updates when the choice is unset or true and the payload source permits
+unattended use. With a locally staged directory, the listener logs the skip once at startup, scans return before probing
+for updates, and automatic admission also declines. A false saved after the migration survives reopening and prevents
+new starts. An explicit null clears that opt-out.
 
 Helm schema 69 adds a durable announcement queue and the database's creation build. Fresh creation records the build
 inside the schema transaction; migration leaves that row absent, so an older database does not acquire a false
@@ -8093,15 +8095,16 @@ download from and refuses by default, naming `FARHELM_HELM_PAYLOAD_DIR` and payl
 `FARHELM_HELM_PAYLOAD_DIR`, which the desktop app reads into `HelmArgs::payload_dir` for its embedded helm, selects an
 operator-staged directory instead — files in an explicitly selected local directory are treated as operator-trusted and
 are not verified, on ANY build, developer or release. That is what lets a desktop build from a working copy update hosts
-with target payloads built from that working copy (`scripts/devbuild-mac.sh`). The downloading source is
-`ReleasePayloadSource` (`provisioning/release_payloads.rs`), which caches one release's assets, their extracted
-binaries, and the signed checksum file under `<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` —
-keyed by version so an upgraded helm never reuses the previous release's binaries, and by base URL so a test server can
-neither read nor poison what the real release wrote. Motivation for reversing the embedding: bundling every target's
-binaries inside every platform's own artifact cost tens of MB per download and coupled a payload's presence to whichever
-platform happened to embed it; a download keeps the size cost where it belongs (paid once, by the host actually being
-provisioned) while keeping the same "provisioned host runs exactly what the provisioning helm expects" property, because
-the default download always names the provisioning helm's own version.
+with target payloads built from that working copy (`scripts/devbuild-mac.sh`). Updating a host from that directory
+requires a user-initiated update. The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`),
+which caches one release's assets, their extracted binaries, and the signed checksum file under
+`<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
+reuses the previous release's binaries, and by base URL so a test server can neither read nor poison what the real
+release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own
+artifact cost tens of MB per download and coupled a payload's presence to whichever platform happened to embed it; a
+download keeps the size cost where it belongs (paid once, by the host actually being provisioned) while keeping the same
+"provisioned host runs exactly what the provisioning helm expects" property, because the default download always names
+the provisioning helm's own version.
 
 Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
 permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before

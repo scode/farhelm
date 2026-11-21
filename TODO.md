@@ -288,15 +288,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Decide whether automatic host updates may install a devbuild's unsigned host builds.** A desktop app built from a
-  working copy (a devbuild) has no signed release to download host builds from, so `scripts/devbuild-mac.sh` stages
-  Linux builds in a local folder and the app installs those on remote hosts, without a signature check, when you click
-  Update. "Update remote hosts automatically" is now on by default. Devbuilds start with it off, but nothing stops you
-  turning it on in one, and then Farhelm would install those unsigned local builds on every remote host with no click at
-  all. Decide whether automatic updates should skip a staged folder and leave it to Update clicks. The review item
-  `review_feedback_queue/staged-payloads-and-automatic-host-updates.md` is the same question. Raised by the
-  auto-update-hosts-default plan, 2026-11-20. Plan: `plans/queue/auto-update-staged-payloads.md`.
-
 - **Test that a real Antigravity still gets its conversation reports accepted.** To keep Restart on the main
   conversation rather than a subagent's, Farhelm now accepts a conversation report from Antigravity only when the
   conversation's log starts the way a main conversation's did in Antigravity CLI 1.5.13 on Linux. Every test of that

@@ -1874,17 +1874,22 @@ impl ProvisioningService {
     }
 
     /// Admit an automatic plan in the same order as durable policy commits.
-    /// None means opt-out or a changed connection consumed the plan without a
-    /// run or failed attempt. Admission waits belong to the cancellable listener.
+    /// A manual-only payload source declines before admission, leaving the
+    /// plan available for explicit confirmation. Otherwise, None means
+    /// opt-out or a changed connection consumed the plan without a run or
+    /// failed attempt. Admission waits belong to the cancellable listener.
     /// The gate ends at the busy/progress claim; only then does ordinary owned
     /// launch begin, with no suspension between claim and spawning that owner.
-    async fn start_automatic_update(
+    pub(super) async fn start_automatic_update(
         self: &Arc<Self>,
         host: HostId,
         entry_uuid: String,
         incarnation: u64,
         request: ProvisionRequest,
     ) -> anyhow::Result<Option<RunAccepted>> {
+        if !self.payloads.allows_automatic_updates() {
+            return Ok(None);
+        }
         #[cfg(test)]
         {
             let hold = self
