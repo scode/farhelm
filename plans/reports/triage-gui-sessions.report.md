@@ -121,3 +121,88 @@ Three deferred outcomes are in TODO.md under Near term → Plan follow-up.
 Every draft passed the independent high-effort GPT-6.2 Sol source review and the commit and PR wording cold read. A
 fresh high-effort Opus review inspected the changed light and dark renders in each visual draft and found no remaining
 mismatch.
+
+### Landing
+
+#### What landed with it
+
+The plan's four PRs merged with a landing fix, #4492. No other plan landed in this round, and main had gained nothing
+since the executor based the plan. A script checked that all 22 findings left the queue and the open ledger and that
+each decision moved to the archive. An independent reviewer and I read the four PRs against the triage decisions.
+Neither of us found a blocker: each outcome was carried out as decided, and the spec text matches the code. The three
+new TODO entries sit in Near term's new Plan follow-up subsection, as the planning rules now ask.
+
+#### Fixes made while landing
+
+All in [#4492](https://github.com/scode/farhelm/pull/4492/changes):
+
+- **Lint errors from an earlier landing.** This round's lint run found seven clippy errors in the session launcher, left
+  by the launcher command field plan's landing earlier on 2026-11-21. One of the seven came from the fix that landing
+  made itself. That landing's lint step reported success after clippy had failed, because I ended the step with a
+  disk-space command whose status replaced clippy's; my checks now end each step with the check itself. Every clippy run
+  on main has failed since, the executors' included. After the fix, clippy passes across the whole workspace, so nothing
+  else was hiding behind the seven. Two of the errors were places that moved keyboard focus directly. Clicking a text
+  field's prefix or suffix still focuses the field; it now takes the same path as every other click, so nothing visible
+  changes. The other errors are marked with the reason or rewritten. The launcher, template and dialog goldens still
+  match.
+- **Screenshot batch scene list.** The plan added three golden pictures (an open session whose sandbox or container is
+  unavailable, Delete of a session in a shared environment, Stop of a session with only terminal tabs left) without
+  adding them to the screenshot batch's list of scenes, whose own test refuses that. They are listed now.
+- **Two text fixes from the review.** A code comment still said every move a pin drag captures counts as activity
+  wherever it is; moves outside the rows now count as leaving the list. And a new spec sentence about Suspend asking
+  first when a host's session refresh is pending or failed had landed beside the paragraph on planned launch behavior;
+  it now sits with the Suspend rule it qualifies.
+
+#### Checks
+
+The plan changes only the desktop app's GUI crate, its goldens, SPEC.md, changelog notes, TODO.md and the review queue
+and triage ledger. The landing ran the GUI crate's tests, the lint runs and the app's end-to-end smoke test on a
+separate arm64 Linux test machine, and the goldens and small checks locally on x86_64.
+
+On the plan as delivered:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `db0f443d-dffd-4892-ae57-edf9ac31b797`): all
+  3256 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `197009df-276f-4a00-830f-0d2e01f0d5dc`):
+  every step passed but paste, which skips on Linux as it always does.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine: failed with the seven launcher errors described
+  above, all from main, none in this plan's files.
+- `python3 scripts/check-gui-goldens.py`, the full comparison, locally (recorder run
+  `cb626459-c0e4-46bf-b126-46040d0ed8fb`): passed with the plan's new pictures.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed on the three unlisted goldens.
+- `python3 -B scripts/test-gui-agent.py`, `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its
+  isolated environment), `dprint check`, `python3 scripts/check-agents-md.py` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+- A script comparing the deleted feedback files, removed index lines and archived ledger entries: all 22 match.
+
+After the landing fix (#4492):
+
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the desktop app's own
+  two clippy runs and `python3 -B scripts/check-gui-lints.py`, on the test machine, not through the recorder: passed,
+  with no errors in the output.
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `2d36a516-0a4d-43c4-b205-51f58e8b9985`): all
+  3256 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `977f0ddb-821d-4604-8da6-ce953970b966`):
+  every step passed but paste.
+- `python3 scripts/check-gui-goldens.py --scene 'launcher-*' --scene 'template*' --scene 'dialog-*'`, locally (recorder
+  run `885da79c-f72f-4622-bd2c-92e9b257b90a`), after the golden scene's focus change: passed, nothing changed.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+Skipped: the workspace suite and the desktop app's tests, since only the GUI crate changed and the lint runs compiled
+the desktop app against it; macOS, for which no machine was part of this run (the changes are GUI logic and drawing that
+the Linux suites and goldens cover); CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- One deferral is worth a look. Marked Stop and Delete can still stop a live shell, or its tabs, based on the
+  confirmation setting and the shell's state at the moment of the click rather than what the window showed. The triage
+  put this in its highest bucket, and its decided fix is narrow: capture the drawn targets and the confirmation setting
+  in the marked bar's button. The executor deferred it to a TODO entry ("Keep bulk Stop and Delete bound to what the
+  user saw"), which also asks for host and environment checks at acceptance and dispatch that the decision did not ask
+  for. Narrowing that entry to the decided fix would make it a small change that could be picked up soon.
+- A pin drag whose pointer leaves the rows now ends the order hold at once, as the spec says. That goes slightly beyond
+  the Shift-sweep case the outcome named, and no test covers it. I would accept it as matching the spec; a test would be
+  a small follow-up if wanted.
+- The report says Delete of a shared environment's session "names the live program". The new wording names no program:
+  it says it stops any processes still running and closes the terminal tabs, which follows the rule about naming shells.
