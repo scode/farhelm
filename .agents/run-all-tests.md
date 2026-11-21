@@ -92,11 +92,12 @@ second clippy run on floating stable is needed.
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts. The
-  workspace Rust selection covers the devbuild's remote-update startup preference.
+  scripts handle an absent pin in the CentOS setup and multiline active-toolchain output in Mac devbuild. The workspace
+  Rust selection covers the devbuild's remote-update startup preference.
 - `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` (the desktop archive's
   build command; the self-test builds nothing)
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` (the focused
-  nextest producer). Its actual payload/install contract runs in the sweep's real Podman selection.
+  nextest producer with a checkout-local build). Its payload/install contract runs in the sweep's real Podman selection.
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped

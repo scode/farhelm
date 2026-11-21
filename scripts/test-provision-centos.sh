@@ -261,6 +261,8 @@ echo "== building the musl-static farhelm payload"
 # the caller's default toolchain while Cargo builds with the repository's pin.
 (
   cd "$repo" || exit 1
+  # Older rustup versions require the selected pin to exist before target operations.
+  rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install || exit 1
   if ! rustup target list --installed 2>/dev/null | grep -qx "$target_triple"; then
     rustup target add "$target_triple" || exit 1
   fi

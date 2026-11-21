@@ -270,12 +270,6 @@ consequences.
   confirmation can install the remote supervisor after Farhelm.app is installed; the pre-confirmation exception's scope
   remains uncertain.
 
-- [`centos-rustup-missing-pin.md`](centos-rustup-missing-pin.md) — Standalone CentOS validation cannot install its
-  target with Rustup 1.28.0 when the pinned compiler is absent; current Rustup auto-install avoids this route.
-
-- [`devbuild-rustup-active-name.md`](devbuild-rustup-active-name.md) — Mac devbuild misparses Rustup 1.28.0's multiline
-  active-toolchain output and aborts preflight even with the compiler installed; current one-line output is unaffected.
-
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -431,14 +425,6 @@ consequences.
 - [`trailing-agent-create-cwd-help-omits-recipe-home-default.md`](trailing-agent-create-cwd-help-omits-recipe-home-default.md)
   — Create folder help omits the new recipe launch default. Abbreviated collection; confidence, proposed dismissals and
   unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md`](trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md)
-  — Unignoring an older non-self-ignored venv can add generated files to jj changes. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md`](trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md)
-  — Shared Cargo output can change before same-source payload packaging. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md`](trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md)
   — Historical-base deflake runs lose their selected revision's required tmux check. Abbreviated collection; confidence,
@@ -648,10 +634,6 @@ consequences.
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
   flash.
-
-- [`devbuild-state-comparison-uses-wrong-path.md`](devbuild-state-comparison-uses-wrong-path.md) — Equivalent paths can
-  apply different automatic-update defaults in a devbuild. This can save an opt-out in the installed app’s state, or
-  leave updates on in separate development state.
 
 - [`devbuild-startup-test-misses-first-scan.md`](devbuild-startup-test-misses-first-scan.md) — The startup test can pass
   if a devbuild starts its first automatic update scan before saving the opt-out. It also starts from a database that
