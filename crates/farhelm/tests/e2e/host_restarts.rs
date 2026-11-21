@@ -315,9 +315,10 @@ async fn an_orderly_restart_keeps_a_host_agent_running_with_its_screen() {
         .create(&client, &fixture_cmd("fake-agent --script basic"))
         .await;
     let host = agent_host(&sup, &session.id).await;
-    wait_for_screen(&host, AGENT_READY_MARKER).await;
+    wait_for_screen(&host, "FAKE-AGENT READY\n>").await;
     type_line(&host, "before-restart").await;
-    wait_for_screen(&host, "echo:before-restart").await;
+    // The stable comparison includes the prompt drawn after the echo.
+    wait_for_screen(&host, "echo:before-restart\n>").await;
     let socket = host.socket().to_path_buf();
     let host_pid = host_process(&socket).expect("the host's process serves its socket");
     let child = host.status().child_pid;
@@ -326,11 +327,8 @@ async fn an_orderly_restart_keeps_a_host_agent_running_with_its_screen() {
 
     sup.stop_in_order_for_test().await;
     let stopped = host.status();
-    // The agent's echo can still be arriving (the rest of its line after the
-    // text the screen wait saw) while the stop runs, and the runtime reads
-    // it until the stop closes it, so the snapshot lies between where the
-    // terminal was when the stop began and where the runtime ended, not
-    // necessarily at the latter.
+    // Stop can still read output after taking its checkpoint. The
+    // checkpoint lies between the pre-stop and final positions.
     let checkpoint = stopped
         .checkpoint
         .expect("the stop left the host a snapshot");

@@ -286,7 +286,7 @@ async fn a_host_agents_exit_is_recorded_once_its_child_exits() {
 /// exit and kill only what carries the session's markers (the inventory's
 /// top risk 9), and a stop that ended the host would take the final screen
 /// with it (the plan's D-17). Spec: with the host's child and an unmarked
-/// grandchild running and the child's marker on screen, Stop succeeds; both
+/// grandchild immune to hangup and the child's marker on screen, Stop succeeds; both
 /// processes go; the host's process still runs and the runtime reports the
 /// child's exit rather than the host's end; the session lists as exited and
 /// stopped by the user; and the screen still shows what the child printed.
@@ -294,14 +294,14 @@ async fn a_host_agents_exit_is_recorded_once_its_child_exits() {
 async fn stop_kills_a_host_agents_tree_and_leaves_the_host_showing_its_screen() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
-    let installed = install_host(&h, &session.id, &tree_script(work.path())).await;
+    let installed = install_host(&h, &session.id, &hangup_immune_tree_script(work.path())).await;
     let host = &installed.host;
-    let (child, grand) = tree_pids(work.path()).await;
+    let tree = hangup_immune_tree(work.path()).await;
     wait_for_screen(host, "host child ready").await;
 
     h.client.stop_session(&session.id).await.expect("stop");
-    wait_until_pid_gone(child, WAIT_SECS).await;
-    wait_until_pid_gone(grand, WAIT_SECS).await;
+    wait_until_pid_gone(tree.child, WAIT_SECS).await;
+    wait_until_pid_gone(tree.grand, WAIT_SECS).await;
     // The list reads the host's evidence, which says exited only once the
     // exit record (sent after the child's drained output) is processed.
     wait_for_liveness(host, "the host reporting the exit", |liveness| {
@@ -356,9 +356,13 @@ async fn restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts() {
     let program = crate::host_creates::script(
         &fixture.path().join("farhelm"),
         &format!(
-            "state=''\n\
+            "command -v ps >/dev/null || exit 3\n\
+             state=''\n\
              for file in {child} {grand}; do\n\
-             \x20 if kill -0 \"$(cat \"$file\")\" 2>/dev/null; then state=\"$state alive\"; \
+             \x20 pid=$(cat \"$file\" 2>/dev/null)\n\
+             \x20 stat=$(ps -o stat= -p \"$pid\" 2>/dev/null)\n\
+             \x20 case \"$stat\" in Z*) state=\"$state gone\"; continue ;; esac\n\
+             \x20 if kill -0 \"$pid\" 2>/dev/null; then state=\"$state alive\"; \
              else state=\"$state gone\"; fi\n\
              done\n\
              printf '%s\\n' \"$state\" >> {at_start}\n\
@@ -461,7 +465,7 @@ struct ImmuneTree {
 }
 
 /// Wait for [`hangup_immune_tree_script`]'s processes and check the
-/// premise the Delete tests rest on: both run, the grandchild's parent is
+/// premise the lifecycle tests rest on: both run, the grandchild's parent is
 /// the child, and the grandchild ignores `SIGHUP`.
 async fn hangup_immune_tree(dir: &Path) -> ImmuneTree {
     let (child, grand) = tree_pids(dir).await;

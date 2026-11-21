@@ -56,11 +56,15 @@ pub(crate) const RESUMED: &str = "RESUMED RUN";
 pub(crate) fn history_agent_with(dir: &Path, last_words: bool) -> String {
     let marker = dir.join("agent-ran");
     let runs = dir.join("runs");
-    let wait = if last_words {
-        "trap 'i=1; while [ \"$i\" -le 30 ]; do printf \"last words %02d\\n\" \"$i\"; \
-         i=$((i + 1)); done; exit 0' TERM HUP\n/bin/sleep 600 &\nwait"
+    // Install the exit handler before printing the marker that lets a test restart.
+    let (trap, wait) = if last_words {
+        (
+            "trap 'i=1; while [ \"$i\" -le 30 ]; do printf \"last words %02d\\n\" \"$i\"; \
+             i=$((i + 1)); done; exit 0' TERM HUP",
+            "/bin/sleep 600 &\nwait",
+        )
     } else {
-        "exec /bin/sleep 600"
+        ("", "exec /bin/sleep 600")
     };
     let program = script(
         &dir.join("history-agent"),
@@ -70,6 +74,7 @@ pub(crate) fn history_agent_with(dir: &Path, last_words: bool) -> String {
              : > {marker}\n\
              i=1\n\
              while [ \"$i\" -le 60 ]; do printf 'history line %02d\\n' \"$i\"; i=$((i + 1)); done\n\
+             {trap}\n\
              printf '\\033]2;old title\\007\\033[?2004h\\033[?25l{OLD_SCREEN_MARK}\\n'\n\
              {wait}",
             marker = shell_words::quote(&marker.to_string_lossy()),
@@ -701,6 +706,7 @@ async fn an_unusable_replacement_host_is_ended_and_the_restart_unwound() {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
+            launch_shell: Some("/bin/sh".into()),
             host_program: Some(failing_host_program(
                 fixture.path(),
                 &flag,
@@ -715,6 +721,14 @@ async fn an_unusable_replacement_host_is_ended_and_the_restart_unwound() {
     let old_socket = old.socket().to_path_buf();
     let old_pid = host_process(&old_socket).expect("the old host's process");
 
+    // Keep a live tab through the same definitive failure as the old agent host.
+    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
+    let tab_host = crate::host_tabs::tab_host(&h.sup, &session.id, &tab.id).await;
+    let tab_socket = tab_host.socket().to_path_buf();
+    let tab_shell = tab_host.live_root().unwrap().expect("live tab shell");
+    type_line(&tab_host, "echo TAB-BEFORE-$((40+2))").await;
+    wait_for_screen(&tab_host, "TAB-BEFORE-42").await;
+    drop(tab_host);
     std::fs::write(&flag, b"").expect("make the next host unusable");
     let failed = h
         .client
@@ -736,6 +750,13 @@ async fn an_unusable_replacement_host_is_ended_and_the_restart_unwound() {
     assert_eq!(agent_host(&h.sup, &session.id).await.socket(), old_socket);
     assert!(!process_is_gone(old_pid), "the old host still runs");
     assert!(!record_path(h.state.path(), &session.id, 1).exists());
+    let listed_tabs = crate::terminal_tabs::listed_tabs(&h.client, &session.id).await;
+    assert_eq!(listed_tabs, std::slice::from_ref(&tab.id));
+    let kept = crate::host_tabs::tab_host(&h.sup, &session.id, &tab.id).await;
+    assert_eq!(kept.socket(), tab_socket);
+    assert_eq!(kept.live_root().unwrap(), Some(tab_shell));
+    type_line(&kept, "echo TAB-AFTER-$((40+3))").await;
+    wait_for_screen(&kept, "TAB-AFTER-43").await;
     end_runtime(&old, old_pid).await;
 }
 

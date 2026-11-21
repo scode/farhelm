@@ -299,6 +299,35 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
     drop(slot);
 }
 
+/// A completed create retains its identity after a reboot ends its terminal.
+/// Replaying it must not start another agent under the old or a new row.
+#[farhelm_testtrace::test]
+async fn a_completed_keyed_create_replays_after_a_reboot() {
+    let h = crate::boot_id_durable_outcome::harness_believing_boot("boot-a").await;
+    let state = h.state.path();
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let key = "completed-reboot";
+    let outcome = || async { stored_reservation(state, key).await.unwrap().outcome };
+    let first = create_keyed(&h.client, work.path(), key).await.unwrap().id;
+    assert_eq!(outcome().await, ReservationOutcome::Created);
+    retire_supervisor(state, h.sup, h.client).await;
+    end_all_terminals(state).await;
+    let sup = supervisor_believing_boot(state, Some("boot-b")).await;
+    let client = connect_client(&sup).await;
+    assert_eq!(
+        listed(&client, &first).await.status,
+        SessionStatus::Interrupted
+    );
+    assert_eq!(outcome().await, ReservationOutcome::Created);
+    assert_eq!(
+        create_keyed(&client, work.path(), key).await.unwrap().id,
+        first
+    );
+    assert_eq!(agent_terminal_count(state).await, 0);
+    assert_eq!(stored_sessions(state).await.len(), 1);
+    retire_supervisor(state, sup, client).await;
+}
+
 /// The other direction of the same key: reused for a DIFFERENT request, it
 /// is refused rather than merged.
 ///

@@ -1164,7 +1164,8 @@ async fn an_unusable_new_host_is_ended_and_the_create_rolled_back() {
 /// and whose command line does not end with its socket, the create fails
 /// saying a terminal host may still be running at that socket and the
 /// session is kept as a launching record; the row exists as a launching
-/// host row; the listener still runs (the test then ends it).
+/// host row and remains listed for cleanup. Its create intent stays pending
+/// because replay has yet to establish whether the launch completed.
 #[farhelm_testtrace::test]
 async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
     let fixture = farhelm_teststate::tempdir().expect("fixture directory");
@@ -1178,35 +1179,57 @@ async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
     )
     .await;
     let work = farhelm_teststate::tempdir().expect("workdir");
+    let key = "unconfirmed-host";
     let error = h
         .client
-        .create_session(
+        .create_session_with_key(
             work.path().to_str().unwrap(),
             "exec sleep 600",
             None,
             80,
             24,
+            Some(key.to_owned()),
         )
         .await
         .expect_err("the host cannot be used");
+    let listener = wait_for_pid_file(&pid_file, WAIT_SECS).await;
+    let _cleanup = PidKillGuard::arm(listener);
     let message = format!("{error:#}");
     assert!(
         message.contains("may still be running at") && message.contains("launching record"),
         "{message}"
     );
-    let rows = SessionStore::open(&h.state.path().join("supervisor.db"), false)
-        .await
-        .unwrap()
-        .load_all()
+    // A refusal proof would let the client discard this unresolved intent key.
+    assert!(!message.contains("the create was durably refused without retaining a session"));
+    assert!(!process_is_gone(listener), "the listener was left alone");
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .unwrap();
+    let rows = store.load_all().await.unwrap();
     let [row] = rows.as_slice() else {
         panic!("the launching row is kept: {rows:?}");
     };
     assert_eq!(row.outcome, LastOutcome::Launching);
     assert_eq!(row.terminal_kind, TerminalKind::Host);
-    let listener = wait_for_pid_file(&pid_file, WAIT_SECS).await;
-    assert!(!process_is_gone(listener), "the listener was left alone");
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|info| info.id == row.id)
+    );
+    let reservation = store
+        .reservation(key)
+        .await
+        .unwrap()
+        .expect("the original reservation");
+    assert_eq!(reservation.session_id, row.id);
+    assert_eq!(
+        reservation.outcome,
+        farhelm_supervisor::store::ReservationOutcome::Pending
+    );
     // SAFETY: ending the test's own stand-in listener.
     unsafe { libc::kill(listener as libc::pid_t, libc::SIGKILL) };
     wait_until_pid_gone(listener, WAIT_SECS).await;

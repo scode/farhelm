@@ -588,8 +588,10 @@ async fn a_host_agent_survives(signal: libc::c_int) {
     let socket = stack.host_socket(&session.id).await;
     let host = host_process(&socket).expect("the host's process serves its socket");
     let mut viewer = GridViewer::attach(&client, &session.id).await;
+    // The fixture prints its prompt after the ready line finishes drawing.
+    // Typing earlier can overwrite the line that the next supervisor must replay.
     viewer
-        .wait_for(&["FAKE-AGENT READY"], || stack.premise(&socket))
+        .wait_for(&["FAKE-AGENT READY\n>"], || stack.premise(&socket))
         .await;
     viewer.type_line(&client, "before-restart").await;
     viewer
@@ -614,7 +616,7 @@ async fn a_host_agent_survives(signal: libc::c_int) {
     let client = stack.start().await;
     let mut viewer = GridViewer::attach(&client, &session.id).await;
     viewer
-        .wait_for(&["FAKE-AGENT READY", "echo:before-restart"], || {
+        .wait_for(&["FAKE-AGENT READY", "echo:before-restart\n>"], || {
             stack.premise(&socket)
         })
         .await;
