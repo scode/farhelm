@@ -293,6 +293,105 @@ gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 [profile.dev.package.sha2]
 opt-level = 3
 
+# The screenshot goldens draw and encode hundreds of PNGs in test builds. In a trial
+# on a dedicated Linux machine, optimizing these dependencies cut a full golden
+# update from 668 to 89 seconds of render time with identical PNGs. The first
+# build with these settings takes longer. Farhelm's own crates keep their debug
+# settings, and shipped binaries already use optimized profiles.
+
+[profile.dev.package.adler2]
+opt-level = 3
+
+[profile.dev.package.cosmic-text]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
+
+[profile.dev.package.etagere]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.font-types]
+opt-level = 3
+
+[profile.dev.package.gpui-base]
+opt-level = 3
+
+[profile.dev.package.gpui-component]
+opt-level = 3
+
+[profile.dev.package.gpui-pre]
+opt-level = 3
+
+[profile.dev.package.gpui-pre-linux]
+opt-level = 3
+
+[profile.dev.package.gpui-pre-platform]
+opt-level = 3
+
+[profile.dev.package.gpui-pre-wgpu]
+opt-level = 3
+
+[profile.dev.package.harfrust]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.lyon]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.naga]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.read-fonts]
+opt-level = 3
+
+[profile.dev.package.resvg]
+opt-level = 3
+
+[profile.dev.package.simd-adler32]
+opt-level = 3
+
+[profile.dev.package.skrifa]
+opt-level = 3
+
+[profile.dev.package.swash]
+opt-level = 3
+
+[profile.dev.package.taffy]
+opt-level = 3
+
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+[profile.dev.package.usvg]
+opt-level = 3
+
+[profile.dev.package.wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+
+[profile.dev.package.zeno]
+opt-level = 3
+
 # Build scripts and proc macros get full debug info in test builds. Cargo
 # builds them without debug info by default, but one that the test build also
 # links into a test binary (`syn`, `proc-macro2` and the like) is built just

@@ -719,7 +719,10 @@ systemd or SSH substrate ran.
   publish before rebasing, or run `--update` again after. Look at each picture its report names as changed or added
   before committing the manifest with the change. A failure leaves the new captures in `gui-goldens/` beside the test
   binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI
-  does not run it yet.
+  does not run it yet. The development profile optimizes the PNG, renderer and UI dependencies used here. In a
+  single-process planning trial on Linux, this reduced the 328-picture update from 668 to 89 seconds of render time with
+  identical files. At that point the update encoded each PNG twice. Expect a rebuild when first switching to this
+  profile.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
