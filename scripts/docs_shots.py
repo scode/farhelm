@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 SCENARIO = HERE.parent / "docs/docs-shots/scenario.json5"
 WEBSITE_SRC = HERE.parent / "website/src"
 RELEASE_PAGE = "release-notes"
+SHOT_COMPONENT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 sys.modules["docs_shots"] = sys.modules[__name__]
 
 
@@ -61,18 +62,28 @@ class Shot:
     max_height: int | None = None
 
 
-def load_pages(directory: Path, only: str | None) -> list[tuple[str, list[Shot]]]:
-    """Refuse malformed shot declarations before an app starts; names must be unique within their page."""
+def load_pages(directory: Path, only: list[str]) -> list[tuple[str, list[Shot]]]:
+    """Load selected pages in capture order, refusing unknown selectors and malformed declarations before startup."""
+    paths = sorted(directory.glob("*.py"))
+    available = {path.stem for path in paths}
+    selected = set()
+    for name in only:
+        page = name.split("/", 1)[0]
+        if not SHOT_COMPONENT.fullmatch(page):
+            raise ValueError(f"--only {name!r}: expected a lowercase kebab-case page name")
+        if page not in available:
+            raise ValueError(f"--only {name!r}: unknown docs screenshot page {page!r}")
+        selected.add(page)
     pages = []
-    for path in [directory / f"{only}.py"] if only else sorted(directory.glob("*.py")):
+    for path in paths:
+        if selected and path.stem not in selected:
+            continue
         module = load(path)
         if not hasattr(module, "SHOTS") or not isinstance(module.SHOTS, list):
             raise ValueError(f"{path}: SHOTS must be a list of Shot values")
         names = set()
         for shot in module.SHOTS:
-            if not isinstance(shot, Shot) or not isinstance(shot.name, str) or not re.fullmatch(
-                r"[a-z0-9]+(?:-[a-z0-9]+)*", shot.name
-            ):
+            if not isinstance(shot, Shot) or not isinstance(shot.name, str) or not SHOT_COMPONENT.fullmatch(shot.name):
                 raise ValueError(f"{path}: bad shot name (expected lowercase kebab case)")
             if shot.name in names:
                 raise ValueError(f"{path}: duplicate shot name {shot.name}")
@@ -97,12 +108,14 @@ def load_pages(directory: Path, only: str | None) -> list[tuple[str, list[Shot]]
 
 
 def select_shots(
-    pages: list[tuple[str, list[Shot]]], website_src: Path, recapture: list[str]
+    pages: list[tuple[str, list[Shot]]], website_src: Path, recapture: list[str], *,
+    only: list[str] | None = None, report_skips: bool = True,
 ) -> list[tuple[str, list[Shot]]]:
-    """Resolve release declarations to their listings and leave published shots for the publisher to carry over.
+    """Choose shots in declaration order, preserving the release freeze even for a draft selection.
 
     The publisher freezes the intersection of the release listings and manifest. Older releases can have images
-    in both without a GPUI declaration. Replacing one requires both an explicit request and a current declaration.
+    in both without a GPUI declaration. Name a frozen shot with --recapture-release-shot and declare its steps
+    before it can be captured. Naming a whole page still skips any frozen shots on it.
     """
     listings = {}
     for path in sorted((website_src / RELEASE_PAGE).glob("*.json")):
@@ -112,6 +125,9 @@ def select_shots(
     published = json.loads(manifest.read_text(encoding="utf-8")).get("shots", {}) if manifest.is_file() else {}
     frozen = listings.keys() & published.keys()
     requested = set(recapture)
+    selectors = set(only or [])
+    for name in sorted((selectors & frozen) - requested):
+        raise ValueError(f"--only {name!r}: frozen release shot; use --recapture-release-shot {name} to replace it")
     for name in sorted(requested):
         if not name.startswith(f"{RELEASE_PAGE}/") or name not in frozen:
             raise ValueError(f"--recapture-release-shot {name}: not a published release shot "
@@ -131,13 +147,18 @@ def select_shots(
                 if listings.get(name) != [version]:
                     raise ValueError(f"{name}: list this shot exactly once, in website/src/release-notes/{version}.json")
             declared.add(name)
+            if selectors and page not in selectors and name not in selectors:
+                continue
             if name in frozen and name not in requested:
-                print(f"docs-shots: skipping frozen {name}", flush=True)
+                if report_skips:
+                    print(f"docs-shots: skipping frozen {name}", flush=True)
             else:
                 page_shots.append(shot)
         selected.append((page, page_shots))
     for name in sorted(requested - declared):
         raise ValueError(f"--recapture-release-shot {name}: add its shot to scripts/docs-shots/release-notes.py first")
+    for name in sorted(selectors - declared - {page for page, _ in pages}):
+        raise ValueError(f"--only {name!r}: unknown docs screenshot")
     return selected
 
 
@@ -421,22 +442,25 @@ def capture_pages(gui, batch, run: Path, pages, out: Path, *, frame: int = 0, ti
 
 
 def main() -> int:
-    """Own one scenario run for the selected pages, always stopping it before reporting success or retained evidence."""
+    """Own one scenario run for the selected shots, stopping it before reporting success or retained evidence."""
     # SIGTERM takes the Ctrl-C path so recorder or worker termination reaches the finally that stops the app.
     signal.signal(signal.SIGTERM, signal.default_int_handler)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--check-selection", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--only")
+    parser.add_argument("--only", action="append", default=[], metavar="PAGE[/SHOT]",
+                        help="capture a page or one of its shots (repeatable)")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--recapture-release-shot", action="append", default=[], metavar="NAME")
     options = parser.parse_args()
     if options.out is None and not options.check_selection:
         parser.error("--out is required")
-    if options.recapture_release_shot and options.only not in (None, RELEASE_PAGE):
+    if options.recapture_release_shot and set(options.only) not in (set(), {RELEASE_PAGE}):
         parser.error("--recapture-release-shot works only on a full run or with --only release-notes")
     try:
-        pages = select_shots(load_pages(HERE / "docs-shots", options.only), WEBSITE_SRC, options.recapture_release_shot)
+        pages = select_shots(load_pages(HERE / "docs-shots", options.only), WEBSITE_SRC,
+                             options.recapture_release_shot, only=options.only,
+                             report_skips=not options.check_selection)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     if options.check_selection or not any(shots for _, shots in pages):

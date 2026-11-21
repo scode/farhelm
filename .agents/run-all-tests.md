@@ -141,8 +141,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
 - `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
   `shellcheck scripts/boat/sandbox/*.sh` (the boat harness's own checks, including the shard configuration preserving
-  the scoped Podman payload setup while removing the local fixture build). Run the harness only on the maintainer's
-  request, per `.agents/boat.md`.
+  the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page, and
+  clearing only the selected docs outputs). Run the harness only on the maintainer's request, per `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
   `python3 -m py_compile scripts/test-worker/remote/prune.py` (the SSH test worker harness's own checks). Run the
   harness only on the maintainer's request, per `.agents/test-worker.md`.
@@ -162,9 +162,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
   lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
-- `python3 -B scripts/test-docs-shots.py` (page declarations, frozen release shots, crop geometry and capture failures
-  against a stand-in harness); one live `scripts/docs-screenshots.sh --local` run on Linux, checking the images at 2x
-  and the full capture record
+- `python3 -B scripts/test-docs-shots.py` (repeatable page and shot selection, draft output boundaries, frozen release
+  shots, crop geometry and capture failures against a stand-in harness); one live `scripts/docs-screenshots.sh --local`
+  run on Linux, checking the images at 2x and the full capture record
 - The recorded demo-video checks from `.agents/validation.md`: recorder unit tests, the capture-build overlay test, and
   a live `scripts/readme-video.sh` run on Linux with its marked stills checked.
 - `python3 -B scripts/test-gui-e2e-smoke.py` (the end-to-end smoke's check that every step is in its `Smoke` class,

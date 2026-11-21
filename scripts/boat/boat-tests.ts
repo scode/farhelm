@@ -20,7 +20,7 @@
  *                                       hash partitions of a nextest archive over n members
  *   gui --out <dir> [--no-build] [smoke] [lifecycle]
  *                                       the GPUI app's end-to-end smoke and/or Linux lifecycle on one member
- *   docs --out <dir> [--no-build] [--only <page>]... [--members <n>] | docs --out <dir> --build-there
+ *   docs --out <dir> [--no-build] [--only <page[/shot]>]... [--members <n>] | docs --out <dir> --build-there
  *                                       the docs website's screenshots (`scripts/docs-screenshots.sh`): the whole
  *                                       capture on one member, or the named pages spread over up to n members;
  *                                       --build-there builds on the member, for a publishable capture
@@ -85,7 +85,9 @@ export function readFrames(stdout: string, localCode: number): ExecResult {
 async function bexec(id: string, cmd: string[]): Promise<ExecResult> {
   const r = await $`boat exec --timeout 0 ${id} -- ${cmd}`.noThrow().stdout("piped").stderr("piped");
   const res = readFrames(r.stdout, r.code);
-  if (!res.sawExit) res.out += `\n[boat exec ended without an exit frame; local code ${r.code}]\n${r.stderr.slice(-2000)}`;
+  if (!res.sawExit) {
+    res.out += `\n[boat exec ended without an exit frame; local code ${r.code}]\n${r.stderr.slice(-2000)}`;
+  }
   return res;
 }
 
@@ -480,12 +482,32 @@ async function packGui(build: boolean, untracked = false, buildThere = false) {
   return out;
 }
 
-/** Splits `pages` round-robin over `members` lists, in page order within each, so the pages a run names spread evenly
- * over the members it got. */
-export function spread(pages: string[], members: number): string[][] {
-  const lists: string[][] = Array.from({ length: Math.max(1, Math.min(members, pages.length)) }, () => []);
-  pages.forEach((page, i) => lists[i % lists.length].push(page));
+/** Assign all selectors for one page together so one member owns its outputs. Each share supports one app start. */
+export function spread(selections: string[], members: number): string[][] {
+  const pages = new Map<string, string[]>();
+  for (const selection of selections) {
+    const page = selection.split("/", 1)[0];
+    const group = pages.get(page) ?? [];
+    group.push(selection);
+    pages.set(page, group);
+  }
+  const lists: string[][] = Array.from({ length: Math.max(1, Math.min(members, pages.size)) }, () => []);
+  [...pages.values()].forEach((page, i) => lists[i % lists.length].push(...page));
   return lists;
+}
+
+/** Discard a prior publish record before merging this run's archives. Clear PNGs owned by the accepted selectors
+ * so a failed or skipped shot cannot be mistaken for a fresh one. Keep the rest of a draft's previews. */
+async function clearDocsOutputs(root: string, selections: string[]) {
+  await $`mkdir -p ${root}`;
+  await $`rm -f ${root}/capture.json`;
+  for (const selection of selections.length ? selections : [""]) {
+    const path = `${root}/${selection}`;
+    if (selection.includes("/")) await $`rm -f ${path}.png`;
+    else if ((await $`test -d ${path}`.noThrow()).code === 0) {
+      await $`find ${path} -type f -name "*.png" -delete`;
+    }
+  }
 }
 
 /** Claims up to `n` free members, settling for fewer (at least one) when the rest of the budget is busy: a docs run with
@@ -499,53 +521,71 @@ async function claimUpTo(n: number, type: string): Promise<Member[]> {
   return await claim(1, type);
 }
 
-/** One member's share of a docs run: its pages one after the other (`sandbox/run-docs.sh`), or the whole capture when
- * `pages` is empty. Each page's PNGs come back into `<out>/docs/shots/<page>/`, and its summary, log and exec output
- * into `<out>/docs/<page or "all">/`. Returns whether every page captured cleanly. */
-async function docsOnMember(m: Member, pack: string, pages: string[], out: string, mode: string): Promise<boolean> {
+/** Each member captures its entire share with one staged app. Logs identify the share by its first page, or "all"
+ * for a full capture. The common shots tree can merge archives because a page belongs to exactly one share. */
+async function docsOnMember(
+  m: Member,
+  pack: string,
+  selections: string[],
+  out: string,
+  mode: string,
+): Promise<boolean> {
   await pushScripts(m);
   await bexecOk(m, ["bash", `${H}/bin/reset.sh`]);
   Deno.writeTextFileSync(RUST_STAGE(), JSON.stringify(rustStage().filter((nm) => nm !== m.name)));
   for (const f of ["src.tar.gz", "git.tar.gz", "bin.tar.gz"]) await put(m, `${pack}/${f}`, `${H}/stage/${f}`);
   await unpack(m, ["bin.tar.gz"]);
-  let ok = true;
-  for (const page of pages.length ? pages : [""]) {
-    const r = await bexec(m.id, ["bash", `${H}/bin/run-docs.sh`, REPO, mode, ...(page ? [page] : [])]);
-    const dir = `${out}/docs/${page || "all"}`;
-    await $`rm -rf ${dir}`;
-    await $`mkdir -p ${dir} ${out}/docs/shots`;
-    await Deno.writeTextFile(`${dir}/exec.log`, r.out.slice(-20000));
-    for (const f of ["summary.txt", "docs.log", "shots.tar.gz"]) await get(m, `${H}/out/docs/${f}`, `${dir}/${f}`);
-    await $`tar -xzf ${dir}/shots.tar.gz -C ${out}/docs/shots`.noThrow();
-    console.log(`${m.name} ${page || "all pages"}: ${r.code === 0 ? "captured" : `FAILED (exit ${r.code})`}`);
-    console.log(r.out.trim().split("\n").slice(-12).join("\n"));
-    if (!r.sawExit) {
-      await markDirty(m);
-      return false;
-    }
-    ok &&= r.code === 0;
+  const r = await bexec(m.id, ["bash", `${H}/bin/run-docs.sh`, REPO, mode, ...selections]);
+  const dir = `${out}/docs/${selections[0]?.split("/", 1)[0] ?? "all"}`;
+  await $`rm -rf ${dir}`;
+  await $`mkdir -p ${dir} ${out}/docs/shots`;
+  await Deno.writeTextFile(`${dir}/exec.log`, r.out.slice(-20000));
+  for (const f of ["summary.txt", "docs.log", "shots.tar.gz"]) await get(m, `${H}/out/docs/${f}`, `${dir}/${f}`);
+  const extracted = (await $`tar -xzf ${dir}/shots.tar.gz -C ${out}/docs/shots`.noThrow()).code === 0;
+  const outcome = r.code !== 0 ? `FAILED (exit ${r.code})` : extracted ? "captured" : "FAILED to collect screenshots";
+  console.log(
+    `${m.name} ${selections.join(", ") || "all pages"}: ${outcome}`,
+  );
+  console.log(r.out.trim().split("\n").slice(-12).join("\n"));
+  if (!r.sawExit) {
+    await markDirty(m);
+    return false;
   }
-  return ok;
+  return r.code === 0 && extracted;
 }
 
-/** The docs screenshots on the pool: the whole capture on one member, or the pages named with `--only` (repeatable)
- * spread over up to `--members` members (default: one per page, within the budget), each running its share one page
- * at a time. The PNGs come back into `<out>/docs/shots/<page>/<shot>.png`. A run from shipped binaries is never
+/** The docs screenshots on the pool: a full capture on one member, or selected pages and shots spread over up to
+ * `--members` members (default: one per selected page, within the budget). The PNGs come back into
+ * `<out>/docs/shots/<page>/<shot>.png`. A run from shipped binaries is never
  * publishable, since `scripts/docs-screenshots.sh` writes its record only when it built the binaries itself; so
  * `--build-there` (whole capture only) ships no binaries and has the member build them from the shipped source, with
  * main recorded beside it for the capture's check that the app code is main's. Its record comes back as
  * `<out>/docs/shots/capture.json`, ready to publish. */
-async function runDocs(a: Record<string, string>, pages: string[]) {
+async function runDocs(a: Record<string, string>, selections: string[]) {
   const buildThere = Boolean(a["build-there"]);
-  if (buildThere && (pages.length || a["no-build"])) throw new Error("--build-there takes neither --only nor --no-build");
+  if (buildThere && (selections.length || a["no-build"])) {
+    throw new Error("--build-there takes neither --only nor --no-build");
+  }
+  if (selections.length) {
+    const flags = selections.flatMap((name) => ["--only", name]);
+    await $`python3 -B ${REPO}/scripts/docs_shots.py --check-selection ${flags}`;
+  }
+  await clearDocsOutputs(`${a.out}/docs/shots`, selections);
   const pack = await packGui(!a["no-build"] && !buildThere, true, buildThere);
-  const want = pages.length ? Math.min(pages.length, Number(a.members ?? pages.length), BUDGET) : 1;
-  const members = await claimUpTo(want, a.type ?? "large");
+  const want = spread(selections, Math.min(Number(a.members ?? BUDGET), BUDGET)).length;
+  let members: Member[] = [];
   try {
-    const shares = pages.length ? spread(pages, members.length) : [[]];
+    members = await claimUpTo(want, a.type ?? "large");
+    const shares = spread(selections, members.length);
     const mode = buildThere ? "build" : "shipped";
-    const results = await Promise.all(shares.map((share, i) => docsOnMember(members[i], pack, share, a.out, mode)));
-    const ok = results.every(Boolean);
+    // A failed transfer must leave the other members their locks and source until their captures finish.
+    const results = await Promise.allSettled(
+      shares.map((share, i) => docsOnMember(members[i], pack, share, a.out, mode)),
+    );
+    for (const [i, result] of results.entries()) {
+      if (result.status === "rejected") console.error(`${members[i].name}: ${result.reason}`);
+    }
+    const ok = results.every((result) => result.status === "fulfilled" && result.value);
     console.log(ok ? `DOCS SHOTS CAPTURED into ${a.out}/docs/shots` : "DOCS SHOTS FAILED (see the lines above)");
     if (!ok) Deno.exitCode = 1;
   } finally {
@@ -678,6 +718,24 @@ Deno.test("a docs run's pages spread round-robin over the members it got, in pag
   assertEquals(spread(["a", "b", "c", "d", "e"], 3), [["a", "d"], ["b", "e"], ["c"]]);
   assertEquals(spread(["a", "b"], 3), [["a"], ["b"]]);
   assertEquals(spread(["a"], 0), [["a"]]);
+  assertEquals(spread(["a/one", "b", "a/two", "c"], 2), [["a/one", "a/two", "c"], ["b"]]);
+  assertEquals(spread(["a/one", "a/two"], 2), [["a/one", "a/two"]]);
+});
+
+Deno.test("a selected docs run clears only its outputs and invalidates a prior full capture", async () => {
+  const root = await Deno.makeTempDir({ prefix: "farhelm-docs-output-" });
+  try {
+    await Deno.mkdir(`${root}/a`);
+    await Deno.mkdir(`${root}/b`);
+    const previous = ["capture.json", "a/one.png", "a/keep.png", "b/old.png", "b/notes.txt"];
+    for (const path of previous) await Deno.writeTextFile(`${root}/${path}`, "earlier capture");
+    await clearDocsOutputs(root, ["a/one", "b"]);
+    assertEquals([...Deno.readDirSync(root)].map((entry) => entry.name).sort(), ["a", "b"]);
+    assertEquals([...Deno.readDirSync(`${root}/a`)].map((entry) => entry.name), ["keep.png"]);
+    assertEquals([...Deno.readDirSync(`${root}/b`)].map((entry) => entry.name), ["notes.txt"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });
 
 Deno.test("the default prefix is derived from the checkout's directory name", () => {

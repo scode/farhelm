@@ -62,8 +62,9 @@ The run's private Mutter renders the scenario's viewport at 2x, and the engine d
 Declare new release shots in `scripts/docs-shots/release-notes.py` and list them under their release version
 (`website/.agents/release-notes.md`, "Release notes").
 
-The command keeps its bulk capture record and local preview output. Use `--only <page>` for drafting. A full capture
-skips published release shots so the publisher can carry them over unchanged. Publishing belongs to a docs refresh or
-the release screenshot procedure. The docs shots have no Mac route. `scripts/publish-docs-shots.sh` is the only thing
-that pushes `refs/docs-assets/keep`; never push it by hand or commit a screenshot on main. Changing that script means
-running its `--self-test`, which needs no network.
+The command keeps its bulk capture record and local preview output. For a draft or GUI check, pass `--only <page>` or
+`--only <page>/<shot>` once for each affected page or shot in the same invocation. A full capture skips published
+release shots so the publisher can carry them over unchanged. Publishing belongs to a docs refresh or the release
+screenshot procedure. The docs shots have no Mac route. `scripts/publish-docs-shots.sh` is the only thing that pushes
+`refs/docs-assets/keep`; never push it by hand or commit a screenshot on main. Changing that script means running its
+`--self-test`, which needs no network.
