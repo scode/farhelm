@@ -3,7 +3,7 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight 0d4a6c] `agent-hook-setup.md` — give every agent type its own Settings section, and let Grok and Antigravity users opt in once to Farhelm installing its Restart hooks into those agents on every machine, asked in the launcher and explained on the greyed Restart (after `launcher-command-field.md`)
-- [pending] `triage-bookkeeping.md` — execute the 45 discard outcomes from the 2026-11-21 triage, and turn the 17 duplicated-code findings into one Near term TODO entry that keeps their detail
+- [in-flight f853ef] `triage-bookkeeping.md` — execute the 45 discard outcomes from the 2026-11-21 triage, and turn the 17 duplicated-code findings into one Near term TODO entry that keeps their detail
 - [pending] `triage-spec-text.md` — write the accepted current behavior from the 2026-11-21 triage outcomes into SPEC.md and SPEC_impl.md
 - [pending] `triage-gui-sessions.md` — execute the 2026-11-21 triage outcomes for the desktop app's session list, sidebar, attention list and notices, in grouped PRs
 - [pending] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
