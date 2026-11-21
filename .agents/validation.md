@@ -1045,7 +1045,8 @@ systemd or SSH substrate ran.
   network. It is bash 3.2-safe, so it also runs under macOS's `/bin/bash`.
 - `dprint check`
 - `python3 -B scripts/test-record-test-run.py` and `python3 -B deflake/test-deflake.py` cover the recorder and deflake
-  tooling, including state-root ownership checks. Changes to the deflake driver also run `deflake/EVAL.md`.
+  tooling, including state-root ownership checks and retention of a nested run after outer temporary directory cleanup.
+  Changes to the deflake driver also run `deflake/EVAL.md`.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops
   the rest silently) and ending with its truncation sentinel, every path an instruction file names and every
@@ -1180,8 +1181,9 @@ systemd or SSH substrate ran.
   described in `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
   `python3 -m py_compile scripts/test-worker/remote/prune.py` — the SSH test worker harness's own checks (the driver,
-  the worker's bootstrap, runners, lock and stop, and the sync's prune). Run them when the harness changes; seconds, no
-  worker. Using the harness itself is described in `.agents/test-worker.md`.
+  the worker's bootstrap, runners, lock and stop, and the sync's prune). Run them when the harness changes. Seconds, no
+  worker. The driver should report a failed copy with the worker's exit status while streaming that run's summary. Using
+  the harness itself is described in `.agents/test-worker.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,

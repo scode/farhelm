@@ -34031,3 +34031,79 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Validation, launch and the recovery marker use the same resolved binary. jj change `sqzmtxmvtpqy`,
   bookmark `plan/triage-tooling/02-capture-host-lifecycle`,
   [draft PR #4494](https://github.com/scode/farhelm/pull/4494/changes).
+
+## runtime-recorder-guidance-conflict.md
+
+- Outcome: `fix code`.
+- Assessment: None in the product. The run-all-tests instructions put the terminal emulator's ignored stress and memory
+  tests under a section that says the test recorder is optional, while root AGENTS.md requires the recorder for every
+  runtime test. Verified: .agents/run-all-tests.md section 2 (line ~80: "Generic recorder wrapping is fine but not
+  required for these") contains the emulator ignored-tests and snapshot-benchmark entries (~177-182). Other runtime
+  entries there say "through the recorder" explicitly. AGENTS.md "Tests and validation" requires it (confirmed).
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Fixed text. Runtime tests explicitly require the recorder even when listed beside optional static checks.
+  jj change `vkrplqqqukrz`, bookmark `plan/triage-tooling/03-recorder-and-test-worker`,
+  [draft PR #4496](https://github.com/scode/farhelm/pull/4496/changes).
+
+## outer-recorder-deletes-nested-failure-evidence.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tooling. When a recorded command runs another recorder (the local CentOS provisioning script
+  does this), the outer recorder deletes its temporary directory at the end, and the inner run's failed evidence goes
+  with it. Verified: Confirmed. `record-test-run.py` `default_output_root` follows TMPDIR, the outer recorder sets the
+  child's TMPDIR to its own temporary directory (~L1902), and `release_child_tmp` removes that directory with `rmtree`
+  if it holds no socket. `test-provision-centos.sh` passes `--output-root` to the inner recorder only when the caller
+  gave one.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix the code. AGENTS.md requires keeping failed run directories, and this silently breaks that.
+- Execution: Fixed. Nested recorders inherit the outer default evidence root outside its disposable TMPDIR. jj change
+  `vkrplqqqukrz`, bookmark `plan/triage-tooling/03-recorder-and-test-worker`,
+  [draft PR #4496](https://github.com/scode/farhelm/pull/4496/changes).
+
+## test-worker-success-loses-evidence.md
+
+- Outcome: `other`.
+- Assessment: None for users. The SSH test-worker driver exits with the remote status even when copying the logs back
+  failed, and can print a previous run's `summary.txt` from a reused output directory. Verified:
+  `scripts/test-worker/test-worker.sh:162-166` ignores `fetch_out`'s status and `cat`s whatever `summary.txt` exists.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code (fail or warn on copy failure; clear or check the old summary)
+- Execution: Fixed. The driver reports a failed evidence transfer separately, preserves the worker status when it
+  failed, and stops reprinting the local summary. Per-invocation evidence ownership goes with “Protect a test worker's
+  checkout before staging.” jj change `vkrplqqqukrz`, bookmark `plan/triage-tooling/03-recorder-and-test-worker`,
+  [draft PR #4496](https://github.com/scode/farhelm/pull/4496/changes).
+
+## test-worker-sync-precedes-lock.md
+
+- Outcome: `other`.
+- Assessment: None for users. A second test-worker request for the same checkout rsyncs and re-snapshots the worker tree
+  before trying the lock, changing the files a running test is using, then fails as "in use". Verified:
+  `test-worker.sh:157-162` runs `push_tools`, `sync_tree` (rsync, prune, snapshot) and only then `with-lock.sh`, which
+  takes `flock -n` (`remote/with-lock.sh:12-16`). `.agents/test-worker.md:32` promises the lock means "two runs never
+  share a tree". Realistic trigger: interrupting the local script does not end the remote run
+  (`.agents/test-worker.md:51-52`), so re-running it syncs into the busy tree.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code (check or take the lock before syncing, or stage per run)
+- Execution: Deferred to “Protect a test worker's checkout before staging.” Atomic ownership across staging needs a
+  lease or isolated promotion that preserves the detached run contract. jj change `vkrplqqqukrz`, bookmark
+  `plan/triage-tooling/03-recorder-and-test-worker`,
+  [draft PR #4496](https://github.com/scode/farhelm/pull/4496/changes).

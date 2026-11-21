@@ -21,11 +21,11 @@
 #   stop                       end the run holding the lock (interrupting this script does not end the remote run)
 #
 # Each run writes a summary and console logs under `<out>`, and, when it fails, the recorder's retained run
-# directories as `<out>/runs.tar.gz`. Exit status is the remote command's.
+# directories as `<out>/runs.tar.gz`. The worker prints its own summary. A failed evidence copy is reported and
+# returns failure even when the remote command passed. A failed remote command keeps its exit status.
 #
 # The worker keeps one tree per checkout name under `~/farhelm-test-worker/<checkout>/` with its own `target/`, so
-# builds stay incremental across runs. A lock there lets only one run use that tree at a time; a second run fails at
-# once rather than waiting.
+# builds stay incremental across runs. The tree's lock covers execution after the driver stages the tools and source.
 set -u
 
 die() {
@@ -161,8 +161,10 @@ rust | gui | run)
   sync_tree || die "could not sync the working copy to $destination"
   remote bash "$base/tools/with-lock.sh" "$base" "run-$cmd.sh" "${args[@]}"
   code=$?
-  fetch_out "$cmd"
-  cat "$out/summary.txt" 2>/dev/null
+  if ! fetch_out "$cmd"; then
+    printf 'test-worker: could not copy evidence to %s (command exit %s)\n' "$out" "$code" >&2
+    [ "$code" != 0 ] || exit 1
+  fi
   exit "$code"
   ;;
 stop)

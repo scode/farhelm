@@ -1247,7 +1247,7 @@ class RecorderTest(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(manifest))
         names = manifest["environment"]["farhelm"]
         self.assertEqual(names["overridden_names"], ["FARHELM_TEST_TRACE_DIR"])
-        self.assertEqual(names["recorder_owned_names"], ["FARHELM_TEST_TRACE_DIR"])
+        self.assertEqual(names["recorder_owned_names"], [RECORDER.DEFAULT_EVIDENCE_ROOT_ENV, "FARHELM_TEST_TRACE_DIR"])
         self.assertEqual(names["retained_names"], [])
         self.assertEqual(manifest["child_status"]["exit_code"], 7)
         self.assertEqual(manifest["test_traces"]["root"], "test-traces")
@@ -1324,6 +1324,23 @@ class RecorderTest(unittest.TestCase):
                 os.close(fd)
         finally:
             shutil.rmtree(path, ignore_errors=True)
+
+    def test_failed_nested_evidence_survives_outer_temporary_cleanup(self) -> None:
+        """A wrapper command can record its own failed test. The outer TMPDIR cleanup must preserve the evidence."""
+        temporary = self.base / "tmpdir"
+        temporary.mkdir()
+        inner = self.cli([PYTHON, "-c", "raise SystemExit(19)"])
+        root_index = inner.index("--output-root")
+        del inner[root_index:root_index + 2]
+        result = self.invoke(inner, env=self.environment(TMPDIR=os.fspath(temporary)))
+        self.assertEqual(result.returncode, 19, result.stderr.decode())
+        _, outer = self.latest_manifest()
+        self.assertTrue(outer["child_tmp"]["removed"], outer["child_tmp"])
+        root = temporary / "farhelm-tmp" / "test-runs"
+        manifests = list(root.glob("*/manifest.json"))
+        self.assertEqual(len(manifests), 1, result.stdout.decode())
+        failed = json.loads(manifests[0].read_text(encoding="utf-8"))
+        self.assertEqual(failed["child_status"]["exit_code"], 19)
 
     def write_run(self, root: pathlib.Path, manifest: dict[str, object], age_days: float) -> pathlib.Path:
         """Plant a run directory with a manifest and bulky parts, backdated by `age_days`."""
