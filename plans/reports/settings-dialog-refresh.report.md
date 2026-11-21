@@ -74,3 +74,99 @@ All four drafts passed the independent Sol high source and Opus high visual revi
 pass reviewed all 62 Settings pictures against the agreed mockups and the written design. It verified the full recipe
 deletion warning and the pinned Checkouts actions at 720 × 560. The other application screenshots matched their previous
 references by content.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main had gained nothing but queue bookkeeping since the executor based the plan.
+An independent reviewer and I read the four PRs against each other and against the specs. The changes to the shared
+controls (the dialog frame, buttons, check boxes, radio groups and text fields) only take effect where Settings asks for
+them, so the launcher, host settings and Add host look and behave as before. The checkout folder and post-clone command
+fields are also used by host settings and the launcher's checkout setup; their Save moves to the footer only inside
+Settings.
+
+The plan still in flight, launcher-command-field, adds the same card color to the theme. It will meet a textual conflict
+there when it lands; both plans expect that, and its landing keeps a single definition of the color.
+
+#### Fixes made while landing
+
+All of them went in as a fifth PR, [#4440](https://github.com/scode/farhelm/pull/4440/changes), which changes no
+behavior. Closing Settings now asks about every unsaved draft, but several texts still said closing throws unsaved text
+away:
+
+- The Tensorlake sandboxes docs page, in its section on saving named credentials. It now says Settings asks whether to
+  save a typed value first.
+- The recipe editor's code comments, which quoted a spec sentence this plan removed and still said the recipe editor
+  asks its own question when Settings closes. Now the Settings dialog asks one question about every draft; the recipe
+  editor still asks its own question only when Add host, which embeds it, is closed.
+- Four test descriptions, and the name of one credential test that no longer checks closing with a draft.
+- A code comment that still gave the section list's old row height. The plan made the rows 28 pixels high instead of 34,
+  to fit the new colored icon tiles; only the comment was stale.
+
+#### Checks
+
+The plan changes only the desktop app's GUI crate (Settings, the shared controls and the theme), its reference pictures,
+SPEC.md, SPEC_impl.md, the Settings guide and the developers' list of how the new app's Settings differs from the old
+one. The landing ran the GUI crate's tests, the app's end-to-end smoke test and the lint runs (clippy) on a separate
+arm64 Linux test machine, and the screenshot comparisons, the website build and the small checks locally on x86_64.
+
+On the plan as delivered, stacked on main:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `bfe3fa96-895c-4e72-a07d-c012e23df5a2`): all
+  3238 passed; the two skipped are the screenshot comparison, run separately below, and a generator that runs only by
+  hand.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `548beb54-871e-4da3-8915-36de8a9a4b37`):
+  every step passed but paste, which skips on Linux as it always does. Its steps open Settings from the gear and close
+  it with Escape.
+- `cargo clippy --all-targets -- -D warnings` and the desktop app's own two clippy runs (with and without
+  `--features agent`), on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `cd32e6ad-8db4-4a2d-952e-625cb2271cc3`): passed, with the plan's new Settings pictures.
+- The website build (`bun install --frozen-lockfile && bun run build`), with its link check, locally: passed.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `python3 scripts/check-agents-md.py`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py`, `dprint check` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After the landing fix (#4440), which changes comments, test descriptions, one test's name, a docs sentence and that
+developers' list:
+
+- `cargo nextest run -p farhelm-gui -E 'test(/^settings::/)'`, on the test machine (recorder run
+  `0ef52b8b-5588-4961-8dda-fe69680d061a`): all 229 passed, the renamed test among them, and
+  `cargo clippy -p farhelm-gui --all-targets -- -D warnings` passed.
+- The website build, `cargo fmt --all -- --check`, `dprint check` and `python3 scripts/check-agents-md.py`, locally:
+  passed.
+
+The other runs above still apply to the fix, which changes no code that runs. Skipped: the workspace suite and the
+desktop app's own tests, since nothing outside the GUI crate changed and the lint runs compiled the desktop app against
+it; CI, which runs only on demand; and Mac runs, which the report leaves to native validation.
+
+#### Things you should know that the report does not say
+
+- A small bug with no data lost: if Send test (ntfy alerts), or the Tensorlake key's Test or Clear, is still running
+  when you close Settings and choose Save, that form's save is refused without a message. The question disappears and
+  Settings stays on that page, with your draft intact. A follow-up could treat a running test as a pending save in the
+  question, or show the usual "Not saved: another operation was in progress. Try again." line.
+- The Tensorlake API key can be typed on two pages, Tensorlake and Credentials, which save the same key. When both hold
+  different typed keys, closing with Save refuses to pick one and shows "Two different Tensorlake keys are typed. Save
+  the one you want first." (the plan's wording). But once you save one from its page, the other page's typed key is
+  still there, and the next close question's Save writes it over the key you just chose. I count that as a bug worth a
+  small follow-up: either drop the other page's draft once one key is saved, or say "Save the one you want and discard
+  the other."
+- While that two-keys message shows, Settings opens the Credentials page's key form even if a credential editor was open
+  there. The executor added a "Resume editing credential" button, not in the mockup, that brings the editor back with
+  its draft. It works.
+- A saved credential's Delete is now a quiet red button in the footer, next to Cancel and Save, and deletes with one
+  click. It never asked for confirmation (the report's "two delete questions" are a recipe's and a leftover
+  container's), but it used to sit apart as a solid red button, so a misclick is now easier.
+- No test closes Settings with a typed credential secret; the close question's tests cover the ntfy and checkout forms,
+  the recipe editor and the two Tensorlake keys.
+- Asking to close with a single unsaved form switches to that form's page (and clears a search), even if you then choose
+  Keep editing.
+- The changelog has four fragments for this one feature, which release curation can merge.
+
+#### What you should still do
+
+Nobody has run this on a Mac yet; the report's checks and these ran on Linux, where the App page's Mac-only controls
+were drawn from stand-ins and no sound can play. On the first Mac build that has this change (a dev build or the next
+release), open Settings once: check the App page and press a play button beside the sounds.
