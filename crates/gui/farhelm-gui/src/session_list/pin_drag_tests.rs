@@ -144,7 +144,7 @@ fn three_pins() -> Vec<farhelm_proto::ui_channel::CollectionState> {
 /// SPEC.md, "Session list": "Hovering or focusing an eligible row reveals a grip on its left edge", and "A newly pinned row
 /// waiting for the order hold to end has neither a grip nor Move actions"; the old grip was a button named "Drag pinned
 /// session" over the row's leading gutter, on movable pins only, shown on hover. Its help is checked beside the sidebar
-/// with the other row marks' (`summary_tests.rs`, `every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring`).
+/// with the other row controls' (`summary_tests.rs`, `row_controls_show_help_beside_the_sidebar_with_a_ring`).
 /// Specified: with a and b pinned and u unpinned, a's and b's grips are drawn, named "Drag pinned session", at the top
 /// left of their rows, 12 by 28 pixels, hidden until the pointer is over the row. The unpinned grip offers a group move.
 /// A pin made by the helm

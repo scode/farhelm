@@ -2667,7 +2667,7 @@
     },
     {
       "golden": "session-row-hover-beside",
-      "title": "An idle row's age hovered: its timestamp beside the sidebar, the notch pointing back at the age and the accent ring on it",
+      "title": "An idle row's age hovered: its timestamp beside the sidebar with a notch pointing to the age",
       "reference": "tooltip-last-activity"
     },
     {

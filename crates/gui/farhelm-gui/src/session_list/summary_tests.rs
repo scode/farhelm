@@ -1,6 +1,6 @@
 //! Tests of a session row's hover help beside the sidebar: the summary card on the row's open control (what it says for
 //! each kind of session, in either density, from the pointer and on keyboard focus) and every row mark asking for the
-//! beside placement, with its ring, the marks that hold focus showing their own help on keyboard focus too.
+//! beside placement. Controls carry a ring and can show their own help on keyboard focus. Status marks carry a notch.
 //!
 //! What the card shows is pinned through [`Summary::of`], a pure function, for a running, an idle, an exited and a
 //! managed-checkout session; that the row shows it, beside the sidebar and with those words painted, is pinned through
@@ -19,7 +19,7 @@ use super::host_rail::tests::{hosts, local, remote};
 use super::row_tests::{node, texts_within};
 use super::summary::{ACTIONS_HINT, CLICK_HINT, CardStatus, Fact, SUMMARY_ID_PREFIX, Summary};
 use super::tests::{
-    Fixture, TEST_NOW, collections, listing, open_main, preferences_state, session,
+    Fixture, TEST_NOW, collections, listing, open_main, preferences_state, selected, session,
 };
 use crate::host_text::tests::painted_words;
 use crate::layers::{self, ShownTooltip, TooltipSide};
@@ -343,8 +343,8 @@ fn ring_inks(cx: &mut VisualTestContext) -> (Hsla, Hsla) {
 }
 
 /// SPEC.md, "Session list": "The same card appears from the title or any unmarked part of the open button", and it sits
-/// "just right of the sidebar ... A left-edge notch points back to the target's centre ... and a thin accent ring
-/// identifies that target", in the on-fill ink on the selected row's accent fill. Specified, over a running local
+/// "just right of the sidebar", with a notch pointing back to the row. "A thin accent ring identifies a control while
+/// its help shows." On a selected row the ring uses the on-fill ink. Specified, over a running local
 /// session `b` beside the open session `a`: resting on b's title shows its card beside the sidebar, reporting the row's
 /// words `Running — open this session`, with the accent ring painted at b's open control's own bounds with square
 /// corners and the notch drawn; the card paints exactly `Fix the widget`, `Running`, the agent line, Host
@@ -442,18 +442,9 @@ fn one_note() -> Value {
     json!([{ "seq": 5, "at": ACTIVE, "text": "Look at this" }])
 }
 
-/// The old app opted every row target into the beside placement one by one, and a mark left at the pointer would put
-/// its help over the rows below it, the very thing the placement exists to avoid. A mark's help that went missing would
-/// leave the row's card showing there instead, also beside the sidebar with a ring, so each check reads the mark's own
-/// words and a ring on the mark's own bounds. Specified, over the open session `a` (pinned, running, one notification)
-/// and `b` (the same) and a stale `s` on the unreachable host 3: on b, the status dot (`Running — Mark unread`), the host
-/// mark (`Local: …`), the agent track (`Codex — …`), the age (`Last activity …`), the pin (`Pinned`), the pin's grip
-/// (`Drag to reorder pinned sessions`), the bell (`Notifications: 1 unread; …`) and the actions button (`Session
-/// actions: …`) each show their help beside the sidebar with an accent ring on the mark's bounds, square except the
-/// button's, which follows its corners inside its edge (2 pixels); on s, the stale cause too; and on the open row a, the
-/// dot, the age, the grip and the bell with the ring in on-fill.
-#[gpui::test]
-fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestAppContext) {
+/// Two pinned running sessions with unread notifications, one selected, and a stale session on an unreachable
+/// host. Both tests hover the same row layout to distinguish pressable controls from the status marks beside them.
+fn open_rows_with_marks(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
     let unreachable = json!({
         "phase": "unreachable-reprobing",
         "cause": "transport-failure",
@@ -472,7 +463,7 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
     };
     let mut registry = hosts(&[local(), remote(3, "ops@host3.example.invalid")]);
     registry.entries[1].value["state"] = unreachable;
-    let (_fake, cx) = open_main(
+    let (fake, cx) = open_main(
         cx,
         vec![
             listing(&order, &rows),
@@ -480,22 +471,57 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
             registry,
         ],
     );
-    let (accent, on_fill) = ring_inks(cx);
-    let square = px(0.);
-    let button_radius = metrics::RADIUS_SM - px(1.);
+    assert_eq!(selected(cx).as_deref(), Some("a"), "a is the open row");
+    (fake, cx)
+}
+
+/// A mark's own help covers the neighboring rows if beside placement is lost. Its words distinguish it from
+/// the summary card, and the notch shows which mark they describe.
+fn assert_status_help(cx: &mut VisualTestContext, row: &str, target: &str, words: &str) {
+    let shown = shown_over(cx, row, target);
+    assert_eq!(shown.side(), TooltipSide::Beside, "{target}");
+    assert!(shown.text.starts_with(words), "{target}: {:?}", shown.text);
+    assert!(cx.debug_bounds("tooltip-notch").is_some(), "{target}");
+    assert!(shown.ring().is_none(), "{target} is a status mark");
+}
+
+/// Status marks sit among controls in both selected and unselected rows. Each mark keeps its own help and
+/// notch beside the sidebar. The absence of a ring makes the mark read as information.
+#[gpui::test]
+fn status_marks_show_help_beside_the_sidebar_without_a_ring(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_rows_with_marks(cx);
     let age = "Last activity 2025-07-01 23:57:58";
-    let bell = "Notifications: 1 unread; click to list them";
-    for (target, words, radius, bordered) in [
-        ("session-seen-b", "Running — Mark unread", square, false),
+    for (target, words) in [
         (
             "session-row-b-host",
             "Local: on this machine, where the helm runs",
-            square,
-            false,
         ),
-        ("session-row-b-agent", "Codex — ", square, false),
-        ("session-row-b-age", age, square, false),
-        ("session-row-b-pin", "Pinned", square, false),
+        ("session-row-b-agent", "Codex — "),
+        ("session-row-b-age", age),
+        ("session-row-b-pin", "Pinned"),
+    ] {
+        assert_status_help(cx, "session-row-b", target, words);
+    }
+    assert_status_help(cx, "session-row-a", "session-row-a-age", age);
+    assert_status_help(
+        cx,
+        "session-row-s",
+        "session-row-s-cause",
+        "Waiting for supervisor: this is the session's last-known state",
+    );
+}
+
+/// A ring identifies which control the help belongs to. The dot, grip, bell and menu keep their own beside
+/// help and ring, including the selected row's inverse ink and the menu button's rounded corners.
+#[gpui::test]
+fn row_controls_show_help_beside_the_sidebar_with_a_ring(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_rows_with_marks(cx);
+    let (accent, on_fill) = ring_inks(cx);
+    let square = px(0.);
+    let button_radius = metrics::RADIUS_SM - px(1.);
+    let bell = "Notifications: 1 unread; click to list them";
+    for (target, words, radius, bordered) in [
+        ("session-seen-b", "Running — Mark unread", square, false),
         (
             "session-pin-grip-b",
             "Drag to reorder pinned sessions",
@@ -512,18 +538,8 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
     ] {
         assert_mark_help(cx, "session-row-b", target, words, accent, radius, bordered);
     }
-    assert_mark_help(
-        cx,
-        "session-row-s",
-        "session-row-s-cause",
-        "Waiting for supervisor: this is the session's last-known state",
-        accent,
-        square,
-        false,
-    );
     for (target, words) in [
         ("session-seen-a", "Running — Mark unread"),
-        ("session-row-a-age", age),
         ("session-pin-grip-a", "Drag to reorder pinned sessions"),
         ("session-bell-a", bell),
     ] {
@@ -538,7 +554,7 @@ fn every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring(cx: &mut TestA
 /// unreachable host 3: its title shows the same card a noncompact row shows, beside the sidebar, its Directory
 /// `/home/user/src/x` in full and its status `Exited`, reporting `Exited (code 17) · Waiting for supervisor ·
 /// /home/user/src/x — open this session`; its ended mark (`Exited (code 17)`) and its stale clock (`Waiting for
-/// supervisor: …`) show their own help beside the sidebar too, each ring on the mark itself.
+/// supervisor: …`) show their own help beside the sidebar with a notch and no ring.
 #[gpui::test]
 fn a_compact_row_shows_the_same_card_with_its_hidden_folder(cx: &mut TestAppContext) {
     let unreachable = json!({
@@ -585,7 +601,6 @@ fn a_compact_row_shows_the_same_card_with_its_hidden_folder(cx: &mut TestAppCont
             .any(|pair| pair == ["Directory", "/home/user/src/x"]),
         "the hidden folder in full: {words:?}"
     );
-    let (accent, _) = ring_inks(cx);
     for (target, words) in [
         ("session-row-x-ended", "Exited (code 17)"),
         (
@@ -593,7 +608,7 @@ fn a_compact_row_shows_the_same_card_with_its_hidden_folder(cx: &mut TestAppCont
             "Waiting for supervisor: this is the session's last-known state",
         ),
     ] {
-        assert_mark_help(cx, "session-row-x", target, words, accent, px(0.), false);
+        assert_status_help(cx, "session-row-x", target, words);
     }
 }
 

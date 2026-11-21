@@ -15,6 +15,8 @@
 //! A mark whose text is a value rather than a symbol (the sidebar's version readout) can be drawn in the monospace face
 //! ([`StatusMark::monospace`]) and cut short with an ellipsis when its row is too narrow ([`StatusMark::truncate`]), as
 //! the old `.app-version` was.
+//!
+//! Beside help points back to the mark with a notch. The ring belongs to targets the user can press.
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
@@ -119,6 +121,7 @@ impl RenderOnce for StatusMark {
             Some(content) => mark.child(content),
             None => mark.child(self.text),
         };
-        super::with_hover_help(mark, &self.id, &self.help, self.described, None, window, cx)
+        let help = self.help.without_ring();
+        super::with_hover_help(mark, &self.id, &help, self.described, None, window, cx)
     }
 }

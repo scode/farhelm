@@ -499,7 +499,7 @@ fn a_rail_tooltip_keeps_its_host_values_in_separate_isolates(cx: &mut TestAppCon
 /// offers All, which needs no registry. Specified: a hosts collection whose first read failed (unavailable, no hosts)
 /// and a snapshot with no hosts collection at all each draw All pressed and, after it, the "?" status named "The host
 /// list could not be loaded" with the status role, and no avatar; Add host still follows, since adding a host needs no
-/// host list.
+/// host list. The status help uses the rail's edge, with a notch pointing to the "?" and no ring.
 #[gpui::test]
 fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) {
     let mut failed = hosts(&[]);
@@ -523,6 +523,19 @@ fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) 
         fake.connect(vec![listing(&[], &[])]);
         cx.run_until_parked();
     }
+    let rail = test_support::bounds(cx, "host-rail");
+    assert_eq!(
+        hover_help(cx, "host-rail-unavailable").as_deref(),
+        Some("The host list could not be loaded")
+    );
+    let shown = cx
+        .update(|window, cx| layers::shown_tooltip(window, cx))
+        .expect("the status help is shown");
+    assert_eq!(shown.side(), layers::TooltipSide::Beside);
+    assert!(shown.ring().is_none());
+    assert!(cx.debug_bounds("tooltip-notch").is_some());
+    let card = test_support::bounds(cx, "tooltip-card");
+    assert!((card.left() - rail.right() - px(6.)).abs() <= px(1.));
 }
 
 // ---- Choosing ------------------------------------------------------------------------------------------------------

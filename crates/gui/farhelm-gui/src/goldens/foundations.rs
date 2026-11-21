@@ -601,8 +601,8 @@ pub(super) fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut A
 /// Show the row's help beside the sidebar as if the pointer had come to rest on it.
 pub(super) fn tooltip_beside_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let cues = layers::BesideCues {
-        on_fill: false,
         radius: theme::metrics::RADIUS_MD,
+        ..Default::default()
     };
     let hint = layers::Hint::placed(BESIDE_HELP.into(), layers::HelpPlacement::Beside(cues));
     layers::show_tooltip_at(

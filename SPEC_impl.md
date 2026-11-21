@@ -949,10 +949,10 @@ for that frame.
 
 Beside help draws a notch on the card edge facing the control. It is half of a 10 by 10 square turned 45 degrees, level
 with the chosen height and at least 12 pixels or half the card's height from the card's top and bottom. Sidebar, rail
-and list help also draws a 1-pixel ring just inside the control, with its corner radius and clip, in the accent or the
-on-fill color of a selected row. Menu help uses the active item's own highlight. The control's bounds are taken inside
-its border, where the ring goes. The old app measured from the border box and closed help on scroll. Here help follows
-its control while the pointer stays on it.
+and list help for a control also draws a 1-pixel ring inside its border, with its corner radius and clip, in the accent
+or the on-fill color of a selected row. `StatusMark` keeps the notch and suppresses the ring when it registers its help.
+Menu help uses the active item's own highlight. The old app measured from the border box and closed help on scroll. Here
+help follows its target while the pointer stays on it.
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,

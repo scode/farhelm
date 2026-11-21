@@ -2770,7 +2770,9 @@ hover summary card and the full invocation on its agent mark on web and desktop;
 a value is recorded. The same card appears from the title or any unmarked part of the open button, in either density and
 on keyboard focus. Every session-row hover, including the summary card and notification bell, sits just right of the
 sidebar, vertically centred on its target and shifted only to fit the window. A left-edge notch points back to the
-target's centre, clamped to the box's straight edge, and a thin accent ring identifies that target while its help shows.
+target's centre, clamped to the box's straight edge. A thin accent ring identifies a control while its help shows.
+Status marks get the notch alone.
+
 When there is no room to the right, it uses ordinary above/below placement without a notch or ring. The summary card
 names the title, status, agent, host, checkout when managed, directory, start and last-activity times, and what a click
 does; meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a short window;
@@ -2815,7 +2817,8 @@ its ordinary place above or below the control. An open submenu takes priority ov
 
 Session group headers, attention rows, host rows and the session list's Show all links use the sidebar's right edge.
 Help for the host rail's avatars and footer controls uses the rail's own right edge as it expands and collapses. A notch
-and a thin ring identify the target in both cases. An open panel keeps its space beside the rail.
+points to the target, and a thin ring identifies a control. Status marks get the notch alone. An open panel keeps its
+space beside the rail.
 
 Controls in the top rows of the sidebar and session pane, main-pane banners, the version readout and the drawn title bar
 show help below the control first. Dialog footer buttons and question answers also prefer below, keeping the text above

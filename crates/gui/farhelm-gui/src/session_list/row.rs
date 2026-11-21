@@ -47,7 +47,7 @@
 //! **Hover help beside the sidebar.** The row's own hover help is its summary card ([`super::summary`]), shown from the
 //! title or any part of the open control no mark covers, and every mark's help asks to sit beside the sidebar too
 //! ([`row_marks::HelpPlace`]): SPEC.md, "Session list", puts every session-row hover "just right of the sidebar" with a
-//! notch and a ring on its target, the ring in the on-fill ink on the selected row. The innermost control's help wins
+//! notch pointing to its target. A control also gets a ring, in the on-fill ink on the selected row. The innermost help wins
 //! ([`crate::layers::hover_began`]), so a mark's own help replaces the card while the pointer is on the mark. The bell
 //! asks for the same placement in [`crate::notices_bell`], which draws it. Keyboard focus shows the same help as the
 //! pointer, in the same place: the card when Tab lands on the open control, and the bell's or the actions button's
