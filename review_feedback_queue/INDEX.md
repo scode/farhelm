@@ -20,9 +20,6 @@ consequences.
   Stop or Delete can ask approval to terminate an agent even though accepting the card terminates the shell and its
   work.
 
-- [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
-  down before it saves command history configured to write on exit.
-
 - [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
   different template from the one shown. The old button can also suppress Undo.
 

@@ -1120,7 +1120,7 @@ async fn handle_stop_session(
             // agent helper is shared with Restart, which must keep tabs.
             let reaped = reap_process_tree(
                 &sup.seams.scopes,
-                ScopeUnits::recorded(entry.scope.clone()),
+                ScopeUnits::recorded(entry.scope.clone()).with_main_launch(&entry.info.launch),
                 None,
                 &session_id,
                 &SweepTarget::AgentOnly,

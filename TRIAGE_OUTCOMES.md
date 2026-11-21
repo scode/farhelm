@@ -265,26 +265,6 @@
   the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## bash-stop-loses-unsaved-history.md
-
-- Outcome: `fix code`.
-- Assessment: Stop, Stop and suspend, Delete and Replace of a Bash session send SIGTERM, which interactive Bash ignores,
-  then SIGKILL. The shell never exits cleanly: it sits out the grace period and loses history it would have saved on
-  exit. Verified: sweep.rs ~1190–1210 and ~1879–1886 send SIGHUP only to tab-marked processes and tab scopes. The launch
-  scope gets TERM then KILL, per a comment written for agents ("a launch scope holds the agent, whose graceful SIGTERM
-  handling a hangup would pre-empt"). SPEC.md (~2147): "Stopping a live agent or shell ... gets its own chance to exit
-  first." Zsh behavior unverified.
-- Decision: Q3, the maintainer picked "Hang up shells; accept the reaping". Unsaved shell history counts as user-owned
-  work for bucketing. (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes
-  we definitely need to batch these in a much smaller set of plans. please try to separate them by area of code so there
-  is a good chance of them running concurrently."
-- Completion criteria: End Bash/Zsh main shells on Stop, Stop and suspend, Delete and Replace with a hangup, as tab
-  close does, so they exit within the grace period and save history. Decide per launch kind in the harness layer, not by
-  comparing kinds at the call site. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
-  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
-  Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
 ## shell-lifecycle-approval-names-wrong-program.md
 
 - Outcome: `fix spec+code`.

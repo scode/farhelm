@@ -1077,9 +1077,8 @@ async fn poll_until_gone(
 ///
 /// 1. Enumerate (PPID closure from the `roots` if any, unioned with the
 ///    environment-marker scan for `session_id`) and SIGTERM the result;
-///    the tab processes among them (every one, for a tab's own sweep) get
-///    SIGHUP as well, because an interactive shell ignores SIGTERM and
-///    exits on the hangup its terminal closing would have sent.
+///    shell selections get SIGHUP as well. For a whole agent session,
+///    only the tab-marked processes get the terminal's hangup.
 /// 2. After a grace period — bounded by [`KILL_GRACE`], ended early only
 ///    once EVERY pid round 1 signalled is confirmed gone (see
 ///    [`poll_until_gone`] for why the root alone dying is not enough) —
@@ -1148,8 +1147,9 @@ async fn kill_process_tree(
     roots: impl IntoIterator<Item = (u32, u64)>,
     session_id: &str,
     target: &SweepTarget,
+    hangup_main: bool,
 ) -> anyhow::Result<()> {
-    kill_process_tree_with_grace(roots, session_id, target, KILL_GRACE).await
+    kill_process_tree_with_grace(roots, session_id, target, KILL_GRACE, hangup_main).await
 }
 
 /// [`kill_process_tree`] with the SIGTERM grace bound as a parameter.
@@ -1164,6 +1164,7 @@ async fn kill_process_tree_with_grace(
     session_id: &str,
     target: &SweepTarget,
     grace: Duration,
+    hangup_main: bool,
 ) -> anyhow::Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
@@ -1188,18 +1189,14 @@ async fn kill_process_tree_with_grace(
         session_id,
         target,
     ));
-    // Hang up the tab processes too. An interactive shell ignores SIGTERM
+    // Hang up the shell processes too. An interactive shell ignores SIGTERM
     // (bash does, absent a trap) but exits on SIGHUP, which is the signal
-    // its terminal closing would have delivered; without it a tab's shell
-    // sat out the entire grace and died to the SIGKILL, and a close paid
-    // the whole bound for nothing. Agents never wear a tab marker, so
-    // their SIGTERM handling is untouched by this. A tab's own sweep hangs
-    // up everything it holds — the pane root and every descendant the
-    // closure reached are that tab's — decided HERE rather than during
+    // its terminal closing would have delivered. A shell reap hangs
+    // up everything it holds, decided here rather than during
     // enumeration so the rule survives an enumeration failure, where the
     // caller's seed (the pane root alone) stands in for the walk.
     let to_hang_up: HashMap<u32, u64> = match target {
-        SweepTarget::Tab(_) => found.identities.clone(),
+        _ if hangup_main || matches!(target, SweepTarget::Tab(_)) => found.identities.clone(),
         _ => found
             .identities
             .iter()
@@ -1309,9 +1306,18 @@ pub(crate) struct ScopeUnits {
     /// is not proof every target was contained (legacy tabs are inferred).
     /// Required unscoped or uncertain targets keep this true across merges.
     needs_sweep: bool,
+    /// Initial signal policy for the main launch, shared by scope and portable cleanup.
+    hangup_main: bool,
 }
 
 impl ScopeUnits {
+    /// First-class shells need a hangup to save history. Use the saved launch, so retries and both cleanup routes
+    /// use the same policy without inspecting the command line or changing which processes the reap owns.
+    pub(crate) fn with_main_launch(mut self, launch: &farhelm_proto::SessionLaunch) -> Self {
+        self.hangup_main = launch.is_shell();
+        self
+    }
+
     /// Start with a scope selection read from a durable launch row.
     pub(crate) fn recorded(unit: Option<String>) -> Self {
         Self {
@@ -1478,6 +1484,7 @@ pub(crate) async fn reap_process_tree_with_podman_deadline(
     scope_kill_failure: ScopeKillFailure,
     podman_deadline: Option<tokio::time::Instant>,
 ) -> anyhow::Result<Reaped> {
+    let hangup_main = units.hangup_main;
     reap_process_tree_with_sweep(
         scopes,
         units,
@@ -1485,7 +1492,7 @@ pub(crate) async fn reap_process_tree_with_podman_deadline(
         session_id,
         scope_kill_failure,
         podman_deadline,
-        |roots| kill_process_tree(roots, session_id, target),
+        |roots| kill_process_tree(roots, session_id, target, hangup_main),
     )
     .await
 }
@@ -1540,6 +1547,7 @@ where
     let mut needs_sweep = units.needs_sweep;
     let mut scope_errors: Vec<String> = Vec::new();
     let earns_reprobe = !units.recorded.is_empty() || !units.possible.is_empty();
+    let hangup_main = units.hangup_main;
     let units: Vec<&String> =
         if scopes.available().await || (earns_reprobe && scopes.reprobe().await) {
             units
@@ -1592,7 +1600,7 @@ where
     // skip the agent's, which is the one most likely to have worked.
     let had_scopes = !units.is_empty();
     for unit in units {
-        match kill_scope(scopes, unit, session_id).await {
+        match kill_scope(scopes, unit, session_id, hangup_main).await {
             Ok(was_live) => needs_sweep |= !was_live,
             Err(e) => scope_errors.push(format!("{e:#}")),
         }
@@ -1810,8 +1818,9 @@ async fn kill_scope(
     scopes: &crate::scope::ScopeManager,
     unit: &str,
     session_id: &str,
+    hangup_main: bool,
 ) -> anyhow::Result<bool> {
-    kill_scope_with_grace(scopes, unit, session_id, KILL_GRACE).await
+    kill_scope_with_grace(scopes, unit, session_id, KILL_GRACE, hangup_main).await
 }
 
 /// Describe only the derived target scope, never broad host process state.
@@ -1843,6 +1852,7 @@ async fn kill_scope_with_grace(
     unit: &str,
     session_id: &str,
     grace: Duration,
+    hangup_main: bool,
 ) -> anyhow::Result<bool> {
     // Two buckets on purpose. `advisory` holds what `systemctl` REPORTED
     // (a failed existence check, a non-zero kill exit); the confirmation
@@ -1875,12 +1885,10 @@ async fn kill_scope_with_grace(
     if let Err(e) = signal_scope(scopes, unit, session_id, "SIGTERM").await {
         advisory.push(format!("{e:#}"));
     }
-    // A tab's scope holds an interactive shell, which ignores SIGTERM and
-    // honours SIGHUP (the signal its terminal closing would send). Hanging
-    // it up is what lets a tab close end inside the grace instead of
-    // sitting it out and dying to the SIGKILL; a launch scope holds the
-    // agent, whose graceful SIGTERM handling a hangup would pre-empt.
-    if crate::scope::is_tab_unit(unit)
+    // A tab or first-class shell ignores SIGTERM and can save its history
+    // on the hangup its terminal closing would send. An agent's graceful
+    // SIGTERM handling needs the grace period.
+    if (hangup_main || crate::scope::is_tab_unit(unit))
         && let Err(e) = signal_scope(scopes, unit, session_id, "SIGHUP").await
     {
         advisory.push(format!("{e:#}"));
@@ -2117,7 +2125,7 @@ pub(crate) async fn stop_live_agent(
     // their own close paths, so their live roots remain available to sweep.
     let reaped = reap_process_tree(
         &sup.seams.scopes,
-        ScopeUnits::recorded(entry.scope.clone()),
+        ScopeUnits::recorded(entry.scope.clone()).with_main_launch(&entry.info.launch),
         roots,
         session_id,
         &SweepTarget::AgentOnly,
@@ -3258,7 +3266,7 @@ mod tests {
 
         let grace = Duration::from_secs(5);
         let started = tokio::time::Instant::now();
-        kill_scope_with_grace(&scopes, &unit, &session_id, grace)
+        kill_scope_with_grace(&scopes, &unit, &session_id, grace, false)
             .await
             .expect("a unit that retired on SIGTERM is a clean teardown");
         let elapsed = started.elapsed();
@@ -3291,7 +3299,7 @@ mod tests {
 
         let grace = Duration::from_millis(300);
         let started = tokio::time::Instant::now();
-        kill_scope_with_grace(&scopes, &unit, &session_id, grace)
+        kill_scope_with_grace(&scopes, &unit, &session_id, grace, false)
             .await
             .expect("a unit that retired on SIGKILL is a clean teardown");
         let elapsed = started.elapsed();
@@ -3383,7 +3391,7 @@ mod tests {
         let mut child = spawn_marked_process(&session_id);
         let grace = Duration::from_secs(5);
         let started = tokio::time::Instant::now();
-        kill_process_tree_with_grace(None, &session_id, &SweepTarget::AgentOnly, grace)
+        kill_process_tree_with_grace(None, &session_id, &SweepTarget::AgentOnly, grace, false)
             .await
             .expect("the sweep must confirm the marked process gone");
         let elapsed = started.elapsed();
@@ -3404,8 +3412,8 @@ mod tests {
         );
     }
 
-    /// A tab's scope is hung up as well as terminated, a launch scope is
-    /// not: the shell in a tab ignores SIGTERM and exits on SIGHUP, while
+    /// A tab's scope is hung up as well as terminated, an agent's launch scope is
+    /// spared: the shell in a tab ignores SIGTERM and exits on SIGHUP, while
     /// the agent in a launch scope must keep its graceful SIGTERM handling.
     ///
     /// Pinned on the fake by op order — SIGHUP after SIGTERM and before any
@@ -3438,7 +3446,7 @@ mod tests {
             };
             let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGKILL", sink);
             assert!(scopes.available().await, "the fake must probe available");
-            kill_scope_with_grace(&scopes, &unit, "session", Duration::from_millis(50))
+            kill_scope_with_grace(&scopes, &unit, "session", Duration::from_millis(50), false)
                 .await
                 .expect("a unit that retires on SIGKILL is a clean teardown");
             let ops = observed.lock().expect("op sink mutex poisoned");
@@ -3458,7 +3466,7 @@ mod tests {
                     "a tab scope is hung up after SIGTERM and before SIGKILL: {ops:?}"
                 ),
                 (true, None) => panic!("a tab scope must be hung up: {ops:?}"),
-                (false, Some(_)) => panic!("a launch scope must never be hung up: {ops:?}"),
+                (false, Some(_)) => panic!("an agent launch scope must never be hung up: {ops:?}"),
                 (false, None) => {}
             }
         }
@@ -3490,7 +3498,7 @@ mod tests {
             ]);
             let mut agent = spawn_marked_process(&session_id);
             let started = tokio::time::Instant::now();
-            kill_process_tree_with_grace(None, &session_id, &target, grace)
+            kill_process_tree_with_grace(None, &session_id, &target, grace, false)
                 .await
                 .unwrap_or_else(|e| {
                     panic!("the sweep must confirm both gone under {target:?}: {e:#}")
@@ -3529,6 +3537,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The saved shell choice must reach both mechanisms. A scope can retire
+    /// at the hangup without a portable walk, and an unscoped shell must
+    /// still receive the same signal before forced cleanup.
+    #[farhelm_testtrace::test]
+    async fn a_sigterm_ignoring_main_shell_ends_by_hangup() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let id = uuid::Uuid::new_v4().to_string();
+        let launch: farhelm_proto::SessionLaunch = serde_json::from_str(
+            r#"{"kind":"agent","selection":{"harness":"bash"},"start":["bash","{farhelm_args}"],"resume":null}"#,
+        )
+        .unwrap();
+        launch.validate_new().expect("a valid shell launch");
+        let reap = async |scopes: &crate::scope::ScopeManager, unit, target: &SweepTarget| {
+            let units = ScopeUnits::recorded(unit).with_main_launch(&launch);
+            reap_process_tree(scopes, units, None, &id, target, ScopeKillFailure::Refuse).await
+        };
+        let scope = crate::scope::unit_name(&id, 0).unwrap();
+        let scoped =
+            crate::scope::ScopeManager::fake_vanishing_after_signal("SIGHUP", Arc::new(|_| {}));
+        reap(&scoped, Some(scope), &SweepTarget::AgentOnly)
+            .await
+            .expect("the scoped shell must retire after a hangup");
+        let mut shell = FixtureChild(crate::procs::sleeper::spawn(&[
+            (crate::launch::SESSION_ID_ENV_VAR, &id),
+            (crate::launch::AGENT_ID_ENV_VAR, &id),
+            (crate::procs::sleeper::SLEEPER_IGNORE_TERM_ENV, "1"),
+        ]));
+        assert!(shell.0.try_wait().unwrap().is_none(), "the shell is alive");
+        reap(
+            &crate::scope::ScopeManager::disabled(),
+            None,
+            &SweepTarget::WholeSession,
+        )
+        .await
+        .expect("the unscoped shell must be reaped");
+        assert_eq!(
+            shell.0.try_wait().unwrap().unwrap().signal(),
+            Some(libc::SIGHUP)
+        );
     }
 
     /// A host with NO user manager must not be asked about derived scope
