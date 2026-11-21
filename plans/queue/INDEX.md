@@ -5,6 +5,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `gui-launcher-feedback-fixes.md` — show recent setups' wrapper prefix, the inline default-folder field for a new sandbox checkout, a correct Restart explanation for older Muse sessions and the Discord link's ↗, closing four triage outcomes
 - [in-flight be1841] `hosts-small-fixes.md` — disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
 - [in-flight b1aebc] `terminal-exit-and-placeholder-fixes.md` — let an exited agent's oldest line scroll into view and make the connecting placeholder readable in light appearance, closing two triage outcomes
-- [pending] `templates-list-bolt-and-key.md` — center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
+- [in-flight 481b08] `templates-list-bolt-and-key.md` — center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
 - [pending] `menu-shortcut-hints.md` — show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
 - [pending] `whats-new-on-upgrade.md` — after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
