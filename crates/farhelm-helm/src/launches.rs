@@ -954,10 +954,7 @@ pub(crate) fn named_start(
     if !selection.harness.offers_named_conversation() {
         return Err("this agent does not offer a named conversation start".into());
     }
-    farhelm_supervisor::agent_kind::validate_named_conversation(&value)?;
-    if selection.harness.named_conversation_is_file() && value.starts_with('~') {
-        return Err("session file paths do not expand ~; use an absolute or relative path".into());
-    }
+    farhelm_proto::conversation::validate_launch_conversation(selection.harness, &value)?;
     let integration = farhelm_supervisor::agent_kind::IntegrationSnapshot::of(launch);
     let argv = if integration.resume_template.is_some() {
         integration.filled_named_resume_argv(&value)?

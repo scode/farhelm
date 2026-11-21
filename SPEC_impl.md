@@ -8884,13 +8884,19 @@ the save is in flight and its Launch while the panel is open. A successful save 
 moved on while it was out, opens the Templates dialog on the new template from the store, which already holds it when
 the reply arrives.
 
-The wrapper input is a raw shell-style draft beside the agent choices, while `LauncherState` and template snapshots hold
+The wrapper input is a raw shell-style draft under More options, while `LauncherState` and template snapshots hold
 parsed words. Invalid text remains in the input and prevents a launch or save instead of silently becoming no prefix.
 Switching agent types loads that type's remembered words; Clone, Replace with and recents use the prefix stored in their
 selection. A template with no prefix edit leaves the current draft alone, while explicit null empties it. Save as
 template offers the current prefix but checks it only when the user explicitly changed or cleared it, so a passive
 remembered value does not become a template edit. Quick launch uses the same snapshot and submit path as New. Restart
 with keeps its own raw input and updates its selection only after parsing succeeds; an invalid edit cannot be sent.
+
+More options is view state. Folding it leaves its text inputs and draft values intact. Its summary renders escaped
+values separately and uses the terminal face for the wrapper. The request prerequisites also drive its inline warnings,
+so they reveal the affected field even while Launch has an earlier refusal to show. The desktop app and helm share the
+literal conversation-selector check. After a correction the disclosure stays open until the user closes it, keeping the
+field available for continued editing.
 
 The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
 when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone

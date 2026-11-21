@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::cmp::Ordering;
 use std::path::Path;
 
-pub(crate) const PREFIX: &str = "grok:";
+use farhelm_proto::conversation::GROK_LOCATOR_PREFIX as PREFIX;
 
 /// A canonical, timezone-independent ordering key for one RFC 3339 event.
 ///

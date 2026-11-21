@@ -16,6 +16,7 @@
 //!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
 //!   (SPEC.md: "switching tabs keeps each tab's draft"). Where the Agent tab offers model, effort and permissions,
 //!   [`choices`] keeps them together and wraps entire fields to fit the available width.
+//!   [`more_options`] keeps the less common Agent settings reachable and opens their editors when the draft needs them.
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -53,10 +54,7 @@ use farhelm_proto::launcher::LaunchCatalogModel;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
-use farhelm_proto::{
-    DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, SessionStatus,
-    split_wrapper_prefix,
-};
+use farhelm_proto::{DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, SessionStatus};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity,
     FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Render,
@@ -70,7 +68,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
-use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target, capitalized};
+use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target};
 use super::words::agent_note;
 use crate::assets::Icon;
 use crate::components::{
@@ -112,6 +110,7 @@ mod history;
 mod host_picker;
 mod latest;
 mod model_field;
+mod more_options;
 mod placement;
 mod recents;
 mod sandbox_question;
@@ -586,7 +585,10 @@ pub(crate) struct Launcher {
     refused: Option<launch::RefusedLaunch>,
     pub(super) folder: TextInputState,
     pub(super) name: TextInputState,
-    conversation: TextInputState,
+    pub(super) conversation: TextInputState,
+    /// Explicit expansion is retained across redraws and tabs. A field requiring attention also sets this bit so
+    /// correcting that field leaves its editor and focus in place.
+    more_options_open: bool,
     pub(super) wrapper: TextInputState,
     pub(super) prompt: TextInputState,
     /// The Custom permission flags, as typed.
@@ -701,10 +703,8 @@ impl Launcher {
         let name = field(&present(Input::Name).text, window, cx);
         let conversation = field(&draft.conversation, window, cx);
         // The mode never changes while the launcher is open, so neither does this placeholder.
-        let required =
-            matches!(&draft.mode, Mode::RestartWith(restart) if restart.conversation_required);
         conversation.set_placeholder(
-            if required {
+            if draft.requires_conversation() {
                 "Required for this restart"
             } else {
                 "Optional, this start only"
@@ -872,6 +872,7 @@ impl Launcher {
             folder,
             name,
             conversation,
+            more_options_open: false,
             wrapper,
             prompt,
             flags,
@@ -1647,22 +1648,6 @@ impl TargetWords {
     }
 }
 
-/// The selector's name in the agent's own vocabulary (old `conversation_label`): a literal session file for Pi and
-/// OMP, the agent's own identifier for the rest. None of these names implies Farhelm looks the conversation up.
-const fn conversation_label(harness: LaunchHarness) -> &'static str {
-    match harness {
-        LaunchHarness::Pi | LaunchHarness::Omp => "Session file",
-        LaunchHarness::Goose | LaunchHarness::OpenCode => "Session ID",
-        LaunchHarness::Cursor => "Chat ID",
-        LaunchHarness::Claude
-        | LaunchHarness::Codex
-        | LaunchHarness::Muse
-        | LaunchHarness::Antigravity
-        | LaunchHarness::Grok => "Conversation ID",
-        LaunchHarness::Bash | LaunchHarness::Zsh => "Conversation ID",
-    }
-}
-
 impl Launcher {
     /// The mode's title and summary for the header.
     fn heading(&self) -> (&'static str, &'static str) {
@@ -1882,7 +1867,7 @@ impl Launcher {
     /// The Agent tab starts with its harness and model choices. What appears below depends on the harness and the
     /// mode. Restart with holds the agent type and prompt, and Custom permissions adds an editor for its flags.
     fn agent_fields(
-        &self,
+        &mut self,
         model: Option<Vec<AnyElement>>,
         palette: &theme::Palette,
         cx: &mut Context<Self>,
@@ -1897,46 +1882,6 @@ impl Launcher {
         }
         if model.is_some() || !harness.is_some_and(LaunchHarness::is_shell) {
             fields.push(self.model_choices(model, palette, cx).into_any_element());
-        }
-        if let Some(harness) = harness.filter(|harness| harness.offers_named_conversation()) {
-            let required = matches!(&self.draft.mode, Mode::RestartWith(restart) if restart.conversation_required);
-            let label = conversation_label(harness);
-            fields.push(
-                row(
-                    "launcher-conversation-row",
-                    label,
-                    self.launcher_input(
-                        "launcher-conversation",
-                        &self.conversation,
-                        label,
-                        HoverHelp::tooltip(format!(
-                            "{label}: start {} on this conversation, this start only",
-                            harness_label(harness)
-                        )),
-                    ),
-                    palette,
-                )
-                .into_any_element(),
-            );
-            if required {
-                fields.push(
-                    help_line(
-                        "Farhelm has no captured conversation to resume. Enter its ID or session file to restart here.",
-                        palette,
-                    )
-                    .into_any_element(),
-                );
-            }
-            if !harness.captures_named_conversation() {
-                fields.push(
-                    help_line(
-                        "Farhelm will not capture this conversation after a named start, so Restart will not be \
-                         available.",
-                        palette,
-                    )
-                    .into_any_element(),
-                );
-            }
         }
         let prompt_offered = harness
             .filter(|harness| harness.supports_initial_prompt(false))
@@ -1989,56 +1934,6 @@ impl Launcher {
         if self.draft.agent.permissions == Some(LaunchPermission::Custom) {
             fields.push(self.flags_editor(harness, palette));
         }
-        fields.push(
-            row(
-                "launcher-wrapper-row",
-                label_with_note(
-                    "Wrapper prefix",
-                    labelled_note("runs through Bash before the agent command"),
-                    palette,
-                ),
-                self.launcher_input(
-                    "launcher-wrapper",
-                    &self.wrapper,
-                    "Wrapper prefix",
-                    HoverHelp::tooltip(
-                        "Wrapper prefix: Bash text before Farhelm's agent command. Leave blank for none. Quotes and \
-                         expansions keep their shell meaning. There are no placeholders.",
-                    ),
-                )
-                .monospace(),
-                palette,
-            )
-            .into_any_element(),
-        );
-        if Input::Wrapper.present(&self.draft, &self.opened).read_only {
-            fields.push(shown_text::clear_button(
-                "launcher-clear-wrapper",
-                "Clear wrapper prefix",
-                "Clear wrapper prefix: remove this value before editing",
-                Launcher::clear_wrapper,
-                cx,
-            ));
-        }
-        // Said as soon as the prefix stops parsing, not only after a press (`launch-composer-choice-error`), so the
-        // user sees which field Launch's reason is about while still typing in it.
-        let wrapper_error = (!self.draft.agent.wrapper.is_empty())
-            .then(|| split_wrapper_prefix(&self.draft.agent.wrapper).err())
-            .flatten();
-        if let Some(error) = wrapper_error {
-            // Its words as its name too: plain text children are not in the accessibility tree.
-            let words = capitalized(&error.to_string());
-            fields.push(
-                div()
-                    .id("launcher-wrapper-error")
-                    .role(Role::Status)
-                    .aria_label(words.clone())
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.warn))
-                    .child(words)
-                    .into_any_element(),
-            );
-        }
         if let Some(notice) = &self.notice {
             fields.push(
                 choices::status_line("launcher-choice-notice", notice.clone(), palette)
@@ -2048,6 +1943,7 @@ impl Launcher {
         if let Some(note) = harness.and_then(agent_note) {
             fields.push(help_line(note, palette).into_any_element());
         }
+        fields.extend(self.more_options(harness, palette, cx));
         fields
     }
 

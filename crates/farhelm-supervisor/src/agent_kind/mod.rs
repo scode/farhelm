@@ -82,7 +82,9 @@
 //!   names and help every surface shares are in
 //!   `crates/gui/farhelm-gui/src/permission/words.rs`,
 //!   and its conversation selector's label is `conversation_label` in
-//!   `launcher/view.rs`. Settings' Agent trust section names its agents with
+//!   `launcher/view/more_options.rs`. The desktop and helm check one-time
+//!   selectors with `farhelm_proto::conversation::validate_launch_conversation`.
+//!   Settings' Agent trust section names its agents with
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`
 //!   (a harness with no managed-checkout trust setting has no variant there,
 //!   as the helm's `trust_column` refuses it), whose exhaustive methods hold
@@ -306,10 +308,9 @@ pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm
 /// whole history. Missing required metadata inside this prefix is a refusal.
 const RECORD_PREFIX_BYTES: usize = 64 * 1024;
 
-/// Maximum retained conversation identifier length.
-/// An identifier crosses from untrusted input into the store, logs and argv;
-/// length and character validation keep that boundary bounded and literal.
-const MAX_CONVERSATION_ID_LEN: usize = 128;
+use farhelm_proto::conversation::{MAX_CONVERSATION_ID_LEN, OMP_LOCATOR_PREFIX, PI_LOCATOR_PREFIX};
+
+pub use farhelm_proto::conversation::{is_reserved_locator_token, validate_named_conversation};
 
 /// Largest vendor session-file path accepted from an injected extension.
 const MAX_SESSION_PATH_BYTES: usize = 4 * 1024;
@@ -339,8 +340,8 @@ impl LocatorVendor {
     /// frozen by every database already holding them; OMP's mirror the shape.
     pub(crate) fn prefix(self) -> &'static str {
         match self {
-            LocatorVendor::Pi => "pi:",
-            LocatorVendor::Omp => "omp:",
+            LocatorVendor::Pi => PI_LOCATOR_PREFIX,
+            LocatorVendor::Omp => OMP_LOCATOR_PREFIX,
         }
     }
 
@@ -352,18 +353,6 @@ impl LocatorVendor {
             LocatorVendor::Omp => "OMP",
         }
     }
-}
-
-/// Whether a conversation token claims EITHER vendor's locator spelling.
-///
-/// Used by the plain-id kinds, whose rejection must not depend on the token
-/// parsing as anything in particular: a malformed `pi:` or `omp:` prefix is
-/// still a claim this build must refuse, not garbage to treat as a bare id.
-pub fn is_reserved_locator_token(value: &str) -> bool {
-    value.starts_with(LocatorVendor::Pi.prefix())
-        || value.starts_with(LocatorVendor::Omp.prefix())
-        || value.starts_with(codex::PREFIX)
-        || value.starts_with(grok::PREFIX)
 }
 
 /// A vendor's exact durable resume target, carried inside the existing
@@ -1767,10 +1756,7 @@ fn correlators_from(
 /// to store, log, and eventually place on an agent's command line.
 ///
 /// TWO untrusted sources, and TWO downstream re-checks, all sharing this
-/// one predicate — which is the whole reason it is `pub(crate)` rather
-/// than private to this module. Splitting it would let the four drift, and
-/// the only way that drift shows up is a resume that runs the wrong
-/// command.
+/// one predicate. The launcher checks a typed selector at the same boundary.
 ///
 /// The sources are where a value first arrives from outside: the record
 /// parse above, which reads ids out of files the supervisor did not write,
@@ -1832,15 +1818,7 @@ fn correlators_from(
 /// local process can write) could steer what the resume argv carries.
 /// Refusing the literals keeps the passes from reinterpreting each other's
 /// output; asking the shared set means a marker added later is covered too.
-pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= MAX_CONVERSATION_ID_LEN
-        && !id.starts_with('-')
-        && !is_reserved_placeholder(id)
-        && id
-            .chars()
-            .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
-}
+pub(crate) use farhelm_proto::conversation::is_plausible_conversation_id;
 
 /// What capture and restart need from a session's launch: its integration
 /// kind and the resume command a Restart fills, still holding its
@@ -2080,19 +2058,6 @@ impl IntegrationSnapshot {
         fill_slots(&mut argv, CONVERSATION_PLACEHOLDER, value);
         Ok(argv)
     }
-}
-
-/// Validate a one-time conversation selector before it can enter executable argv.
-///
-/// Reuse the captured-id boundary rather than introducing a weaker validator.
-/// Spaces and shell quoting are refused; file paths are passed literally, with
-/// relative paths resolved by the agent in the session folder. The composer
-/// additionally refuses a leading tilde for harnesses that take a file path.
-pub fn validate_named_conversation(value: &str) -> Result<(), String> {
-    if !is_plausible_conversation_id(value) || is_reserved_locator_token(value) {
-        return Err("conversation id or session file must be a nonempty literal without spaces, quotes, control characters, a leading dash or Farhelm placeholders".into());
-    }
-    Ok(())
 }
 
 /// Whether this kind's ownership proofs (foreground attribution plus its own
