@@ -145,10 +145,6 @@ consequences.
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.
 
-- [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
-  short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
-  terminal.
-
 - [`stop-wait-test-releases-exit-before-wait-witness.md`](stop-wait-test-releases-exit-before-wait-witness.md) — The
   regression can miss Stop ceasing to wait for final terminal output, leaving a lost opportunity to return the complete
   launch-failure explanation undetected.
@@ -426,10 +422,6 @@ consequences.
   — Create folder help omits the new recipe launch default. Abbreviated collection; confidence, proposed dismissals and
   unresolved consequences are preserved in the entry.
 
-- [`trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md`](trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md)
-  — Historical-base deflake runs lose their selected revision's required tmux check. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
   — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
@@ -594,10 +586,6 @@ consequences.
   error can leave a tunnel’s port visible in Farhelm after it stopped accepting connections. The next list refresh can
   remove the mapping without a reason.
 
-- [`linux-docs-capture-follow-ups.md`](linux-docs-capture-follow-ups.md) — The README hero still uses the Mac workflow
-  by default. A small Templates button crop would fail the publisher’s size check if a page uses it, and the template
-  search crop catches a warning below the search box.
-
 - [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
   enough to time out while the host is still working, Farhelm can remove the session without telling you where its
   unarchived checkout was left.
@@ -628,9 +616,6 @@ consequences.
 - [`connection-refusal-tests-release-port-too-early.md`](connection-refusal-tests-release-port-too-early.md) — Two tests
   can reach a different process if it starts listening after the test gives up the port it reserved.
 
-- [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
-  preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
-
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
   flash.
@@ -645,18 +630,6 @@ consequences.
 
 - [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
   can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
-
-- [`docs-shot-cleanup-hides-primary-error.md`](docs-shot-cleanup-hides-primary-error.md) — If a capture and its cleanup
-  both fail, the screenshot report can show only the cleanup error and carry the unrestored fixture into the next shot.
-
-- [`docs-shot-guard-ends-before-cleanup.md`](docs-shot-guard-ends-before-cleanup.md) — A screenshot can be accepted
-  without checking whether its cleanup changed the staged sessions that the next shot will use.
-
-- [`docs-group-shot-lacks-drawn-membership-check.md`](docs-group-shot-lacks-drawn-membership-check.md) — The release
-  screenshot can pass its checks without confirming that the moved session was drawn under its new group.
-
-- [`docs-group-shot-wait-exceeds-budget.md`](docs-group-shot-wait-exceeds-budget.md) — If the staged helm stalls, the
-  group screenshot’s ten-second membership wait can spend about a minute on one request.
 
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
