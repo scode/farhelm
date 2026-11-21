@@ -2184,7 +2184,8 @@ impl Render for AttachedTerminal {
                         .bottom_0()
                         .p(px(PLACEHOLDER_PADDING))
                         .text_size(px(PLACEHOLDER_TEXT))
-                        .text_color(theme::color(theme::palette(cx).fg_dim))
+                        // With no screen yet, the terminal uses the same dark ground in both appearances.
+                        .text_color(theme::color(theme::DARK.fg_dim))
                         .child(CONNECTING_TEXT)
                 });
         // The reconnect card, never under the veil and only while nothing holds it back (see "The reconnect card" in

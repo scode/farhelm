@@ -309,9 +309,6 @@ consequences.
   may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
   replacement-folder grant.
 
-- [`light-appearance-darkens-terminal-catchup.md`](light-appearance-darkens-terminal-catchup.md) — Light appearance
-  darkens catch-up prose while its terminal background stays dark; display duration is unmeasured.
-
 - [`restart-trust-discards-observed-canonical-folder.md`](restart-trust-discards-observed-canonical-folder.md) — Restart
   trust discards its lookup's canonical folder. An alias round trip exposes a conditional mismatch, but an ordinary
   accidental producer and in-scope trust-boundary harm remain unestablished.
