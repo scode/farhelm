@@ -884,58 +884,8 @@ consequences.
   tests can pass even if a token, login file, or device credential appears outside the intended entry field or request,
   because they rarely look for the secret in the painted frame, refusal text, or logs.
 
-- [`desktop-startup-update-duplicates.md`](desktop-startup-update-duplicates.md) — Desktop startup and updates maintain
-  separate copies of the same checks, formatting, and reopen command construction.
-
-- [`terminal-grid-row-traversal-duplicated.md`](terminal-grid-row-traversal-duplicated.md) — Terminal word selection and
-  file-path recognition each interpret the same grid row separately, so their treatment of the same cells can drift.
-
-- [`gui-controls-repeat-shared-rendering.md`](gui-controls-repeat-shared-rendering.md) — Controls draw their own focus
-  rings and repeat small formatting rules that should stay consistent across forms.
-
-- [`gui-focus-checks-repeat-drawn-predicate.md`](gui-focus-checks-repeat-drawn-predicate.md) — Several focus paths
-  reimplement the check that a control is present in the frame.
-
-- [`approval-views-repeat-status-lookups.md`](approval-views-repeat-status-lookups.md) — Host-add and tunnel approval
-  views independently look up whether a request is waiting or being answered.
-
-- [`gui-command-paths-repeat-reply-classification.md`](gui-command-paths-repeat-reply-classification.md) — Two GUI
-  request paths repeat the classification of the same helm replies and refusal messages.
-
-- [`hosts-menu-and-settings-repeat-operation-logic.md`](hosts-menu-and-settings-repeat-operation-logic.md) — Hosts
-  repeats the code that closes menus, describes lifecycle operations, retains current progress, and saves permanent
-  answers.
-
-- [`launcher-repeats-choices-and-summary-formatting.md`](launcher-repeats-choices-and-summary-formatting.md) — Launcher
-  controls, search, and recent setups have separate implementations of labels and display rules that are supposed to
-  match.
-
-- [`gui-screenshot-scenes-repeat-fixture-wiring.md`](gui-screenshot-scenes-repeat-fixture-wiring.md) — Screenshot scenes
-  each build similar fake sessions and set up dialogs independently. One scene also recreates the update text it is
-  meant to show.
-
 - [`launcher-stale-search-selection-fails-silently.md`](launcher-stale-search-selection-fails-silently.md) — Choosing a
   vanished host or stale recent setup can clear the search or do nothing without saying why.
-
-- [`session-list-actions-repeat-admission-and-progress.md`](session-list-actions-repeat-admission-and-progress.md) —
-  Session actions repeat their request setup, current-work lookup, and progress rendering. Compact and full rows also
-  repeat part of the status display.
-
-- [`session-pane-repeats-last-known-status.md`](session-pane-repeats-last-known-status.md) — The Details bar and the
-  unavailable-session view separately calculate the same last known status and activity age.
-
-- [`settings-repeat-preference-and-focus-wiring.md`](settings-repeat-preference-and-focus-wiring.md) — Several controls
-  build the same preference command, and two Settings editors independently restore focus to the control that opened
-  them.
-
-- [`templates-repeat-lookup-and-control-wiring.md`](templates-repeat-lookup-and-control-wiring.md) — Template screens
-  repeat lookups, refusal wording, control construction, and shortcut input mapping.
-
-- [`terminal-repeats-modifier-mapping.md`](terminal-repeats-modifier-mapping.md) — The terminal and its help keep
-  separate copies of platform modifier rules. The terminal also copies modifier conversion for mouse and keyboard input.
-
-- [`trash-repeats-animation-and-focus-wiring.md`](trash-repeats-animation-and-focus-wiring.md) — Trash repeats the
-  spinner's timer and independently looks up the same focus destination on confirmation and cancellation.
 
 - [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
   macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
@@ -954,12 +904,6 @@ consequences.
 
 - [`wrapped-link-test-misses-second-open.md`](wrapped-link-test-misses-second-open.md) — The test checks that the second
   click gives no refusal but never verifies that it opens the link.
-
-- [`control-tests-repeat-simulated-key-events.md`](control-tests-repeat-simulated-key-events.md) — Control and approval
-  tests each construct and deliver the same simulated key presses and releases.
-
-- [`session-list-tests-repeat-frame-and-request-helpers.md`](session-list-tests-repeat-frame-and-request-helpers.md) —
-  Session-list tests maintain separate copies of their frame queries, mouse gestures, and fake-helm acknowledgements.
 
 - [`connection-refusal-tests-release-port-too-early.md`](connection-refusal-tests-release-port-too-early.md) — Two tests
   can reach a different process if it starts listening after the test gives up the port it reserved.
