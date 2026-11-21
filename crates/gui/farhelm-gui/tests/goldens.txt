@@ -36,10 +36,10 @@ linux/dialog-list-tooltip--dark.png b1ad44993aebc6a579323d122578af994d1a216b
 linux/dialog-list-tooltip--light.png fe0e46bb42b19cfae4ad09b9321cdc05d91101bb
 linux/dialog-notices-stop--dark.png 3d96a1a657383461d64a04e7026ecf218b2bc920
 linux/dialog-notices-stop--light.png af3822d922d34fcd23893903bdf5c7483b71ffa8
-linux/feedback-dialog--dark.png ba488c69dfa3a6b7b6ecaa6ef3b0d62524e59da2
-linux/feedback-dialog--light.png 678041905f3e329fa8e5e9f67c89a93681fe9c12
-linux/feedback-dialog-reuse--dark.png 7d66dee266b1de60f5d723e249ba395d89f56565
-linux/feedback-dialog-reuse--light.png 8366e73411c39d771cdb9b6cf2e174ca8c0f4760
+linux/feedback-dialog--dark.png c7aec33e547125337bf1120c38a5b7d4e02b155f
+linux/feedback-dialog--light.png 63efd080d2ba1f2314404016025384e5a8472308
+linux/feedback-dialog-reuse--dark.png 787264c4d19065d0d498403b57fa14379218539d
+linux/feedback-dialog-reuse--light.png bb93fb2be1b122430da3bc085af5c0498f0cd765
 linux/filter-empty-both-links--dark.png d423cda2aa8331116574e6e3c3f47a750dcce928
 linux/filter-empty-both-links--light.png 92265c2d7487766dc3f1fb779e3c4a7d29a6bfb3
 linux/focus-ring--dark.png 6b7b43d368f719b9d73f4c93732399604dc5aba1

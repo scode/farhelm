@@ -303,11 +303,17 @@ fn a_pushed_contact_seeds_the_next_dialog_but_never_the_open_one(cx: &mut TestAp
 /// SPEC.md: "Under the header summary, the dialog offers "Rather talk in the open? Chat on Discord". Its Chat on
 /// Discord link opens the same invite through the same browser opener as the menu item, leaving the dialog and its
 /// draft open." Specified: with focus in the message as the dialog opens, after typing a message, a click on Chat on
-/// Discord opens the invite, and the dialog is still open with the message as typed.
+/// Discord opens the invite, and the dialog is still open with the message as typed. The visible arrow marks the
+/// external destination while the link's accessible name still identifies Discord.
 #[gpui::test]
 fn chat_on_discord_opens_the_invite_and_keeps_the_draft(cx: &mut TestAppContext) {
     let (_helm, cx, _toggle) = open_bar(cx, None);
     open_dialog(cx);
+    assert_eq!(
+        label(cx, "feedback-discord").as_deref(),
+        Some("Chat on Discord")
+    );
+    assert!(shows(cx, "Chat on Discord ↗"));
     assert!(
         message_focused(cx),
         "the premise: typing goes to the message"
