@@ -254,6 +254,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
   also "Fix 'answer trust dialog' for Claude Code").
 
+- **Session launcher: put the command field in charge.** the session launcher is getting really crowded. The search
+  field "is the "do everything command field" of the current launcher", so it should be "central and prominent and the
+  obvious main place to be", with keyboard focus starting there and hints for a couple of things you can type; the agent
+  icons are the session list's own. Agreed on mockups (design B2): the field replaces the title row, the left column
+  lists recent setups and templates and becomes the field's results while typing, the form gets labels above its fields,
+  one host-and-folder field and a More options fold, and the footer loses its summary line. Plan:
+  `plans/queue/launcher-command-field.md`.
+
+- **Settings dialog: grouped sections, cards and a pinned Save.** The settings dialog "still feels very "basic"", "not
+  really feeling reasonably modern", and "a bit flat, like lack of colors. especially the menu to the left". For long
+  pages, the overall cancel/save/etc must always be visible without scrolling. Agreed on mockups of every page: sections
+  in three groups with one hue per group, settings in cards under a sticky page heading, a pinned footer carrying the
+  shown page's Save, and closing with unsaved changes asks first. Plan: `plans/queue/settings-dialog-refresh.md`.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
