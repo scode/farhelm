@@ -55,17 +55,3 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/stop-wait-starting-launch-witness.md`.
-
-## spare-test-fifo-write-can-outlive-reader.md
-
-- Outcome: `other`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Claim:
-  in `crates/farhelm/tests/spare_builder.rs` (FIFO at 747-750, `tokio::fs::write` at 775), the test can block in a FIFO
-  open if the guarded shell exits before the test releases it. nextest's outer timeout still bounds the run. The code is
-  unchanged on current main.
-- Decision: the user picked "Discard: fix flakes when observed" (2026-10-26 ten-question triage page, Q4), adding
-  "unless the fix is obvious and trivial in which case it's worth fixing with complexity gate"
-- Completion criteria: at execution, fix the test only if the fix is obvious and trivial (one clear shape, about 30
-  lines or less, no new test mechanism); otherwise treat this as a discard and say so in the execution record. Either
-  way, remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spare-builder-fifo-release.md`.

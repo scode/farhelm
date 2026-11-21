@@ -832,6 +832,9 @@ async fn spare_builder_owner_sigkill_after_rc_retires_cache_fetch() {
 /// outlive their direct shell, both with inherited pipes and with pipes closed.
 #[farhelm_testtrace::test]
 async fn spare_builder_completed_clone_retires_held_and_closed_pipe_descendants() {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
     for close in [false, true] {
         let redirect = if close { ">/dev/null 2>&1" } else { "" };
         let fixture = Fixture::new(
@@ -841,9 +844,8 @@ async fn spare_builder_completed_clone_retires_held_and_closed_pipe_descendants(
             60_000,
         );
         fixture.upstream();
-        let fifo =
-            std::ffi::CString::new(fixture.root.join("continue").as_os_str().as_encoded_bytes())
-                .unwrap();
+        let release_pipe = fixture.root.join("continue");
+        let fifo = std::ffi::CString::new(release_pipe.as_os_str().as_encoded_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
         let mut child = GroupChild::spawn_detached_tethered(
             &mut fixture.command("build-spare-guard").into(),
@@ -869,9 +871,25 @@ async fn spare_builder_completed_clone_retires_held_and_closed_pipe_descendants(
             !fixture.root.join("git-argv").exists(),
             "premise: helper has not begun"
         );
-        tokio::fs::write(fixture.root.join("continue"), b"continue\n")
-            .await
-            .unwrap();
+        // ENXIO means no reader is present. An exited shell must hit the deadline too.
+        until(
+            "rc shell reads its release pipe",
+            || match fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&release_pipe)
+            {
+                Ok(mut writer) => {
+                    writer
+                        .write_all(b"continue\n")
+                        .expect("release the rc shell");
+                    true
+                }
+                Err(error) if error.raw_os_error() == Some(libc::ENXIO) => false,
+                Err(error) => panic!("open rc release pipe: {error}"),
+            },
+        )
+        .await;
         let ended = child
             .finish(tokio::time::Instant::now() + Duration::from_secs(60), CAPS)
             .await
