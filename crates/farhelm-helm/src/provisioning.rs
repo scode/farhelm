@@ -1684,6 +1684,72 @@ mod tests {
         .expect("the automatic listener future must be destroyed");
     }
 
+    /// A host taken by manual work after planning gets another opportunity
+    /// on the same connection once the incumbent releases its claim.
+    #[farhelm_testtrace::test]
+    async fn automatic_update_losing_the_busy_claim_leaves_the_host_eligible() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh(
+                "update.example",
+                HostScript {
+                    build: "1.0.0".into(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.state._automatic_updates.stop();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
+        let incarnation = harness.manager.status(host).unwrap().incarnation;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::skewed(root.path().into());
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("2.0.0".into());
+        let gate = Arc::new(TestBoundaryGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *service.automatic_admission_gate.lock().unwrap() = Some((Arc::clone(&gate), None));
+        let mut attempted = HashMap::new();
+        let scan = service.scan_automatic_updates(&mut attempted);
+        let take_host = async {
+            gate.reached.notified().await;
+            let mut memory = service.memory.lock().await;
+            assert!(memory.runs.is_empty(), "the automatic plan is still held");
+            assert!(memory.busy.insert(host), "manual work can claim the host");
+            gate.release.notify_one();
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(scan, take_host)
+        })
+        .await
+        .expect("the plan must reach and lose admission");
+        result.unwrap();
+        assert!(!attempted.contains_key(&host));
+        {
+            let mut memory = service.memory.lock().await;
+            assert!(memory.runs.is_empty(), "the busy host refused the run");
+            assert!(memory.busy.remove(&host));
+        }
+        assert_eq!(
+            harness.manager.status(host).unwrap().incarnation,
+            incarnation
+        );
+        // Consume a distinct planning refusal so retry is observable without
+        // leaving an accepted run using the fixture after the test ends.
+        *backend.probe.lock().unwrap() = Some(Err(BackendFailure::new("retry probe", "")));
+        service
+            .scan_automatic_updates(&mut attempted)
+            .await
+            .unwrap();
+        assert!(backend.probe.lock().unwrap().is_none());
+        assert!(service.memory.lock().await.runs.is_empty());
+        assert_eq!(attempted.get(&host), Some(&incarnation));
+    }
+
     /// Stop and drop must both destroy a suspended, unaccepted admission. The
     /// one-shot sender lives only in that held future; its destruction before
     /// releasing the hold proves cancellation, rather than a quiet observation

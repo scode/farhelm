@@ -535,28 +535,6 @@
   to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## automatic-update-counts-busy-as-failure.md
-
-- Outcome: `fix code`.
-- Assessment: If you start a manual operation on an outdated host just as automatic update is planning for it, the
-  automatic attempt counts as failed. The host then gets no automatic update until it reconnects or Farhelm restarts.
-  Verified: Confirmed. `scan()` records the attempt before `plan_update`. A Busy error from planning or from
-  `start_automatic_update` (service.rs ~1861, ~2431) takes the error path, which re-inserts the current incarnation as
-  attempted. SPEC.md ~182-185: "busy hosts are reconsidered when their work finishes". The same paragraph also says "A
-  planning refusal ... remembers that failed attempt", and Busy could be read as a planning refusal, so this is not
-  SETTLED.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code. On a typed Busy result, clear the attempt record and keep
-  suppression for real failures. If the fix turns out not to be straightforward, or needs significant additional
-  complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## shell-switch-can-submit-hidden-conversation-id.md
 
 - Outcome: `fix spec+code`.
@@ -1454,25 +1432,6 @@
   and refuse twin container hosts that reach the same machine and account. Update SPEC accordingly. Both identity items
   may land together. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-podman.md`.
-
-## automatic-update-misses-development-builds.md
-
-- Outcome: `fix code`.
-- Assessment: Automatic update overwrites a remote host running a development build if that build speaks an older
-  protocol than the helm. It can also overwrite a development build installed while an automatic update was being
-  planned. Verified: Confirmed. `automatic.rs` `eligible()` checks for a development build only in the Connected branch;
-  the VersionSkew branch skips that check. The unit test docstring limits the exemption to "development build, same
-  protocol", which shows the code is deliberate. SPEC.md ~182-184 excludes "hosts running a development build" with no
-  exception. The race in the fresh planning probe is confirmed from source and is very narrow.
-- Decision: Q6, the maintainer picked "Never touch a development build". (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Automatic update skips every host running a development build, including one that speaks an older
-  protocol, as SPEC already says; update the unit test that pins the old behavior. The planning race in the finding is
-  not required. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or
-  a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
-  file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## browser-shard-failure-sweeps-running-siblings.md
 

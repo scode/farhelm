@@ -108,14 +108,6 @@ consequences.
 - [`linux-ctrl-f-leaves-settings-field-at-end.md`](linux-ctrl-f-leaves-settings-field-at-end.md) — Ctrl+F at the end of
   a Linux Settings field can focus Search and send the next keystroke there.
 
-- [`automatic-update-misses-development-builds.md`](automatic-update-misses-development-builds.md) — A released Farhelm
-  can overwrite a remote development supervisor if it speaks an older protocol. An update already in progress can also
-  miss a development build installed before the final check.
-
-- [`automatic-update-counts-busy-as-failure.md`](automatic-update-counts-busy-as-failure.md) — An outdated host can miss
-  automatic updates until it reconnects or Farhelm reopens if a manual operation takes the host first and leaves it
-  outdated.
-
 - [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
   agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
 
