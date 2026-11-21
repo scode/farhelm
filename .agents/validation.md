@@ -730,16 +730,19 @@ systemd or SSH substrate ran.
   publishing so changes to a shared component show up in every scene it reaches. Only a full successful update can
   produce a completion marker. Additional Cargo build options go before a bare `--`. Only libtest output options are
   supported after it, and `--scene` is the selector. The runner builds the test binary once and splits the scenes among
-  four processes by default, capped at available CPUs and selected scenes. Use `--jobs N` to change render parallelism,
-  including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit build jobs. Parallel renderer output is
-  grouped by process.
+  four processes by default, capped at available CPUs and selected scenes. A comparison writes highlights from the
+  pixels it already has. An update gives the same binary only the changed picture pairs that have references after
+  rendering. Use `--jobs N` to change the process budget for both, including `--jobs 1` for a serial run. Use Cargo's
+  `-j N` before `--` to limit build jobs. Parallel output is grouped by process.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
   update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.
   The tests also cover Cargo's executable discovery, ordered pattern matching and an unmatched pattern refused before
   rendering. It also checks the CPU cap, disjoint work groups and a real killed worker that leaves other workers'
-  captures available without certifying the update. Run it when the runner changes. Seconds, no graphics renderer or
-  network.
+  captures available without certifying the update. The changes page checks exercise packaged pictures and highlights,
+  native update requests, size changes, removal of stale pages, and an update without access to the store. Run it when
+  the runner or page generator changes. Seconds, no graphics renderer or network. The Rust unit tests filtered with
+  `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size changes without drawing.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
