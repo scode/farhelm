@@ -512,9 +512,6 @@ consequences.
   malformed terminal checkpoint can be accepted during recovery when its cursor template contains forbidden combining
   characters and the attribute-storage budget is exhausted.
 
-- [`snapshot-comparison-ignores-link-grouping.md`](snapshot-comparison-ignores-link-grouping.md) — Snapshot regression
-  checks can pass after terminal hyperlink identities or boundaries change.
-
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.

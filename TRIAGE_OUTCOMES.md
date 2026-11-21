@@ -149,23 +149,6 @@
   feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## snapshot-comparison-ignores-link-grouping.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): `link_eq` in
-  `crates/farhelm-terminal-emulator/tests/common/compare.rs:189-206` still treats any two generated `<n>_alacritty` ids
-  with equal URIs as equal, cell by cell. That includes the direct live-versus-restored comparison `diff(&live, &same)`
-  at `tests/common/roundtrip.rs:309-312`, which needs no renaming. A restore that split or merged anonymous links would
-  pass. The desktop grid model groups OSC links by id (`crates/gui/farhelm-grid-model/src/links.rs:170-178,265-305`), so
-  such a change would be visible to users as different hover and underline extents.
-- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
-  findings that cited removed UI code, Q5); this is one of the two tests.
-- Completion criteria: Add the missing regression check the Assessment describes ("Terminal snapshot tests can't catch
-  changed link grouping"), so the product regression it names would fail a test. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/container-delete-and-link-group-tests.md`.
-
 ## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
 
 - Outcome: `fix code`.
