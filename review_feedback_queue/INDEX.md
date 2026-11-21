@@ -619,9 +619,6 @@ consequences.
 - [`announcement-report-overstates-startup-validation.md`](announcement-report-overstates-startup-validation.md) —
   Announcement table validation cannot exclude the database and creation-version failures omitted by the landing report.
 
-- [`feedback-discord-link-omits-external-indicator.md`](feedback-discord-link-omits-external-indicator.md) — The
-  feedback dialog's Discord link omits the required external-link arrow.
-
 - [`joined-link-spec-omits-cursor-tail-exception.md`](joined-link-spec-omits-cursor-tail-exception.md) — The broad
   joined-link comparison promise omits an accepted cursor-positioned tail exception.
 

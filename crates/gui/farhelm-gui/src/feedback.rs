@@ -595,12 +595,13 @@ fn problem_line(id: &'static str, words: String, palette: &Palette) -> impl Into
 fn heading(palette: &Palette) -> impl IntoElement {
     let discord = Button::new(
         "feedback-discord",
-        "Chat on Discord",
+        "Chat on Discord ↗",
         HoverHelp::tooltip(
             "Chat on Discord: talk with Farhelm's maintainer and other users in the open",
         ),
         Role::Link,
     )
+    .accessible_name("Chat on Discord")
     .tier(Tier::Link)
     .on_click(|_, _, cx| cx.open_url(crate::help_menu::DISCORD_URL));
     div()

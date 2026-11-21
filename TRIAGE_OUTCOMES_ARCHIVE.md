@@ -28920,3 +28920,22 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `puulrpquztlvyyzntmrnmoxslkvvxwuu`, bookmark
   `plan/gui-launcher-feedback-fixes/03-muse-restart-explanation`,
   [PR #4409](https://github.com/scode/farhelm/pull/4409/changes).
+
+## feedback-discord-link-omits-external-indicator.md
+
+- Outcome: `fix code`.
+- Assessment: unresolved by a delegated reader against main 28f177284 (code reading, not run): The desktop feedback
+  dialog's link is still labelled just "Chat on Discord" (`crates/gui/farhelm-gui/src/feedback.rs:596-605`). However,
+  the rule the finding cited ("A link that opens a page outside the app ends in `↗`") was part of SPEC_impl.md's Dioxus
+  GUI section and was deleted by the old app's removal commit `1eb4e3751` (#3407). Current SPEC.md (4777-4778) names
+  only the words. The desktop app is mixed: Welcome, Announcements and Checkouts links carry `↗`, while the Discord,
+  Tensorlake pricing (`hosts/setup.rs:470-480`) and prompt links do not. Whether `↗` is still a convention to enforce is
+  a product decision nothing current settles.
+- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
+  triage page for findings that cited removed UI code, Q6), naming "the link missing the arrow".
+- Completion criteria: The feedback dialog's Chat on Discord link ends in the external-link ↗, matching the desktop
+  links that already carry it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment). Remove the feedback file and its index entry.
+- Execution: change `qtprpssqympxksuqxsnlmtuqswtnqvuq`, bookmark
+  `plan/gui-launcher-feedback-fixes/04-discord-link-arrow`,
+  [PR #4410](https://github.com/scode/farhelm/pull/4410/changes).
