@@ -480,6 +480,8 @@ pub struct Inputs<'a> {
     pub host: Option<&'a HostText>,
     /// A `gh:` query's repository choices, in order (the module docs); only a `gh:` query reads them.
     pub repositories: &'a [GithubRepo],
+    /// Whether this `gh:` query awaits an answer. `None` when it has no discovery read to ask.
+    pub repository_pending: Option<bool>,
 }
 
 /// A line the results area shows when there are no rows, and whether it is a warning (drawn in the warning color) or a
@@ -550,10 +552,11 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     let blank_all = scope == Scope::All && value.is_empty();
     if any(Scope::Model) && inputs.catalog.is_none() && preferred_harness.is_none() && family_word {
         // An exact family word waits for the release catalog. A history or name row could consume it first.
+        let pending = inputs.catalog_pending;
         return Results {
             rows,
             default: 0,
-            message: empty_message(Scope::Model, value, false, inputs.catalog_pending, false),
+            message: empty_message(Scope::Model, value, false, pending, None, false),
             reason: None,
         };
     }
@@ -741,6 +744,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
             value,
             needs_harness,
             inputs.catalog_pending,
+            inputs.repository_pending,
             inputs.query.is_empty(),
         )
     } else {
@@ -810,6 +814,7 @@ fn empty_message(
     value: &str,
     needs_harness: bool,
     catalog_pending: bool,
+    repository_pending: Option<bool>,
     box_empty: bool,
 ) -> Option<Message> {
     if box_empty {
@@ -832,10 +837,19 @@ fn empty_message(
             Scope::Perms => ("No permissions match", true),
             Scope::Folder => ("No folder matches", true),
             Scope::Recent => ("No recent setup matches", true),
-            Scope::Github if value.is_empty() => ("Type owner/repo to choose a repository", false),
-            Scope::Github => ("No repository matches; enter owner/repo", true),
+            Scope::Github => return Some(repository_empty_message(value, repository_pending)),
             Scope::Templates => ("No template matches", true),
         }
     };
     Some(Message { text, warning })
+}
+
+/// The repository field and `gh:` search use the same hint, loading status and no-match warning.
+pub(super) fn repository_empty_message(query: &str, pending: Option<bool>) -> Message {
+    let (text, warning) = match (query.trim().is_empty(), pending) {
+        (true, _) | (_, None) => ("Type owner/repo to choose a repository", false),
+        (false, Some(true)) => ("Loading repositories…", false),
+        (false, Some(false)) => ("No repository matches; enter owner/repo", true),
+    };
+    Message { text, warning }
 }

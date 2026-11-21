@@ -84,7 +84,7 @@ use crate::launcher::draft::{
 };
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
-use crate::launcher::search::{Scope, scoped};
+use crate::launcher::search::{Scope, repository_empty_message, scoped};
 use crate::session_pane::details::{Checkout as SessionCheckout, checkout_mark};
 use crate::settings::{CheckoutField, CheckoutUpdated, FolderScope};
 use crate::theme::{self, metrics};
@@ -102,9 +102,6 @@ const REPOSITORY_LIST: &str = "launcher-repository-list";
 /// `.launch-composer-checkout-explanation` for an installed host.
 const EXPLANATION: &str = "Farhelm clones the repository into a new folder named after the session, under this host's \
                            checkout folder. When the last session using it is deleted, the folder moves to the trash.";
-/// The suggestions list's words when it has no row: nothing typed yet, or nothing that matches or parses.
-const TYPE_A_PAIR: &str = "Type owner/repo to choose a repository";
-const NO_MATCH: &str = "No repository matches; enter owner/repo";
 /// What the field note says for a scan the helm cut short, when it gave no reason.
 const INCOMPLETE: &str =
     "Repository search is incomplete; a valid owner/repo can still be selected";
@@ -410,15 +407,16 @@ impl Launcher {
 
     /// The search's rows for its `gh:` query: a valid typed pair first, then the host's discovered repositories that
     /// match, from the suggestions answer while it is about this host and query (the module docs); empty for any other
-    /// query.
-    pub(super) fn search_repositories(&self, cx: &App) -> Vec<GithubRepo> {
+    /// query. The loading status follows the same key.
+    pub(super) fn search_repositories(&self, cx: &App) -> (Vec<GithubRepo>, Option<bool>) {
         let Some(query) = self.search_repository_query(cx) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
-        repository_choices(
-            &query,
-            self.discovered(self.suggest_key_for(query.clone(), cx)),
-        )
+        let key = self.suggest_key_for(query.clone(), cx);
+        let pending = key
+            .as_ref()
+            .and_then(|key| self.checkout.suggestions.pending_for(key));
+        (repository_choices(&query, self.discovered(key)), pending)
     }
 
     /// What a suggestions read would ask now: the search's `gh:` query while there is one; otherwise, while the user is
@@ -1342,7 +1340,7 @@ impl Launcher {
 }
 
 /// The open suggestions list's rows (`field_list`): a branch glyph and the `owner/repo` per suggestion, or, with none,
-/// a status line saying what to type.
+/// a status line saying what to type or whether discovery is still pending.
 fn draw_repository_rows(
     launcher: &Launcher,
     list: Stateful<Div>,
@@ -1354,12 +1352,16 @@ fn draw_repository_rows(
     let list = list.aria_label("Repositories");
     let rows = launcher.repository_rows(window, cx);
     if rows.is_empty() {
-        // The old list became a status saying what to type, a warning once something typed matches nothing.
-        let typed = !launcher.checkout.repository.text(cx).trim().is_empty();
-        let (words, color) = if typed {
-            (NO_MATCH, palette.warn)
+        let query = launcher.checkout.repository.text(cx);
+        let pending = launcher
+            .suggest_key_for(query.to_string(), cx)
+            .and_then(|key| launcher.checkout.suggestions.pending_for(&key));
+        let message = repository_empty_message(&query, pending);
+        let words = message.text;
+        let color = if message.warning {
+            palette.warn
         } else {
-            (TYPE_A_PAIR, palette.fg_1)
+            palette.fg_1
         };
         let empty = div()
             .id("launcher-repository-empty")

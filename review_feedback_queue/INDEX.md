@@ -303,9 +303,6 @@ consequences.
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
   tunnel ports occupied while individual close requests fail.
 
-- [`repository-search-reports-empty-before-reply.md`](repository-search-reports-empty-before-reply.md) — Partial
-  repository search reports no matches while discovery is still pending.
-
 - [`canonical-folder-history-contract-conflict.md`](canonical-folder-history-contract-conflict.md) — Host canonical-path
   replies become remembered folder text, despite a product rule saying those replies must not choose remembered
   defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are

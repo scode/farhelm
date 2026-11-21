@@ -74,6 +74,7 @@ struct Draft {
     model: Option<&'static str>,
     catalog: Option<Vec<LaunchCatalogModel>>,
     catalog_pending: bool,
+    repository_pending: Option<bool>,
     hosts: Vec<HostView>,
     templates: Result<Vec<TemplateRow>, HostSentence>,
     history: Option<LaunchHistoryReply>,
@@ -87,6 +88,7 @@ impl Draft {
             model: None,
             catalog: Some(catalog()),
             catalog_pending: false,
+            repository_pending: Some(false),
             hosts: hosts(),
             templates: Ok(Vec::new()),
             history: None,
@@ -114,6 +116,7 @@ impl Draft {
             history: self.history.as_ref(),
             host: Some(&placement),
             repositories: &[],
+            repository_pending: self.repository_pending,
         })
     }
 
@@ -430,8 +433,8 @@ fn choice_words_before_a_harness_say_to_choose_one() {
 
 // ---- Empty results -------------------------------------------------------------------------------------------------
 
-/// Every label's empty result has its own words, and only a hint (an empty `name:` or `gh:`, an unlabelled blank,
-/// models still loading) is drawn in the ordinary color; a query that matched nothing is a warning; an empty box says
+/// Every label's empty result has its own words, and hints or pending reads are drawn in the ordinary color. A query
+/// that matched nothing is a warning; an empty box says
 /// nothing; a catalog read that failed is not loading. Why: a refusal presented as help, or a pending read as a failure
 /// (or a failure as pending), misleads (old `empty_search_messages_cover_labels_and_loading`).
 #[test]
@@ -493,6 +496,17 @@ fn empty_results_say_why_and_warn_only_on_a_miss() {
         "a failed read has nothing to wait for"
     );
     assert_eq!(draft.search("codex").message, None, "rows leave no message");
+    let loading = Draft {
+        repository_pending: Some(true),
+        ..draft
+    };
+    assert_eq!(
+        loading.search("gh:nope").message,
+        Some(Message {
+            text: "Loading repositories…",
+            warning: false,
+        })
+    );
 }
 
 // ---- Names and hosts -----------------------------------------------------------------------------------------------
