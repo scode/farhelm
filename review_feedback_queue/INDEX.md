@@ -117,10 +117,6 @@ consequences.
   — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-recipe-place-status-error-discards-success-and-has-no-retry.md`](trailing-recipe-place-status-error-discards-success-and-has-no-retry.md)
-  — Failed per-place status reads discard controls and lack a direct retry. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md`](trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md)
   — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -324,10 +320,6 @@ consequences.
   arising only during named restart can retain the previous conversation. Broad tracking-failure acceptance and the
   specific preparation-clearing promise conflict; no healthy concurrent-publication trigger is established.
 
-- [`request-cards-cover-tunnel-controls.md`](request-cards-cover-tunnel-controls.md) — A waiting agent request can cover
-  the opened tunnel list and prevent pointer access to overlapping close controls. Exact native overlap geometry remains
-  unmeasured, and specification coverage is ambiguous.
-
 - [`plan-deferral-survives-replacement-question.md`](plan-deferral-survives-replacement-question.md) — After the
   maintainer answers one large plan question, a later ordinary question from that plan can remain excluded from
   automatic handling. Whether the operational-artifact exclusion covers this workflow defect is ambiguous.
@@ -355,10 +347,6 @@ consequences.
 
 - [`older-muse-restart-refusal-blames-command-mode.md`](older-muse-restart-refusal-blames-command-mode.md) — Plain
   Restart can describe an older Muse agent launch as a command launch with reporting disabled.
-
-- [`container-tab-close-overpromises-process-termination.md`](container-tab-close-overpromises-process-termination.md) —
-  The tab Close warning and internal contract say all started processes end, although detached container work can
-  survive.
 
 - [`host-permission-copy-quotes-retired-labels.md`](host-permission-copy-quotes-retired-labels.md) — Specifications and
   helm refusal text quote old host-permission labels rather than the controls users now see.
@@ -428,17 +416,9 @@ consequences.
 - [`valid-ssh-uri-short-label-parsing.md`](valid-ssh-uri-short-label-parsing.md) — Valid SSH URIs with a trailing slash,
   service-name port or empty port can show an incorrectly shortened host label.
 
-- [`literal-this-machine-alias-rewritten-in-full-labels.md`](literal-this-machine-alias-rewritten-in-full-labels.md) —
-  An explicitly chosen local alias equal to this machine is rewritten on full-name surfaces even though its short label
-  preserves it.
-
 - [`full-host-tooltip-conflicts-with-line-cap.md`](full-host-tooltip-conflicts-with-line-cap.md) — The shared tooltip
   cap conflicts with full-value disclosure for host names and approval requester titles. The new admitted long-title
   route is source-confirmed; original host-alias wrapping remains unmeasured.
-
-- [`typed-name-matching-repeats-quadratic-prefix-work.md`](typed-name-matching-repeats-quadratic-prefix-work.md) — Typed
-  template matching performs quadratic duplicate checks before applying the five-row display cap; practical
-  supported-scale latency remains unmeasured.
 
 - [`discovery-registration-bypasses-host-row-lock.md`](discovery-registration-bypasses-host-row-lock.md) — Discovery
   registration can bypass a host row's execution lock, but a supported differing-path transition with lasting
@@ -458,13 +438,6 @@ consequences.
 
 - [`legacy-quickstart-stops-surviving-supervisor.md`](legacy-quickstart-stops-surviving-supervisor.md) — The parked
   quickstart contradicts itself about whether the supervisor survives quitting the Mac app.
-
-- [`literal-deleted-suffix-breaks-desktop-owner.md`](literal-deleted-suffix-breaks-desktop-owner.md) — A development
-  executable literally ending in ` (deleted)` can lose ownership recognition and leave an older answering build reused.
-
-- [`desktop-smoke-supervisor-precedes-cleanup-record.md`](desktop-smoke-supervisor-precedes-cleanup-record.md) —
-  Interruption before desktop-test ownership publication can leave a detached supervisor outside cleanup; timing and
-  survivor duration are unmeasured, and an older browser-helper discard's broader intent is ambiguous.
 
 - [`stalled-input-test-accepts-discarded-bytes.md`](stalled-input-test-accepts-discarded-bytes.md) — The stalled-input
   regression accepts discarded typing rather than proving that controls remain responsive beside pending input.
@@ -557,9 +530,6 @@ consequences.
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.
 
-- [`grid-input-omits-x10-only-mouse-reporting.md`](grid-input-omits-x10-only-mouse-reporting.md) — Programs that request
-  only classic X10 mouse tracking lose clicks in terminal-host terminals, unlike the live raw-stream browser terminal.
-
 - [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
   input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
 
@@ -617,43 +587,12 @@ consequences.
   terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
   writing the post-echo prompt.
 
-- [`grid-shift-enter-loses-independent-altgraph.md`](grid-shift-enter-loses-independent-altgraph.md) — On a
-  keyboard/browser that reports AltGraph independently of Ctrl and Alt, holding AltGraph while pressing Shift+Enter can
-  insert Farhelm newline ESC CR instead of the ordinary Enter CR the existing terminal sends.
-
-- [`bold-brightening-ignores-redefined-palette.md`](bold-brightening-ignores-redefined-palette.md) — A program
-  redefining bright terminal colors still gets the original theme colors for bold text.
-
 - [`exit-notice-hides-oldest-scrollback-row.md`](exit-notice-hides-oldest-scrollback-row.md) — Once an agent's program
   exits, scrolling to the beginning of its retained output can still leave the oldest row clipped out of view.
-
-- [`triple-click-truncates-long-logical-line.md`](triple-click-truncates-long-logical-line.md) — Triple-clicking a
-  retained terminal logical line that extends more than 1000 wrapped rows from the click copies only part of that line.
-
-- [`hovered-link-double-click-selects-one-word.md`](hovered-link-double-click-selects-one-word.md) — A stable hovered
-  hyperlink with multiword text copies only the clicked word on double-click in a grid terminal, whereas xterm selects
-  the entire hovered link range.
-
-- [`block-copy-omits-wide-continuation-column.md`](block-copy-omits-wide-continuation-column.md) — A rectangular
-  terminal copy omits the leading blank corresponding to a wide-character continuation cell on a row whose left
-  selection boundary cuts through that character, shifting that row's copied content left relative to other selected
-  rows.
-
-- [`wide-wrap-inference-drops-real-boundary-space.md`](wide-wrap-inference-drops-real-boundary-space.md) — A real space
-  printed at the right edge before a wide character can disappear when copied, and printed-URL detection can incorrectly
-  append the following wide text to the URL instead of stopping at that space.
-
-- [`combined-punctuation-word-selection-differs.md`](combined-punctuation-word-selection-differs.md) — Double-clicking
-  unlinked text beside punctuation carrying a combining mark can select a shorter word in a grid terminal than in an old
-  terminal.
 
 - [`wide-wrap-placeholder-loses-final-cell-style.md`](wide-wrap-placeholder-loses-final-cell-style.md) — A wide glyph
   wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
   screen and history use the conversion.
-
-- [`initial-oversized-grid-cannot-attach.md`](initial-oversized-grid-cannot-attach.md) — The supervisor accepts an
-  attach size above the grid stream's 1000-cell bound and then ends the attachment at its first `hello`; the page no
-  longer sends one, but any client that does gets a terminal that fails to open.
 
 - [`program-selected-cursor-color-never-reaches-viewer.md`](program-selected-cursor-color-never-reaches-viewer.md) — A
   program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's
@@ -859,14 +798,6 @@ consequences.
   Attention-list Update buttons omit their host and version from the accessible name, leaving identical actions
   difficult to distinguish.
 
-- [`drag-preview-neighbor-diverges-from-drop-unresolved.md`](drag-preview-neighbor-diverges-from-drop-unresolved.md) —
-  The drag preview and final drop can use different neighboring rows. A complete supported native ordering producing the
-  mismatch remains unverified after investigation.
-
-- [`pointer-capture-drop-crosses-new-modal-unresolved.md`](pointer-capture-drop-crosses-new-modal-unresolved.md) — A
-  captured drag may finish after a new modal appears and still reorder rows beneath it. The native event sequence
-  remains unverified after investigation.
-
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 
@@ -931,9 +862,6 @@ consequences.
 - [`capture-local-program-path.md`](capture-local-program-path.md) — Naming a Farhelm binary in the current directory
   with --farhelm ./farhelm can fail to launch it or silently run another Farhelm found on PATH, so screen inspection can
   use a different build than requested.
-
-- [`credential-cancel-erases-delivery-report.md`](credential-cancel-erases-delivery-report.md) — Cancelling an unrelated
-  credential draft erases the previous save's inline failed-delivery report; the host's separate warning remains.
 
 - [`tunnel-dns-outlives-dial-admission.md`](tunnel-dns-outlives-dial-admission.md) — Unverified after investigation:
   stalled hostname resolution can outlive recipe tunnel timeouts and admission limits, potentially accumulating work or
@@ -1019,10 +947,6 @@ consequences.
 - [`dependency-block-counts-held-plan-time.md`](dependency-block-counts-held-plan-time.md) — A plan temporarily blocked
   by an abandoned dependency can accumulate overdue passes from time it was explicitly on hold.
 
-- [`progress-hover-keeps-short-host-name.md`](progress-hover-keeps-short-host-name.md) — Update progress repeats a
-  shortened host name instead of revealing its full display name, so similarly named hosts remain indistinguishable
-  there.
-
 - [`orphan-cleanup-promises-unheld-provisioning-lock.md`](orphan-cleanup-promises-unheld-provisioning-lock.md) — The
   implementation specification promises that orphan cleanup checks ownership under the host provisioning lock, but the
   endpoint does not hold that lock. No supported destructive adoption race was established.
@@ -1038,10 +962,6 @@ consequences.
 - [`sandbox-launch-skips-remembered-agent-choices.md`](sandbox-launch-skips-remembered-agent-choices.md) — A successful
   sandbox launch does not persist the user's permission or wrapper choice. The initiating page's local mirror hides the
   omission until a reload.
-
-- [`suspended-sandbox-keeps-row-confirmations-enabled.md`](suspended-sandbox-keeps-row-confirmations-enabled.md) — A
-  Stop or Replace question opened before suspension can remain answerable after the normal menu actions disable.
-  Accepting it dismisses the question and sends a request the backend refuses.
 
 - [`replace-selection-focus-contract.md`](replace-selection-focus-contract.md) — The specifications give conflicting
   answers about opening a replacement after the user types while its source remains selected. Current code follows the
@@ -1623,10 +1543,6 @@ consequences.
   — Stop-test migration removes the signal-to-legacy-client teardown oracle. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-deleted-raw-pty-cursor-control-sequence-oracle.md`](trailing-deleted-raw-pty-cursor-control-sequence-oracle.md)
-  — The deleted raw-input test leaves cursor/control-sequence delivery without its end-to-end oracle. Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-removed-serving-legacy-binary-final-output-oracle.md`](trailing-removed-serving-legacy-binary-final-output-oracle.md)
   — Deleting the immediate-exit test loses the real-ticker legacy final-output oracle. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
@@ -1822,10 +1738,6 @@ consequences.
 - [`desktop-updater-read-failure-enables-auto-install.md`](desktop-updater-read-failure-enables-auto-install.md) —
   Farhelm can install an update in the background after you turned automatic updates off, if it later cannot read the
   setting.
-
-- [`environment-launch-opens-earliest-session.md`](environment-launch-opens-earliest-session.md) — If two sessions
-  appear in a new environment before launch finishes, Farhelm can open the other session when their creation times tie
-  or arrive out of order.
 
 - [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
   enough to time out while the host is still working, Farhelm can remove the session without telling you where its
