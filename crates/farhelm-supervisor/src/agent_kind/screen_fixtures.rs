@@ -27,6 +27,7 @@ use super::screen_reader::{
 };
 use farhelm_proto::AgentKind;
 use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, trim_screen_tail};
+use std::net::Ipv6Addr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -209,38 +210,85 @@ pub(super) fn contains_email(text: &str) -> bool {
 
 /// Whether `text` holds a URL whose host is this machine or a private
 /// network: a loopback or unspecified address, `localhost`, an RFC 1918
-/// address, or the capture tool's `host` placeholder for the host name.
+/// address, a unique-local or link-local IPv6 address, or the scrubbed name `host`.
 ///
 /// An agent shows such a URL when the capture host's configuration routes it
 /// through a local proxy (Codex warns that its base URL is overridden), which
 /// describes the capture machine's setup. Hand-rolled for the same reason as
-/// [`contains_email`]. Userinfo is skipped only inside the authority, so a
-/// password cannot hide a local host and a path's `@` cannot change the host.
+/// [`contains_email`]. A path or a nonempty query or fragment makes the
+/// end of a valid authority explicit. A bare URL can end at prose punctuation,
+/// so check shorter candidates too. Each candidate can itself carry userinfo.
 pub(super) fn contains_local_url(text: &str) -> bool {
     text.match_indices("://").any(|(at, _)| {
-        let authority = text[at + 3..]
-            .split(|c: char| "/?#".contains(c) || c.is_whitespace())
+        let tail = &text[at + 3..];
+        let authority = tail
+            .split(|c: char| "/?#\"<>`".contains(c) || c.is_whitespace())
             .next()
             .unwrap_or("");
-        let rest = authority.rsplit('@').next().unwrap_or("");
-        let host = match rest.strip_prefix('[') {
-            Some(bracketed) => bracketed.split(']').next().unwrap_or(""),
-            None => rest
-                .split(|c: char| c == ':' || c == '/' || c.is_whitespace() || ",;)".contains(c))
-                .next()
-                .unwrap_or("")
-                .trim_end_matches('.'),
-        };
-        let host = host.to_ascii_lowercase();
-        let octets: Option<Vec<u8>> = host.split('.').map(|part| part.parse().ok()).collect();
-        let private_ip = match octets.as_deref() {
-            Some([127, ..] | [10, ..] | [0, 0, 0, 0]) => true,
-            Some([192, 168, _, _]) => true,
-            Some([172, second, _, _]) => (16..=31).contains(second),
-            _ => false,
-        };
-        private_ip || ["localhost", "host", "::1"].contains(&host.as_str())
+        if let Some(local) = local_authority(authority) {
+            let suffix = &tail[authority.len()..];
+            let explicit_suffix = suffix.starts_with('/')
+                || suffix
+                    .strip_prefix(['?', '#'])
+                    .and_then(|rest| rest.chars().next())
+                    .is_some_and(|c| !c.is_whitespace() && !"\"'<>`)]}".contains(c));
+            if local || explicit_suffix {
+                return local;
+            }
+        }
+        authority
+            .match_indices([',', ';', ')', '\'', ']', '}'])
+            .any(|(end, _)| local_authority(&authority[..end]) == Some(true))
     })
+}
+
+/// Classify a complete host and port, or report that the candidate has no usable authority.
+fn local_authority(authority: &str) -> Option<bool> {
+    let rest = authority
+        .trim_end_matches('.')
+        .rsplit('@')
+        .next()
+        .unwrap_or("");
+    if let Some(bracketed) = rest.strip_prefix('[') {
+        let (literal, port) = bracketed.split_once(']')?;
+        let address = literal.split('%').next()?.parse::<Ipv6Addr>().ok()?;
+        return local_url_port(port).then(|| {
+            address.is_loopback()
+                || address.is_unspecified()
+                || address.is_unicast_link_local()
+                || address.is_unique_local()
+                || address.to_ipv4_mapped().is_some_and(|mapped| {
+                    mapped.is_loopback() || mapped.is_unspecified() || mapped.is_private()
+                })
+        });
+    }
+    let end = rest.find(':').unwrap_or(rest.len());
+    let (host, port) = rest.split_at(end);
+    let host = host.trim_end_matches('.');
+    if !local_url_port(port)
+        || host.is_empty()
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._~-".contains(&b))
+    {
+        return None;
+    }
+    let octets: Option<Vec<u8>> = host.split('.').map(|part| part.parse().ok()).collect();
+    let private_ip = match octets.as_deref() {
+        Some([127, ..] | [10, ..] | [0, 0, 0, 0]) => true,
+        Some([192, 168, _, _]) => true,
+        Some([172, second, _, _]) => (16..=31).contains(second),
+        _ => false,
+    };
+    Some(private_ip || host.eq_ignore_ascii_case("localhost") || host.eq_ignore_ascii_case("host"))
+}
+
+/// A port can be absent or empty. A word after the colon can still be a password in a longer candidate.
+fn local_url_port(suffix: &str) -> bool {
+    suffix.is_empty()
+        || suffix
+            .strip_prefix(':')
+            .is_some_and(|port| port.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// The placeholder the capture tool writes for every address it scrubs.
@@ -338,13 +386,18 @@ fn screen_fixtures_carry_no_personal_data() {
 /// Why it matters: a detector that never fires would make the personal-data
 /// test pass vacuously, and one that fired on every URL would refuse
 /// ordinary agent screens (links to documentation). Userinfo must not hide
-/// a local host, nor may an `@` in a public URL's path or query replace it.
+/// a local host, and the host has to survive adjacent prose with its own `@`.
+/// A public link can still mention a local name in its path or query.
 #[test]
 fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
     for local in [
         "base URL is overridden to http://127.0.0.1:8080/backend-api/codex.",
         "http://localhost:3000",
         "ws://[::1]:9/x",
+        "http://[::]:8080",
+        "http://[fd00::1]:8080/backend-api/codex",
+        "http://[fe80::1%25eth0]:8080",
+        "http://[::ffff:192.168.1.4]:8080",
         "https://192.168.1.4/",
         "http://10.0.0.2:80",
         "http://172.20.1.1/",
@@ -355,6 +408,16 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
         "http://user:pass@[::1]:8080/",
         "http://user@localhost:8080?mode=proxy",
         "http://user:pass@[::1]:8080#proxy",
+        "http://user:p@ss@[fd00::1]:8080/",
+        "http://localhost:8080,user@example.com",
+        "http://localhost:8080,user@example.com?",
+        "http://localhost:8080,user@example.com#",
+        "http://user:p,ass@localhost:8080,user@example.com",
+        "http://localhost:123,p@ss@localhost:8080,user@example.com",
+        "http://localhost:123,p@ss@localhost:8080/guide",
+        "\"http://localhost:8080\"",
+        "\"http://user:p@ss@127.0.0.1.:8080\"",
+        "\"http://[fd00::1]:8080\"",
     ] {
         assert!(contains_local_url(local), "{local}");
     }
@@ -366,6 +429,10 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
         "https://user:pass@docs.example.com/x",
         "https://docs.example.com/user@localhost",
         "https://docs.example.com/?next=user@localhost",
+        "https://[2001:db8::1]/user@localhost",
+        "https://localhost.example.com/help",
+        "https://localhost:8080,user@example.com/guide",
+        "https://localhost:8080,user@example.com?view=guide",
         "no url at all",
     ] {
         assert!(!contains_local_url(public), "{public}");

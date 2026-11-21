@@ -277,10 +277,6 @@ consequences.
   terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
   does not establish output pressure. This is a new coverage-description error, with no observed product stall.
 
-- [`fixture-private-ipv6-url-guard.md`](fixture-private-ipv6-url-guard.md) — The fixture checks can approve a screen
-  containing a private IPv6 proxy URL. This is a guard omission for valid URL/configuration text, not evidence that a
-  private address or credential was published.
-
 - [`capture-startup-metadata-cleanup.md`](capture-startup-metadata-cleanup.md) — A screen-capture run can fail after
   launching its agent but before returning the run handle, leaving the detached capture process and its terminal host
   running without the caller cleaning them up.
@@ -288,14 +284,6 @@ consequences.
 - [`capture-local-program-path.md`](capture-local-program-path.md) — Naming a Farhelm binary in the current directory
   with --farhelm ./farhelm can fail to launch it or silently run another Farhelm found on PATH, so screen inspection can
   use a different build than requested.
-
-- [`capture-scrubber-misses-multiple-at-signs.md`](capture-scrubber-misses-multiple-at-signs.md) — The capture scrubber
-  and its immediate check both miss a local proxy URL with another raw at sign in its password. The separate Rust check
-  catches it when run; actual vendor display and publication of such a URL are unestablished.
-
-- [`fixture-url-guard-consumes-adjacent-at-sign.md`](fixture-url-guard-consumes-adjacent-at-sign.md) — The independent
-  fixture privacy check can miss a local proxy URL followed by comma-separated text containing an at sign. Automatic
-  capture scrubs this exact input, but manually authored fixtures can pass the weakened guard.
 
 - [`landing-tests-import-unregistered-module.md`](landing-tests-import-unregistered-module.md) — The documented
   landing-tool validation command can crash during import before testing any safeguards, because its dynamically loaded

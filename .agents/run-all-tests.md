@@ -131,7 +131,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   `scripts/plans-landing/idle-watch.ts`, and `shellcheck scripts/plans-landing/notify.sh` (the landing monitor's round
   tooling)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
-- `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy guard; no vendor turns)
+- `python3 -B scripts/test-capture-agent-screens.py` (private IPv4 and IPv6 fixture URLs, userinfo and punctuation, no
+  vendor turns)
 - `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins with zero vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
