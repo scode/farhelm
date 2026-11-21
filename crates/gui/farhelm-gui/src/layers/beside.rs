@@ -446,6 +446,7 @@ impl PlacedBeside {
         let ring = if let HelpPlacement::Beside(cues)
         | HelpPlacement::Rail(cues)
         | HelpPlacement::List { cues, .. } = placement
+            && !cues.no_ring
         {
             let color = theme::color(if cues.on_fill {
                 palette.on_fill

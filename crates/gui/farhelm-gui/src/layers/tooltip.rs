@@ -256,13 +256,15 @@ impl Help {
     }
 }
 
-/// What a control asks of ringed help ([`HelpPlacement::Beside`]), including the ring's color and corners. The
+/// What the target asks of beside help ([`HelpPlacement::Beside`]), including the ring's color and corners. The
 /// ring is the old `.tooltip-target-ring` (`app.css` lines 1899-1917): an accent line 1 pixel inside the control's
 /// bounds, or the on-fill color in a selected row, which already wears the accent fill. Its corners are the
 /// control's own (the old ring was an inset shadow, which follows the element's radius), so a round status dot
 /// passes half its size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BesideCues {
+    /// Reserve the ring for controls. Status marks still use the notch to point to the target.
+    pub(crate) no_ring: bool,
     /// Draw the ring in the on-fill color rather than the accent.
     pub on_fill: bool,
     /// The ring's corner radius: the control's own.

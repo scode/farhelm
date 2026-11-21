@@ -292,6 +292,17 @@ impl HoverHelp {
         self
     }
 
+    /// Keep the help's edge and notch while reserving its ring for things the user can press.
+    fn without_ring(mut self) -> Self {
+        match &mut self.placement {
+            HelpPlacement::Beside(cues)
+            | HelpPlacement::Rail(cues)
+            | HelpPlacement::List { cues, .. } => cues.no_ring = true,
+            _ => {}
+        }
+        self
+    }
+
     /// The control's accessible description: the help as one string, with every host value escaped
     /// ([`Help::accessible_text`]). Private to the component layer, like the help itself.
     fn description(&self) -> SharedString {

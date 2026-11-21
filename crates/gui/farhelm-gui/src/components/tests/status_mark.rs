@@ -4,9 +4,40 @@
 use gpui::{IntoElement, Modifiers, ParentElement as _, Styled as _, TestAppContext, div, px};
 
 use crate::components::{Button, HoverHelp, Role};
+use crate::layers::{self, TooltipSide};
 use crate::test_support::{center, frame, keys, open};
 
 use super::{tooltip, wait_hover_delay};
+
+/// The notch still identifies a status mark when its help sits outside a surface. Even help configured with a
+/// control's rounded ring keeps the ring off when a status mark owns it.
+#[gpui::test]
+fn a_status_mark_keeps_beside_help_without_a_ring(cx: &mut TestAppContext) {
+    let cx = open(cx, |window, cx| {
+        div()
+            .relative()
+            .w(px(220.))
+            .child(layers::beside_edge("status-help-edge", window, cx))
+            .child(crate::components::StatusMark::new(
+                "phase",
+                "Connected",
+                HoverHelp::tooltip("Host is connected").ring_radius(px(4.)),
+                Role::Status,
+                "Connected",
+            ))
+            .into_any_element()
+    });
+    let at = center(cx, "phase");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    cx.update(|window, cx| {
+        let shown = layers::shown_tooltip(window, cx).expect("the mark's own help");
+        assert_eq!(shown.text.as_ref(), "Host is connected");
+        assert_eq!(shown.side(), TooltipSide::Beside);
+        assert!(shown.ring().is_none());
+    });
+    assert!(cx.debug_bounds("tooltip-notch").is_some());
+}
 
 /// A status mark is information, not a control: the old app's `role="status"` span with its label and tooltip. A user
 /// who sees only its symbol needs its words on hover, a screen reader needs them as its name, and a keyboard user must

@@ -327,7 +327,7 @@ pub(super) fn session_lists_beside(
         .into_any_element()
 }
 
-/// The idle row's age, its hover help beside the sidebar with the notch and the accent ring on the age (reference
+/// The idle row's age, its hover help beside the sidebar with a notch pointing to the age (reference
 /// `tooltip-last-activity`). The setup turns on GPUI's driver record, which [`rest_pointer_on`] finds the age in.
 pub(super) fn session_row_hover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     window.set_driver_enabled(true);

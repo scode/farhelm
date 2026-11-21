@@ -513,12 +513,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
-  type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
-  row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
-  button/something selectable, which is basically what that appearance of the rectangle on hover is showing Plan:
-  `plans/queue/status-mark-hover-ring.md`.
-
 - **Managed checkout layout in the launcher explodes.** the layout explodes due to the long message and two controls for
   managed checkouts (the vertical size of the box towards the top). we need to fix (Screenshot: the launcher's
   Destination box with Managed checkout selected; under the Repository field, a wrapped "Managed checkout of <repo> on

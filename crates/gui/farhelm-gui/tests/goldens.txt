@@ -214,8 +214,8 @@ linux/session-missing-terminal-card--dark.png a607a921d8aae1ee2903bc1d6dcc541c01
 linux/session-missing-terminal-card--light.png 294fe8052afb479c2c59c5298af41f580a9ec393
 linux/session-order-menu--dark.png e316f4f605989b1fdd8ab2f9e11c5b957f738811
 linux/session-order-menu--light.png 1e9124e404d643b69763daaab98e85e107211501
-linux/session-row-hover-beside--dark.png a22fb30357388ed8703ece3d737bececfd7eaacb
-linux/session-row-hover-beside--light.png beb80951534d87bd61b34f2ba3fd313f896b0438
+linux/session-row-hover-beside--dark.png 0ab9e4d9c70afde9397428c664c1778a98404725
+linux/session-row-hover-beside--light.png 6864321da6f1219b48e7ae9a75eca67b7308b2f5
 linux/session-row-menu--dark.png c826e88de2ced1ef91fddf986bbba8e0fc53ba88
 linux/session-row-menu--light.png 52a5ded10b4cb36fba6a34f9c2a2732ef68c8e5d
 linux/session-status-segments--dark.png b811d5ce774763c750a6d97e03d0fad1d6f410eb

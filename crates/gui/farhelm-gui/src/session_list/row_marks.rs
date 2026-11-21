@@ -349,9 +349,9 @@ impl RowMarks {
 // ---- Where a mark's help shows ---------------------------------------------------------------------------------------
 
 /// Where a mark's hover help shows. SPEC.md, "Session list": "Every session-row hover, including the summary card and
-/// notification bell, sits just right of the sidebar", with a notch pointing back at its control and a thin ring on it,
-/// while "tooltips outside session rows ... keep their placement without these cues". The host mark is drawn in a row,
-/// in the session pane's details bar and in the quick switcher's rows, so whoever draws it says which it is.
+/// notification bell, sits just right of the sidebar". The notch points back to the target and a ring identifies a
+/// control. The host mark is drawn in a row, in the session pane's details bar and in the quick switcher's rows, so
+/// whoever draws it says which it is.
 ///
 /// The old app opted each row target in by hand (`data-tooltip-anchor="session-row"` on the open button, the dot, the
 /// host, agent and permission marks, the pin, the age, the stale and ended marks, the bell and the actions button);
@@ -361,9 +361,8 @@ impl RowMarks {
 pub(crate) enum HelpPlace {
     /// Anywhere but a session row: the ordinary placement, no cues.
     Ordinary,
-    /// In a session row, `selected` or not: beside the sidebar ([`HoverHelp::beside`]), the ring in the on-fill ink on
-    /// the selected row's accent fill ([`HoverHelp::ring_on_fill`]), as the old `.session-row.selected
-    /// .tooltip-target-ring` drew it.
+    /// Beside the sidebar, with the on-fill ring for controls on the selected row's accent fill. A
+    /// [`StatusMark`] keeps the placement and notch.
     Row { selected: bool },
 }
 
