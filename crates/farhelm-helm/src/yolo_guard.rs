@@ -27,7 +27,7 @@ use crate::store::HostId;
 #[derive(Debug, thiserror::Error)]
 #[error(
     "{host_name} asks before YOLO launches, and this launch is YOLO or uses the agent's own setting: nothing was \
-     started. Confirm the YOLO launch explicitly in the GUI, or turn on \"start YOLO sessions here \
+     started. Confirm the YOLO launch explicitly in the GUI, or turn on \"Start YOLO sessions \
      without asking\" in the host's settings"
 )]
 pub(crate) struct YoloNeedsConfirmation {
@@ -160,7 +160,7 @@ pub(crate) async fn check_agent_wrapper(
                      launch, a command launch, or an agent launch whose command line Farhelm \
                      did not compose itself (such as a copy of a session an older Farhelm \
                      started) there: nothing was started. To let agents do this, turn on \
-                     \"start YOLO sessions here without asking\" in {host_name}'s settings"
+                     \"Start YOLO sessions without asking\" in {host_name}'s settings"
                 ),
             )))
         }

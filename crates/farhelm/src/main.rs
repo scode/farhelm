@@ -317,10 +317,10 @@ enum AgentCmd {
     Create {
         /// Working directory for the new session, on the TARGET host.
         ///
-        /// Required unless a template sets the folder, and never defaulted
-        /// to this session's own directory: a create that silently
-        /// inherited it would be a clone wearing another verb's name, and
-        /// `clone` is right there.
+        /// Required for an ordinary create unless a template or --gh sets the
+        /// destination. A recipe launch defaults to the new environment's
+        /// home. For a recipe launch, --cwd accepts only the literal '~'.
+        /// Use --gh to clone a repository there.
         ///
         /// A plain `String`, not a `PathBuf`: this path is interpreted on
         /// whichever host the session lands on, so resolving it against
@@ -820,7 +820,7 @@ fn refuse_confirm_yolo(_value: &str) -> Result<String, String> {
         "--confirm-yolo is no longer accepted: an agent cannot confirm a YOLO launch for the \
          user. Farhelm asks the user before any agent launch, and on a host that asks before \
          YOLO launches an agent may not start a YOLO or command launch at all; the user can \
-         allow that by turning on \"start YOLO sessions here without asking\" in the host's \
+         allow that by turning on \"Start YOLO sessions without asking\" in the host's \
          settings"
             .to_string(),
     )
@@ -2891,7 +2891,8 @@ mod tests {
     /// Spec: `farhelm agent create --recipe` becomes the environment verb,
     /// with `--container-host` only beside `--recipe`; `--recipe` refuses
     /// `--host` and `--idempotency-key`; `clone` may omit `--host` (SPEC.md,
-    /// "Agents and environments").
+    /// "Agents and environments"). Help explains why a recipe launch
+    /// can leave the folder unset.
     ///
     /// Why: sending a recipe as an ordinary create would let a helm that
     /// predates environment launches create an ordinary session somewhere
@@ -2905,6 +2906,17 @@ mod tests {
             full.extend_from_slice(args);
             Cli::try_parse_from(full)
         };
+        let Err(help) = agent(&["create", "--help"]) else {
+            panic!("expected create help");
+        };
+        assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
+        let help = help
+            .to_string()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(help.contains("A recipe launch defaults to the new environment's home."));
+        assert!(help.contains("--cwd accepts only the literal '~'."));
         let Cmd::Agent { command } = agent(&[
             "create",
             "--recipe",

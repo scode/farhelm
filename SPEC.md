@@ -4524,7 +4524,7 @@ On a host that asks before YOLO launches, an agent may only start what runs the 
 refuses, without asking, an agent's create, clone or spawn (`--inherit-agent` included) whose launch is YOLO, and any of
 them that is a command launch whatever its YOLO assertion says, because Farhelm cannot check the assertion. It applies
 that rule again when the user approves, so a host whose setting changed during the wait is judged as it is then. The
-refusal names the host and says that turning on "Start YOLO sessions here without asking" for it is how to let agents do
+refusal names the host and says that turning on "Start YOLO sessions without asking" for it is how to let agents do
 this. A plain restart re-runs the session's own stored launch, which the user approved or a host setting allowed when
 the session was created (sessions agents created before these prompts existed included), so it is allowed and gets the
 ordinary card unless either applicable command permission waives it, and so do agent launches whose permission is not
