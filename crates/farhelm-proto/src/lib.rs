@@ -957,6 +957,39 @@ impl PersistentHookSetup {
     }
 }
 
+/// The helm's current hook setup consent for Restart. The supervisor knows the session's actual kind under its
+/// lifecycle claim, even when the helm cannot read its cached launch or the target is outside the session list.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PersistentHookOptIns {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grok: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub antigravity: bool,
+}
+
+impl PersistentHookOptIns {
+    /// The empty policy grants no setup consent and can be omitted from a restart request.
+    pub const fn is_empty(&self) -> bool {
+        !self.grok && !self.antigravity
+    }
+
+    /// Whether this operation authorizes writing the resolved kind's hook files before starting it again.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub const fn allows(self, kind: AgentKind) -> bool {
+        match kind {
+            AgentKind::Grok => self.grok,
+            AgentKind::Antigravity => self.antigravity,
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Omp
+            | AgentKind::Muse
+            | AgentKind::Generic => false,
+        }
+    }
+}
+
 /// A session as the supervisor reports it. The supervisor is authoritative over these facts (SPEC.md).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
@@ -3771,9 +3804,9 @@ pub enum ControlMsg {
     /// conversation, a working agent without consent, a vanished or
     /// repointed working directory — leaves the session untouched.
     RestartSession {
-        /// Use the current opt-in for this start. A saved launch does not carry consent into a later Restart.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        setup_persistent_hooks: bool,
+        /// Use current consent for the session's resolved agent. A saved launch does not own the opt-in.
+        #[serde(default, skip_serializing_if = "PersistentHookOptIns::is_empty")]
+        setup_persistent_hooks: PersistentHookOptIns,
         req_id: u64,
         /// Explicitly enter this conversation once, with Restart with only.
         /// Captured-identity proof gates apply only when this is absent.
@@ -8358,7 +8391,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
-            setup_persistent_hooks: true,
+            setup_persistent_hooks: PersistentHookOptIns {
+                grok: true,
+                antigravity: false,
+            },
             named_start: None,
             req_id: 42,
             session_id: "s1".to_string(),
@@ -8499,7 +8535,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_json_shape_is_pinned() {
         let msg = ControlMsg::RestartSession {
-            setup_persistent_hooks: false,
+            setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 7,
             session_id: "s1".to_string(),
@@ -8565,7 +8601,7 @@ mod tests {
         assert!(with.is_none());
 
         let msg = ControlMsg::RestartSession {
-            setup_persistent_hooks: false,
+            setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 2,
             session_id: "s1".into(),
@@ -8681,7 +8717,7 @@ mod tests {
         assert_eq!(
             msg,
             ControlMsg::RestartSession {
-                setup_persistent_hooks: false,
+                setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 9,
                 session_id: "s1".to_string(),

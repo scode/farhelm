@@ -270,7 +270,7 @@ declare_execution_classes! {
             session_id: c.session_id.into(),
         };
         RestartSession => OwnedMutation => |c| ControlMsg::RestartSession {
-            setup_persistent_hooks: false,
+            setup_persistent_hooks: Default::default(),
             req_id: c.req_id,
             named_start: None,
             session_id: c.session_id.into(),

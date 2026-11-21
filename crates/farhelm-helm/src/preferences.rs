@@ -112,11 +112,13 @@ pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(mut patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
-    let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some()
+    let agent_hint_changed = patch.claude_trust_hint_dismissed.is_some()
         || patch.codex_trust_hint_dismissed.is_some()
         || patch.muse_trust_hint_dismissed.is_some()
         || patch.pi_trust_hint_dismissed.is_some()
-        || patch.antigravity_trust_hint_dismissed.is_some();
+        || patch.antigravity_trust_hint_dismissed.is_some()
+        || patch.grok_hook_hint_dismissed.is_some()
+        || patch.antigravity_hook_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
     let auto_update_changed = patch.auto_update_remote_hosts.is_some();
     if let Some(Some(version)) = &patch.last_whats_new_release
@@ -289,7 +291,7 @@ pub(crate) async fn put_preferences(
             // The hint announcement used to follow the completed consent task,
             // after this gate was released. Keep that ordering while owning it.
             drop(_mutation);
-            if trust_hint_changed {
+            if agent_hint_changed {
                 state.manager.events().bump();
             }
             Ok::<(), anyhow::Error>(())
@@ -297,7 +299,7 @@ pub(crate) async fn put_preferences(
         .await
         .map_err(anyhow::Error::from)
         .and_then(|result| result)
-    } else if trust_hint_changed || auto_update_changed {
+    } else if agent_hint_changed || auto_update_changed {
         // Keep the write-plus-hint sub-operation owned independently of its
         // response conversion, like consent above. Auto-update authorization
         // uses the same committed-write notification to wake the helm listener.
@@ -1376,6 +1378,8 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 antigravity_trust_hint_dismissed: None,
+                grok_hook_hint_dismissed: None,
+                antigravity_hook_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -1506,6 +1510,8 @@ mod tests {
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
                 antigravity_trust_hint_dismissed: None,
+                grok_hook_hint_dismissed: None,
+                antigravity_hook_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,

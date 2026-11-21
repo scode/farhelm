@@ -226,6 +226,7 @@ mod announcements;
 /// belongs here rather than in its storage, routes or clients.
 mod release_announcements;
 
+mod agent_hook_setup;
 /// The rules both session caches share: the reply merge, creation order,
 /// cap eviction, and the session id bound.
 pub mod session_cache;
@@ -741,6 +742,10 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/checkout-agent-trust/{harness}",
             get(checkout_config::get_agent_trust).put(checkout_config::put_agent_trust),
+        )
+        .route(
+            "/api/agent-hook-setup/{kind}",
+            get(agent_hook_setup::get).put(agent_hook_setup::put),
         )
         // The GUI's channel (see `ui_channel`). A WebSocket upgrade, so a GET
         // that `own_state_change` runs inline; the commands it carries go
